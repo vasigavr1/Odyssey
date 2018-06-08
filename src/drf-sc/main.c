@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
   cyan_printf("W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
               W_CREDITS, W_BUF_SLOTS, W_BUF_SIZE);
 
-  yellow_printf("Using Quorom %d , Quorum Machines %d \n", USE_QUORUM, QUORUM_OF_ACKS);
+  yellow_printf("Using Quorom %d , Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
   green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
 //  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);

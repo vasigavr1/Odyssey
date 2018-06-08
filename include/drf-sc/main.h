@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 39
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // NUmber of remote machines
 
@@ -93,7 +93,7 @@
 #define MAX_W_COALESCE 15
 #define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
-
+#define CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
@@ -111,7 +111,7 @@
 
 
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
-#define QUORUM_OF_ACKS (USE_QUORUM == 1 ? (QUORUM_NUM - 1): REM_MACH_NUM)
+#define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1): REM_MACH_NUM)
 
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 
@@ -218,6 +218,7 @@
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
+#define DEBUG_QUORUM 1
 
 
 
@@ -289,6 +290,15 @@ struct remote_qp {
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
+
+struct quorum_info {
+	uint8_t missing_num;
+	uint8_t missing_ids[REM_MACH_NUM];
+	uint8_t active_num;
+	uint8_t active_ids[REM_MACH_NUM];
+  bool send_vector[REM_MACH_NUM];
+};
+
 
 struct ts_tuple {
   uint8_t m_id;

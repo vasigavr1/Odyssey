@@ -431,7 +431,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   }
 }
 
-// The worker uses this to send in the lin writes after receiving a quorum of read replies for them
+// The worker uses this to send in the lin writes after receiving a write_quorum of read replies for them
 // Additionally worker sends reads that received a higher timestamp and thus have to be applied as writes
 inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thread_id, struct read_info **writes,
                                                        uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)

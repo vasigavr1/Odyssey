@@ -566,9 +566,97 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
 //------------------------------ BROADCASTS -----------------------------
 //---------------------------------------------------------------------------*/
 
+// Update the quorum info, use this one a timeout
+static inline void update_q_info(struct quorum_info *q_info,
+                                 uint16_t credits[][MACHINE_NUM], uint8_t vc)
+{
+  uint8_t i, rm_id;
+  q_info->missing_num = 0;
+  q_info->active_num = 0;
+  for (i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    else if (i <  machine_id) rm_id = i;
+    else rm_id = (uint8_t) (i - 1);
+    if (credits[vc][i] == 0) {
+      q_info->missing_ids[q_info->missing_num] = i;
+      q_info->missing_num++;
+      q_info->send_vector[rm_id] = false;
+    }
+    else {
+      q_info->active_ids[q_info->active_num] = i;
+      q_info->active_num++;
+      q_info->send_vector[rm_id] = true;
+    }
+  }
+  if (ENABLE_ASSERTIONS) {
+    assert(q_info->missing_num <= REM_MACH_NUM);
+    assert(q_info->active_num <= REM_MACH_NUM);
+  }
+}
+
+// Bring back a machine
+static inline void revive_machine(struct quorum_info *q_info,
+                                 uint8_t revived_mach_id)
+{
+  uint8_t rm_id = revived_mach_id < machine_id ? revived_mach_id : (uint8_t)(revived_mach_id - 1);
+  if (ENABLE_ASSERTIONS) {
+    assert(revived_mach_id < MACHINE_NUM);
+    assert(revived_mach_id != machine_id);
+    assert(q_info->missing_num > 0);
+    assert(q_info->send_vector[rm_id] == false);
+  }
+  // Fix the send vector and update the rest based on that,
+  // because using the credits may not be reliable here
+  q_info->send_vector[rm_id] = true;
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    uint8_t m_id = i < machine_id ? i : (uint8_t)(i + 1);
+    if (q_info->send_vector[i]) {
+      q_info->missing_ids[q_info->missing_num] = m_id;
+      q_info->missing_num++;
+    }
+    else {
+      q_info->active_ids[q_info->active_num] = m_id;
+      q_info->active_num++;
+    }
+  }
+
+  for (uint16_t i = 0; i < q_info->missing_num; i++)
+    if (DEBUG_QUORUM) green_printf("After: Missing position %u, missing id %u, id to revive\n",
+                                   i, q_info->missing_ids[i], revived_mach_id);
+}
+
+// Update the links between the send Work Requests for broadcasts given the quorum information
+static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv_send_wr *wr)
+{
+  if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
+  uint8_t prev_i = 0, avail_mach = 0;
+
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    if (q_info->send_vector) {
+      if (avail_mach > 0) {
+        for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
+          wr[(REM_MACH_NUM * j) + prev_i].next = &wr[(REM_MACH_NUM * j) + i];
+        }
+      }
+      avail_mach++;
+      prev_i = i;
+    }
+  }
+}
+
+// Update the quorum info, use this one a timeout
+static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
+                                    uint16_t mes_sent, uint8_t vc)
+{
+  for (uint8_t i = 0; i < q_info->active_num; i++) {
+    if (ENABLE_ASSERTIONS) assert(credits[vc][q_info->active_ids[i]] >= mes_sent);
+    credits[vc][q_info->active_ids[i]] -= mes_sent;
+  }
+}
+
 //Checks if there are enough credits to perform a broadcast -- protocol independent
-static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk* cb, struct ibv_wc* credit_wc,
-                                       uint32_t* credit_debug_cnt, uint8_t vc)
+static inline bool check_bcast_all_credits_depr(uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb, struct ibv_wc *credit_wc,
+                                                uint32_t *credit_debug_cnt, uint8_t vc)
 {
   bool poll_for_credits = false;
   uint16_t j;
@@ -579,14 +667,146 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct h
       break;
     }
   }
-  if (ENABLE_ASSERTIONS) {
-    if (poll_for_credits) credit_debug_cnt[vc]++;
-    else credit_debug_cnt[vc] = 0;
-  }
+  //if (ENABLE_ASSERTIONS) {
+  if (poll_for_credits) credit_debug_cnt[vc]++;
+  else credit_debug_cnt[vc] = 0;
+  //}
   // There are no explicit credit messages for the reads or write messages
-   return !poll_for_credits;
+  return !poll_for_credits;
 
 }
+
+//Checks if there are enough credits to perform a broadcast
+static inline bool check_bcast_all_credits(uint16_t credits[][MACHINE_NUM], uint16_t *available_credits,
+                                           struct ibv_send_wr *send_wr, bool *quorum_flag,
+                                           uint32_t *time_out_cnt, uint8_t vc)
+{
+  uint16_t i;
+  for (i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    if (credits[vc][i] == 0) {
+      time_out_cnt[vc]++;
+      return false;
+    }
+  }
+
+  //second phase: count credits
+  uint16_t avail_cred = K_64_;
+  printf("avail cred %u\n", avail_cred);
+  for (i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    if (credits[vc][i] < avail_cred)
+      avail_cred = credits[vc][i];
+  }
+
+  // need to rectify the send_wr
+  if (*quorum_flag == true) {
+    for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) { // Number of Broadcasts
+      for (i = 0; i < MESSAGES_IN_BCAST; i++) {
+        uint16_t index = (uint16_t) ((j * MESSAGES_IN_BCAST) + i);
+        if (ENABLE_ASSERTIONS) assert (index < MESSAGES_IN_BCAST_BATCH);
+        send_wr[index].next = (i == MESSAGES_IN_BCAST - 1) ? NULL : &send_wr[index + 1];
+      }
+    }
+  }
+  *available_credits = avail_cred;
+  time_out_cnt[vc] = 0;
+  // There are no explicit credit messages for the reads or write messages
+  return true;
+}
+
+//Checks if there are enough credits to perform a broadcast -- protocol independent
+// Take care that send_vector is a bool per remote machine t match the send_wr,
+// and thus its index cannot be the machine_id
+static inline bool check_bcast_quorum_credits(uint16_t credits[][MACHINE_NUM], uint16_t *available_credits,
+                                              struct ibv_send_wr *send_wr, uint32_t *credit_debug_cnt,
+                                              uint8_t vc, bool *send_vector, uint16_t *available_machines)
+{
+  uint16_t i, rm_id;
+  for (i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    if (credits[vc][i] > 0) (*available_machines)++;
+  }
+  if (ENABLE_ASSERTIONS) {
+    if ((*available_machines) < REMOTE_QUORUM) credit_debug_cnt[vc]++;
+    else credit_debug_cnt[vc] = 0;
+    assert((*available_machines) <= REM_MACH_NUM);
+  }
+  if ((*available_machines) < REMOTE_QUORUM) return false;
+
+  // Set the send vector and reduce credits
+  uint16_t avail_cred = K_64_;
+  uint16_t prev_i = 0, avail_mach = 0;
+  for (i = 0; i < REM_MACH_NUM; i++) {
+    if (i < machine_id) rm_id = i;
+    else rm_id = (uint16_t) ((i + 1) % MACHINE_NUM);
+
+    if (credits[vc][rm_id] > 0) {
+      // find out how many bcasts can be sent
+      if (credits[vc][i] < avail_cred) avail_cred = credits[vc][i];
+      send_vector[i] = true;
+      if (avail_mach > 0) {
+        for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
+          send_wr[(MESSAGES_IN_BCAST * j) + prev_i].next = &send_wr[(MESSAGES_IN_BCAST * j) + i];
+        }
+      }
+      prev_i = i;
+      avail_mach++;
+    }
+    else send_vector[i] = false;
+  }
+  *available_credits = avail_cred;
+
+
+  // There are no explicit credit messages for the reads or write messages
+  return true;
+
+}
+
+// Check credits, first see if all credits are here, then if not and enough time has passed,
+// transition to write_quorum broadcasts
+static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
+                                       uint32_t *time_out_cnt, uint8_t vc,
+                                       uint16_t *available_credits, struct ibv_send_wr *send_wr,
+                                       uint32_t *credit_debug_cnt, uint16_t t_id)
+{
+  uint16_t i;
+  // First check the active ids, to have a fast path when there are not enough credits
+  for (i = 0; i < q_info->active_num; i++) {
+    if (credits[vc][q_info->active_ids[i]] == 0) {
+      time_out_cnt[vc]++;
+      if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
+        if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
+        update_q_info(q_info, credits, vc);
+        update_bcast_wr_links(q_info, send_wr);
+        time_out_cnt[vc] = 0;
+      }
+      return false;
+    }
+  }
+
+  // then check the missing credits to see if we need to change the configuration
+  if (q_info->missing_num > 0) {
+    for (i = 0; i < q_info->missing_num; i++) {
+      if (credits[vc][q_info->missing_ids[i]] > 0) {
+        revive_machine(q_info, q_info->missing_ids[i]);
+        update_bcast_wr_links(q_info, send_wr);
+      }
+    }
+  }
+
+  //finally count credits
+  uint16_t avail_cred = K_64_;
+  printf("avail cred %u\n", avail_cred);
+  for (i = 0; i < q_info->active_num; i++) {
+    if (credits[vc][q_info->active_ids[i]] < avail_cred)
+      avail_cred = credits[vc][q_info->active_ids[i]];
+  }
+  *available_credits = avail_cred;
+  return true;
+}
+
+
 
 
 // Broadcast logic uses this function to post appropriate number of credit recvs before sending broadcasts
@@ -623,10 +843,11 @@ static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_
 
 // Form the Broadcast work request for the write
 static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
-                                 struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
-                                 struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
-                                 uint16_t br_i, uint16_t credits[][MACHINE_NUM],
-                                 uint8_t vc, uint16_t t_id) {
+                              struct quorum_info *q_info,
+                              struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
+                              struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
+                              uint16_t br_i, uint16_t credits[][MACHINE_NUM],
+                              uint8_t vc, uint16_t t_id) {
   uint16_t i;
   struct ibv_wc signal_send_wc;
   struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_i];
@@ -657,7 +878,9 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   if ((*w_br_tx) % W_BCAST_SS_BATCH == 0) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u Sending signaled the first message, total %lu, br_i %u \n", t_id, *w_br_tx, br_i);
-    send_wr[0].send_flags |= IBV_SEND_SIGNALED;
+    uint8_t rm_id =  q_info->active_ids[0] < machine_id ?
+                     q_info->active_ids[0] : (uint8_t) (q_info->active_ids[0] - 1);
+    send_wr[rm_id].send_flags |= IBV_SEND_SIGNALED; // TODO Make sure this works
   }
   (*w_br_tx)++;
   if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
@@ -666,37 +889,46 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
     poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc);
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
-  if (br_i > 0)
-    send_wr[(br_i * MESSAGES_IN_BCAST) - 1].next = &send_wr[br_i * MESSAGES_IN_BCAST];
+  if (br_i > 0) {
+    uint8_t m_id = q_info->active_ids[q_info->active_num - 1];
+    uint8_t rm_id_last = m_id  < machine_id ? m_id : (uint8_t) (m_id - 1);
+    uint8_t rm_id_first = q_info->active_ids[0] < machine_id ?
+                         q_info->active_ids[0] : (uint8_t) (q_info->active_ids[0] - 1);
+    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + rm_id_last].next =
+      &send_wr[(br_i * MESSAGES_IN_BCAST) + rm_id_first];
+  }
 
 }
 
 
 // Broadcast Writes
-static inline void broadcast_writes(struct pending_ops *p_ops,
+static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_info *q_info,
                                     uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
-                                    uint32_t *credit_debug_cnt,
+                                    uint32_t *credit_debug_cnt, uint32_t *time_out_cnt,
                                     struct ibv_sge *w_send_sgl, struct ibv_send_wr *w_send_wr,
                                     uint64_t *w_br_tx, struct recv_info *ack_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes)
 {
   //  printf("Worker %d bcasting writes \n", t_id);
   uint8_t vc = W_VC;
-  uint16_t writes_sent = 0, br_i = 0, j, credit_recv_counter = 0;
+  uint16_t writes_sent = 0, br_i = 0, mes_sent = 0, credit_recv_counter = 0, available_credits = 0;
+  if (p_ops->w_fifo->bcast_size > 0) {
+    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+                             &available_credits, w_send_wr, credit_debug_cnt, t_id))
+      return;
+  }
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
   uint32_t posted_recvs = ack_recv_info->posted_recvs;
 
-  while (p_ops->w_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits, cb, NULL, credit_debug_cnt, vc))
-      break;
+  while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
     if (DEBUG_WRITES)
       printf("Wrkr %d has %u write bcasts to send credits %d\n",t_id, p_ops->w_fifo->bcast_size, credits[W_VC][0]);
     // Create the broadcast messages
 
-    forge_w_wr(bcast_pull_ptr, p_ops, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
+    forge_w_wr(bcast_pull_ptr, p_ops, q_info, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
     br_i++;
     uint8_t coalesce_num = p_ops->w_fifo->w_message[bcast_pull_ptr].w_num;
-    for (uint16_t i = 0; i < MACHINE_NUM; i++) credits[W_VC][i]--;
+    //for (uint16_t i = 0; i < MACHINE_NUM; i++) credits[W_VC][i]--;
     if (ENABLE_ASSERTIONS) {
       assert(p_ops->w_fifo->bcast_size >= coalesce_num);
       (*outstanding_writes) += coalesce_num;
@@ -713,6 +945,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops,
     }
     p_ops->w_fifo->bcast_size -= coalesce_num;
     writes_sent += coalesce_num;
+    mes_sent++;
     MOD_ADD(bcast_pull_ptr, W_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
       if (posted_recvs < MAX_RECV_ACK_WRS) {
@@ -745,6 +978,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops,
   }
   p_ops->w_fifo->bcast_pull_ptr = bcast_pull_ptr;
   ack_recv_info->posted_recvs = posted_recvs;
+  if (mes_sent > 0) decrease_credits(credits, q_info, mes_sent, vc);
 }
 
 // Form the Broadcast work request for the red
@@ -804,7 +1038,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
   uint32_t posted_recvs = r_rep_recv_info->posted_recvs;
 
   while (p_ops->r_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits, cb, NULL, credit_debug_cnt, vc))
+    if (!check_bcast_all_credits_depr(credits, cb, NULL, credit_debug_cnt, vc))
       break;
     if (DEBUG_READS)
       printf("Wrkr %d has %u read bcasts to send credits %d\n",t_id, p_ops->r_fifo->bcast_size, credits[R_VC][0]);
@@ -1294,8 +1528,8 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
       read_info_bookkeeping(r_rep, read_info);
       if (DEBUG_READS)
         yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
-                      i, read_info->rep_num, QUORUM_OF_ACKS, r_ptr);
-      if (read_info->rep_num >= QUORUM_OF_ACKS) {
+                      i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
+      if (read_info->rep_num >= REMOTE_QUORUM) {
         // if (ENABLE_ASSERTIONS) assert(p_ops->r_state[r_ptr] >= SENT);
         p_ops->r_state[r_ptr] = READY;
         if (ENABLE_ASSERTIONS) {
@@ -1334,8 +1568,8 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
   while(p_ops->r_state[pull_ptr] == READY) {
 //    if ((!p_ops->read_info[pull_ptr].seen_larger_ts) ||
 //       (p_ops->read_info[pull_ptr].seen_larger_ts &&
-//        p_ops->read_info[pull_ptr].times_seen_ts >= QUORUM_OF_ACKS)) {
-    if (p_ops->read_info[pull_ptr].times_seen_ts >= QUORUM_OF_ACKS &&
+//        p_ops->read_info[pull_ptr].times_seen_ts >= REMOTE_QUORUM)) {
+    if (p_ops->read_info[pull_ptr].times_seen_ts >= REMOTE_QUORUM &&
       (p_ops->read_info[pull_ptr].opcode != CACHE_OP_LIN_PUT)) {
       if (DEBUG_READS || DEBUG_TS)
         green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
@@ -1576,7 +1810,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
       }
       p_ops->acks_seen[ack_ptr]++;
       if (ENABLE_ASSERTIONS) assert(p_ops->acks_seen[ack_ptr] <= REM_MACH_NUM);
-      if (p_ops->acks_seen[ack_ptr] == QUORUM_OF_ACKS) {
+      if (p_ops->acks_seen[ack_ptr] == REMOTE_QUORUM) {
         if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
         //printf("Wrkr %d valid ack %u/%u, write at ptr %d is ready \n",
             //   t_id, ack_i, ack_num,  ack_ptr);

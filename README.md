@@ -7,7 +7,7 @@ The protocols are implemented over RDMA.
 ## Optimizations
 The protocol is implemented over UD Sends and Receives.
 All messages are batched, the stats will print out the batching of all messages.
-The Read will only perfrom a second round, if it detects that the value it is reading is not available to a quorum of machines.
+The Read will only perfrom a second round, if it detects that the value it is reading is not available to a write_quorum of machines.
 The read replies will not include a key or a timestamp, if the timestamp that is proposed to be read is smaller or equal to the local timestamp
 
 
