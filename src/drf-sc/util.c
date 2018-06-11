@@ -481,6 +481,22 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 
 }
 
+// Initialize the quorum info that contains the system configuration
+void set_up_q_info(struct quorum_info **q_info)
+{
+  (*q_info) = (struct quorum_info *) malloc(sizeof(struct quorum_info));
+  memset((*q_info), 0, sizeof(struct quorum_info));
+  (*q_info)->active_num = REM_MACH_NUM;
+  (*q_info)->first_active_rm_id = 0;
+  (*q_info)->last_active_rm_id = REM_MACH_NUM - 1;
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    uint8_t m_id = i < machine_id ? i : (uint8_t) (i + 1);
+    (*q_info)->active_ids[i] = m_id;
+    (*q_info)->send_vector[i] = true;
+  }
+
+}
+
 // Set up the memory registrations required
 void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t buffer_size,
                     struct hrd_ctrl_blk *cb)

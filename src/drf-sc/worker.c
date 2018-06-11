@@ -118,7 +118,8 @@ void *worker(void *arg)
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl, ack_recv_wr, ack_recv_sgl,
                          r_rep_recv_wr, r_rep_recv_sgl, cb, r_rep_mr, acks, t_id);
   set_up_credits(credits);
-
+  struct quorum_info *q_info;
+  set_up_q_info(&q_info);
 
 	// TRACE
 	struct trace_command_uni *trace;
@@ -128,10 +129,11 @@ void *worker(void *arg)
 	------------------------------LATENCY AND DEBUG-----------------------------------
 	---------------------------------------------------------------------------*/
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
-  uint32_t credit_debug_cnt[VC_NUM] = {0};
+  uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0};
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
 	struct timespec start, end;
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
+  bool slept = false;
 
 	/* ---------------------------------------------------------------------------
 	------------------------------START LOOP--------------------------------
@@ -142,6 +144,13 @@ void *worker(void *arg)
      if (ENABLE_ASSERTIONS && CHECK_DBG_COUNTERS)
        check_debug_cntrs(credit_debug_cnt, waiting_dbg_counter, p_ops, (void *) cb->dgram_buf, r_buf_pull_ptr,
                          w_buf_pull_ptr, ack_buf_pull_ptr, r_rep_buf_pull_ptr, t_id);
+
+    if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
+      (t_stats[t_id].cache_hits_per_thread > M_16) && (!slept)) {
+      uint seconds = 10;
+      yellow_printf("Worker %u is going to sleep for %u secs\n", t_id, seconds);
+      sleep(seconds); slept = true;
+    }
 
 
     /* ---------------------------------------------------------------------------
@@ -213,7 +222,8 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     // Perform the write broadcasts
     if (WRITE_RATIO > 0)
-      broadcast_writes(p_ops, credits, cb, credit_debug_cnt, w_send_sgl,  w_send_wr, &w_br_tx,
+      broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
+                       w_send_sgl, w_send_wr, &w_br_tx,
                        ack_recv_info, t_id, &outstanding_writes);
 
 

@@ -167,6 +167,37 @@ static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *sen
     send_wr[i].send_flags = flag;
 }
 
+// Convert a machine id to a "remote machine id"
+static inline uint8_t  mid_to_rmid(uint8_t m_id)
+{
+  return m_id < machine_id ? m_id : (uint8_t)(m_id - 1);
+}
+
+// Convert a "remote machine id" to a machine id
+static inline uint8_t  rmid_to_mid(uint8_t rm_id)
+{
+  return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
+}
+
+
+static inline void print_q_info(struct quorum_info *q_info)
+{
+  yellow_printf("-----QUORUM INFO----- \n");
+  green_printf("Active m_ids: \n");
+  for (uint8_t i = 0; i < q_info->active_num; i++) {
+    green_printf("%u) %u \n", i, q_info->active_ids[i]);
+  }
+  red_printf("Missing m_ids: \n");
+  for (uint8_t i = 0; i < q_info->missing_num; i++) {
+    red_printf("%u) %u \n", i, q_info->missing_ids[i]);
+  }
+  yellow_printf("Send vector : ");
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    yellow_printf("%d ", q_info->send_vector[i]);
+  }
+  yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
+                q_info->first_active_rm_id, q_info->last_active_rm_id);
+}
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
 //---------------------------------------------------------------------------*/
@@ -575,8 +606,7 @@ static inline void update_q_info(struct quorum_info *q_info,
   q_info->active_num = 0;
   for (i = 0; i < MACHINE_NUM; i++) {
     if (i == machine_id) continue;
-    else if (i <  machine_id) rm_id = i;
-    else rm_id = (uint8_t) (i - 1);
+    rm_id = mid_to_rmid(i);
     if (credits[vc][i] == 0) {
       q_info->missing_ids[q_info->missing_num] = i;
       q_info->missing_num++;
@@ -588,6 +618,10 @@ static inline void update_q_info(struct quorum_info *q_info,
       q_info->send_vector[rm_id] = true;
     }
   }
+  q_info->first_active_rm_id = mid_to_rmid(q_info->active_ids[0]);
+  q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
+  if (DEBUG_QUORUM) print_q_info(q_info);
+
   if (ENABLE_ASSERTIONS) {
     assert(q_info->missing_num <= REM_MACH_NUM);
     assert(q_info->active_num <= REM_MACH_NUM);
@@ -598,7 +632,8 @@ static inline void update_q_info(struct quorum_info *q_info,
 static inline void revive_machine(struct quorum_info *q_info,
                                  uint8_t revived_mach_id)
 {
-  uint8_t rm_id = revived_mach_id < machine_id ? revived_mach_id : (uint8_t)(revived_mach_id - 1);
+
+  uint8_t rm_id = mid_to_rmid(revived_mach_id);
   if (ENABLE_ASSERTIONS) {
     assert(revived_mach_id < MACHINE_NUM);
     assert(revived_mach_id != machine_id);
@@ -608,9 +643,11 @@ static inline void revive_machine(struct quorum_info *q_info,
   // Fix the send vector and update the rest based on that,
   // because using the credits may not be reliable here
   q_info->send_vector[rm_id] = true;
+  q_info->missing_num = 0;
+  q_info->active_num = 0;
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
-    uint8_t m_id = i < machine_id ? i : (uint8_t)(i + 1);
-    if (q_info->send_vector[i]) {
+    uint8_t m_id = rmid_to_mid(i);
+    if (!q_info->send_vector[i]) {
       q_info->missing_ids[q_info->missing_num] = m_id;
       q_info->missing_num++;
     }
@@ -619,22 +656,26 @@ static inline void revive_machine(struct quorum_info *q_info,
       q_info->active_num++;
     }
   }
-
+  q_info->first_active_rm_id = mid_to_rmid(q_info->active_ids[0]);
+  q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
+  if (DEBUG_QUORUM) print_q_info(q_info);
   for (uint16_t i = 0; i < q_info->missing_num; i++)
     if (DEBUG_QUORUM) green_printf("After: Missing position %u, missing id %u, id to revive\n",
                                    i, q_info->missing_ids[i], revived_mach_id);
 }
 
 // Update the links between the send Work Requests for broadcasts given the quorum information
-static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv_send_wr *wr)
+static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv_send_wr *wr, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
   uint8_t prev_i = 0, avail_mach = 0;
-
+  green_printf("Worker %u fixing the links between the wrs \n", t_id);
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    wr[i].next = NULL;
     if (q_info->send_vector) {
       if (avail_mach > 0) {
         for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
+          yellow_printf("Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
           wr[(REM_MACH_NUM * j) + prev_i].next = &wr[(REM_MACH_NUM * j) + i];
         }
       }
@@ -676,93 +717,6 @@ static inline bool check_bcast_all_credits_depr(uint16_t credits[][MACHINE_NUM],
 
 }
 
-//Checks if there are enough credits to perform a broadcast
-static inline bool check_bcast_all_credits(uint16_t credits[][MACHINE_NUM], uint16_t *available_credits,
-                                           struct ibv_send_wr *send_wr, bool *quorum_flag,
-                                           uint32_t *time_out_cnt, uint8_t vc)
-{
-  uint16_t i;
-  for (i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    if (credits[vc][i] == 0) {
-      time_out_cnt[vc]++;
-      return false;
-    }
-  }
-
-  //second phase: count credits
-  uint16_t avail_cred = K_64_;
-  printf("avail cred %u\n", avail_cred);
-  for (i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    if (credits[vc][i] < avail_cred)
-      avail_cred = credits[vc][i];
-  }
-
-  // need to rectify the send_wr
-  if (*quorum_flag == true) {
-    for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) { // Number of Broadcasts
-      for (i = 0; i < MESSAGES_IN_BCAST; i++) {
-        uint16_t index = (uint16_t) ((j * MESSAGES_IN_BCAST) + i);
-        if (ENABLE_ASSERTIONS) assert (index < MESSAGES_IN_BCAST_BATCH);
-        send_wr[index].next = (i == MESSAGES_IN_BCAST - 1) ? NULL : &send_wr[index + 1];
-      }
-    }
-  }
-  *available_credits = avail_cred;
-  time_out_cnt[vc] = 0;
-  // There are no explicit credit messages for the reads or write messages
-  return true;
-}
-
-//Checks if there are enough credits to perform a broadcast -- protocol independent
-// Take care that send_vector is a bool per remote machine t match the send_wr,
-// and thus its index cannot be the machine_id
-static inline bool check_bcast_quorum_credits(uint16_t credits[][MACHINE_NUM], uint16_t *available_credits,
-                                              struct ibv_send_wr *send_wr, uint32_t *credit_debug_cnt,
-                                              uint8_t vc, bool *send_vector, uint16_t *available_machines)
-{
-  uint16_t i, rm_id;
-  for (i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    if (credits[vc][i] > 0) (*available_machines)++;
-  }
-  if (ENABLE_ASSERTIONS) {
-    if ((*available_machines) < REMOTE_QUORUM) credit_debug_cnt[vc]++;
-    else credit_debug_cnt[vc] = 0;
-    assert((*available_machines) <= REM_MACH_NUM);
-  }
-  if ((*available_machines) < REMOTE_QUORUM) return false;
-
-  // Set the send vector and reduce credits
-  uint16_t avail_cred = K_64_;
-  uint16_t prev_i = 0, avail_mach = 0;
-  for (i = 0; i < REM_MACH_NUM; i++) {
-    if (i < machine_id) rm_id = i;
-    else rm_id = (uint16_t) ((i + 1) % MACHINE_NUM);
-
-    if (credits[vc][rm_id] > 0) {
-      // find out how many bcasts can be sent
-      if (credits[vc][i] < avail_cred) avail_cred = credits[vc][i];
-      send_vector[i] = true;
-      if (avail_mach > 0) {
-        for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
-          send_wr[(MESSAGES_IN_BCAST * j) + prev_i].next = &send_wr[(MESSAGES_IN_BCAST * j) + i];
-        }
-      }
-      prev_i = i;
-      avail_mach++;
-    }
-    else send_vector[i] = false;
-  }
-  *available_credits = avail_cred;
-
-
-  // There are no explicit credit messages for the reads or write messages
-  return true;
-
-}
-
 // Check credits, first see if all credits are here, then if not and enough time has passed,
 // transition to write_quorum broadcasts
 static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
@@ -778,26 +732,27 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
         update_q_info(q_info, credits, vc);
-        update_bcast_wr_links(q_info, send_wr);
+        update_bcast_wr_links(q_info, send_wr, t_id);
         time_out_cnt[vc] = 0;
       }
       return false;
     }
   }
-
+  time_out_cnt[vc] = 0;
   // then check the missing credits to see if we need to change the configuration
   if (q_info->missing_num > 0) {
     for (i = 0; i < q_info->missing_num; i++) {
       if (credits[vc][q_info->missing_ids[i]] > 0) {
+        if (DEBUG_QUORUM) red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
-        update_bcast_wr_links(q_info, send_wr);
+        update_bcast_wr_links(q_info, send_wr, t_id);
       }
     }
   }
 
   //finally count credits
   uint16_t avail_cred = K_64_;
-  printf("avail cred %u\n", avail_cred);
+  //printf("avail cred %u\n", avail_cred);
   for (i = 0; i < q_info->active_num; i++) {
     if (credits[vc][q_info->active_ids[i]] < avail_cred)
       avail_cred = credits[vc][q_info->active_ids[i]];
@@ -841,6 +796,28 @@ static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_
   }
 }
 
+// Post a quorum broadcast and apost the appropriate receives for it
+static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, uint32_t recvs_to_post_num,
+                                                   struct quorum_info *q_info, uint16_t br_i, uint64_t br_tx,
+                                                   struct ibv_send_wr *send_wr, struct ibv_qp *send_qp,
+                                                   int enable_inlining)
+{
+  struct ibv_send_wr *bad_send_wr;
+  if (recvs_to_post_num > 0) {
+    // printf("Wrkr %d posting %d recvs\n", t_id,  recvs_to_post_num);
+    if (recvs_to_post_num) post_recvs_with_recv_info(recv_info, recvs_to_post_num);
+    recv_info->posted_recvs += recvs_to_post_num;
+  }
+  if (DEBUG_SS_BATCH)
+    green_printf("Sending %u bcasts, total %lu \n", br_i, br_tx);
+
+  send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next = NULL;
+  int ret = ibv_post_send(send_qp, &send_wr[q_info->first_active_rm_id], &bad_send_wr);
+  if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
+  if (!ENABLE_ADAPTIVE_INLINING)
+    send_wr[q_info->first_active_rm_id].send_flags = enable_inlining == 1 ? IBV_SEND_INLINE : 0;
+}
+
 // Form the Broadcast work request for the write
 static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
                               struct quorum_info *q_info,
@@ -873,14 +850,11 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
                  t_id, w_mes->write[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], *(uint64_t*)w_mes->l_id);
 
-  //send_wr[0].send_flags = W_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
   // Do a Signaled Send every W_BCAST_SS_BATCH broadcasts (W_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
   if ((*w_br_tx) % W_BCAST_SS_BATCH == 0) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u Sending signaled the first message, total %lu, br_i %u \n", t_id, *w_br_tx, br_i);
-    uint8_t rm_id =  q_info->active_ids[0] < machine_id ?
-                     q_info->active_ids[0] : (uint8_t) (q_info->active_ids[0] - 1);
-    send_wr[rm_id].send_flags |= IBV_SEND_SIGNALED; // TODO Make sure this works
+    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED; // TODO Make sure this works
   }
   (*w_br_tx)++;
   if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
@@ -890,12 +864,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0) {
-    uint8_t m_id = q_info->active_ids[q_info->active_num - 1];
-    uint8_t rm_id_last = m_id  < machine_id ? m_id : (uint8_t) (m_id - 1);
-    uint8_t rm_id_first = q_info->active_ids[0] < machine_id ?
-                         q_info->active_ids[0] : (uint8_t) (q_info->active_ids[0] - 1);
-    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + rm_id_last].next =
-      &send_wr[(br_i * MESSAGES_IN_BCAST) + rm_id_first];
+    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next =
+      &send_wr[(br_i * MESSAGES_IN_BCAST) + q_info->first_active_rm_id];
   }
 
 }
@@ -911,24 +881,21 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
 {
   //  printf("Worker %d bcasting writes \n", t_id);
   uint8_t vc = W_VC;
-  uint16_t writes_sent = 0, br_i = 0, mes_sent = 0, credit_recv_counter = 0, available_credits = 0;
+  uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   if (p_ops->w_fifo->bcast_size > 0) {
     if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
                              &available_credits, w_send_wr, credit_debug_cnt, t_id))
       return;
   }
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
-  uint32_t posted_recvs = ack_recv_info->posted_recvs;
 
   while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
     if (DEBUG_WRITES)
       printf("Wrkr %d has %u write bcasts to send credits %d\n",t_id, p_ops->w_fifo->bcast_size, credits[W_VC][0]);
     // Create the broadcast messages
-
     forge_w_wr(bcast_pull_ptr, p_ops, q_info, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
     br_i++;
     uint8_t coalesce_num = p_ops->w_fifo->w_message[bcast_pull_ptr].w_num;
-    //for (uint16_t i = 0; i < MACHINE_NUM; i++) credits[W_VC][i]--;
     if (ENABLE_ASSERTIONS) {
       assert(p_ops->w_fifo->bcast_size >= coalesce_num);
       (*outstanding_writes) += coalesce_num;
@@ -944,40 +911,21 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
       p_ops->w_fifo->w_message[p_ops->w_fifo->push_ptr].w_num = 0;
     }
     p_ops->w_fifo->bcast_size -= coalesce_num;
-    writes_sent += coalesce_num;
     mes_sent++;
     MOD_ADD(bcast_pull_ptr, W_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
-      if (posted_recvs < MAX_RECV_ACK_WRS) {
-        uint32_t recvs_to_post_num = MAX_RECV_ACK_WRS - posted_recvs;
-        // printf("Wrkr %d posting %d recvs\n", t_id,  recvs_to_post_num);
-        if (recvs_to_post_num) post_recvs_with_recv_info(ack_recv_info, recvs_to_post_num);
-        posted_recvs += recvs_to_post_num;
-        writes_sent = 0;
-      }
-      if (DEBUG_SS_BATCH)
-        green_printf("Sending %u bcasts, total %lu \n", br_i, *w_br_tx);
-      post_recvs_and_batch_bcasts_to_NIC(br_i, cb, w_send_wr, NULL, &credit_recv_counter, W_QP_ID);
+      post_quorum_broadasts_and_recvs(ack_recv_info, MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
+                                      q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
+                                      W_ENABLE_INLINING);
       br_i = 0;
-      if (!ENABLE_ADAPTIVE_INLINING)
-        w_send_wr[0].send_flags = W_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
     }
   }
-  if (br_i > 0) {
-    if (posted_recvs < MAX_RECV_ACK_WRS) {
-      uint32_t recvs_to_post_num = MAX_RECV_ACK_WRS - posted_recvs;
-//    printf("Ldr %d posting %d recvs\n",m_id,  recvs_to_post_num);
-      if (recvs_to_post_num) post_recvs_with_recv_info(ack_recv_info, recvs_to_post_num);
-      posted_recvs += recvs_to_post_num;
-    }
-    if (DEBUG_SS_BATCH)
-      green_printf("Sending %u bcasts, total %lu \n", br_i, *w_br_tx);
-    post_recvs_and_batch_bcasts_to_NIC(br_i, cb, w_send_wr, NULL, &credit_recv_counter, W_QP_ID);
-    if (!ENABLE_ADAPTIVE_INLINING)
-      w_send_wr[0].send_flags = W_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
-  }
+  if (br_i > 0)
+    post_quorum_broadasts_and_recvs(ack_recv_info, MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
+                                    q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
+                                    W_ENABLE_INLINING);
+
   p_ops->w_fifo->bcast_pull_ptr = bcast_pull_ptr;
-  ack_recv_info->posted_recvs = posted_recvs;
   if (mes_sent > 0) decrease_credits(credits, q_info, mes_sent, vc);
 }
 
@@ -1104,7 +1052,7 @@ static inline void  ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint
     if(unlikely(*(uint64_t *) ack->local_id) + ack->ack_num != l_id) {
       red_printf("Adding to existing ack with l_id %lu, ack_num %u with new l_id %lu and w_num %u\n",
                  *(uint64_t *) ack->local_id, ack->ack_num, l_id, w_num);
-      assert(false);
+      //assert(false);
     }
   }
   if (ack->opcode == CACHE_OP_ACK) {// new ack
@@ -1116,6 +1064,7 @@ static inline void  ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint
     if (DEBUG_ACKS) yellow_printf("Create an ack with l_id  %lu \n", *(uint64_t *)ack->local_id);
   }
   else {
+    if (ENABLE_ASSERTIONS) assert((*(uint64_t *)ack->local_id) + ack->ack_num == l_id);
     ack->credits++;
     if (ENABLE_ASSERTIONS) assert(ack->ack_num < 63000);
     ack->ack_num += w_num;

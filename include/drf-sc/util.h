@@ -123,6 +123,8 @@ void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
 void set_up_queue_depths(int**, int**);
 // Initialize the struct that holds all pending ops
 void set_up_pending_ops(struct pending_ops**, uint32_t, uint32_t);
+// Initialize the quorum info that contains the system configuration
+void set_up_q_info(struct quorum_info **q_info);
 // Set up the memory registrations in case inlining is disabled
 // Set up the memory registrations required
 void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t buffer_size,

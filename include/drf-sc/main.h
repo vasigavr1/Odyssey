@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 39
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // NUmber of remote machines
 
@@ -86,12 +86,12 @@
 
 // CORE CONFIGURATION
 #define SESSIONS_PER_THREAD 80
-#define ENABLE_LIN 1
+#define ENABLE_LIN 0
 #define R_CREDITS 2
 #define MAX_R_COALESCE 40
 #define W_CREDITS 8
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
@@ -214,11 +214,13 @@
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
 #define DEBUG_TS 0
-#define CHECK_DBG_COUNTERS 0
+#define CHECK_DBG_COUNTERS 1
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 1
+#define PUT_A_MACHINE_TO_SLEEP 1
+#define MACHINE_THAT_SLEEPS 1
 
 
 
@@ -297,6 +299,10 @@ struct quorum_info {
 	uint8_t active_num;
 	uint8_t active_ids[REM_MACH_NUM];
   bool send_vector[REM_MACH_NUM];
+	// These are not a machine_ids, they ranges= from 0 to REM_MACH_NUM -1
+	// to facilitate usage with the ib_send_wrs
+	uint8_t first_active_rm_id;
+	uint8_t last_active_rm_id;
 };
 
 
