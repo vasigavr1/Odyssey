@@ -26,6 +26,9 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
+#define OP_LIN_RELEASE 108
+#define OP_RELEASE 109
+#define OP_ACQUIRE 110
 #define CACHE_OP_GET 111
 #define CACHE_OP_PUT 112
 #define CACHE_OP_UPD 113
@@ -38,7 +41,7 @@
 #define EMPTY 120
 #define CACHE_GET_SUCCESS 121
 #define CACHE_PUT_SUCCESS 122
-#define CACHE_UPD_SUCCESS 123
+#define CACHE_LOCAL_GET_SUCCESS 123
 #define CACHE_INV_SUCCESS 124
 #define CACHE_ACK_SUCCESS 125
 #define CACHE_LAST_ACK_SUCCESS 126
@@ -64,6 +67,8 @@
 #define CACHE_PUT_FAIL 137
 
 #define UNSERVED_CACHE_MISS 140
+
+#define IS_WRITE(X) (((X) == CACHE_OP_PUT || (X) == OP_RELEASE) ? 1 : 0)
 
 char* code_to_str(uint8_t code);
 

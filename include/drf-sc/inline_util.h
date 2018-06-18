@@ -322,7 +322,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
-// Worker inserts a new local r_rep to the r_rep fifo it maintains
+// Worker inserts a new local read to the read fifo it maintains
 static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read, uint16_t t_id)
 {
   struct r_message *r_mes = p_ops->r_fifo->r_message;
@@ -332,8 +332,9 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   //  printf("Insert a r_rep %u \n", *(uint32_t *)r_rep);
   memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
   memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-  if (read->opcode == CACHE_OP_LIN_PUT) r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_LIN_PUT;
-  else r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_GET;
+  r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
+  //if (read->opcode == CACHE_OP_LIN_PUT) r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_LIN_PUT;
+  //else r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
   if (inside_r_ptr == 0) {
     p_ops->r_fifo->backward_ptrs[r_mes_ptr] = r_ptr;
     uint64_t message_l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
@@ -363,8 +364,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
                           (struct cache_key *)read));
   }
   p_ops->r_state[r_ptr] = VALID;
-
-  memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
+  if (read->opcode == OP_ACQUIRE)
+    memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
   if (ENABLE_ASSERTIONS) assert(p_ops->r_session_id[r_ptr] <= SESSIONS_PER_THREAD);
   MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
   p_ops->r_size++;
@@ -381,7 +382,6 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
 static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, uint8_t source,
                                 uint32_t r_pull_ptr, uint16_t t_id)
 {
-
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[r_pull_ptr];
   else if (source == LIN_WRITE) r_info = (struct read_info *) write;
@@ -390,7 +390,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
   uint32_t w_ptr = p_ops->w_push_ptr;
-  //  printf("Insert a write %u \n", *(uint32_t *)write);
+  printf("Insert a write %u \n", *(uint32_t *)write);
   if (source == FROM_TRACE) {
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
            4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
@@ -421,7 +421,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
         }
       }
     }
-    // printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
+    printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
     memcpy(w_mes[w_mes_ptr].l_id, &message_l_id, 8);
   }
   if (ENABLE_ASSERTIONS) {
@@ -437,10 +437,10 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   }
   p_ops->w_state[w_ptr] = VALID;
   if (source != FROM_READ) {
-    memcpy(&p_ops->w_session_id[w_ptr], write, SESSION_BYTES);
+    if (write->opcode == OP_RELEASE) memcpy(&p_ops->w_session_id[w_ptr], write, SESSION_BYTES);
     if (source == LIN_WRITE) memset(write, 0, 3); // empty the read info such that it can be reused
   }
-  else  p_ops->w_session_id[w_ptr] = p_ops->r_session_id[r_pull_ptr];
+  else if (r_info->opcode == OP_ACQUIRE) p_ops->w_session_id[w_ptr] = p_ops->r_session_id[r_pull_ptr];
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
@@ -533,6 +533,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
                                                  struct pending_ops *p_ops, struct mica_resp *resp)
 {
   int i = 0, op_i = 0;
+  uint16_t writes_num = 0, reads_num = 0;
   uint8_t is_update = 0;
   int working_session = -1;
   if (p_ops->all_sessions_stalled) return trace_iter;
@@ -546,15 +547,23 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   if (ENABLE_ASSERTIONS) assert(working_session != -1);
 
   //green_printf("op_i %d , trace_iter %d, trace[trace_iter].opcode %d \n", op_i, trace_iter, trace[trace_iter].opcode);
-  while (op_i < CACHE_BATCH_SIZE && working_session < SESSIONS_PER_THREAD) {
+  while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
     if (ENABLE_ASSERTIONS) assert(trace[trace_iter].opcode != NOP);
-    is_update = (IS_WRITE(trace[trace_iter].opcode)) ? (uint8_t) 1 : (uint8_t) 0;
+    is_update = (uint8_t) IS_WRITE(trace[trace_iter].opcode);
+    cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
+    // Create some back pressure from the buffers, since the sessions may never be stalled
+    if (is_update) writes_num++; else reads_num++;
+    if (p_ops->w_size + writes_num >= PENDING_WRITES || p_ops->r_size + reads_num >= PENDING_READS)
+      break;
+    cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
-    ops[op_i].opcode = is_update ? (ENABLE_LIN ? (uint8_t) CACHE_OP_LIN_PUT : (uint8_t) CACHE_OP_PUT) : (uint8_t) CACHE_OP_GET;
+    ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
-    p_ops->session_has_pending_op[working_session] = true;
-    memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
-    // yellow_printf("BEFORE: OP_i %u -> session %u \n", op_i, working_session);
+    if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE) {
+      p_ops->session_has_pending_op[working_session] = true;
+      memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
+    }
+    yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
     while (p_ops->session_has_pending_op[working_session]) {
       working_session++;
       if (working_session == SESSIONS_PER_THREAD) {
@@ -562,8 +571,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
         break;
       }
     }
-    // cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
-    if (ENABLE_ASSERTIONS == 1) {
+    //cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
+    if (ENABLE_ASSERTIONS) {
       assert(WRITE_RATIO > 0 || is_update == 0);
       if (is_update) assert(ops[op_i].val_len > 0);
     }
@@ -571,7 +580,9 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     trace_iter++;
     if (trace[trace_iter].opcode == NOP) trace_iter = 0;
     op_i++;
+
   }
+
   t_stats[t_id].cache_hits_per_thread += op_i;
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
   // assert(op_i + p_ops->w_size == SESSIONS_PER_THREAD);
@@ -580,10 +591,13 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
       yellow_printf("Cache_miss, session %d \n", *(uint32_t *) &ops[i]);
-      p_ops->session_has_pending_op[*(uint32_t *) &ops[i]] = false;
-      p_ops->all_sessions_stalled = false;
+      if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE) {
+        p_ops->session_has_pending_op[*(uint32_t *) &ops[i]] = false;
+        p_ops->all_sessions_stalled = false;
+      }
     }
-    else if (ops[i].opcode == CACHE_OP_PUT)
+    else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) ;
+    else if (ops[i].opcode == CACHE_OP_PUT || ops[i].opcode == OP_RELEASE)
       insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
     else {
       insert_read(p_ops, &ops[i], t_id);
@@ -835,13 +849,16 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
   for (i = 0; i < coalesce_num; i++) {
-    p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT;
+    if (w_mes->write[i].opcode == CACHE_OP_PUT)
+      p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_PUT;
+    else p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_RELEASE;
     if (DEBUG_WRITES)
       printf("Write %d, val-len %u, message w_size %d\n", i, w_mes->write[i].val_len,
              send_sgl[br_i].length);
     if (ENABLE_ASSERTIONS) {
       assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(w_mes->write[i].opcode == CACHE_OP_PUT);
+      assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
+             w_mes->write[i].opcode == OP_RELEASE);
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
@@ -950,7 +967,8 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
       yellow_printf("Read %d, message mes_size %d, version %u \n", i,
              send_sgl[br_i].length, *(uint32_t *)r_mes->read[i].ts.version);
     if (ENABLE_ASSERTIONS) {
-      assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT);
+      assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT ||
+             r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE);
     }
   }
   if (DEBUG_READS)
@@ -1048,7 +1066,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 // Keep track of the write messages to send the appropriate acks
 static inline void  ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint64_t l_id)
 {
-  if (ENABLE_ASSERTIONS) {
+  if (ENABLE_ASSERTIONS && DEBUG_QUORUM) {
     if(unlikely(*(uint64_t *) ack->local_id) + ack->ack_num != l_id) {
       red_printf("Adding to existing ack with l_id %lu, ack_num %u with new l_id %lu and w_num %u\n",
                  *(uint64_t *) ack->local_id, ack->ack_num, l_id, w_num);
@@ -1077,6 +1095,7 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
 {
   uint32_t debug_cntr = 0;
   while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
+    if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -1155,6 +1174,7 @@ static inline void wait_for_the_entire_read(volatile struct r_message *r_mes,
   uint32_t debug_cntr = 0;
   while (r_mes->read[r_mes->coalesce_num - 1].opcode != CACHE_OP_GET) {
     if (r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_LIN_PUT) return;
+    if (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -1195,7 +1215,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
     if (polled_reads + r_num > MAX_INCOMING_R && ENABLE_ASSERTIONS) assert(false);
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
-      if (ENABLE_ASSERTIONS) if(read->opcode != CACHE_OP_GET && read->opcode != CACHE_OP_LIN_PUT)
+      if (ENABLE_ASSERTIONS) if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE)
           red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, i, r_num);
       //printf("version %u \n", *(uint32_t*) read->ts.version);
       p_ops->ptrs_to_r_ops[polled_reads] = (struct read *)(((void *) read) - 3); //align with the cache op
@@ -1512,21 +1532,22 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
 static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
 {
   uint32_t pull_ptr = p_ops->r_pull_ptr;
-  uint16_t lin_puts_num = 0, writes_for_cache = 0;
+  uint16_t writes_for_cache = 0;
 
   while(p_ops->r_state[pull_ptr] == READY) {
-//    if ((!p_ops->read_info[pull_ptr].seen_larger_ts) ||
-//       (p_ops->read_info[pull_ptr].seen_larger_ts &&
-//        p_ops->read_info[pull_ptr].times_seen_ts >= REMOTE_QUORUM)) {
     if (p_ops->read_info[pull_ptr].times_seen_ts >= REMOTE_QUORUM &&
       (p_ops->read_info[pull_ptr].opcode != CACHE_OP_LIN_PUT)) {
+      if (ENABLE_ASSERTIONS)
+        assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE);
       if (DEBUG_READS || DEBUG_TS)
         green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
                      pull_ptr, p_ops->read_info[pull_ptr].times_seen_ts);
       // commit this read
       p_ops->r_state[pull_ptr] = INVALID;
-      p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
-      p_ops->all_sessions_stalled = false;
+      if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE) {
+        p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
+        p_ops->all_sessions_stalled = false;
+      }
       memset(&p_ops->read_info[pull_ptr], 0, 3);
       MOD_ADD(pull_ptr, PENDING_READS);
       p_ops->r_size--;
@@ -1544,15 +1565,15 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
         memcpy(&p_ops->read_info[pull_ptr], &session_id, SESSION_BYTES);
         insert_write(p_ops, (struct cache_op *) &p_ops->read_info[pull_ptr], LIN_WRITE, 0, t_id);
         p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
-        lin_puts_num++;
         writes_for_cache++;
-
       }
       else { // convert the read to a write and push it to the write ops
         if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
         insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
         memset(&p_ops->read_info[pull_ptr], 0, 3);
-        if (ENABLE_ASSERTIONS) assert(p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET);
+        if (ENABLE_ASSERTIONS)
+          assert(p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET ||
+                 p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE);
         if (p_ops->read_info[pull_ptr].seen_larger_ts) { // then we also have to propagate this read to the cache
           p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
           writes_for_cache++;
@@ -1664,25 +1685,25 @@ static inline void wait_for_the_entire_ack(volatile struct ack_message *ack,
 // Remove writes that have seen all acks
 static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
 {
-  while(p_ops->w_state[p_ops->w_pull_ptr] == READY) {
-//    if (DEBUG_ACKS)
-//    green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
-//                 t_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
-//                 p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
-
+  while(p_ops->w_state[p_ops->w_pull_ptr] >= READY_PUT) {
+    //if (DEBUG_ACKS)
+    //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
+    //               t_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
+    //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
+    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) {
+      p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
+      p_ops->all_sessions_stalled = false;
+    }
     p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
     p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
-    p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
-    p_ops->all_sessions_stalled = false;
     p_ops->local_w_id++;
     MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
     p_ops->w_size--;
   }
   if (ENABLE_ASSERTIONS) {
-    assert(p_ops->w_state[p_ops->w_pull_ptr] != READY);
-    assert(p_ops->w_state[(p_ops->w_pull_ptr + 1) % PENDING_WRITES] != READY);
+    assert(p_ops->w_state[p_ops->w_pull_ptr] < READY_PUT);
+    assert(p_ops->w_state[(p_ops->w_pull_ptr + 1) % PENDING_WRITES] < READY_PUT);
   }
-  //sleep(3);
 }
 
 
@@ -1763,7 +1784,8 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
         if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
         //printf("Wrkr %d valid ack %u/%u, write at ptr %d is ready \n",
             //   t_id, ack_i, ack_num,  ack_ptr);
-        p_ops->w_state[ack_ptr] = READY;
+        if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
+        else p_ops->w_state[ack_ptr] = READY_RELEASE;
       }
       MOD_ADD(ack_ptr, PENDING_WRITES);
     }

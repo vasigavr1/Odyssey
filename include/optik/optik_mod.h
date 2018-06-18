@@ -166,7 +166,7 @@ optik_get_type_name()
 
 typedef volatile struct
 {
-    uint8_t _unused[2];
+    uint8_t epoch_id[2];
     uint8_t lock;
     uint8_t m_id;
     uint32_t version;

@@ -175,18 +175,37 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
   clock_gettime(CLOCK_MONOTONIC, &time);
   uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + g_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
-  uint32_t i, writes = 0;
+  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0;
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
     (*cmds)[i].opcode = 0;
 
-    //Before reading the request deside if it's gone be r_rep or write
+    //Before reading the request decide if it's gone be r_rep or write
     uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
+    uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     if (is_update) {
-      (*cmds)[i].opcode = (uint8_t) 1; // WRITE_OP
+      if (is_sc) {
+        if (ENABLE_LIN) (*cmds)[i].opcode = OP_LIN_RELEASE;
+        else (*cmds)[i].opcode = OP_RELEASE;
+        sc_writes++;
+      }
+      else {
+        if (ENABLE_LIN) (*cmds)[i].opcode = CACHE_OP_LIN_PUT;
+        else (*cmds)[i].opcode = CACHE_OP_PUT;
+        writes++;
+      }
 
     }
-    else  (*cmds)[i].opcode = (uint8_t) 2; // READ_OP
+    else  {
+      if (is_sc) {
+        (*cmds)[i].opcode = OP_ACQUIRE;
+        sc_reads++;
+      }
+      else {
+        (*cmds)[i].opcode = CACHE_OP_GET;
+        reads++;
+      }
+    }
 
 
     //--- KEY ID----------
@@ -194,10 +213,15 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
     memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
-    if ((*cmds)[i].opcode == 1) writes++;
+
   }
 
-  if (g_id  == 0) printf("Write Ratio: %.2f%% \nTrace w_size %d \n", (double) (writes * 100) / TRACE_SIZE, TRACE_SIZE);
+  if (g_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%%\n"
+                           "Trace w_size %d \n",
+                         (double) (writes * 100) / TRACE_SIZE,
+                         (double) (sc_writes * 100) / TRACE_SIZE,
+                         (double) (reads * 100) / TRACE_SIZE,
+                         (double) (sc_reads * 100) / TRACE_SIZE, TRACE_SIZE);
   (*cmds)[TRACE_SIZE].opcode = NOP;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
   //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );

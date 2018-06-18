@@ -111,8 +111,8 @@ void *worker(void *arg)
   set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, W_FIFO_SIZE * sizeof(struct w_message), cb);
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
 
-  struct cache_op *ops= (struct cache_op *) malloc(SESSIONS_PER_THREAD * sizeof(struct cache_op));
-  struct mica_resp *resp = (struct mica_resp *) malloc(SESSIONS_PER_THREAD * sizeof(struct mica_resp));
+  struct cache_op *ops= (struct cache_op *) malloc(MAX_OP_BATCH * sizeof(struct cache_op));
+  struct mica_resp *resp = (struct mica_resp *) malloc(MAX_OP_BATCH * sizeof(struct mica_resp));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl, w_recv_wr, w_recv_sgl,
                    r_recv_wr, r_recv_sgl,t_id, cb, w_mr, r_mr);
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl, ack_recv_wr, ack_recv_sgl,
@@ -170,7 +170,7 @@ void *worker(void *arg)
 		------------------------------ POLL FOR READS--------------------------
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-    poll_for_reads(r_buffer, &r_buf_pull_ptr, p_ops, cb->dgram_recv_cq[R_QP_ID],
+      poll_for_reads(r_buffer, &r_buf_pull_ptr, p_ops, cb->dgram_recv_cq[R_QP_ID],
                     r_recv_wc, r_rep_recv_info, acks, t_id, waiting_dbg_counter);
 
     /* ---------------------------------------------------------------------------

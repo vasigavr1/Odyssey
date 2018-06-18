@@ -18,9 +18,9 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 39
-#define MACHINE_NUM 3
-#define REM_MACH_NUM (MACHINE_NUM - 1) // NUmber of remote machines
+#define WORKERS_PER_MACHINE 1
+#define MACHINE_NUM 2
+#define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
@@ -85,7 +85,7 @@
  * --------------------------------------------------------------------------------*/
 
 // CORE CONFIGURATION
-#define SESSIONS_PER_THREAD 80
+#define SESSIONS_PER_THREAD 1
 #define ENABLE_LIN 0
 #define R_CREDITS 2
 #define MAX_R_COALESCE 40
@@ -98,7 +98,8 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
-
+#define MAX_OP_BATCH 300
+#define SC_RATIO 10// this is out of 1000, e.g. 10 means 1%
 
 
 #define QP_NUM 4
@@ -112,12 +113,12 @@
 
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
 #define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1): REM_MACH_NUM)
-
+#define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 
 
-// READS
 
+// READS
 #define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
 #define R_MES_HEADER (10) // local id + coalesce num + m_id
 #define R_MES_SIZE (R_MES_HEADER + (R_SIZE * MAX_R_COALESCE))
@@ -144,7 +145,6 @@
 #define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE)
 
 // Writes
-
 #define MAX_RECV_W_WRS (W_CREDITS * REM_MACH_NUM)
 #define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
 #define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_W_COALESCE)
@@ -184,9 +184,9 @@
 #define TOTAL_BUF_SIZE (R_BUF_SIZE + R_REP_BUF_SIZE + W_BUF_SIZE + ACK_BUF_SIZE)
 #define TOTAL_BUF_SLOTS (R_BUF_SLOTS + R_REP_BUF_SLOTS + W_BUF_SLOTS + ACK_BUF_SLOTS)
 
-#define PENDING_READS (SESSIONS_PER_THREAD + 1)
+#define PENDING_READS (MAX_OP_BATCH + 1)
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
-#define PENDING_WRITES (SESSIONS_PER_THREAD + 1)
+#define PENDING_WRITES (MAX_OP_BATCH + 1)
 #define W_FIFO_SIZE (PENDING_WRITES)
 #define R_FIFO_SIZE (PENDING_READS)
 
@@ -210,16 +210,16 @@
 
 
 // DEBUG
-#define DEBUG_WRITES 0
-#define DEBUG_ACKS 0
-#define DEBUG_READS 0
-#define DEBUG_TS 0
+#define DEBUG_WRITES 1
+#define DEBUG_ACKS 1
+#define DEBUG_READS 1
+#define DEBUG_TS 1
 #define CHECK_DBG_COUNTERS 1
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 1
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 
 
@@ -250,7 +250,7 @@
 
 
 #define IS_READ(X)  ((X) == HOT_READ || (X) == LOCAL_READ || (X) == REMOTE_READ  ? 1 : 0)
-#define IS_WRITE(X)  ((X) == HOT_WRITE || (X) == LOCAL_WRITE || (X) == REMOTE_WRITE  ? 1 : 0)
+//#define IS_WRITE(X)  ((X) == HOT_WRITE || (X) == LOCAL_WRITE || (X) == REMOTE_WRITE  ? 1 : 0)
 
 
 
@@ -284,6 +284,10 @@ struct remote_qp {
 #define VALID 1
 #define SENT 2
 #define READY 3
+#define SENT_PUT 4
+#define SENT_RELEASE 5
+#define READY_PUT 6
+#define READY_RELEASE 7
 
 // Possible write sources
 #define FROM_TRACE 0
@@ -546,7 +550,7 @@ extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
-extern atomic_uint_fast64_t global_w_id, committed_global_w_id;
+extern atomic_uint_fast16_t epoch_id;
 
 struct thread_params {
 	int id;

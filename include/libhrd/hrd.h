@@ -125,7 +125,6 @@
 
 int is_roce;
 int machine_id, num_threads;
-bool write_quorum;
 char *remote_IP, *local_IP;
 
 

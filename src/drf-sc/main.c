@@ -9,7 +9,7 @@ struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 atomic_char qps_are_set_up;
-atomic_uint_fast64_t global_w_id, committed_global_w_id;
+atomic_uint_fast16_t epoch_id;
 
 
 
@@ -65,6 +65,9 @@ int main(int argc, char *argv[])
   assert(MAX_R_REP_COALESCE < 256);
 
   assert(MAX_R_REP_COALESCE == MAX_R_COALESCE);
+  assert(SESSIONS_PER_THREAD > 0);
+  assert(MAX_OP_BATCH < CACHE_BATCH_SIZE);
+  assert(ENABLE_LIN == 0); // Lin is not implemented
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
 
@@ -87,8 +90,8 @@ int main(int argc, char *argv[])
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
 	remote_IP = (char *)malloc(16 * sizeof(char));
-	global_w_id = 1; // DO not start from 0, because when checking for acks there is a non-zero test
-  committed_global_w_id = 0;
+  atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
+
 
 	struct thread_params *param_arr;
 	pthread_t *thread_arr;

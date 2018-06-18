@@ -123,7 +123,7 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
 				key_in_store[I] = 1;
-				if ((*op)[I].opcode == CACHE_OP_GET) {
+				if ((*op)[I].opcode == CACHE_OP_GET || (*op)[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
 					do {
@@ -138,13 +138,16 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
             }
             memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr[I]->value, VALUE_SIZE);
 					} while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
-          p_ops->read_info[r_push_ptr].opcode = CACHE_OP_GET;
-          //p_ops->read_info[r_push_ptr].opcode = 0;
+          // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
+          if (*(uint16_t *)prev_meta.epoch_id < epoch_id || (*op)[I].opcode == OP_ACQUIRE) {
+            p_ops->read_info[r_push_ptr].opcode = (*op)[I].opcode;
+            MOD_ADD(r_push_ptr, PENDING_READS);
+            resp[I].type = CACHE_GET_SUCCESS;
+          }
+          else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
           memcpy((void *)&(*op)[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
-          MOD_ADD(r_push_ptr, PENDING_READS);
-					resp[I].type = CACHE_GET_SUCCESS;
-
-				} else if ((*op)[I].opcode == CACHE_OP_PUT) {
+				}
+        else if ((*op)[I].opcode == CACHE_OP_PUT || (*op)[I].opcode == OP_RELEASE) {
           if (ENABLE_ASSERTIONS) assert((*op)[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
           memcpy(kv_ptr[I]->value, (*op)[I].value, VALUE_SIZE);
@@ -366,7 +369,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       long long *key_ptr_req = (long long *) op;
       if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[I] = 1;
-        if (op->opcode == CACHE_OP_GET) {
+        if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) {
           //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           uint8_t tmp_value[VALUE_SIZE];
@@ -561,7 +564,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 
 	for(i = n - 1; i >= 0; i--) {
 		optik_init(&op.key.meta);
-//		op.key.meta._unused = 0;
+		memset((void *)op.key.meta.epoch_id, 0, EPOCH_BYTES);
 //		op.key.meta.state = VALID_STATE;
 		op_key[1] = key_arr[i].second;
 		op.opcode = CACHE_OP_PUT;
@@ -711,8 +714,8 @@ char* code_to_str(uint8_t code){
 			return "CACHE_GET_SUCCESS";
 		case CACHE_PUT_SUCCESS:
 			return "CACHE_PUT_SUCCESS";
-		case CACHE_UPD_SUCCESS:
-			return "CACHE_UPD_SUCCESS";
+		case CACHE_LOCAL_GET_SUCCESS:
+			return "CACHE_LOCAL_GET_SUCCESS";
     case KEY_HIT:
       return "KEY_HIT";
 		case CACHE_INV_SUCCESS:
