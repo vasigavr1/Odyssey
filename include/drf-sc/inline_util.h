@@ -136,13 +136,13 @@ static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t re
 }
 
 /* Fill @wc with @num_comps comps from this @cq. Exit on error. */
-static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc)
+static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, uint8_t caller_flag)
 {
   int comps = 0;
   uint32_t debug_cnt = 0;
   while(comps < num_comps) {
     if (ENABLE_ASSERTIONS && debug_cnt > M_256) {
-      printf("Someone is stuck waiting for a completion %d / %d  \n", comps, num_comps );
+      printf("Someone is stuck waiting for a completion %d / %d , type %u  \n", comps, num_comps, caller_flag );
       debug_cnt = 0;
     }
     int new_comps = ibv_poll_cq(cq, num_comps - comps, &wc[comps]);
@@ -198,6 +198,7 @@ static inline void print_q_info(struct quorum_info *q_info)
   yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
                 q_info->first_active_rm_id, q_info->last_active_rm_id);
 }
+
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
 //---------------------------------------------------------------------------*/
@@ -390,8 +391,16 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
   uint32_t w_ptr = p_ops->w_push_ptr;
-  printf("Insert a write %u \n", *(uint32_t *)write);
+  //printf("Insert a write %u \n", *(uint32_t *)write);
   if (source == FROM_TRACE) {
+    // if the write is a release put it on a new message to
+    // guarantee it is not batched with writes from the same session
+    if (write->opcode == OP_RELEASE && inside_w_ptr > 0) {
+      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+      w_mes_ptr = p_ops->w_fifo->push_ptr;
+      w_mes[w_mes_ptr].w_num = 0;
+      inside_w_ptr = 0;
+    }
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
            4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
     w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
@@ -399,6 +408,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   else {
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
+    if (r_info->opcode == OP_ACQUIRE) w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
+    else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
   }
   if (inside_w_ptr == 0) {
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
@@ -421,7 +432,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
         }
       }
     }
-    printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
+    //printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
     memcpy(w_mes[w_mes_ptr].l_id, &message_l_id, 8);
   }
   if (ENABLE_ASSERTIONS) {
@@ -442,6 +453,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   }
   else if (r_info->opcode == OP_ACQUIRE) p_ops->w_session_id[w_ptr] = p_ops->r_session_id[r_pull_ptr];
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
+  if (ENABLE_ASSERTIONS) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
   w_mes[w_mes_ptr].w_num++;
@@ -550,12 +562,10 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
     if (ENABLE_ASSERTIONS) assert(trace[trace_iter].opcode != NOP);
     is_update = (uint8_t) IS_WRITE(trace[trace_iter].opcode);
-    cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
     // Create some back pressure from the buffers, since the sessions may never be stalled
     if (is_update) writes_num++; else reads_num++;
     if (p_ops->w_size + writes_num >= PENDING_WRITES || p_ops->r_size + reads_num >= PENDING_READS)
       break;
-    cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
     ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
@@ -563,7 +573,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       p_ops->session_has_pending_op[working_session] = true;
       memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
     }
-    yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
+    //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
     while (p_ops->session_has_pending_op[working_session]) {
       working_session++;
       if (working_session == SESSIONS_PER_THREAD) {
@@ -613,7 +623,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
 
 // Update the quorum info, use this one a timeout
 static inline void update_q_info(struct quorum_info *q_info,
-                                 uint16_t credits[][MACHINE_NUM], uint8_t vc)
+                                 uint16_t credits[][MACHINE_NUM], uint16_t min_credits, uint8_t vc)
 {
   uint8_t i, rm_id;
   q_info->missing_num = 0;
@@ -621,7 +631,7 @@ static inline void update_q_info(struct quorum_info *q_info,
   for (i = 0; i < MACHINE_NUM; i++) {
     if (i == machine_id) continue;
     rm_id = mid_to_rmid(i);
-    if (credits[vc][i] == 0) {
+    if (credits[vc][i] < min_credits) {
       q_info->missing_ids[q_info->missing_num] = i;
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
@@ -731,21 +741,22 @@ static inline bool check_bcast_all_credits_depr(uint16_t credits[][MACHINE_NUM],
 
 }
 
-// Check credits, first see if all credits are here, then if not and enough time has passed,
+// Check credits, first see if there are credits from all active nodes, then if not and enough time has passed,
 // transition to write_quorum broadcasts
 static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
                                        uint32_t *time_out_cnt, uint8_t vc,
                                        uint16_t *available_credits, struct ibv_send_wr *send_wr,
+                                       uint16_t min_credits,
                                        uint32_t *credit_debug_cnt, uint16_t t_id)
 {
   uint16_t i;
   // First check the active ids, to have a fast path when there are not enough credits
   for (i = 0; i < q_info->active_num; i++) {
-    if (credits[vc][q_info->active_ids[i]] == 0) {
+    if (credits[vc][q_info->active_ids[i]] < min_credits) {
       time_out_cnt[vc]++;
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
-        update_q_info(q_info, credits, vc);
+        update_q_info(q_info, credits, min_credits, vc);
         update_bcast_wr_links(q_info, send_wr, t_id);
         time_out_cnt[vc] = 0;
       }
@@ -753,10 +764,12 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
     }
   }
   time_out_cnt[vc] = 0;
+
   // then check the missing credits to see if we need to change the configuration
   if (q_info->missing_num > 0) {
     for (i = 0; i < q_info->missing_num; i++) {
-      if (credits[vc][q_info->missing_ids[i]] > 0) {
+      if (credits[W_VC][q_info->missing_ids[i]] == W_CREDITS &&
+          credits[R_VC][q_info->missing_ids[i]] == R_CREDITS ) {
         if (DEBUG_QUORUM) red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
         update_bcast_wr_links(q_info, send_wr, t_id);
@@ -774,7 +787,6 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
   *available_credits = avail_cred;
   return true;
 }
-
 
 
 
@@ -858,7 +870,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
     if (ENABLE_ASSERTIONS) {
       assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
       assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
-             w_mes->write[i].opcode == OP_RELEASE);
+             w_mes->write[i].opcode == OP_RELEASE ||
+             w_mes->write[i].opcode == OP_ACQUIRE);
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
@@ -871,13 +884,13 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   if ((*w_br_tx) % W_BCAST_SS_BATCH == 0) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u Sending signaled the first message, total %lu, br_i %u \n", t_id, *w_br_tx, br_i);
-    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED; // TODO Make sure this works
+    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
   }
   (*w_br_tx)++;
   if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u POLLING for a send completion in writes, total %lu \n", t_id, *w_br_tx);
-    poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc);
+    poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc, POLL_CQ_W);
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0) {
@@ -899,14 +912,28 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
   //  printf("Worker %d bcasting writes \n", t_id);
   uint8_t vc = W_VC;
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
-  if (p_ops->w_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
-                             &available_credits, w_send_wr, credit_debug_cnt, t_id))
-      return;
-  }
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
+  bool is_release;
+  if (p_ops->w_fifo->bcast_size > 0) {
+    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE;
+    uint16_t min_credits = is_release ? (uint16_t) W_CREDITS : (uint16_t)1;
+    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+                             &available_credits, w_send_wr, min_credits, credit_debug_cnt, t_id))
+      return;
+    if (ENABLE_ASSERTIONS) {
+      if (is_release) assert(available_credits == W_CREDITS);
+    }
+  }
+  else return;
+
 
   while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
+    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE;
+    if (is_release) {
+      if (mes_sent > 0 || available_credits < W_CREDITS) {
+        break;
+      }
+    }
     if (DEBUG_WRITES)
       printf("Wrkr %d has %u write bcasts to send credits %d\n",t_id, p_ops->w_fifo->bcast_size, credits[W_VC][0]);
     // Create the broadcast messages
@@ -921,13 +948,14 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
       t_stats[t_id].writes_sent += coalesce_num;
       t_stats[t_id].writes_sent_mes_num++;
     }
+    p_ops->w_fifo->bcast_size -= coalesce_num;
     // This message has been sent, do not add other writes to it!
-    if (coalesce_num < MAX_W_COALESCE) {
+    // this is tricky because releases leave half-filled messages, make sure this is the last message to bcast
+    if (coalesce_num < MAX_W_COALESCE && p_ops->w_fifo->bcast_size == 0) {
       //yellow_printf("Broadcasting write with coalesce num %u \n", coalesce_num);
       MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
       p_ops->w_fifo->w_message[p_ops->w_fifo->push_ptr].w_num = 0;
     }
-    p_ops->w_fifo->bcast_size -= coalesce_num;
     mes_sent++;
     MOD_ADD(bcast_pull_ptr, W_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
@@ -948,6 +976,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
 
 // Form the Broadcast work request for the red
 static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
+                              struct quorum_info *q_info,
                               struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                               struct ibv_send_wr *send_wr, uint64_t *r_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
@@ -977,43 +1006,48 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], *(uint64_t*)r_mes->l_id);
   //send_wr[0].send_flags = R_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
   // Do a Signaled Send every R_BCAST_SS_BATCH broadcasts (R_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
-  if ((*r_br_tx) % R_BCAST_SS_BATCH == 0) send_wr[0].send_flags |= IBV_SEND_SIGNALED;
+  if ((*r_br_tx) % R_BCAST_SS_BATCH == 0)
+    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
   (*r_br_tx)++;
   if ((*r_br_tx) % R_BCAST_SS_BATCH == R_BCAST_SS_BATCH - 1) {
     //printf("Wrkr %u POLLING for a send completion in reads \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_QP_ID], 1, &signal_send_wc);
+    poll_cq(cb->dgram_send_cq[R_QP_ID], 1, &signal_send_wc, POLL_CQ_R);
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0)
-    send_wr[(br_i * MESSAGES_IN_BCAST) - 1].next = &send_wr[br_i * MESSAGES_IN_BCAST];
+    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next =
+      &send_wr[(br_i * MESSAGES_IN_BCAST) + q_info->first_active_rm_id];
 
 }
 
 // Broadcast Reads
 static inline void broadcast_reads(struct pending_ops *p_ops,
-                                    uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
-                                    uint32_t *credit_debug_cnt,
-                                    struct ibv_sge *r_send_sgl, struct ibv_send_wr *r_send_wr,
-                                    uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
-                                    uint16_t t_id, uint32_t *outstanding_reads)
+                                   uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
+                                   struct quorum_info *q_info, uint32_t *credit_debug_cnt,
+                                   uint32_t *time_out_cnt,
+                                   struct ibv_sge *r_send_sgl, struct ibv_send_wr *r_send_wr,
+                                   uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
+                                   uint16_t t_id, uint32_t *outstanding_reads)
 {
   //  printf("Worker %d bcasting reads \n", t_id);
   uint8_t vc = R_VC;
-  uint16_t reads_sent = 0, br_i = 0, j, credit_recv_counter = 0;
+  uint16_t reads_sent = 0, br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
-  uint32_t posted_recvs = r_rep_recv_info->posted_recvs;
 
-  while (p_ops->r_fifo->bcast_size > 0) {
-    if (!check_bcast_all_credits_depr(credits, cb, NULL, credit_debug_cnt, vc))
-      break;
+  if (p_ops->r_fifo->bcast_size > 0) {
+    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+                             &available_credits, r_send_wr, 1, credit_debug_cnt, t_id))
+      return;
+  }
+  else return;
+
+  while (p_ops->r_fifo->bcast_size > 0 &&  mes_sent < available_credits) {
     if (DEBUG_READS)
       printf("Wrkr %d has %u read bcasts to send credits %d\n",t_id, p_ops->r_fifo->bcast_size, credits[R_VC][0]);
     // Create the broadcast messages
-
-    forge_r_wr(bcast_pull_ptr, p_ops, cb,  r_send_sgl, r_send_wr, r_br_tx, br_i, credits, vc, t_id);
+    forge_r_wr(bcast_pull_ptr, p_ops, q_info, cb, r_send_sgl, r_send_wr, r_br_tx, br_i, credits, vc, t_id);
     br_i++;
     uint8_t coalesce_num = p_ops->r_fifo->r_message[bcast_pull_ptr].coalesce_num;
-    for (uint16_t i = 0; i < MACHINE_NUM; i++) credits[R_VC][i]--;
     if (ENABLE_ASSERTIONS) {
       assert( p_ops->r_fifo->bcast_size >= coalesce_num);
       (*outstanding_reads) += coalesce_num;
@@ -1030,34 +1064,21 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
     }
     p_ops->r_fifo->bcast_size -= coalesce_num;
     reads_sent += coalesce_num;
+    mes_sent++;
     MOD_ADD(bcast_pull_ptr, R_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
-      if (posted_recvs < MAX_RECV_R_REP_WRS) {
-        uint32_t recvs_to_post_num = MAX_RECV_R_REP_WRS - posted_recvs;
-        // printf("Wrkr %d posting %d recvs\n", t_id,  recvs_to_post_num);
-        if (recvs_to_post_num) post_recvs_with_recv_info(r_rep_recv_info, recvs_to_post_num);
-        posted_recvs += recvs_to_post_num;
-        reads_sent = 0;
-      }
-      post_recvs_and_batch_bcasts_to_NIC(br_i, cb, r_send_wr, NULL, &credit_recv_counter, R_QP_ID);
+      post_quorum_broadasts_and_recvs(r_rep_recv_info, MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs,
+                                      q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
+                                      R_ENABLE_INLINING);
       br_i = 0;
-      if (!ENABLE_ADAPTIVE_INLINING)
-        r_send_wr[0].send_flags = R_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
     }
   }
-  if (br_i > 0) {
-    if (posted_recvs < MAX_RECV_R_REP_WRS) {
-      uint32_t recvs_to_post_num = MAX_RECV_R_REP_WRS - posted_recvs;
-//    printf("Ldr %d posting %d recvs\n",m_id,  recvs_to_post_num);
-      if (recvs_to_post_num) post_recvs_with_recv_info(r_rep_recv_info, recvs_to_post_num);
-      posted_recvs += recvs_to_post_num;
-    }
-    post_recvs_and_batch_bcasts_to_NIC(br_i, cb, r_send_wr, NULL, &credit_recv_counter, R_QP_ID);
-    if (!ENABLE_ADAPTIVE_INLINING)
-      r_send_wr[0].send_flags = R_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
-  }
+  if (br_i > 0)
+    post_quorum_broadasts_and_recvs(r_rep_recv_info, MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs,
+                                    q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
+                                    R_ENABLE_INLINING);
   p_ops->r_fifo->bcast_pull_ptr = bcast_pull_ptr;
-  r_rep_recv_info->posted_recvs = posted_recvs;
+  if (mes_sent > 0) decrease_credits(credits, q_info, mes_sent, vc);
 }
 /* ---------------------------------------------------------------------------
 //------------------------------ POLLLING------- -----------------------------
@@ -1096,6 +1117,7 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   uint32_t debug_cntr = 0;
   while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
+    if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -1139,7 +1161,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     for (uint16_t i = 0; i < w_num; i++) {
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) {
-        if(write->opcode != CACHE_OP_PUT)
+        if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE && write->opcode != OP_ACQUIRE)
           red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
@@ -1288,7 +1310,7 @@ static inline void forge_r_rep_wr(uint32_t r_rep_i, uint16_t mes_i, struct pendi
   (*r_rep_tx)++;
   if ((*r_rep_tx) % R_REP_SS_BATCH == R_REP_SS_BATCH - 1) {
     //printf("Wrkr %u POLLING for a send completion in read replies \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_REP_QP_ID], 1, &signal_send_wc);
+    poll_cq(cb->dgram_send_cq[R_REP_QP_ID], 1, &signal_send_wc, POLL_CQ_R_REP);
   }
   if (mes_i > 0) send_wr[mes_i - 1].next = &send_wr[mes_i];
 
@@ -1630,7 +1652,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     } else ack_send_wr[i].send_flags = IBV_SEND_INLINE;
     if ((*sent_ack_tx) % ACK_SS_BATCH == ACK_SS_BATCH - 1) {
       // if (t_id == 0) green_printf("Polling for ack  %llu \n", *sent_ack_tx);
-      poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc);
+      poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, POLL_CQ_ACK);
     }
     if (ack_i > 0) {
       if (DEBUG_ACKS) yellow_printf("Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, i);

@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 #define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 2
+#define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
@@ -85,7 +85,7 @@
  * --------------------------------------------------------------------------------*/
 
 // CORE CONFIGURATION
-#define SESSIONS_PER_THREAD 1
+#define SESSIONS_PER_THREAD 10
 #define ENABLE_LIN 0
 #define R_CREDITS 2
 #define MAX_R_COALESCE 40
@@ -94,12 +94,13 @@
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
+#define REL_CREDIT_TIMEOUT M_32
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH 300
-#define SC_RATIO 10// this is out of 1000, e.g. 10 means 1%
+#define MAX_OP_BATCH 100
+#define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
 
 
 #define QP_NUM 4
@@ -162,7 +163,7 @@
 #define ACK_SIZE 14
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
 
-#define VC_NUM 4
+#define VC_NUM 2
 #define R_VC 0
 #define W_VC 1
 
@@ -210,21 +211,22 @@
 
 
 // DEBUG
-#define DEBUG_WRITES 1
-#define DEBUG_ACKS 1
-#define DEBUG_READS 1
-#define DEBUG_TS 1
-#define CHECK_DBG_COUNTERS 1
+#define DEBUG_WRITES 0
+#define DEBUG_ACKS 0
+#define DEBUG_READS 0
+#define DEBUG_TS 0
+#define CHECK_DBG_COUNTERS 0
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 
-
-
-
+#define POLL_CQ_R 0
+#define POLL_CQ_W 1
+#define POLL_CQ_R_REP 2
+#define POLL_CQ_ACK 3
 
 //LATENCY Measurment
 #define MAX_LATENCY 400 //in us

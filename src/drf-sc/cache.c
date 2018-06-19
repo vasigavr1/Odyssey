@@ -264,25 +264,24 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
       long long *key_ptr_req = (long long *) op;
       if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[I] = 1;
-        if (op->opcode == CACHE_OP_PUT) {
-//          red_printf("op val len %d in ptr %d, total ops %d \n", op->val_len, (w_pull_ptr + I) % max_op_size, op_num );
-          if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr[I]->val_len);
-          optik_lock(&kv_ptr[I]->key.meta);
-          if (optik_is_greater_version(kv_ptr[I]->key.meta, op->key.meta)) {
-            memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-            optik_unlock(&kv_ptr[I]->key.meta, op->key.meta.m_id, op->key.meta.version);
-          }
-          else {
-            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-            t_stats[thread_id].failed_rem_writes++;
+        if (ENABLE_ASSERTIONS) {
+          if (op->opcode != CACHE_OP_PUT && op->opcode != OP_RELEASE && op->opcode != OP_ACQUIRE) {
+            red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
+                       op->opcode, I, op->key.meta.m_id,
+                       op->val_len, op->key.meta.version);
+            assert(0);
           }
         }
+        //red_printf("op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
+        if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr[I]->val_len);
+        optik_lock(&kv_ptr[I]->key.meta);
+        if (optik_is_greater_version(kv_ptr[I]->key.meta, op->key.meta)) {
+          memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
+          optik_unlock(&kv_ptr[I]->key.meta, op->key.meta.m_id, op->key.meta.version);
+        }
         else {
-          red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
-                     op->opcode, I, writes[(pull_ptr + I) % max_op_size]->m_id,
-                     writes[(pull_ptr + I) % max_op_size]->val_len,
-                     *(uint32_t *)writes[(pull_ptr + I) % max_op_size]->version);
-          assert(0);
+          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+          t_stats[thread_id].failed_rem_writes++;
         }
       }
     }
