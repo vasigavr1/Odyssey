@@ -184,7 +184,7 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     if (is_update) {
-      if (is_sc) {
+      if (is_sc && ENABLE_RELEASES) {
         if (ENABLE_LIN) (*cmds)[i].opcode = OP_LIN_RELEASE;
         else (*cmds)[i].opcode = OP_RELEASE;
         sc_writes++;
@@ -197,7 +197,7 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
 
     }
     else  {
-      if (is_sc) {
+      if (is_sc && ENABLE_ACQUIRES) {
         (*cmds)[i].opcode = OP_ACQUIRE;
         sc_reads++;
       }

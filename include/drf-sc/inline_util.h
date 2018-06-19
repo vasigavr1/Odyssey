@@ -408,7 +408,12 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   else {
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
-    if (r_info->opcode == OP_ACQUIRE) w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
+    if (unlikely(r_info->fp_detected)) {
+      w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
+      r_info->fp_detected = false;
+      if (DEBUG_QUORUM)
+        yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
+    }
     else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
   }
   if (inside_w_ptr == 0) {
@@ -452,8 +457,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     if (source == LIN_WRITE) memset(write, 0, 3); // empty the read info such that it can be reused
   }
   else if (r_info->opcode == OP_ACQUIRE) p_ops->w_session_id[w_ptr] = p_ops->r_session_id[r_pull_ptr];
+  if (ENABLE_ASSERTIONS) if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
-  if (ENABLE_ASSERTIONS) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
   w_mes[w_mes_ptr].w_num++;
@@ -476,7 +481,8 @@ static inline void set_up_r_rep_entry( struct r_rep_fifo *r_rep_fifo, uint8_t re
 // Insert a new r_rep to the r_rep reply fifo
 static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *local_ts,
                                 struct ts_tuple *remote_ts, uint64_t l_id, uint16_t t_id,
-                                uint8_t rem_m_id, uint16_t op_i, uint8_t* payload, bool is_lin_put) {
+                                uint8_t rem_m_id, uint16_t op_i, uint8_t* payload, bool is_lin_put,
+                                bool false_positive) {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
 
@@ -517,6 +523,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
     case GREATER: // local is greater than remote
       memcpy(&r_rep->ts, local_ts, TS_TUPLE_SIZE);
       if (ENABLE_LIN && is_lin_put) {
+        //This does not need the value, as it is going to do a write eventually
         r_rep->opcode = TS_GREATER_LIN_PUT;
         r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_LIN_PUT_SIZE - R_REP_SMALL_SIZE);
       }
@@ -529,6 +536,11 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
       break;
     default:
       assert(false);
+  }
+  if (false_positive) {
+    if (DEBUG_QUORUM)
+      yellow_printf("Worker %u Letting machine %u know that I believed it failed \n", t_id, rem_m_id);
+    r_rep->opcode += FALSE_POSITIVE_OFFSET;
   }
   p_ops->r_rep_fifo->total_size++;
   r_rep_mes[r_rep_mes_ptr].coalesce_num++;
@@ -635,6 +647,9 @@ static inline void update_q_info(struct quorum_info *q_info,
       q_info->missing_ids[q_info->missing_num] = i;
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
+      //Change the machine-wide configuration bit-vector
+      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u \n", i);
+      atomic_store_explicit(&config_vector[i], false, memory_order_relaxed);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -696,7 +711,7 @@ static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv
   green_printf("Worker %u fixing the links between the wrs \n", t_id);
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
     wr[i].next = NULL;
-    if (q_info->send_vector) {
+    if (q_info->send_vector[i]) {
       if (avail_mach > 0) {
         for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
           yellow_printf("Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
@@ -719,33 +734,12 @@ static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quor
   }
 }
 
-//Checks if there are enough credits to perform a broadcast -- protocol independent
-static inline bool check_bcast_all_credits_depr(uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb, struct ibv_wc *credit_wc,
-                                                uint32_t *credit_debug_cnt, uint8_t vc)
-{
-  bool poll_for_credits = false;
-  uint16_t j;
-  for (j = 0; j < MACHINE_NUM; j++) {
-    if (j == machine_id) continue;
-    if (credits[vc][j] == 0) {
-      poll_for_credits = true;
-      break;
-    }
-  }
-  //if (ENABLE_ASSERTIONS) {
-  if (poll_for_credits) credit_debug_cnt[vc]++;
-  else credit_debug_cnt[vc] = 0;
-  //}
-  // There are no explicit credit messages for the reads or write messages
-  return !poll_for_credits;
-
-}
-
 // Check credits, first see if there are credits from all active nodes, then if not and enough time has passed,
 // transition to write_quorum broadcasts
 static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
                                        uint32_t *time_out_cnt, uint8_t vc,
-                                       uint16_t *available_credits, struct ibv_send_wr *send_wr,
+                                       uint16_t *available_credits,
+                                       struct ibv_send_wr *r_send_wr, struct ibv_send_wr *w_send_wr,
                                        uint16_t min_credits,
                                        uint32_t *credit_debug_cnt, uint16_t t_id)
 {
@@ -757,12 +751,14 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
         update_q_info(q_info, credits, min_credits, vc);
-        update_bcast_wr_links(q_info, send_wr, t_id);
+        update_bcast_wr_links(q_info, r_send_wr, t_id);
+        update_bcast_wr_links(q_info, w_send_wr, t_id);
         time_out_cnt[vc] = 0;
       }
       return false;
     }
   }
+
   time_out_cnt[vc] = 0;
 
   // then check the missing credits to see if we need to change the configuration
@@ -772,11 +768,12 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
           credits[R_VC][q_info->missing_ids[i]] == R_CREDITS ) {
         if (DEBUG_QUORUM) red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
-        update_bcast_wr_links(q_info, send_wr, t_id);
+        update_bcast_wr_links(q_info, r_send_wr, t_id);
+        update_bcast_wr_links(q_info, w_send_wr, t_id);
       }
     }
   }
-
+  if (unlikely(q_info->active_num < REMOTE_QUORUM)) return false;
   //finally count credits
   uint16_t avail_cred = K_64_;
   //printf("avail cred %u\n", avail_cred);
@@ -785,6 +782,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
       avail_cred = credits[vc][q_info->active_ids[i]];
   }
   *available_credits = avail_cred;
+
   return true;
 }
 
@@ -905,7 +903,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
 static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_info *q_info,
                                     uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
                                     uint32_t *credit_debug_cnt, uint32_t *time_out_cnt,
-                                    struct ibv_sge *w_send_sgl, struct ibv_send_wr *w_send_wr,
+                                    struct ibv_sge *w_send_sgl, struct ibv_send_wr *r_send_wr,
+                                    struct ibv_send_wr *w_send_wr,
                                     uint64_t *w_br_tx, struct recv_info *ack_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes)
 {
@@ -918,7 +917,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE;
     uint16_t min_credits = is_release ? (uint16_t) W_CREDITS : (uint16_t)1;
     if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
-                             &available_credits, w_send_wr, min_credits, credit_debug_cnt, t_id))
+                             &available_credits, r_send_wr, w_send_wr, min_credits, credit_debug_cnt, t_id))
       return;
     if (ENABLE_ASSERTIONS) {
       if (is_release) assert(available_credits == W_CREDITS);
@@ -1026,6 +1025,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
                                    struct quorum_info *q_info, uint32_t *credit_debug_cnt,
                                    uint32_t *time_out_cnt,
                                    struct ibv_sge *r_send_sgl, struct ibv_send_wr *r_send_wr,
+                                   struct ibv_send_wr *w_send_wr,
                                    uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
                                    uint16_t t_id, uint32_t *outstanding_reads)
 {
@@ -1036,7 +1036,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 
   if (p_ops->r_fifo->bcast_size > 0) {
     if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
-                             &available_credits, r_send_wr, 1, credit_debug_cnt, t_id))
+                             &available_credits, r_send_wr, w_send_wr, 1, credit_debug_cnt, t_id))
       return;
   }
   else return;
@@ -1166,6 +1166,13 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
+      }
+      if (unlikely(write->opcode == OP_ACQUIRE)) {
+        if (DEBUG_QUORUM)
+          yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
+                          "round of an acquire for machine %u \n",
+                        t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id);
+        config_vector[w_mes->m_id] = true;
       }
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
@@ -1361,6 +1368,12 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
 static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_info * read_info)
 {
+  // Check for acquires that detected a false positivie
+  if (unlikely(r_rep->opcode > TS_GREATER)) {
+    read_info->fp_detected = true;
+    r_rep->opcode -= FALSE_POSITIVE_OFFSET;
+
+  }
   if (r_rep->opcode == TS_GREATER || r_rep->opcode == TS_GREATER_LIN_PUT) {
     if (ENABLE_ASSERTIONS) {
       if (r_rep->opcode == TS_GREATER_LIN_PUT) assert(read_info->opcode == CACHE_OP_LIN_PUT);
@@ -1403,7 +1416,7 @@ static inline void wait_until_the_entire_r_rep(volatile struct r_rep_big *stuck_
   uint32_t debug_cntr = 0;
   while (stuck_r_rep->opcode < TS_SMALLER || stuck_r_rep->opcode > TS_GREATER) {
     if (ENABLE_ASSERTIONS) {
-      //assert(false);
+      assert(false);
       debug_cntr++;
       if (debug_cntr == M_512_) {
         red_printf("Wrkr %d stuck waiting for a r_rep_mes to come, stuck opcode %u, stuck byte_ptr %u, r_rep_i %u, stuck ptr %lu  \n",
@@ -1502,14 +1515,15 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     for (uint16_t i = 0; i < r_rep_num; i++) {
       struct r_rep_big *r_rep = (struct r_rep_big *)(((void *)r_rep_mes) + byte_ptr);
       if (ENABLE_ASSERTIONS) {
-        if (r_rep->opcode < TS_SMALLER || r_rep->opcode > TS_GREATER) {
+        if (r_rep->opcode < TS_SMALLER || r_rep->opcode > TS_GREATER + FALSE_POSITIVE_OFFSET) {
           wait_until_the_entire_r_rep((volatile struct r_rep_big *) r_rep, incoming_r_reps, i,
                                       index, p_ops, byte_ptr, t_id);
           //red_printf("Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, i, r_rep_num);
         }
       }
-      if (r_rep->opcode == TS_GREATER) byte_ptr += R_REP_SIZE;
-      else if (r_rep->opcode == TS_GREATER_LIN_PUT) byte_ptr += R_REP_LIN_PUT_SIZE;
+      if (r_rep->opcode == TS_GREATER || (r_rep->opcode == TS_GREATER + FALSE_POSITIVE_OFFSET))
+        byte_ptr += R_REP_SIZE;
+      else if (unlikely(r_rep->opcode == TS_GREATER_LIN_PUT)) byte_ptr += R_REP_LIN_PUT_SIZE;
       else byte_ptr++;
       polled_r_reps++;
       if (pull_lid >= l_id) {
@@ -1558,9 +1572,10 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
 
   while(p_ops->r_state[pull_ptr] == READY) {
     if (p_ops->read_info[pull_ptr].times_seen_ts >= REMOTE_QUORUM &&
-      (p_ops->read_info[pull_ptr].opcode != CACHE_OP_LIN_PUT)) {
+      (p_ops->read_info[pull_ptr].opcode != CACHE_OP_LIN_PUT) &&
+      !p_ops-> read_info[pull_ptr].fp_detected) {
       if (ENABLE_ASSERTIONS)
-        assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE);
+        assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE || epoch_id > 0);
       if (DEBUG_READS || DEBUG_TS)
         green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
                      pull_ptr, p_ops->read_info[pull_ptr].times_seen_ts);
@@ -1591,8 +1606,11 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
       }
       else { // convert the read to a write and push it to the write ops
         if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
+        if (unlikely(p_ops-> read_info[pull_ptr].fp_detected)) {
+          //epoch_id++;
+          if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
+        }
         insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
-        memset(&p_ops->read_info[pull_ptr], 0, 3);
         if (ENABLE_ASSERTIONS)
           assert(p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET ||
                  p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE);
@@ -1600,6 +1618,7 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
           p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
           writes_for_cache++;
         }
+        memset(&p_ops->read_info[pull_ptr], 0, 3);
       }
       p_ops->r_state[pull_ptr] = INVALID;
       MOD_ADD(pull_ptr, PENDING_READS);

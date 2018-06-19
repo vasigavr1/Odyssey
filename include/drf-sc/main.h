@@ -87,10 +87,10 @@
 // CORE CONFIGURATION
 #define SESSIONS_PER_THREAD 10
 #define ENABLE_LIN 0
-#define R_CREDITS 2
-#define MAX_R_COALESCE 40
-#define W_CREDITS 8
-#define MAX_W_COALESCE 15
+#define R_CREDITS 20
+#define MAX_R_COALESCE 3
+#define W_CREDITS 20
+#define MAX_W_COALESCE 3
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
@@ -101,6 +101,8 @@
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH 100
 #define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES 1
+#define ENABLE_ACQUIRES 1
 
 
 #define QP_NUM 4
@@ -215,12 +217,12 @@
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
 #define DEBUG_TS 0
-#define CHECK_DBG_COUNTERS 0
+#define CHECK_DBG_COUNTERS 1
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 1
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 
 #define POLL_CQ_R 0
@@ -449,6 +451,8 @@ struct read_info {
   struct ts_tuple ts_to_read;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t value[VALUE_SIZE];
+  bool fp_detected; //detected false positive
+  uint8_t epoch_id;
 };
 
 struct pending_ops {
@@ -553,6 +557,7 @@ extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
+extern atomic_bool config_vector[MACHINE_NUM];
 
 struct thread_params {
 	int id;

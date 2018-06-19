@@ -386,9 +386,10 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             if (compare_ts((struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id) == GREATER)
               memcpy(tmp_value, kv_ptr[I]->value, VALUE_SIZE);
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
+          bool false_positive = op->opcode == OP_ACQUIRE && (!config_vector[p_ops->ptrs_to_r_headers[I]->m_id]);
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, false);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, false, false_positive);
 
         }
         else if (op->opcode == CACHE_OP_LIN_PUT) {
@@ -408,7 +409,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, true);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, true, false);
 
         }
         else {
@@ -512,7 +513,7 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thre
           memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
           optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
         }
-        else if (op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
+        else if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
             if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id);

@@ -8,6 +8,7 @@ uint32_t* latency_counters;
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
+atomic_bool config_vector[MACHINE_NUM];
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 
@@ -91,6 +92,7 @@ int main(int argc, char *argv[])
 	is_roce = -1; machine_id = -1;
 	remote_IP = (char *)malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
+  for (i = 0; i < MACHINE_NUM; i++) config_vector[i] = true;
 
 
 	struct thread_params *param_arr;

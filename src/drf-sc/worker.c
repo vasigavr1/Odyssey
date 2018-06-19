@@ -214,8 +214,8 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     // Perform the r_rep broadcasts
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt, r_send_sgl, r_send_wr, &r_br_tx,
-                      r_rep_recv_info, t_id, &outstanding_reads);
+      broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt, r_send_sgl, r_send_wr, w_send_wr,
+                      &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST WRITES--------------------------
@@ -223,7 +223,7 @@ void *worker(void *arg)
     // Perform the write broadcasts
     if (WRITE_RATIO > 0)
       broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
-                       w_send_sgl, w_send_wr, &w_br_tx,
+                       w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                        ack_recv_info, t_id, &outstanding_writes);
 
 
