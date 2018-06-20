@@ -199,7 +199,7 @@ void cache_batch_op_updates(uint32_t , int , struct write**, uint32_t,  uint32_t
 void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
                           uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
-void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thread_id, struct read_info **writes,
+void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id, struct read_info **writes,
 																								uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
 #endif

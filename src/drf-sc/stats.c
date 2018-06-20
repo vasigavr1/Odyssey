@@ -50,6 +50,8 @@ void *print_stats(void* no_arg) {
         all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO) / (1000 * seconds);
       else
         all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
+      all_stats.quorum_reads_per_thread[i] = (curr_c_stats[i].quorum_reads - prev_c_stats[i].quorum_reads) / (seconds);
+
       all_stats.writes_sent[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) / (seconds);
       all_stats.r_reps_sent[i] = (curr_c_stats[i].r_reps_sent - prev_c_stats[i].r_reps_sent) / seconds;
       all_stats.acks_sent[i] = (curr_c_stats[i].acks_sent - prev_c_stats[i].acks_sent) / seconds;
@@ -88,10 +90,11 @@ void *print_stats(void* no_arg) {
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
     for (i = 0; i < num_threads; i++) {
       cyan_printf("T%d: ", i);
-      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s", i,
+      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
                     all_stats.cache_hits_per_thread[i],
                     all_stats.reads_sent[i],
-                    all_stats.writes_sent[i]);
+                    all_stats.writes_sent[i],
+                    all_stats.quorum_reads_per_thread[i]);
       yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
                     all_stats.ack_batch_size[i],
                     all_stats.write_batch_size[i],

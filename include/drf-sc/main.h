@@ -550,6 +550,9 @@ struct thread_stats { // 2 cache lines
 	uint64_t read_to_write;
   uint64_t failed_rem_writes;
   uint64_t total_writes;
+  uint64_t quorum_reads;
+  uint64_t rectified_keys;
+  uint64_t q_reads_with_low_epoch;
 
 
   uint64_t stalled_ack;
@@ -564,7 +567,10 @@ extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
 extern atomic_bool config_vector[MACHINE_NUM];
-extern atomic_uint_fast8_t config_bit_vector; // the vector shows with a '1' the missing machines
+// the vector shows with a '1' the missing machines
+// The send vector does not contain all failed nodes,
+// but only those locally detected
+extern atomic_uint_fast8_t send_config_bit_vector;
 extern const uint8_t machine_bit_id[8];
 extern atomic_bool print_for_debug;
 

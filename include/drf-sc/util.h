@@ -32,7 +32,7 @@ struct stats {
   double stalled_ack[WORKERS_PER_MACHINE];
   double stalled_r_rep[WORKERS_PER_MACHINE];
 	double failed_rem_write[WORKERS_PER_MACHINE];
-
+  double quorum_reads_per_thread[WORKERS_PER_MACHINE];
 
 	double cache_hits_per_thread[WORKERS_PER_MACHINE];
 

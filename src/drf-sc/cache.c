@@ -143,6 +143,12 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
             p_ops->read_info[r_push_ptr].opcode = (*op)[I].opcode;
             MOD_ADD(r_push_ptr, PENDING_READS);
             resp[I].type = CACHE_GET_SUCCESS;
+            if (ENABLE_STAT_COUNTING && (*op)[I].opcode == CACHE_OP_GET) {
+              t_stats[t_id].quorum_reads++;
+//              if (t_stats[t_id].quorum_reads % MILLION == 0 && t_stats[t_id].quorum_reads > 0)
+//                printf("Q reads %lu, epoch_id %u/%u \n", t_stats[t_id].quorum_reads,
+//                       *(uint16_t *) prev_meta.epoch_id, epoch_id);
+            }
           }
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
           memcpy((void *)&(*op)[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
@@ -436,7 +442,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 
 // The worker uses this to send in the lin writes after receiving a write_quorum of read replies for them
 // Additionally worker sends reads that received a higher timestamp and thus have to be applied as writes
-inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thread_id, struct read_info **writes,
+inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id, struct read_info **writes,
                                                        uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
@@ -524,12 +530,23 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thre
           }
           else {
             optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-            t_stats[thread_id].failed_rem_writes++;
+            t_stats[t_id].failed_rem_writes++;
           }
         }
         else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
-            memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
+          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id) {
+            //if (t_stats[t_id].reads_sent_mes_num % 1000 == 0)
+             // printf("Rectifying the epoch on key with tag %u, reads sent %ld old epoch %u, ",
+              //       kv_ptr[I]->key.tag, t_stats[t_id].reads_sent_mes_num, *(uint16_t *)kv_ptr[I]->key.meta.epoch_id);
+            optik_lock(&kv_ptr[I]->key.meta);
+            *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
+            //memcpy((void *) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
+            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+            if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
+            if (t_stats[t_id].rectified_keys % 100000 == 0) printf("Rectified keys %lu\n", t_stats[t_id].rectified_keys);
+            //if (t_stats[t_id].reads_sent_mes_num % 1000 == 0) printf("new epoch id %u \n", *(uint16_t *)kv_ptr[I]->key.meta.epoch_id);
+          }
+          //else if (op->epoch_id == 0) t_stats[t_id].q_reads_with_low_epoch++;
         }
         else {
           red_printf("wrong Opcode in cache: %d, req %d, m_id %u,version %u , \n",

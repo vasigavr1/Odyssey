@@ -145,6 +145,8 @@ void *worker(void *arg)
        check_debug_cntrs(credit_debug_cnt, waiting_dbg_counter, p_ops, (void *) cb->dgram_buf, r_buf_pull_ptr,
                          w_buf_pull_ptr, ack_buf_pull_ptr, r_rep_buf_pull_ptr, t_id);
 
+
+
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
       (t_stats[t_id].cache_hits_per_thread > M_16) && (!slept)) {
       uint seconds = 10;
@@ -178,15 +180,15 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR WRITES--------------------------
 		---------------------------------------------------------------------------*/
-    if (WRITE_RATIO > 0)
-      poll_for_writes(w_buffer, &w_buf_pull_ptr, p_ops, cb->dgram_recv_cq[W_QP_ID],
-                      w_recv_wc, w_recv_info, acks, t_id);
+
+    poll_for_writes(w_buffer, &w_buf_pull_ptr, p_ops, cb->dgram_recv_cq[W_QP_ID],
+                    w_recv_wc, w_recv_info, acks, t_id);
 
     /* ---------------------------------------------------------------------------
        ------------------------------ SEND ACKS----------------------------------
        ---------------------------------------------------------------------------*/
-    if (WRITE_RATIO > 0)
-      send_acks(ack_send_wr, &ack_tx, cb,  w_recv_info, acks, t_id);
+
+    send_acks(ack_send_wr, &ack_tx, cb,  w_recv_info, acks, t_id);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR READS--------------------------
@@ -218,9 +220,9 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
-    if (WRITE_RATIO > 0)
-      poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID], ack_recv_wc,
-                ack_recv_info, t_id, waiting_dbg_counter, &outstanding_writes);
+   // if (WRITE_RATIO > 0)
+    poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID], ack_recv_wc,
+              ack_recv_info, t_id, waiting_dbg_counter, &outstanding_writes);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------
@@ -243,10 +245,10 @@ void *worker(void *arg)
 		------------------------------BROADCAST WRITES--------------------------
 		---------------------------------------------------------------------------*/
     // Perform the write broadcasts
-    if (WRITE_RATIO > 0)
-      broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
-                       w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
-                       ack_recv_info, t_id, &outstanding_writes);
+    //if (WRITE_RATIO > 0)
+    broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
+                     w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
+                     ack_recv_info, t_id, &outstanding_writes);
 
 
 

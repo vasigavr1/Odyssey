@@ -333,7 +333,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   //  printf("Insert a r_rep %u \n", *(uint32_t *)r_rep);
   memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
   memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-  p_ops->read_info->epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
+  p_ops->read_info[r_ptr].epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
 
   r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
   //if (read->opcode == CACHE_OP_LIN_PUT) r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_LIN_PUT;
@@ -618,6 +618,13 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   }
 
   t_stats[t_id].cache_hits_per_thread += op_i;
+//  if (t_stats[t_id].cache_hits_per_thread % (40 * MILLION) < op_i)
+//    yellow_printf("Cache hits: %u \nReads: %lu \nWrites: %lu \nReleases: %lu \nAcquires: %lu \nQ Reads: %lu "
+//                    "\nLow epoch q reads %lu \nRectified keys %lu\n",
+//                  t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
+//                  t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
+//                  t_stats[t_id].acquires_per_thread, t_stats[t_id].quorum_reads,
+//                  t_stats[t_id].q_reads_with_low_epoch, t_stats[t_id].rectified_keys);
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
   // assert(op_i + p_ops->w_size == SESSIONS_PER_THREAD);
   //cyan_printf("thread %d  adds %d ops\n", t_id, op_i);
@@ -659,10 +666,11 @@ static inline void update_q_info(struct quorum_info *q_info,
       q_info->missing_ids[q_info->missing_num] = i;
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
-      //Change the machine-wide configuration bit-vector
-      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u \n", i);
-      atomic_store_explicit(&config_vector[i], false, memory_order_relaxed);
-      config_bit_vector += machine_bit_id[i];
+      //Change the machine-wide configuration bit-vector and the bit vector to be sent
+      config_vector[i] = false;
+      send_config_bit_vector = send_config_bit_vector | machine_bit_id[i];
+      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u, send vector %u \n",
+                                      i, send_config_bit_vector);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -846,7 +854,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       printf("Write %d, val-len %u, message w_size %d\n", i, w_mes->write[i].val_len,
              send_sgl[br_i].length);
     if (ENABLE_ASSERTIONS) {
-      assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
+      //assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
       assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
              w_mes->write[i].opcode == OP_RELEASE ||
              w_mes->write[i].opcode == OP_ACQUIRE ||
@@ -854,6 +862,10 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
+  if (w_mes->write[0].opcode == OP_RELEASE)
+    w_mes->write[0].val_len = (uint8_t) send_config_bit_vector;
+  else w_mes->write[0].val_len = VALUE_SIZE >> SHIFT_BITS;
+
   if (DEBUG_WRITES)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u, with credits: %d, lid: %u  \n",
                  t_id, w_mes->write[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
@@ -1113,6 +1125,47 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   }
 }
 
+//Handle the configuration bit vector on receiving a release or the second round of an acquire
+static inline void handle_configuration_on_receiving_rel_acq(struct write *write, struct w_message *w_mes,
+                                                             uint16_t t_id)
+{
+  // On receiving an acquire change the configuration vector AND the send vector
+  if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
+    if (!config_vector[w_mes->m_id]) {
+      if (DEBUG_QUORUM)
+        yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
+                        "round of an acquire for machine %u, send vector %u \n",
+                      t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_config_bit_vector);
+      config_vector[w_mes->m_id] = true;
+      if (send_config_bit_vector & machine_bit_id[w_mes->m_id])
+        send_config_bit_vector -= machine_bit_id[w_mes->m_id];
+      if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector);
+    }
+    else if (ENABLE_ASSERTIONS) {
+      if (send_config_bit_vector & machine_bit_id[w_mes->m_id] > 0) {
+        red_printf("send vector %u, m_id %d \n", send_config_bit_vector, w_mes->m_id);
+        assert(false);
+      }
+    }
+    write->opcode = OP_ACQUIRE;
+  }
+  // On receiving a release change the configuration vector but NOT the send vector
+  if (write->opcode == OP_RELEASE) {
+    if (write->val_len != 0) {
+      for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+        if (write->val_len & machine_bit_id[m_i])
+          if (config_vector[m_i]) {
+            config_vector[m_i] = false;
+            if (DEBUG_QUORUM)
+              green_printf("Worker %u updates the kept config bit vector: received: %u, m_id %u \n",
+                           t_id, write->val_len, m_i);
+          }
+      }
+    }
+    write->val_len = VALUE_SIZE >> SHIFT_BITS;
+  }
+}
+
 // Poll for the write broadcasts
 static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws,
                                    uint32_t *pull_ptr, struct pending_ops *p_ops,
@@ -1150,16 +1203,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
       }
-      if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
-        if (DEBUG_QUORUM)
-          yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
-                          "round of an acquire for machine %u \n",
-                        t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id);
-        config_vector[w_mes->m_id] = true;
-        if (ENABLE_ASSERTIONS) assert(config_bit_vector >= machine_bit_id[w_mes->m_id]);
-        config_bit_vector -= machine_bit_id[w_mes->m_id];
-        write->opcode = OP_ACQUIRE;
-      }
+      handle_configuration_on_receiving_rel_acq(write, w_mes,t_id);
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
     }
@@ -1606,8 +1650,10 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
       else { // convert the read to a write and push it to the write ops
         if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
         if (unlikely(p_ops-> read_info[pull_ptr].fp_detected)) {
-          epoch_id++;
-          if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
+          if (p_ops-> read_info[pull_ptr].epoch_id == epoch_id) {
+            epoch_id++;
+            if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
+          }
         }
         insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
         if (ENABLE_ASSERTIONS)
