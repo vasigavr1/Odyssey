@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 39
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -87,10 +87,10 @@
 // CORE CONFIGURATION
 #define SESSIONS_PER_THREAD 10
 #define ENABLE_LIN 0
-#define R_CREDITS 20
-#define MAX_R_COALESCE 3
-#define W_CREDITS 20
-#define MAX_W_COALESCE 3
+#define R_CREDITS 3
+#define MAX_R_COALESCE 20
+#define W_CREDITS 6
+#define MAX_W_COALESCE 15
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
@@ -99,7 +99,7 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH 100
+#define MAX_OP_BATCH 200
 #define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
@@ -217,13 +217,14 @@
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
 #define DEBUG_TS 0
-#define CHECK_DBG_COUNTERS 1
+#define CHECK_DBG_COUNTERS 0
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
-#define DEBUG_QUORUM 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define DEBUG_QUORUM 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
+#define ENABLE_INFO_DUMP_ON_STALL 0
 
 #define POLL_CQ_R 0
 #define POLL_CQ_W 1
@@ -289,7 +290,7 @@ struct remote_qp {
 #define SENT 2
 #define READY 3
 #define SENT_PUT 4
-#define SENT_RELEASE 5
+#define SENT_RELEASE 5 // Release or second round of acquire!!
 #define READY_PUT 6
 #define READY_RELEASE 7
 
@@ -452,7 +453,7 @@ struct read_info {
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t value[VALUE_SIZE];
   bool fp_detected; //detected false positive
-  uint8_t epoch_id;
+  uint16_t epoch_id;
 };
 
 struct pending_ops {
@@ -507,6 +508,11 @@ struct fifo {
 
 struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
+  uint64_t reads_per_thread;
+  uint64_t writes_per_thread;
+  uint64_t acquires_per_thread;
+  uint64_t releases_per_thread;
+
 
 	long long reads_sent;
 	long long acks_sent;
@@ -558,6 +564,10 @@ extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
 extern atomic_bool config_vector[MACHINE_NUM];
+extern atomic_uint_fast8_t config_bit_vector; // the vector shows with a '1' the missing machines
+extern const uint8_t machine_bit_id[8];
+extern atomic_bool print_for_debug;
+
 
 struct thread_params {
 	int id;

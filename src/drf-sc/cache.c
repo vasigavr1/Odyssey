@@ -518,12 +518,18 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int thre
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
             if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id);
             memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
+            if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
+              memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
             optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
           }
           else {
             optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
             t_stats[thread_id].failed_rem_writes++;
           }
+        }
+        else if (op->opcode == UPDATE_EPOCH_OP_GET) {
+          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
+            memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
         }
         else {
           red_printf("wrong Opcode in cache: %d, req %d, m_id %u,version %u , \n",

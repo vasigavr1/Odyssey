@@ -333,6 +333,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   //  printf("Insert a r_rep %u \n", *(uint32_t *)r_rep);
   memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
   memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+  p_ops->read_info->epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
+
   r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
   //if (read->opcode == CACHE_OP_LIN_PUT) r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_LIN_PUT;
   //else r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
@@ -408,11 +410,14 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   else {
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
-    if (unlikely(r_info->fp_detected)) {
-      w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
-      r_info->fp_detected = false;
-      if (DEBUG_QUORUM)
-        yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
+    if (r_info->opcode == OP_ACQUIRE) {
+      if (unlikely(r_info->fp_detected)) {
+        w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
+        r_info->fp_detected = false;
+        if (DEBUG_QUORUM)
+          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
+      }
+      else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
     }
     else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
   }
@@ -457,6 +462,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     if (source == LIN_WRITE) memset(write, 0, 3); // empty the read info such that it can be reused
   }
   else if (r_info->opcode == OP_ACQUIRE) p_ops->w_session_id[w_ptr] = p_ops->r_session_id[r_pull_ptr];
+
   if (ENABLE_ASSERTIONS) if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
   p_ops->w_size++;
@@ -578,6 +584,12 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     if (is_update) writes_num++; else reads_num++;
     if (p_ops->w_size + writes_num >= PENDING_WRITES || p_ops->r_size + reads_num >= PENDING_READS)
       break;
+    if (ENABLE_STAT_COUNTING) {
+      if (trace[trace_iter].opcode == CACHE_OP_PUT) t_stats[t_id].writes_per_thread++;
+      else if (trace[trace_iter].opcode == CACHE_OP_GET) t_stats[t_id].reads_per_thread++;
+      else if (trace[trace_iter].opcode == OP_ACQUIRE) t_stats[t_id].acquires_per_thread++;
+      else if (trace[trace_iter].opcode == OP_RELEASE) t_stats[t_id].releases_per_thread++;
+    }
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
     ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
@@ -650,6 +662,7 @@ static inline void update_q_info(struct quorum_info *q_info,
       //Change the machine-wide configuration bit-vector
       if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u \n", i);
       atomic_store_explicit(&config_vector[i], false, memory_order_relaxed);
+      config_bit_vector += machine_bit_id[i];
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -708,13 +721,13 @@ static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv
 {
   if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
   uint8_t prev_i = 0, avail_mach = 0;
-  green_printf("Worker %u fixing the links between the wrs \n", t_id);
+  if (DEBUG_QUORUM) green_printf("Worker %u fixing the links between the wrs \n", t_id);
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
     wr[i].next = NULL;
     if (q_info->send_vector[i]) {
       if (avail_mach > 0) {
         for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
-          yellow_printf("Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
+          if (DEBUG_QUORUM) yellow_printf("Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
           wr[(REM_MACH_NUM * j) + prev_i].next = &wr[(REM_MACH_NUM * j) + i];
         }
       }
@@ -787,39 +800,6 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
 }
 
 
-
-// Broadcast logic uses this function to post appropriate number of credit recvs before sending broadcasts
-static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_ctrl_blk *cb,
-                                                      struct ibv_send_wr *send_wr,
-                                                      struct ibv_recv_wr *credit_recv_wr,
-                                                      uint16_t *credit_recv_counter, uint8_t qp_id)
-{
-  uint16_t j;
-  int ret;
-  struct ibv_send_wr *bad_send_wr;
-  uint32_t max_credit_recvs = 0;
-  if (max_credit_recvs > 0) {
-    struct ibv_recv_wr *bad_recv_wr;
-    if (*credit_recv_counter > 0) { // Must post receives for credits
-      if (ENABLE_ASSERTIONS == 1) assert ((*credit_recv_counter) * REM_MACH_NUM <= max_credit_recvs);
-      for (j = 0; j < REM_MACH_NUM * (*credit_recv_counter); j++) {
-        credit_recv_wr[j].next = (j == (REM_MACH_NUM * (*credit_recv_counter)) - 1) ?
-                                 NULL : &credit_recv_wr[j + 1];
-      }
-//    cyan_printf("Leader posting a credit receive\n");
-      ret = ibv_post_recv(cb->dgram_qp[FC_QP_ID], &credit_recv_wr[0], &bad_recv_wr);
-      if (ENABLE_ASSERTIONS) CPE(ret, "ibv_post_recv error: posting recvs for credits before broadcasting", ret);
-      *credit_recv_counter = 0;
-    }
-  }
-  // Batch the broadcasts to the NIC
-  if (br_i > 0) {
-    send_wr[(br_i * MESSAGES_IN_BCAST) - 1].next = NULL;
-    ret = ibv_post_send(cb->dgram_qp[qp_id], &send_wr[0], &bad_send_wr);
-    if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
-  }
-}
-
 // Post a quorum broadcast and apost the appropriate receives for it
 static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, uint32_t recvs_to_post_num,
                                                    struct quorum_info *q_info, uint16_t br_i, uint64_t br_tx,
@@ -861,7 +841,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   for (i = 0; i < coalesce_num; i++) {
     if (w_mes->write[i].opcode == CACHE_OP_PUT)
       p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_PUT;
-    else p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_RELEASE;
+    else p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_RELEASE; // Release or second round of acquire!!
     if (DEBUG_WRITES)
       printf("Write %d, val-len %u, message w_size %d\n", i, w_mes->write[i].val_len,
              send_sgl[br_i].length);
@@ -869,7 +849,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
       assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
              w_mes->write[i].opcode == OP_RELEASE ||
-             w_mes->write[i].opcode == OP_ACQUIRE);
+             w_mes->write[i].opcode == OP_ACQUIRE ||
+             w_mes->write[i].opcode == OP_ACQUIRE_FLIP_BIT);
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
@@ -1118,6 +1099,7 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
+    if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -1161,18 +1143,22 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     for (uint16_t i = 0; i < w_num; i++) {
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) {
-        if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE && write->opcode != OP_ACQUIRE)
+        if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
+          write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT)
           red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
       }
-      if (unlikely(write->opcode == OP_ACQUIRE)) {
+      if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
         if (DEBUG_QUORUM)
           yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
                           "round of an acquire for machine %u \n",
                         t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id);
         config_vector[w_mes->m_id] = true;
+        if (ENABLE_ASSERTIONS) assert(config_bit_vector >= machine_bit_id[w_mes->m_id]);
+        config_bit_vector -= machine_bit_id[w_mes->m_id];
+        write->opcode = OP_ACQUIRE;
       }
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
@@ -1368,12 +1354,15 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
 static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_info * read_info)
 {
-  // Check for acquires that detected a false positivie
+  // Check for acquires that detected a false positive
   if (unlikely(r_rep->opcode > TS_GREATER)) {
     read_info->fp_detected = true;
+    if (DEBUG_QUORUM) yellow_printf("Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
     r_rep->opcode -= FALSE_POSITIVE_OFFSET;
-
+    if (ENABLE_ASSERTIONS)
+      assert(r_rep->opcode >= TS_SMALLER && r_rep->opcode <= TS_GREATER);
   }
+
   if (r_rep->opcode == TS_GREATER || r_rep->opcode == TS_GREATER_LIN_PUT) {
     if (ENABLE_ASSERTIONS) {
       if (r_rep->opcode == TS_GREATER_LIN_PUT) assert(read_info->opcode == CACHE_OP_LIN_PUT);
@@ -1580,11 +1569,21 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
         green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
                      pull_ptr, p_ops->read_info[pull_ptr].times_seen_ts);
       // commit this read
-      p_ops->r_state[pull_ptr] = INVALID;
-      if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE) {
+      if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET) {
+        if (p_ops->w_size + writes_for_cache < PENDING_WRITES && writes_for_cache < MAX_INCOMING_R) {
+          p_ops->read_info[pull_ptr].opcode = UPDATE_EPOCH_OP_GET;
+          p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
+          writes_for_cache++;
+        }
+        else break;
+      }
+      else if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE) {
         p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
         p_ops->all_sessions_stalled = false;
       }
+      else if (ENABLE_ASSERTIONS) assert(false);
+
+      p_ops->r_state[pull_ptr] = INVALID;
       memset(&p_ops->read_info[pull_ptr], 0, 3);
       MOD_ADD(pull_ptr, PENDING_READS);
       p_ops->r_size--;
@@ -1607,7 +1606,7 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
       else { // convert the read to a write and push it to the write ops
         if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
         if (unlikely(p_ops-> read_info[pull_ptr].fp_detected)) {
-          //epoch_id++;
+          epoch_id++;
           if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
         }
         insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
