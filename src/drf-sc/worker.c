@@ -111,7 +111,7 @@ void *worker(void *arg)
   set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, W_FIFO_SIZE * sizeof(struct w_message), cb);
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
 
-  struct cache_op *ops= (struct cache_op *) malloc(MAX_OP_BATCH * sizeof(struct cache_op));
+  struct cache_op *ops = (struct cache_op *) malloc(MAX_OP_BATCH * sizeof(struct cache_op));
   struct mica_resp *resp = (struct mica_resp *) malloc(MAX_OP_BATCH * sizeof(struct mica_resp));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl, w_recv_wr, w_recv_sgl,
                    r_recv_wr, r_recv_sgl,t_id, cb, w_mr, r_mr);
@@ -154,27 +154,7 @@ void *worker(void *arg)
       sleep(seconds); slept = true;
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
-      uint16_t i;
-      green_printf("---DEBUG INFO---------\n");
-      yellow_printf("1. ---SESSIONS--- \n");
-      if (p_ops->all_sessions_stalled) yellow_printf("All sessions are stalled \n");
-      else yellow_printf("There are available sessions \n");
-      for (i = 0; i < SESSIONS_PER_THREAD; i++)
-        printf("S%u: %d ", i, p_ops->session_has_pending_op[i]);
-      printf("\n");
-      cyan_printf("2. ---CREDITS--- \n");
-      for (i = 0; i < MACHINE_NUM; i++)
-        cyan_printf("Credits for machine %u: %u R and %u W \n", i, credits[R_VC][i], credits[W_VC][i]);
-      printf("\n");
-      green_printf("3. ---FIFOS--- \n");
-      green_printf("W_size: %u \nw_push_ptr %u \nw_pull_ptr %u\n", p_ops->w_size, p_ops->w_push_ptr, p_ops->w_pull_ptr);
-      green_printf("R_size: %u \nr_push_ptr %u \nr_pull_ptr %u\n", p_ops->r_size, p_ops->r_push_ptr, p_ops->r_pull_ptr);
-
-      yellow_printf("Cache hits: %u \nReads: %u \nWrites: %u \nReleases: %u \nAcquires: %u \n",
-                    t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
-                    t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
-                    t_stats[t_id].acquires_per_thread);
-      print_for_debug = false;
+      print_verbouse_debug_info(p_ops, t_id, credits);
     }
 
     /* ---------------------------------------------------------------------------
@@ -249,11 +229,6 @@ void *worker(void *arg)
     broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                      ack_recv_info, t_id, &outstanding_writes);
-
-
-
-
-
 	}
 	return NULL;
 }

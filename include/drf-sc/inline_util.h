@@ -115,6 +115,42 @@ static inline void report_remote_latency(struct latency_flags* latency_info, uin
 		}
 	}
 }
+
+static inline void print_thread_stats(uint16_t t_id) {
+
+    yellow_printf("Cache hits: %u \nReads: %lu \nWrites: %lu \nReleases: %lu \nAcquires: %lu \nQ Reads: %lu "
+                    "\nRectified keys %lu\n",
+                  t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
+                  t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
+                  t_stats[t_id].acquires_per_thread, t_stats[t_id].quorum_reads,
+                  t_stats[t_id].rectified_keys);
+}
+
+
+static inline void print_verbouse_debug_info(struct pending_ops *p_ops, uint16_t t_id, uint16_t credits[][MACHINE_NUM])
+{
+  uint16_t i;
+  green_printf("---DEBUG INFO---------\n");
+  yellow_printf("1. ---SESSIONS--- \n");
+  if (p_ops->all_sessions_stalled) yellow_printf("All sessions are stalled \n");
+  else yellow_printf("There are available sessions \n");
+  for (i = 0; i < SESSIONS_PER_THREAD; i++)
+    printf("S%u: %d ", i, p_ops->session_has_pending_op[i]);
+  printf("\n");
+  cyan_printf("2. ---CREDITS--- \n");
+  for (i = 0; i < MACHINE_NUM; i++)
+    cyan_printf("Credits for machine %u: %u R and %u W \n", i, credits[R_VC][i], credits[W_VC][i]);
+  printf("\n");
+  green_printf("3. ---FIFOS--- \n");
+  green_printf("W_size: %u \nw_push_ptr %u \nw_pull_ptr %u\n", p_ops->w_size, p_ops->w_push_ptr, p_ops->w_pull_ptr);
+  green_printf("R_size: %u \nr_push_ptr %u \nr_pull_ptr %u\n", p_ops->r_size, p_ops->r_push_ptr, p_ops->r_pull_ptr);
+
+  yellow_printf("Cache hits: %u \nReads: %u \nWrites: %u \nReleases: %u \nAcquires: %u \n",
+                t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
+                t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
+                t_stats[t_id].acquires_per_thread);
+  print_for_debug = false;
+}
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
@@ -618,20 +654,15 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   }
 
   t_stats[t_id].cache_hits_per_thread += op_i;
-//  if (t_stats[t_id].cache_hits_per_thread % (40 * MILLION) < op_i)
-//    yellow_printf("Cache hits: %u \nReads: %lu \nWrites: %lu \nReleases: %lu \nAcquires: %lu \nQ Reads: %lu "
-//                    "\nLow epoch q reads %lu \nRectified keys %lu\n",
-//                  t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
-//                  t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
-//                  t_stats[t_id].acquires_per_thread, t_stats[t_id].quorum_reads,
-//                  t_stats[t_id].q_reads_with_low_epoch, t_stats[t_id].rectified_keys);
+
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
   // assert(op_i + p_ops->w_size == SESSIONS_PER_THREAD);
   //cyan_printf("thread %d  adds %d ops\n", t_id, op_i);
   for (i = 0; i < op_i; i++) {
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
-      yellow_printf("Cache_miss, session %d \n", *(uint32_t *) &ops[i]);
+      //yellow_printf("Cache_miss, session %d \n", *(uint32_t *) &ops[i]);
+      green_printf("Cache_miss: bkt %u, server %u, tag %u \n", ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
       if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE) {
         p_ops->session_has_pending_op[*(uint32_t *) &ops[i]] = false;
         p_ops->all_sessions_stalled = false;

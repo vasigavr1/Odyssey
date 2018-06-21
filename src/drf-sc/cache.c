@@ -127,7 +127,7 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
 					do {
-//						memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
+						// memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
             prev_meta = kv_ptr[I]->key.meta;
             if (ENABLE_ASSERTIONS) {
               debug_cntr++;
@@ -145,9 +145,6 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
             resp[I].type = CACHE_GET_SUCCESS;
             if (ENABLE_STAT_COUNTING && (*op)[I].opcode == CACHE_OP_GET) {
               t_stats[t_id].quorum_reads++;
-//              if (t_stats[t_id].quorum_reads % MILLION == 0 && t_stats[t_id].quorum_reads > 0)
-//                printf("Q reads %lu, epoch_id %u/%u \n", t_stats[t_id].quorum_reads,
-//                       *(uint16_t *) prev_meta.epoch_id, epoch_id);
             }
           }
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
@@ -158,8 +155,6 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
           optik_lock(&kv_ptr[I]->key.meta);
           memcpy(kv_ptr[I]->value, (*op)[I].value, VALUE_SIZE);
           optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *) &(*op)[I].key.meta.version);
-//          resp[I].val_len = 0;
-//          resp[I].val_ptr = NULL;
           resp[I].type = CACHE_PUT_SUCCESS;
 				}
         else if ((*op)[I].opcode == CACHE_OP_LIN_PUT) {
@@ -167,7 +162,7 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
           uint32_t debug_cntr = 0;
           do {
             prev_meta = kv_ptr[I]->key.meta;
-//            memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
+            // memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
             if (ENABLE_ASSERTIONS) {
               debug_cntr++;
               if (debug_cntr == M_4) {
@@ -192,6 +187,8 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
 		if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
 //			resp[I].val_len = 0;
 //			resp[I].val_ptr = NULL;
+      red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
+                 (*op)[I].key.bkt, kv_ptr[I]->key.bkt ,(*op)[I].key.server, kv_ptr[I]->key.server, (*op)[I].key.tag, kv_ptr[I]->key.tag);
 			resp[I].type = CACHE_MISS;
 		}
 	}
@@ -428,9 +425,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       }
     }
     if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-//      resp[I].val_len = 0;
-//      resp[I].val_ptr = NULL;
-      // resp[I].type = CACHE_MISS;
+      red_printf("Cache_miss: bkt %u, server %u, tag %u \n", op->key.bkt, op->key.server, op->key.tag);
       assert(false); // cant have a miss since, it hit in the source's cache
     }
     if (zero_ops) {
@@ -535,18 +530,11 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
         }
         else if (op->opcode == UPDATE_EPOCH_OP_GET) {
           if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id) {
-            //if (t_stats[t_id].reads_sent_mes_num % 1000 == 0)
-             // printf("Rectifying the epoch on key with tag %u, reads sent %ld old epoch %u, ",
-              //       kv_ptr[I]->key.tag, t_stats[t_id].reads_sent_mes_num, *(uint16_t *)kv_ptr[I]->key.meta.epoch_id);
             optik_lock(&kv_ptr[I]->key.meta);
             *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
-            //memcpy((void *) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
             optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
             if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
-            if (t_stats[t_id].rectified_keys % 100000 == 0) printf("Rectified keys %lu\n", t_stats[t_id].rectified_keys);
-            //if (t_stats[t_id].reads_sent_mes_num % 1000 == 0) printf("new epoch id %u \n", *(uint16_t *)kv_ptr[I]->key.meta.epoch_id);
           }
-          //else if (op->epoch_id == 0) t_stats[t_id].q_reads_with_low_epoch++;
         }
         else {
           red_printf("wrong Opcode in cache: %d, req %d, m_id %u,version %u , \n",
@@ -559,7 +547,7 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
     if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
     }
     if (zero_ops) {
-//      printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
+      // printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
       op->opcode = 5;
     }
   }
@@ -596,7 +584,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 		op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
 		uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
 		memset(op.value, val, (uint8_t) val_len);
-
+//    green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
 		mica_insert_one(kv, (struct mica_op *) &op, &resp);
 	}
 

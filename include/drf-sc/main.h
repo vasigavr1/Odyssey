@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 39
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -85,13 +85,13 @@
  * --------------------------------------------------------------------------------*/
 
 // CORE CONFIGURATION
-#define SESSIONS_PER_THREAD 10
+#define SESSIONS_PER_THREAD 80
 #define ENABLE_LIN 0
 #define R_CREDITS 3
 #define MAX_R_COALESCE 20
 #define W_CREDITS 6
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
 #define REL_CREDIT_TIMEOUT M_32
@@ -100,7 +100,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH 200
-#define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
 
@@ -222,7 +222,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 

@@ -73,6 +73,7 @@ int main(int argc, char *argv[])
   assert(MAX_OP_BATCH < CACHE_BATCH_SIZE);
   assert(ENABLE_LIN == 0); // Lin is not implemented
   assert(MACHINE_NUM < 9); // the bit vector is 8 bits
+	assert(VALUE_SIZE % 8 == 0);
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
 

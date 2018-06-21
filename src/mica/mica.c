@@ -3,6 +3,7 @@
 * Adapted from https://github.com/efficient/rdma_bench
 */
 
+#include <cache.h>
 #include "hrd.h"
 #include "mica.h"
 
@@ -116,11 +117,13 @@ void mica_insert_one(struct mica_kv *kv,
 			slot_to_use = i;
 		}
 	}
-
+	bool evict_flag = false;
 	/* If no slot found, choose one to evict */
 	if(slot_to_use == -1) {
 		slot_to_use = tag & 7;	/* tag is ~ randomly distributed */
 		kv->num_index_evictions++;
+		evict_flag = true;
+
 	}
 
 	/* Encode the empty slot */
@@ -132,13 +135,18 @@ void mica_insert_one(struct mica_kv *kv,
 	uint8_t *log_ptr = &kv->ht_log[kv->log_head & kv->log_mask];
 
 	/* Data copied: key, opcode, val_len, value */
+	//int len_to_copy = sizeof(struct mica_key) + sizeof(uint8_t) +
+	//	sizeof(uint8_t) + op->val_len;
 	int len_to_copy = sizeof(struct mica_key) + sizeof(uint8_t) +
-		sizeof(uint8_t) + op->val_len;
+											sizeof(uint8_t) + VALUE_SIZE;
 
 	/* Ensure that we don't wrap around in the *virtual* log space even
 	 * after 8-byte alignment below.*/
 	assert((1ULL << MICA_LOG_BITS) - kv->log_head > len_to_copy + 8);
-
+	if (evict_flag) {
+		struct cache_op *evic_op = (struct cache_op *) log_ptr;
+		red_printf("Evicting key:bkt %u, server %u, tag %u \n", evic_op->key.bkt, evic_op->key.server, evic_op->key.tag);
+	}
 	memcpy(log_ptr, op, len_to_copy);
 	kv->log_head += len_to_copy;
 
