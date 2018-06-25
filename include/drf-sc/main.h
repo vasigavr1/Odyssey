@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 39
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -100,7 +100,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH 200
-#define SC_RATIO 200// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
 
