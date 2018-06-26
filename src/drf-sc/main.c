@@ -15,7 +15,7 @@ atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
-const uint16_t machine_bit_id[16] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
+const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
 
 

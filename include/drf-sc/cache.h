@@ -27,7 +27,8 @@
 
 //Cache Opcode
 
-#define OP_RELEASE_BIT_VECTOR 106// first round of a release that carries a bit vector
+#define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
+#define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // signal that this is the second round of an acquire that flips the config bit
 #define OP_ACQUIRE_FLIP_BIT 107
 #define OP_LIN_RELEASE 108

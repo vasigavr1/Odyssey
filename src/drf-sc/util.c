@@ -477,6 +477,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
   // PTRS to R_OPS
   (*p_ops)->ptrs_to_r_ops = (struct read **) malloc(MAX_INCOMING_R * sizeof(struct read *));
+  // PTRS to local ops to find the write after sending the first round of a release
+  (*p_ops)->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
+  (*p_ops)->overwritten_values = (uint8_t *) malloc(pending_writes * SEND_CONF_VEC_SIZE);
+  memset((*p_ops)->overwritten_values, 0, pending_writes * SEND_CONF_VEC_SIZE);
 
   for (i = 0; i < W_FIFO_SIZE; i++) {
     (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
@@ -500,8 +504,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 
   for (i = 0; i < pending_reads; i++)
     (*p_ops)->r_state[i] = INVALID;
-  for (i = 0; i < pending_writes; i++)
+  for (i = 0; i < pending_writes; i++) {
     (*p_ops)->w_state[i] = INVALID;
+    (*p_ops)->ptrs_to_local_w[i] = NULL;
+  }
 
 }
 

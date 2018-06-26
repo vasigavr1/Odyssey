@@ -522,7 +522,7 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
         else if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
-            if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id);
+            // if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id); // this assert is wrong, local writes can happen after a local read but reach remote desitnations faster
             memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
             if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
               memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);

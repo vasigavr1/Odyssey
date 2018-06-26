@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 39
+#define WORKERS_PER_MACHINE 10
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -118,7 +118,9 @@
 #define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1): REM_MACH_NUM)
 #define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
-
+// in the first round of a release the first bytes of the value get overwritten
+// before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
+#define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
 
 
 // READS
@@ -300,6 +302,7 @@ struct remote_qp {
 #define FROM_TRACE 0
 #define LIN_WRITE 1
 #define FROM_READ 2
+#define FROM_WRITE 3 //the second reound of a release
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
@@ -461,8 +464,11 @@ struct read_info {
 struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
-  struct write **ptrs_to_w_ops;
-  struct read **ptrs_to_r_ops;
+  struct write **ptrs_to_w_ops; // used for remote writes
+  struct read **ptrs_to_r_ops; // used for remote reads
+
+	struct write **ptrs_to_local_w; // used for the first phase of release
+	uint8_t *overwritten_values;
   struct r_message **ptrs_to_r_headers;
 //  struct read_payload *r_payloads;
   struct read_info *read_info;
@@ -565,7 +571,7 @@ struct thread_stats { // 2 cache lines
 
 #define STABLE_STATE 0
 #define TRANSIENT_STATE 1
-#define SEND_CONF_VEC_SIZE (CEILING(MACHINE_NUM, 8)) //unused
+
 
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern atomic_char qps_are_set_up;
@@ -582,6 +588,7 @@ extern atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;
+
 
 
 struct thread_params {
