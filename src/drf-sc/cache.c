@@ -261,6 +261,7 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(I = 0; I < op_num; I++) {
     struct cache_op *op = (struct cache_op*) writes[(pull_ptr + I) % max_op_size];
+    if (unlikely (op->opcode == OP_RELEASE_BIT_VECTOR )) continue;
     if(kv_ptr[I] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
       long long *key_ptr_log = (long long *) kv_ptr[I];
@@ -389,7 +390,11 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             if (compare_ts((struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id) == GREATER)
               memcpy(tmp_value, kv_ptr[I]->value, VALUE_SIZE);
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
+          //On receiving the 1st round of an Acquire:
+          // If the corresponding bit in the stable vector is set, then let the machine know
+          // it lost messages and switch the bit to Transient state
           bool false_positive = op->opcode == OP_ACQUIRE && (!config_vector[p_ops->ptrs_to_r_headers[I]->m_id]);
+          if (false_positive) config_vect_state[p_ops->ptrs_to_r_headers[I]->m_id] = TRANSIENT_STATE;
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, false, false_positive);

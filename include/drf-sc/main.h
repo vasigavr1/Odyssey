@@ -85,13 +85,13 @@
  * --------------------------------------------------------------------------------*/
 
 // CORE CONFIGURATION
-#define SESSIONS_PER_THREAD 80
+#define SESSIONS_PER_THREAD 32
 #define ENABLE_LIN 0
 #define R_CREDITS 3
 #define MAX_R_COALESCE 20
 #define W_CREDITS 6
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_16
 #define REL_CREDIT_TIMEOUT M_32
@@ -100,7 +100,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH 200
-#define SC_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO 500// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
 
@@ -222,7 +222,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -291,8 +291,10 @@ struct remote_qp {
 #define READY 3
 #define SENT_PUT 4
 #define SENT_RELEASE 5 // Release or second round of acquire!!
-#define READY_PUT 6
-#define READY_RELEASE 7
+#define SENT_BIT_VECTOR 6
+#define READY_PUT 7
+#define READY_RELEASE 8
+#define READY_BIT_VECTOR 9
 
 // Possible write sources
 #define FROM_TRACE 0
@@ -561,17 +563,24 @@ struct thread_stats { // 2 cache lines
 	//long long unused[3]; // padding to avoid false sharing
 };
 
+#define STABLE_STATE 0
+#define TRANSIENT_STATE 1
+#define SEND_CONF_VEC_SIZE (CEILING(MACHINE_NUM, 8)) //unused
+
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
 extern atomic_bool config_vector[MACHINE_NUM];
+extern atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
 // the vector shows with a '1' the missing machines
 // The send vector does not contain all failed nodes,
 // but only those locally detected
-extern atomic_uint_fast8_t send_config_bit_vector;
-extern const uint8_t machine_bit_id[8];
+extern atomic_uint_fast16_t send_config_bit_vector;
+extern atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
+extern const uint16_t machine_bit_id[16];
+
 extern atomic_bool print_for_debug;
 
 

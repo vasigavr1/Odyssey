@@ -148,7 +148,7 @@ void *worker(void *arg)
 
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
-      (t_stats[t_id].cache_hits_per_thread > M_16) && (!slept)) {
+      (t_stats[t_id].cache_hits_per_thread > M_2) && (!slept)) {
       uint seconds = 10;
       yellow_printf("Worker %u is going to sleep for %u secs\n", t_id, seconds);
       sleep(seconds); slept = true;

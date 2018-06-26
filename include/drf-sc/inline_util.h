@@ -215,6 +215,18 @@ static inline uint8_t  rmid_to_mid(uint8_t rm_id)
   return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
 }
 
+// When receiving a reply to the first round of a release
+static inline void convert_transient_to_stable_send_conf_vec(uint16_t t_id)
+{
+  for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+    if ((send_config_bit_vector & machine_bit_id[i]) &&
+      send_config_vect_state[i] == TRANSIENT_STATE) {
+      send_config_bit_vector-= machine_bit_id[i];
+    }
+  }
+  if (DEBUG_QUORUM) yellow_printf("Thread %u received a reply to a release, send vector: %u\n",
+                                  t_id, send_config_bit_vector);
+}
 
 static inline void print_q_info(struct quorum_info *q_info)
 {
@@ -699,6 +711,8 @@ static inline void update_q_info(struct quorum_info *q_info,
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
       config_vector[i] = false;
+      config_vect_state[i] = STABLE_STATE;
+      send_config_vect_state[i] = STABLE_STATE;
       send_config_bit_vector = send_config_bit_vector | machine_bit_id[i];
       if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u, send vector %u \n",
                                       i, send_config_bit_vector);
@@ -893,9 +907,15 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
-  if (w_mes->write[0].opcode == OP_RELEASE)
-    w_mes->write[0].val_len = (uint8_t) send_config_bit_vector;
-  else w_mes->write[0].val_len = VALUE_SIZE >> SHIFT_BITS;
+  // Check if the release needs to send the vector bit to get quoromized
+  if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vector > 0)) {
+    memcpy(w_mes->write[0].value, &send_config_bit_vector, 2);
+    for (i = 0; i < MACHINE_NUM; i++)
+      if (send_config_bit_vector & machine_bit_id[i]) send_config_vect_state[i] = TRANSIENT_STATE;
+    if (DEBUG_QUORUM) green_printf("Sending a release with a vector bit \n");
+    w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
+    p_ops->w_state[backward_ptr] = SENT_BIT_VECTOR;
+  }
 
   if (DEBUG_WRITES)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u, with credits: %d, lid: %u  \n",
@@ -1143,6 +1163,7 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
+    if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -1160,16 +1181,20 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
 static inline void handle_configuration_on_receiving_rel_acq(struct write *write, struct w_message *w_mes,
                                                              uint16_t t_id)
 {
-  // On receiving an acquire change the configuration vector AND the send vector
+  // If the corresponding bit is set in Transient State then flip the bit and transition its state to Stable
+  // Also reset the Send Vector: the machine will do quorum reads after that acquire anyway
   if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
-    if (!config_vector[w_mes->m_id]) {
+    if (!config_vector[w_mes->m_id] && config_vect_state[w_mes->m_id] == TRANSIENT_STATE) {
       if (DEBUG_QUORUM)
         yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
                         "round of an acquire for machine %u, send vector %u \n",
                       t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_config_bit_vector);
       config_vector[w_mes->m_id] = true;
-      if (send_config_bit_vector & machine_bit_id[w_mes->m_id])
+      config_vect_state[w_mes->m_id] = STABLE_STATE;
+      if (send_config_bit_vector & machine_bit_id[w_mes->m_id]) {
         send_config_bit_vector -= machine_bit_id[w_mes->m_id];
+        send_config_vect_state[w_mes->m_id] = STABLE_STATE;
+      }
       if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector);
     }
     else if (ENABLE_ASSERTIONS) {
@@ -1180,21 +1205,21 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
     }
     write->opcode = OP_ACQUIRE;
   }
-  // On receiving a release change the configuration vector but NOT the send vector
-  if (write->opcode == OP_RELEASE) {
-    if (write->val_len != 0) {
-      for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
-        if (write->val_len & machine_bit_id[m_i])
-          if (config_vector[m_i]) {
-            config_vector[m_i] = false;
-            if (DEBUG_QUORUM)
-              green_printf("Worker %u updates the kept config bit vector: received: %u, m_id %u \n",
-                           t_id, write->val_len, m_i);
-          }
+  // On receiving the 1st round of a Release:
+  // apply the change to the stable vector and set the bit that gets changed to Stable state.
+  // Do not change the sent vector
+  if (unlikely(write->opcode == OP_RELEASE_BIT_VECTOR)) {
+    uint16_t recv_conf_bit_vec = *(uint16_t *) write->value;
+    for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+      if (recv_conf_bit_vec & machine_bit_id[m_i]) {
+          config_vector[m_i] = false;
+          config_vect_state[m_i] = STABLE_STATE;
+          if (DEBUG_QUORUM)
+            green_printf("Worker %u updates the kept config bit vector: received: %u, m_id %u \n",
+                         t_id, recv_conf_bit_vec, m_i);
       }
     }
-    write->val_len = VALUE_SIZE >> SHIFT_BITS;
-  }
+  } // we do not change the op back to OP_RELEASE, because we want to avoid making the actual write to the KVS
 }
 
 // Poll for the write broadcasts
@@ -1228,7 +1253,8 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) {
         if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
-          write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT)
+          write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT &&
+          write->opcode != OP_RELEASE_BIT_VECTOR)
           red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
@@ -1473,8 +1499,10 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
 }
 
 // spin waiting for the r_rep
-static inline void wait_until_the_entire_r_rep(volatile struct r_rep_big *stuck_r_rep, volatile struct r_rep_message_ud_req *r_rep_buf,
-                                               uint16_t r_rep_i, uint32_t r_rep_pull_ptr, struct pending_ops *p_ops, uint16_t stuck_byte_ptr,
+static inline void wait_until_the_entire_r_rep(volatile struct r_rep_big *stuck_r_rep,
+                                               volatile struct r_rep_message_ud_req *r_rep_buf,
+                                               uint16_t r_rep_i, uint32_t r_rep_pull_ptr,
+                                               struct pending_ops *p_ops, uint16_t stuck_byte_ptr,
                                                uint16_t t_id)
 {
   uint32_t debug_cntr = 0;
@@ -1807,7 +1835,8 @@ static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
     //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
     //               t_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
-    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) {
+    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE ||
+        p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR) {
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
     }
@@ -1901,7 +1930,11 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
         if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
         //printf("Wrkr %d valid ack %u/%u, write at ptr %d is ready \n",
             //   t_id, ack_i, ack_num,  ack_ptr);
-        if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
+        if (unlikely(p_ops->w_state[ack_ptr] == SENT_BIT_VECTOR)) {
+          p_ops->w_state[ack_ptr] = READY_BIT_VECTOR;
+          convert_transient_to_stable_send_conf_vec(t_id);
+        }
+        else if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
         else p_ops->w_state[ack_ptr] = READY_RELEASE;
       }
       MOD_ADD(ack_ptr, PENDING_WRITES);

@@ -9,11 +9,14 @@ struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 atomic_bool config_vector[MACHINE_NUM];
-atomic_uint_fast8_t send_config_bit_vector;
+atomic_uint_fast16_t send_config_bit_vector;
+atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
+atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
-const uint8_t machine_bit_id[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+const uint16_t machine_bit_id[16] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
+																		 1024, 2048, 4096, 8192, 16384, 32768};
 
 
 
@@ -72,8 +75,9 @@ int main(int argc, char *argv[])
   assert(SESSIONS_PER_THREAD > 0);
   assert(MAX_OP_BATCH < CACHE_BATCH_SIZE);
   assert(ENABLE_LIN == 0); // Lin is not implemented
-  assert(MACHINE_NUM < 9); // the bit vector is 8 bits
-	assert(VALUE_SIZE % 8 == 0);
+  assert(MACHINE_NUM < 16); // the bit vector is 16 bits
+	if (USE_BIG_OBJECTS) assert(VALUE_SIZE % 8 == 0);
+	assert(VALUE_SIZE >= 2); // first round of release can overload the first 2 bytes of value
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
 
@@ -97,7 +101,11 @@ int main(int argc, char *argv[])
 	is_roce = -1; machine_id = -1;
 	remote_IP = (char *)malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
-  for (i = 0; i < MACHINE_NUM; i++) config_vector[i] = true;
+  for (i = 0; i < MACHINE_NUM; i++) {
+		config_vect_state[i] =  STABLE_STATE;
+		send_config_vect_state[i] =  STABLE_STATE;
+		config_vector[i] = true;
+	}
   send_config_bit_vector = 0; // the vector shows with a '1' the missing machines
   print_for_debug = false;
 

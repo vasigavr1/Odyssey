@@ -15,7 +15,7 @@
 #define CACHE_NUM_BKTS (2 *1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
 #define CACHE_NUM_KEYS (250 * 1000)
 
-#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define CACHE_BATCH_SIZE 500
 
 //Cache States
@@ -26,6 +26,8 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
+
+#define OP_RELEASE_BIT_VECTOR 106// first round of a release that carries a bit vector
 // signal that this is the second round of an acquire that flips the config bit
 #define OP_ACQUIRE_FLIP_BIT 107
 #define OP_LIN_RELEASE 108
