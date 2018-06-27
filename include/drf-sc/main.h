@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 10
+#define WORKERS_PER_MACHINE 39
 #define MACHINE_NUM 3
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -100,7 +100,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH 200
-#define SC_RATIO 500// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
 
@@ -571,6 +571,10 @@ struct thread_stats { // 2 cache lines
 
 #define STABLE_STATE 0
 #define TRANSIENT_STATE 1
+#define UP_STABLE 0
+#define UP_TRANSIENT 1
+#define DOWN_STABLE 2
+#define DOWN_TRANSIENT 3
 
 
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
@@ -578,13 +582,13 @@ extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
-extern atomic_bool config_vector[MACHINE_NUM];
+extern atomic_uint_fast8_t config_vector[MACHINE_NUM];
 extern atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
 // the vector shows with a '1' the missing machines
 // The send vector does not contain all failed nodes,
 // but only those locally detected
-extern atomic_uint_fast16_t send_config_bit_vector;
-extern atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
+extern atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
+extern atomic_uint_fast8_t send_config_bit_vec_state;
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;

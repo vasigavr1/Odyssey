@@ -225,18 +225,59 @@ static inline uint8_t  rmid_to_mid(uint8_t rm_id)
   return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
 }
 
+// Generic CAS
+static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
+{
+  return atomic_compare_exchange_strong(state, (atomic_uint_fast8_t *) &old_state,
+                                        (atomic_uint_fast16_t) new_state);
+}
+
+// Lower a bit in the send vector if it is risen
+static inline bool cas_sent_bit_vector_state(uint16_t t_id, uint16_t m_id, uint8_t old_state, uint8_t new_state)
+{
+  bool return_val = atomic_compare_exchange_strong(&send_config_bit_vector[m_id],(atomic_uint_fast8_t *) &old_state,
+                                       (atomic_uint_fast16_t) new_state);
+  // Do a check to raise the flag that releases should stop sending the bit vector
+  if (new_state == UP_STABLE) {
+    for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+      if (i == machine_id) continue;
+      if (send_config_bit_vector[i] != UP_STABLE)
+        return return_val;
+    }
+    send_config_bit_vec_state = UP_STABLE;
+  }
+  return return_val;
+}
+
+
 // When receiving a reply to the first round of a release
 static inline void convert_transient_to_stable_send_conf_vec(uint16_t t_id)
 {
+  if (DEBUG_QUORUM)
+    green_printf("Thread %u received a reply to a release\n",
+                 t_id);
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {
-    if ((send_config_bit_vector & machine_bit_id[i]) &&
-      send_config_vect_state[i] == TRANSIENT_STATE) {
-      send_config_bit_vector-= machine_bit_id[i];
+    if (send_config_bit_vector[i] == DOWN_TRANSIENT) {
+      cas_sent_bit_vector_state(t_id, i, DOWN_TRANSIENT, UP_STABLE);
     }
   }
-  if (DEBUG_QUORUM) green_printf("Thread %u received a reply to a release, send vector: %u\n",
-                                  t_id, send_config_bit_vector);
+  if (DEBUG_QUORUM)
+    green_printf("Thread %u received a reply to a release\n",
+                                  t_id);
 }
+
+// Create a bit vector to be put inside the release
+static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
+{
+  uint64_t bit_vect = 0;
+  for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    if (send_config_bit_vector[i] != UP_STABLE)
+      bit_vect = bit_vect | machine_bit_id[i];
+  }
+  memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
+}
+
 
 static inline void print_q_info(struct quorum_info *q_info)
 {
@@ -425,8 +466,18 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
                           (struct cache_key *)read));
   }
   p_ops->r_state[r_ptr] = VALID;
-  if (read->opcode == OP_ACQUIRE)
+  if (read->opcode == OP_ACQUIRE) {
     memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
+    if (unlikely(config_vector[machine_id] == DOWN_STABLE)) { // if a remote release has notified the machine it has lsot messages
+      if (cas_a_state(&config_vector[machine_id], DOWN_STABLE, UP_STABLE, t_id)) {
+        // do this after the epoch_id in the read_info is filled, such the the epoch id is only incremented once
+        epoch_id++;
+        if (DEBUG_QUORUM)
+          yellow_printf("Thread %u, acquire increses the epoch id "
+                          "as a remote release has notified the machine it has lsot messages, new epoch id %u", t_id, epoch_id);
+      }
+    }
+  }
   if (ENABLE_ASSERTIONS) assert(p_ops->r_session_id[r_ptr] <= SESSIONS_PER_THREAD);
   MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
   p_ops->r_size++;
@@ -469,8 +520,10 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
     w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
     if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
-    if (t_id == 0) {printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
-    print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);}
+    if (DEBUG_QUORUM) {
+      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
+      print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
+    }
   }
   else {
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
@@ -714,8 +767,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
 //---------------------------------------------------------------------------*/
 
 // Update the quorum info, use this one a timeout
-static inline void update_q_info(struct quorum_info *q_info,
-                                 uint16_t credits[][MACHINE_NUM], uint16_t min_credits, uint8_t vc)
+static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[][MACHINE_NUM],
+                                 uint16_t min_credits, uint8_t vc, uint16_t t_id)
 {
   uint8_t i, rm_id;
   q_info->missing_num = 0;
@@ -728,12 +781,11 @@ static inline void update_q_info(struct quorum_info *q_info,
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
-      config_vector[i] = false;
-      config_vect_state[i] = STABLE_STATE;
-      send_config_vect_state[i] = STABLE_STATE;
-      send_config_bit_vector = send_config_bit_vector | machine_bit_id[i];
-      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u, send vector %u \n",
-                                      i, send_config_bit_vector);
+      config_vector[i] = DOWN_STABLE;
+      cas_sent_bit_vector_state(t_id, i, UP_STABLE, DOWN_STABLE);
+      send_config_bit_vec_state = DOWN_STABLE;
+      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u, send vector bit %u \n",
+                                      i, send_config_bit_vector[i]);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -742,7 +794,8 @@ static inline void update_q_info(struct quorum_info *q_info,
     }
   }
   q_info->first_active_rm_id = mid_to_rmid(q_info->active_ids[0]);
-  q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
+  if (q_info->active_num > 0)
+    q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
   if (DEBUG_QUORUM) print_q_info(q_info);
 
   if (ENABLE_ASSERTIONS) {
@@ -834,7 +887,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
       time_out_cnt[vc]++;
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
-        update_q_info(q_info, credits, min_credits, vc);
+        update_q_info(q_info, credits, min_credits, vc, t_id);
         update_bcast_wr_links(q_info, r_send_wr, t_id);
         update_bcast_wr_links(q_info, w_send_wr, t_id);
         time_out_cnt[vc] = 0;
@@ -910,13 +963,6 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
   for (i = 0; i < coalesce_num; i++) {
-    if (unlikely(w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND)) {
-      if (DEBUG_QUORUM) green_printf("Changing the op of the second round of a release \n");
-      w_mes->write[i].opcode = OP_RELEASE;
-    }
-    if (w_mes->write[i].opcode == CACHE_OP_PUT)
-      p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_PUT;
-    else p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = SENT_RELEASE; // Release or second round of acquire!!
     if (DEBUG_WRITES)
       printf("Write %d, val-len %u, message w_size %d\n", i, w_mes->write[i].val_len,
              send_sgl[br_i].length);
@@ -925,24 +971,45 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
              w_mes->write[i].opcode == OP_RELEASE ||
              w_mes->write[i].opcode == OP_ACQUIRE ||
-             w_mes->write[i].opcode == OP_ACQUIRE_FLIP_BIT);
+             w_mes->write[i].opcode == OP_ACQUIRE_FLIP_BIT ||
+             w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND);
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
   // Check if the release needs to send the vector bit to get quoromized
-  if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vector > 0)) {
-    if (ENABLE_ASSERTIONS) w_mes->write[0].value[0] = 1;
-    // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
-    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value, SEND_CONF_VEC_SIZE);
-    memcpy(w_mes->write[0].value, &send_config_bit_vector, SEND_CONF_VEC_SIZE);
-    for (i = 0; i < MACHINE_NUM; i++)
-      if (send_config_bit_vector & machine_bit_id[i]) send_config_vect_state[i] = TRANSIENT_STATE;
-    //if (DEBUG_QUORUM)
-    //green_printf("Thread %u Sending a release with a vector bit %u \n", t_id, send_config_bit_vector);
-    w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
-    p_ops->w_state[backward_ptr] = SENT_BIT_VECTOR;
-    p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+  if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vec_state == DOWN_STABLE)) {
+    uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
+    create_bit_vector(bit_vector_to_send, t_id);
+    if (*(uint16_t*)bit_vector_to_send > 0) {
+      // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
+      memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value, SEND_CONF_VEC_SIZE);
+      memcpy(w_mes->write[0].value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
+      for (i = 0; i < MACHINE_NUM; i++)
+        if (send_config_bit_vector[i] != UP_STABLE)
+          cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
+      if (DEBUG_QUORUM)
+        green_printf("Thread %u Sending a release with a vector bit %u \n", t_id, *(uint16_t *) bit_vector_to_send);
+      w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
+      p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+    }
   }
+
+  // Set the w_state for each write
+  for (i = 0; i < coalesce_num; i++) {
+    if (unlikely(w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND)) {
+      if (DEBUG_QUORUM) green_printf("Thread %u Changing the op of the second round of a release \n", t_id);
+      w_mes->write[i].opcode = OP_RELEASE;
+    }
+    uint8_t w_state;
+    if (w_mes->write[i].opcode == CACHE_OP_PUT) w_state = SENT_PUT;
+    else if (unlikely(w_mes->write[i].opcode == OP_RELEASE_BIT_VECTOR))
+      w_state = SENT_BIT_VECTOR;
+    else w_state = SENT_RELEASE; // Release or second round of acquire!!
+    if (ENABLE_ASSERTIONS) if (w_state == OP_RELEASE_BIT_VECTOR) assert(i == 0);
+
+    p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = w_state;
+  }
+
 
   if (DEBUG_WRITES)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u, with credits: %d, lid: %u  \n",
@@ -1211,24 +1278,18 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
   // If the corresponding bit is set in Transient State then flip the bit and transition its state to Stable
   // Also reset the Send Vector: the machine will do quorum reads after that acquire anyway
   if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
-    if (!config_vector[w_mes->m_id] && config_vect_state[w_mes->m_id] == TRANSIENT_STATE) {
+    if (config_vector[w_mes->m_id] == DOWN_TRANSIENT) {
       if (DEBUG_QUORUM)
         yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
-                        "round of an acquire for machine %u, send vector %u \n",
-                      t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_config_bit_vector);
-      config_vector[w_mes->m_id] = true;
-      config_vect_state[w_mes->m_id] = STABLE_STATE;
-      if (send_config_bit_vector & machine_bit_id[w_mes->m_id]) {
-        send_config_bit_vector -= machine_bit_id[w_mes->m_id];
-        send_config_vect_state[w_mes->m_id] = STABLE_STATE;
+                        "round of an acquire for machine %u, send vector bit %u \n",
+                      t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_config_bit_vector[w_mes->m_id]);
+      cas_a_state(&config_vector[w_mes->m_id], DOWN_TRANSIENT, UP_STABLE, t_id);
+      if (send_config_bit_vector[w_mes->m_id] == DOWN_TRANSIENT ||
+          send_config_bit_vector[w_mes->m_id] == DOWN_STABLE) {
+        red_printf("thread %u Acquire lowers the sent bit", t_id);
+        atomic_store(&send_config_bit_vector[w_mes->m_id], UP_STABLE);
       }
-      if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector);
-    }
-    else if (ENABLE_ASSERTIONS) {
-      if (send_config_bit_vector & machine_bit_id[w_mes->m_id] > 0) {
-        red_printf("send vector %u, m_id %d \n", send_config_bit_vector, w_mes->m_id);
-        assert(false);
-      }
+      if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector[w_mes->m_id]);
     }
     write->opcode = OP_ACQUIRE;
   }
@@ -1239,8 +1300,7 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
     uint16_t recv_conf_bit_vec = *(uint16_t *) write->value;
     for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
       if (recv_conf_bit_vec & machine_bit_id[m_i]) {
-          config_vector[m_i] = false;
-          config_vect_state[m_i] = STABLE_STATE;
+          config_vector[m_i] = DOWN_STABLE;
           if (DEBUG_QUORUM)
             green_printf("Worker %u updates the kept config bit vector: received: %u, m_id %u \n",
                          t_id, recv_conf_bit_vec, m_i);
@@ -1287,6 +1347,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
       }
+
       handle_configuration_on_receiving_rel_acq(write, w_mes,t_id);
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
@@ -1866,44 +1927,58 @@ static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
     }
-    else if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR)) {
+    if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR)) {
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
-      if (p_ops->w_size == PENDING_WRITES) { // this can deadlock: we need to remove a write to add a write
-        printf("p_ops is full sized %u \n", p_ops->w_size);
-        assert(false);
-      }
+      uint32_t w_size = p_ops->w_size;
+      // take care to handle the case where the w_size == PENDING_WRITES
+      p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
+      p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
+      p_ops->local_w_id++;
+      MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
+      p_ops->w_size--;
 
-      struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
-      if (ENABLE_ASSERTIONS) {
-        assert (rel != NULL);
-        uint16_t overloaded_val = *(uint16_t *)&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr];
-        // red_printf("overloaded val %u \n", overloaded_val);
-        assert(overloaded_val > 0);
+      if (w_size == PENDING_WRITES) { // this can deadlock: we need to remove a write to add a write
+        red_printf("p_ops is full sized -- it should still work %u \n", w_size);
+        //assert(false);
       }
+      struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
+      if (ENABLE_ASSERTIONS) assert (rel != NULL);
 
       // because we overwrite the value, we need to go through the cache again
       memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
       struct cache_op op;
       memcpy((void *) &op, &p_ops->w_session_id[w_pull_ptr], SESSION_BYTES);
       memcpy((void *) &op.key.meta.m_id, rel, W_SIZE);
-      if (t_id == 0) green_printf("Thread %u adding a write from w_pull_ptr %u to w_push_ptr %u, w_size %u, sess_id %u, l_id %lu \n",
-                                  t_id, w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size, p_ops->w_session_id[w_pull_ptr], p_ops->local_w_id);
       insert_write(p_ops, &op, FROM_WRITE, w_pull_ptr, t_id); // the push pointer is not needed because the session id is inside the op
       if (ENABLE_ASSERTIONS) {
         p_ops->ptrs_to_local_w[w_pull_ptr] =  NULL;
         memset(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], 0, SEND_CONF_VEC_SIZE);
       }
     }
-    p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
-    p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
-    p_ops->local_w_id++;
-    MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
-    p_ops->w_size--;
+    else {
+      p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
+      p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
+      p_ops->local_w_id++;
+      MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
+      p_ops->w_size--;
+    }
+
   }
 
   if (ENABLE_ASSERTIONS) {
-    assert(p_ops->w_state[p_ops->w_pull_ptr] < READY_PUT);
-    assert(p_ops->w_state[(p_ops->w_pull_ptr + 1) % PENDING_WRITES] < READY_PUT);
+    if(p_ops->w_state[p_ops->w_pull_ptr] >= READY_PUT) {
+      red_printf("W state = %u at ptr  %u, size: %u \n",
+                 p_ops->w_state[p_ops->w_pull_ptr], p_ops->w_pull_ptr, p_ops->w_size);
+      assert(false);
+    }
+    if (p_ops->w_state[(p_ops->w_pull_ptr + 1) % PENDING_WRITES] >= READY_PUT) {
+      red_printf("W state = %u at ptr %u, push ptr %u , size: %u \n",
+                 p_ops->w_state[(p_ops->w_pull_ptr + 1) % PENDING_WRITES], (p_ops->w_pull_ptr + 1) % PENDING_WRITES,
+                 p_ops->w_push_ptr, p_ops->w_size);
+      red_printf("W state = %u at ptr  %u, size: %u \n",
+                 p_ops->w_state[p_ops->w_pull_ptr], p_ops->w_pull_ptr, p_ops->w_size);
+      assert(false);
+    };
   }
 }
 
@@ -1973,7 +2048,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
     }
     // Apply the acks that refer to stored writes
     for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {
-      if (ENABLE_ASSERTIONS && (ack_ptr == p_ops->w_push_ptr)) {
+      if (ENABLE_ASSERTIONS && DEBUG_WRITES && (ack_ptr == p_ops->w_push_ptr)) {
         uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
         red_printf("Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
                    origin_ack_ptr,  (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,

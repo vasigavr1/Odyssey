@@ -8,10 +8,12 @@ uint32_t* latency_counters;
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
-atomic_bool config_vector[MACHINE_NUM];
-atomic_uint_fast16_t send_config_bit_vector;
+
+atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
+atomic_uint_fast8_t send_config_bit_vec_state;
+
+atomic_uint_fast8_t config_vector[MACHINE_NUM];
 atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
-atomic_uint_fast8_t send_config_vect_state[MACHINE_NUM];
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
@@ -102,12 +104,12 @@ int main(int argc, char *argv[])
 	remote_IP = (char *)malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
   for (i = 0; i < MACHINE_NUM; i++) {
-		config_vect_state[i] =  STABLE_STATE;
-		send_config_vect_state[i] =  STABLE_STATE;
-		config_vector[i] = true;
+//		config_vect_state[i] =  STABLE_STATE;
+		config_vector[i] = UP_STABLE;
+		send_config_bit_vector[i] = UP_STABLE;
 	}
-  send_config_bit_vector = 0; // the vector shows with a '1' the missing machines
   print_for_debug = false;
+	send_config_bit_vec_state = STABLE_STATE;
 
 
 	struct thread_params *param_arr;
