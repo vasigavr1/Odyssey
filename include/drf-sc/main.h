@@ -18,8 +18,8 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 39
-#define MACHINE_NUM 3
+#define WORKERS_PER_MACHINE 2
+#define MACHINE_NUM 2
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
@@ -91,10 +91,10 @@
 #define MAX_R_COALESCE 20
 #define W_CREDITS 6
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT M_16
-#define REL_CREDIT_TIMEOUT M_32
+#define CREDIT_TIMEOUT M_1
+#define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
@@ -103,6 +103,8 @@
 #define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES 1
 #define ENABLE_ACQUIRES 1
+#define ENABLE_RMWS 1
+#define ENABLE_NO_CONFLICT_RMW 1
 
 
 #define QP_NUM 4
@@ -166,6 +168,15 @@
 #define MAX_ACK_WRS (MACHINE_NUM)
 #define ACK_SIZE 14
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
+
+// RMWs
+#define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
+#define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
+
+// RMW entry states
+#define INVALID_RMW 0
+#define PROPOSED 1 // has seen a propose
+#define ACCEPTED 2 // has acked an acccept
 
 #define VC_NUM 2
 #define R_VC 0
@@ -318,7 +329,10 @@ struct quorum_info {
 	uint8_t first_active_rm_id;
 	uint8_t last_active_rm_id;
 };
-
+ struct rmw_id {
+   uint8_t t_id;
+   uint8_t id[8];
+ };
 
 struct ts_tuple {
   uint8_t m_id;
@@ -493,6 +507,40 @@ struct pending_ops {
 };
 
 
+struct rmw_entry {
+  uint8_t opcode;
+  struct key key;
+  uint8_t state;
+  struct rmw_id rmw_id;
+  struct ts_tuple old_ts;
+  struct ts_tuple new_ts;
+  uint8_t value[VALUE_SIZE];
+  atomic_flag lock;
+};
+
+// Global struct that holds the RMW information
+// Cannot be a FIFO because the incoming commit messages must be processed, such that
+// acks to the commits mean that the RMW has happened
+struct rmw_info {
+  struct rmw_entry entry[RMW_ENTRIES_NUM];
+  uint16_t empty_fifo[RMW_ENTRIES_NUM];
+  uint16_t ef_push_ptr; // empty fifo push ptr
+  uint16_t ef_pull_ptr;
+  uint16_t ef_size; // ho many empty slots are there
+
+  atomic_flag ef_lock;
+
+  atomic_uint_fast16_t local_rmw_num;
+  atomic_flag local_rmw_lock;
+
+  uint32_t size;
+  uint8_t lock;
+  uint64_t version; // allow for lock free reads of the struct
+};
+
+//typedef _Atomic struct rmw_info atomic_rmw_info;
+extern struct rmw_info rmw;
+
 struct recv_info {
 	uint32_t push_ptr;
 	uint32_t buf_slots;
@@ -584,7 +632,7 @@ struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
 extern atomic_uint_fast8_t config_vector[MACHINE_NUM];
 extern atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
-// the vector shows with a '1' the missing machines
+
 // The send vector does not contain all failed nodes,
 // but only those locally detected
 extern atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];

@@ -26,7 +26,7 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
-
+#define OP_RMW 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // signal that this is the second round of an acquire that flips the config bit
@@ -97,12 +97,6 @@ struct cache_op {
 	uint8_t opcode;
 	uint8_t val_len;
 	uint8_t value[MICA_MAX_VALUE];
-};
-
-struct key {
-  unsigned int bkt			:32;
-  unsigned int server			:16;
-  unsigned int tag			:16;
 };
 
 
@@ -193,7 +187,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 
 /* The leader and follower send their local requests to this, reads get served
  * But writes do not get served, writes are only propagated here to see whether their keys exist */
-void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op,
+void cache_batch_op_trace(int op_num, uint16_t t_id, struct cache_op **op,
                           struct mica_resp *resp, struct pending_ops *);
 /* The leader sends the writes to be committed with this function*/
 void cache_batch_op_updates(uint32_t , int , struct write**, uint32_t,  uint32_t, bool);

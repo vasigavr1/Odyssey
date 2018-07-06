@@ -175,7 +175,7 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
   clock_gettime(CLOCK_MONOTONIC, &time);
   uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + g_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
-  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0;
+  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0;
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
     (*cmds)[i].opcode = 0;
@@ -183,7 +183,12 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     //Before reading the request decide if it's gone be r_rep or write
     uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    if (is_update) {
+    if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && (i == (machine_id * WORKERS_PER_MACHINE + g_id))) {
+      printf("Worker %u, command %u is an RMW \n", g_id, i);
+      rmws++;
+      (*cmds)[i].opcode = OP_RMW;
+    }
+    else if (is_update) {
       if (is_sc && ENABLE_RELEASES) {
         if (ENABLE_LIN) (*cmds)[i].opcode = OP_LIN_RELEASE;
         else (*cmds)[i].opcode = OP_RELEASE;
@@ -212,16 +217,25 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     uint32 key_id = (uint32) rand() % CACHE_NUM_KEYS;
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
+    if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && (i == (machine_id * WORKERS_PER_MACHINE + g_id))) {
+      key_id = (uint32_t) i;
+      key_hash = CityHash128((char *) &(key_id), 4);
+    }
+    else if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && key_id == (uint32_t) machine_id * WORKERS_PER_MACHINE + g_id) {
+      key_id = (uint32_t) i + 1;
+      key_hash = CityHash128((char *) &(key_id), 4);
+    }
     memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
 
   }
 
-  if (g_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%%\n"
+  if (g_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
                            "Trace w_size %d \n",
                          (double) (writes * 100) / TRACE_SIZE,
                          (double) (sc_writes * 100) / TRACE_SIZE,
                          (double) (reads * 100) / TRACE_SIZE,
-                         (double) (sc_reads * 100) / TRACE_SIZE, TRACE_SIZE);
+                         (double) (sc_reads * 100) / TRACE_SIZE,
+                         (double) (rmws * 100) / TRACE_SIZE,TRACE_SIZE);
   (*cmds)[TRACE_SIZE].opcode = NOP;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
   //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
@@ -426,6 +440,15 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 /* ---------------------------------------------------------------------------
 ------------------------------ABD WORKER --------------------------------------
 ---------------------------------------------------------------------------*/
+// Initialize the rmw struct
+void set_up_rmw_struct()
+{
+  memset(&rmw, 0, sizeof(struct rmw_info));
+  for (uint16_t i = 0; i < RMW_ENTRIES_NUM; i++)
+    rmw.empty_fifo[i] = i;
+  rmw.ef_size = RMW_ENTRIES_NUM;
+}
+
 // Initialize the pending ops struct
 void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uint32_t pending_reads)
 {

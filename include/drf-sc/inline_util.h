@@ -278,7 +278,7 @@ static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
   memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
 }
 
-
+// Prints out information about the participants
 static inline void print_q_info(struct quorum_info *q_info)
 {
   yellow_printf("-----QUORUM INFO----- \n");
@@ -297,6 +297,128 @@ static inline void print_q_info(struct quorum_info *q_info)
   yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
                 q_info->first_active_rm_id, q_info->last_active_rm_id);
 }
+
+// Grab an entry of the RMW- non blocking,
+// call it only if you have the lock of the KVS
+// the ts_tuple should be the old ts
+static inline bool grab_RMW_entry(struct key *key, struct ts_tuple *ts, uint8_t state,
+                                uint8_t opcode, uint8_t m_id, uint16_t *index, uint16_t t_id)
+{
+  if (rmw.ef_size == 0) return false;
+  uint32_t debug_cntr = 0;
+  do {
+    if (ENABLE_ASSERTIONS) {
+      debug_cntr++;
+      if (debug_cntr == B_4_)
+        red_printf("Worker %u cant grab the lock on the EF of rmw \n", t_id);
+    }
+  } while (atomic_flag_test_and_set(&rmw.ef_lock));
+
+  // have the ef lock
+  if (rmw.ef_size == 0) {
+    atomic_flag_clear(&rmw.ef_lock);
+    return false;
+  }
+  else {
+    *index = rmw.empty_fifo[rmw.ef_pull_ptr];
+    rmw.ef_size--;
+    MOD_ADD(rmw.ef_pull_ptr, RMW_ENTRIES_NUM);
+    // unlock
+    atomic_flag_clear(&rmw.ef_lock);
+    // I can freely change that RMW entry without grabbing its lock because
+    // the KVS does not yet have a pointer to the RMW entry
+    struct rmw_entry *entry = &rmw.entry[*index];
+    entry->opcode = opcode;
+    entry->key = *key;
+    entry->old_ts = *ts;
+    entry->new_ts.m_id = m_id;
+    *(uint32_t *)entry->new_ts.version = (*(uint32_t *)ts->version) + 1;
+    entry->state = state;
+    return true;
+  }
+}
+
+// Try to increment the local rmw counter, if it returns false it means it is maxed out
+static inline bool incr_local_rmw_counter()
+{
+  if (rmw.local_rmw_num == RMW_ENTRIES_PER_MACHINE) return false;
+  atomic_flag_test_and_set(&rmw.local_rmw_lock);
+   if (rmw.local_rmw_num < RMW_ENTRIES_PER_MACHINE) {
+     rmw.local_rmw_num++;
+     atomic_flag_clear(&rmw.local_rmw_lock);
+     return true;
+   }
+   else {
+     atomic_flag_clear(&rmw.local_rmw_lock);
+     return false;
+   }
+}
+
+// Decrement the local rmw counter, it must always work
+static inline void decr_local_rmw_counter()
+{
+  if (ENABLE_ASSERTIONS) assert(rmw.local_rmw_num > 0);
+  atomic_fetch_sub(&rmw.local_rmw_num, 1);
+}
+
+static inline bool rmw_version_is_valid (uint64_t version)
+{
+  return version == atomic_load_explicit(&rmw.version, memory_order_seq_cst) &&
+         version % 2 == 0;
+}
+
+// return true if the key exists in the rmw struct, and puts the position in the entry
+static inline bool key_exists_in_rmw(struct key *key, uint32_t *entry)
+{
+//
+//  bool found  = false;
+//  uint64_t version;
+//  do {
+//    version = atomic_load_explicit(&rmw.version, memory_order_seq_cst);
+//    for (uint32_t i = 0; i < RMW_ENTRIES_NUM; i++) {
+//      if (rmw.state[i] == INVALID_RMW) continue;
+//      if (rmw.key[i].tag == key->tag) {
+//        if (rmw.key[i].bkt == key->bkt &&
+//            rmw.key[i].server == key->server) {
+//          *entry = i;
+//          found = true;
+//        }
+//      }
+//    }
+//  } while(rmw_version_is_valid(version));
+//  return found;
+}
+
+
+// check if a key exists, if it does not create an entry for it
+static inline bool check_key_and_create_entry_in_rmw(struct key *key, uint32_t *entry,
+                                                     uint16_t t_id)
+{
+//  if (key_exists_in_rmw(key, entry)) {
+//
+//  }
+//  else { // create an entry
+//    if (rmw.size == RMW_ENTRIES_NUM) return false; // should be fine to do this without any lock
+//    uint32_t debug_cntr = 0;
+//    // try to grab the lock to create an entry
+//    while (!atomic_compare_exchange_strong(&rmw.lock, 0, 1)) {
+//      if (ENABLE_ASSERTIONS) {
+//        debug_cntr++;
+//        if (debug_cntr == B_4_)
+//          red_printf("Worker %u cant grab the lock on the rmw \n", t_id);
+//      }
+//    }
+//    // Lock has been grabbed
+//    rmw.version++;
+//    //uint32_t ptr = rmw.push_ptr;
+//
+//    rmw.version++;
+//    atomic_store_explicit(&rmw.lock, 0, memory_order_seq_cst);
+//  }
+//
+}
+
+
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
@@ -712,7 +834,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
     ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
-    if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE) {
+    if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE
+        || ops[op_i].opcode == OP_RMW) {
       p_ops->session_has_pending_op[working_session] = true;
       memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
     }
@@ -1286,7 +1409,7 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
       cas_a_state(&config_vector[w_mes->m_id], DOWN_TRANSIENT, UP_STABLE, t_id);
       if (send_config_bit_vector[w_mes->m_id] == DOWN_TRANSIENT ||
           send_config_bit_vector[w_mes->m_id] == DOWN_STABLE) {
-        red_printf("thread %u Acquire lowers the sent bit", t_id);
+        //red_printf("thread %u Acquire lowers the sent bit", t_id);
         atomic_store(&send_config_bit_vector[w_mes->m_id], UP_STABLE);
       }
       if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector[w_mes->m_id]);

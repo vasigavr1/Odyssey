@@ -121,6 +121,8 @@ void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
 
 //Set up the depths of all QPs
 void set_up_queue_depths(int**, int**);
+// Initialize the rmw struct
+void set_up_rmw_struct();
 // Initialize the struct that holds all pending ops
 void set_up_pending_ops(struct pending_ops**, uint32_t, uint32_t);
 // Initialize the quorum info that contains the system configuration

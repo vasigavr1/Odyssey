@@ -43,6 +43,9 @@ void *worker(void *arg)
   pre_post_recvs(&r_buf_push_ptr, cb->dgram_qp[R_QP_ID], cb->dgram_buf_mr->lkey, (void *)r_buffer,
                  R_BUF_SLOTS, MAX_RECV_R_WRS, R_QP_ID, R_RECV_SIZE);
 
+  // Initialize the RMW struct, before anyone tries to touch it
+  if (t_id == 0) set_up_rmw_struct();
+
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/
@@ -121,6 +124,7 @@ void *worker(void *arg)
   struct quorum_info *q_info;
   set_up_q_info(&q_info);
 
+
 	// TRACE
 	struct trace_command_uni *trace;
 	trace_init((void **)&trace, t_id);
@@ -142,15 +146,16 @@ void *worker(void *arg)
 
 
      if (ENABLE_ASSERTIONS && CHECK_DBG_COUNTERS)
-       check_debug_cntrs(credit_debug_cnt, waiting_dbg_counter, p_ops, (void *) cb->dgram_buf, r_buf_pull_ptr,
+       check_debug_cntrs(credit_debug_cnt, waiting_dbg_counter, p_ops,
+                         (void *) cb->dgram_buf, r_buf_pull_ptr,
                          w_buf_pull_ptr, ack_buf_pull_ptr, r_rep_buf_pull_ptr, t_id);
 
 
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
-      (t_stats[t_id].cache_hits_per_thread > M_2) && (!slept)) {
+      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > M_32) && (!slept)) {
       uint seconds = 10;
-      yellow_printf("Worker %u is going to sleep for %u secs\n", t_id, seconds);
+      if (t_id == 0) yellow_printf("Worker %u is going to sleep for %u secs\n", t_id, seconds);
       sleep(seconds); slept = true;
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
@@ -187,8 +192,9 @@ void *worker(void *arg)
 		------------------------------ POLL FOR READ REPLIES--------------------------
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      poll_for_read_replies(r_rep_buffer, &r_rep_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[R_REP_QP_ID],
-                          r_rep_recv_wc, r_rep_recv_info, t_id, &outstanding_reads, waiting_dbg_counter);
+      poll_for_read_replies(r_rep_buffer, &r_rep_buf_pull_ptr, p_ops, credits,
+                            cb->dgram_recv_cq[R_REP_QP_ID], r_rep_recv_wc,
+                            r_rep_recv_info, t_id, &outstanding_reads, waiting_dbg_counter);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ COMMIT READS----------------------------------
@@ -201,8 +207,8 @@ void *worker(void *arg)
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
    // if (WRITE_RATIO > 0)
-    poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID], ack_recv_wc,
-              ack_recv_info, t_id, waiting_dbg_counter, &outstanding_writes);
+    poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
+              ack_recv_wc,  ack_recv_info, t_id, waiting_dbg_counter, &outstanding_writes);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------
@@ -218,7 +224,8 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     // Perform the r_rep broadcasts
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt, r_send_sgl, r_send_wr, w_send_wr,
+      broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt,
+                      r_send_sgl, r_send_wr, w_send_wr,
                       &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
 
     /* ---------------------------------------------------------------------------

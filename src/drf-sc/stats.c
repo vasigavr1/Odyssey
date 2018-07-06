@@ -9,7 +9,7 @@ void *print_stats(void* no_arg) {
   long long all_clients_cache_hits = 0;
   double total_throughput = 0;
 
-  int sleep_time = 10;
+  uint sleep_time = 1;
   struct thread_stats *curr_c_stats, *prev_c_stats;
   curr_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
   prev_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
@@ -86,34 +86,35 @@ void *print_stats(void* no_arg) {
     memcpy(prev_c_stats, curr_c_stats, num_threads * (sizeof(struct thread_stats)));
     total_throughput = (all_clients_cache_hits) / seconds;
 
-    printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
-    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
-    for (i = 0; i < num_threads; i++) {
-      cyan_printf("T%d: ", i);
-      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
-                    all_stats.cache_hits_per_thread[i],
-                    all_stats.reads_sent[i],
-                    all_stats.writes_sent[i],
-                    all_stats.quorum_reads_per_thread[i]);
-      yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
-                    all_stats.ack_batch_size[i],
-                    all_stats.write_batch_size[i],
-                    all_stats.r_batch_size[i],
-                    all_stats.r_rep_batch_size[i]);
-       yellow_printf(", RtoW %.2f%%, FW %.2f%%",
-                     100 * all_stats.reads_that_become_writes[i],
-                     100 * all_stats.failed_rem_write[i]);
-        printf("\n");
-    }
-    printf("\n");
-    printf("---------------------------------------\n");
-    if (ENABLE_CACHE_STATS == 1)
-      print_cache_stats(start, machine_id);
-    // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
-    if (DUMP_STATS_2_FILE == 1)
-      dump_stats_2_file(&all_stats);
-    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
-    if (((int)total_throughput) == 0 && ENABLE_INFO_DUMP_ON_STALL) print_for_debug = true;
+//    printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
+//    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+    green_printf("%u %.2f \n", print_count, total_throughput);
+//    for (i = 0; i < num_threads; i++) {
+//      cyan_printf("T%d: ", i);
+//      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
+//                    all_stats.cache_hits_per_thread[i],
+//                    all_stats.reads_sent[i],
+//                    all_stats.writes_sent[i],
+//                    all_stats.quorum_reads_per_thread[i]);
+//      yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
+//                    all_stats.ack_batch_size[i],
+//                    all_stats.write_batch_size[i],
+//                    all_stats.r_batch_size[i],
+//                    all_stats.r_rep_batch_size[i]);
+//       yellow_printf(", RtoW %.2f%%, FW %.2f%%",
+//                     100 * all_stats.reads_that_become_writes[i],
+//                     100 * all_stats.failed_rem_write[i]);
+//        printf("\n");
+//    }
+//    printf("\n");
+//    printf("---------------------------------------\n");
+//    if (ENABLE_CACHE_STATS == 1)
+//      print_cache_stats(start, machine_id);
+//    // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
+//    if (DUMP_STATS_2_FILE == 1)
+//      dump_stats_2_file(&all_stats);
+//    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+//    if (((int)total_throughput) == 0 && ENABLE_INFO_DUMP_ON_STALL) print_for_debug = true;
   }
 
 }

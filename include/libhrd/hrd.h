@@ -128,6 +128,13 @@ int machine_id, num_threads;
 char *remote_IP, *local_IP;
 
 
+struct key {
+  unsigned int bkt			:32;
+  unsigned int server			:16;
+  unsigned int tag			:16;
+};
+
+
 // returns the number of remote IP addresses and fills the remoteIPs array with them
 int getRemoteIPs(char***);
 void die(const char *);

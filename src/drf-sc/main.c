@@ -19,7 +19,7 @@ atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
 const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
-
+struct rmw_info rmw;
 
 
 
@@ -55,6 +55,8 @@ int main(int argc, char *argv[])
   yellow_printf("Using Quorom %d , Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
   green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
+
+  red_printf("MAX allowed pending RMWs per machine %d and total %d \n", RMW_ENTRIES_PER_MACHINE, RMW_ENTRIES_NUM);
 //  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
 //	assert(LEADER_MACHINE < MACHINE_NUM);
 //	assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);

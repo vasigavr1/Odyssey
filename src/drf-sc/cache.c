@@ -49,7 +49,7 @@ void cache_init(int cache_id, int num_threads) {
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, struct mica_resp *resp,
+inline void cache_batch_op_trace(int op_num, uint16_t t_id, struct cache_op **op, struct mica_resp *resp,
                                  struct pending_ops *p_ops)
 {
 	int I, j;	/* I is batch index */
@@ -176,6 +176,25 @@ inline void cache_batch_op_trace(int op_num, int t_id, struct cache_op **op, str
           p_ops->read_info[r_push_ptr].opcode = CACHE_OP_LIN_PUT;
           MOD_ADD(r_push_ptr, PENDING_READS);
           resp[I].type = CACHE_GET_SUCCESS;
+        }
+        else if ((*op)[I].opcode == OP_RMW) {
+          optik_lock(&kv_ptr[I]->key.meta);
+          if (kv_ptr[I]->opcode < 2) {
+            // they key has no space, check if a new RMW is allowed subject to per machine limitations
+            if (incr_local_rmw_counter()) {
+              uint16_t index = 0;
+              struct ts_tuple ts;
+              *(uint32_t *)ts.version = kv_ptr[I]->key.meta.version - 1;
+              ts.m_id = kv_ptr[I]->key.meta.m_id;
+              if (grab_RMW_entry((struct key*) &(*op)[I].key.bkt, &ts, PROPOSED,
+                (*op)[I].opcode, (uint8_t)machine_id, &index, t_id)) {
+                assert(index < 254);
+                kv_ptr[I]->opcode = (uint8_t) (index + 2);
+              }
+              else assert(false);
+            }
+          }
+          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
         red_printf("wrong Opcode in cache: %d, req %d \n", (*op)[I].opcode, I);
@@ -583,7 +602,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 		memset((void *)op.key.meta.epoch_id, 0, EPOCH_BYTES);
 //		op.key.meta.state = VALID_STATE;
 		op_key[1] = key_arr[i].second;
-		op.opcode = CACHE_OP_PUT;
+		op.opcode = 0;
 
 		//printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
 		op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
