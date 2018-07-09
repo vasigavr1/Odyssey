@@ -159,7 +159,7 @@ void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
 // Set up the credits
 void set_up_credits(uint16_t credits[][MACHINE_NUM]);
 // Manufactures a trace without a file
-void manufacture_trace(struct trace_command_uni **cmds, int g_id);
+void manufacture_trace(struct trace_command_uni **cmds, int t_id);
 
 
 

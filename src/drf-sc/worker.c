@@ -79,7 +79,7 @@ void *worker(void *arg)
   struct ibv_recv_wr ack_recv_wr[MAX_RECV_ACK_WRS];
 
 
- 	uint16_t credits[VC_NUM][MACHINE_NUM];
+ 	uint16_t credits[VC_NUM][MACHINE_NUM], op_i = 0;
   uint64_t r_br_tx = 0, w_br_tx = 0, r_rep_tx = 0, ack_tx = 0;
 
 
@@ -216,7 +216,7 @@ void *worker(void *arg)
 
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
-		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
+		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, &op_i, trace, ops,
                                            p_ops, resp);
 
     /* ---------------------------------------------------------------------------

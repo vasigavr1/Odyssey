@@ -45,6 +45,8 @@
 #define CACHE_OP_LIN_PUT 118
 #define UPDATE_EPOCH_OP_GET 119
 //Cache Response
+#define RMW_SUCCESS 118
+#define RETRY_RMW 119
 #define EMPTY 120
 #define CACHE_GET_SUCCESS 121
 #define CACHE_PUT_SUCCESS 122
@@ -187,7 +189,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 
 /* The leader and follower send their local requests to this, reads get served
  * But writes do not get served, writes are only propagated here to see whether their keys exist */
-void cache_batch_op_trace(int op_num, uint16_t t_id, struct cache_op **op,
+void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op **op,
                           struct mica_resp *resp, struct pending_ops *);
 /* The leader sends the writes to be committed with this function*/
 void cache_batch_op_updates(uint32_t , int , struct write**, uint32_t,  uint32_t, bool);

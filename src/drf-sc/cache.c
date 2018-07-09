@@ -49,7 +49,7 @@ void cache_init(int cache_id, int num_threads) {
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(int op_num, uint16_t t_id, struct cache_op **op, struct mica_resp *resp,
+inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op **op, struct mica_resp *resp,
                                  struct pending_ops *p_ops)
 {
 	int I, j;	/* I is batch index */
@@ -178,22 +178,30 @@ inline void cache_batch_op_trace(int op_num, uint16_t t_id, struct cache_op **op
           resp[I].type = CACHE_GET_SUCCESS;
         }
         else if ((*op)[I].opcode == OP_RMW) {
+          if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode < 2) {
             // they key has no space, check if a new RMW is allowed subject to per machine limitations
             if (incr_local_rmw_counter()) {
               uint16_t index = 0;
               struct ts_tuple ts;
+              // pass the old ts
               *(uint32_t *)ts.version = kv_ptr[I]->key.meta.version - 1;
               ts.m_id = kv_ptr[I]->key.meta.m_id;
-              if (grab_RMW_entry((struct key*) &(*op)[I].key.bkt, &ts, PROPOSED,
-                (*op)[I].opcode, (uint8_t)machine_id, &index, t_id)) {
+              struct key *key = (struct key*) (((void*) &(*op)[I]) + sizeof(cache_meta));
+              if (grab_RMW_entry(key, &ts, PROPOSED, (*op)[I].opcode,
+                                 (uint8_t)machine_id, &index, t_id)) {
                 assert(index < 254);
                 kv_ptr[I]->opcode = (uint8_t) (index + 2);
+                resp[I].type = RMW_SUCCESS;
+                if (DEBUG_RMW) green_printf("Worker %u got entry %u for its RMW, new opcode %u \n",
+                                            t_id, index, kv_ptr[I]->opcode);
               }
               else assert(false);
             }
+            else resp[I].type = RETRY_RMW; // retry due to lack of local available entries
           }
+          else resp[I].type = RETRY_RMW; // retry because the key is currently being RMWed
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
@@ -417,6 +425,41 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, false, false_positive);
+
+        }
+        else if (op->opcode == OP_RMW) {
+          if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
+          uint8_t flag = RMW_NEW_ENTRY;
+          uint8_t tmp_value[VALUE_SIZE];
+          optik_lock(&kv_ptr[I]->key.meta);
+          if (compare_ts((struct ts_tuple *)&kv_ptr[I]->key.meta.m_id,
+                         (struct ts_tuple *)&op->key.meta.m_id ) != GREATER) {
+            if (kv_ptr[I]->opcode < 2) {
+              assert(rmw.size < RMW_ENTRIES_NUM);
+              uint16_t index = 0;
+              struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
+              if (grab_RMW_entry(key, (struct ts_tuple *)&op->key.meta.m_id, PROPOSED, op->opcode,
+                                 p_ops->ptrs_to_r_headers[I]->m_id, &index, t_id)) {
+                assert(index < 254);
+                kv_ptr[I]->opcode = (uint8_t) (index + 2);
+                if (DEBUG_RMW)
+                  green_printf("Worker %u got entry %u for its RMW, new opcode %u \n",
+                               t_id, index, kv_ptr[I]->opcode);
+              } else
+                assert(false);
+            }
+          }
+          else { // handle the case where the KVS ts is bigger than the incoming Prepare
+            flag = RMW_SMALLER_TS;
+          }
+          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+
+          bool false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
+          if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
+          insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
+                       *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, flag, false_positive);
+
 
         }
         else if (op->opcode == CACHE_OP_LIN_PUT) {

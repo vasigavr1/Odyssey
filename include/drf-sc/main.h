@@ -18,7 +18,7 @@
 #define WORKER_HYPERTHREADING 1
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 2
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 2
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
@@ -91,7 +91,7 @@
 #define MAX_R_COALESCE 20
 #define W_CREDITS 6
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_1
 #define REL_CREDIT_TIMEOUT M_16
@@ -149,7 +149,7 @@
 
 #define R_REP_ENABLE_INLINING ((R_REP_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 #define R_REP_FIFO_SIZE (MAX_INCOMING_R)
-#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE)
+//#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE) // not correct
 
 // Writes
 #define MAX_RECV_W_WRS (W_CREDITS * REM_MACH_NUM)
@@ -235,6 +235,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
+#define DEBUG_RMW 1
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -314,6 +315,15 @@ struct remote_qp {
 #define LIN_WRITE 1
 #define FROM_READ 2
 #define FROM_WRITE 3 //the second reound of a release
+
+// Possible flag values when inserting a read reply
+#define READ 0
+#define LIN_PUT 1
+#define RMW_SMALLER_TS 2
+#define RMW_NEW_ENTRY 3
+#define RMW_EXISTING_ENTRY 4
+
+
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};

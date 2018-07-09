@@ -367,58 +367,6 @@ static inline bool rmw_version_is_valid (uint64_t version)
          version % 2 == 0;
 }
 
-// return true if the key exists in the rmw struct, and puts the position in the entry
-static inline bool key_exists_in_rmw(struct key *key, uint32_t *entry)
-{
-//
-//  bool found  = false;
-//  uint64_t version;
-//  do {
-//    version = atomic_load_explicit(&rmw.version, memory_order_seq_cst);
-//    for (uint32_t i = 0; i < RMW_ENTRIES_NUM; i++) {
-//      if (rmw.state[i] == INVALID_RMW) continue;
-//      if (rmw.key[i].tag == key->tag) {
-//        if (rmw.key[i].bkt == key->bkt &&
-//            rmw.key[i].server == key->server) {
-//          *entry = i;
-//          found = true;
-//        }
-//      }
-//    }
-//  } while(rmw_version_is_valid(version));
-//  return found;
-}
-
-
-// check if a key exists, if it does not create an entry for it
-static inline bool check_key_and_create_entry_in_rmw(struct key *key, uint32_t *entry,
-                                                     uint16_t t_id)
-{
-//  if (key_exists_in_rmw(key, entry)) {
-//
-//  }
-//  else { // create an entry
-//    if (rmw.size == RMW_ENTRIES_NUM) return false; // should be fine to do this without any lock
-//    uint32_t debug_cntr = 0;
-//    // try to grab the lock to create an entry
-//    while (!atomic_compare_exchange_strong(&rmw.lock, 0, 1)) {
-//      if (ENABLE_ASSERTIONS) {
-//        debug_cntr++;
-//        if (debug_cntr == B_4_)
-//          red_printf("Worker %u cant grab the lock on the rmw \n", t_id);
-//      }
-//    }
-//    // Lock has been grabbed
-//    rmw.version++;
-//    //uint32_t ptr = rmw.push_ptr;
-//
-//    rmw.version++;
-//    atomic_store_explicit(&rmw.lock, 0, memory_order_seq_cst);
-//  }
-//
-}
-
-
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
@@ -588,9 +536,9 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
                           (struct cache_key *)read));
   }
   p_ops->r_state[r_ptr] = VALID;
-  if (read->opcode == OP_ACQUIRE) {
+  if (read->opcode == OP_ACQUIRE || read->opcode == OP_RMW) { // treat RMW as an acquire
     memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
-    if (unlikely(config_vector[machine_id] == DOWN_STABLE)) { // if a remote release has notified the machine it has lsot messages
+    if (unlikely(config_vector[machine_id] == DOWN_STABLE)) { // if a remote release has notified the machine it has lost messages
       if (cas_a_state(&config_vector[machine_id], DOWN_STABLE, UP_STABLE, t_id)) {
         // do this after the epoch_id in the read_info is filled, such the the epoch id is only incremented once
         epoch_id++;
@@ -799,11 +747,11 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
 }
 
 // Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
-static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id,
+static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id, uint16_t *old_op_i,
                                                  struct trace_command_uni *trace, struct cache_op *ops,
                                                  struct pending_ops *p_ops, struct mica_resp *resp)
 {
-  int i = 0, op_i = 0;
+  int i = 0;
   uint16_t writes_num = 0, reads_num = 0;
   uint8_t is_update = 0;
   int working_session = -1;
@@ -816,7 +764,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   }
   //   printf("working session = %d\n", working_session);
   if (ENABLE_ASSERTIONS) assert(working_session != -1);
-
+  uint16_t op_i = *old_op_i;
   //green_printf("op_i %d , trace_iter %d, trace[trace_iter].opcode %d \n", op_i, trace_iter, trace[trace_iter].opcode);
   while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
     if (ENABLE_ASSERTIONS) assert(trace[trace_iter].opcode != NOP);
@@ -856,14 +804,13 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     trace_iter++;
     if (trace[trace_iter].opcode == NOP) trace_iter = 0;
     op_i++;
-
   }
 
-  t_stats[t_id].cache_hits_per_thread += op_i;
+  t_stats[t_id].cache_hits_per_thread += (op_i - *old_op_i);
 
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
-  // assert(op_i + p_ops->w_size == SESSIONS_PER_THREAD);
   //cyan_printf("thread %d  adds %d ops\n", t_id, op_i);
+  uint16_t tmp_op_i = 0;
   for (i = 0; i < op_i; i++) {
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
@@ -875,12 +822,20 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       }
     }
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) ;
+    else if (resp[i].type == RETRY_RMW) {
+      if (tmp_op_i != i)
+        memcpy(&ops[tmp_op_i], &ops[i], KEY_SIZE + 2 + VALUE_SIZE);
+      if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved it from position %u to %u \n",
+                                  t_id, i, tmp_op_i);
+      tmp_op_i++;
+    }
     else if (ops[i].opcode == CACHE_OP_PUT || ops[i].opcode == OP_RELEASE)
       insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
     else {
       insert_read(p_ops, &ops[i], t_id);
     }
   }
+  *old_op_i = tmp_op_i;
   return trace_iter;
 }
 
@@ -1257,7 +1212,8 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
              send_sgl[br_i].length, *(uint32_t *)r_mes->read[i].ts.version);
     if (ENABLE_ASSERTIONS) {
       assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT ||
-             r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE);
+             r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE ||
+             r_mes->read[i].opcode == OP_RMW);
     }
   }
   if (DEBUG_READS)
@@ -1502,6 +1458,7 @@ static inline void wait_for_the_entire_read(volatile struct r_message *r_mes,
   while (r_mes->read[r_mes->coalesce_num - 1].opcode != CACHE_OP_GET) {
     if (r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_LIN_PUT) return;
     if (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) return;
+    if (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_RMW) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;

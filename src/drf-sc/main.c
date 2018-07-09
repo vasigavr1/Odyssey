@@ -26,11 +26,11 @@ struct rmw_info rmw;
 int main(int argc, char *argv[])
 {
 
-  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu/%d,"
+  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu,"
                  "read info %llu/%d\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
-               sizeof (struct read_info), READ_INFO_SIZE);
+               sizeof (struct read_info));
   cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
                sizeof(struct ack_message), ACK_SIZE,
                sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);

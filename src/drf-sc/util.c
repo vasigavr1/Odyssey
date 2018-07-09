@@ -168,12 +168,12 @@ int parse_trace(char* path, struct trace_command **cmds, int g_id){
 
 
 // Manufactures a trace with a uniform distrbution without a backing file
-void manufacture_trace(struct trace_command_uni **cmds, int g_id)
+void manufacture_trace(struct trace_command_uni **cmds, int t_id)
 {
   (*cmds) = (struct trace_command_uni *)malloc((TRACE_SIZE + 1) * sizeof(struct trace_command_uni));
   struct timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
-  uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + g_id) + (uint64_t)(*cmds);
+  uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
   uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0;
   //parse file line by line and insert trace to cmd.
@@ -183,8 +183,10 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     //Before reading the request decide if it's gone be r_rep or write
     uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && (i == (machine_id * WORKERS_PER_MACHINE + g_id))) {
-      printf("Worker %u, command %u is an RMW \n", g_id, i);
+    bool is_rmw = (t_id == 0) && ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS &&
+      (i == (machine_id * WORKERS_PER_MACHINE + t_id));
+    if (is_rmw) {
+      printf("Worker %u, command %u is an RMW \n", t_id, i);
       rmws++;
       (*cmds)[i].opcode = OP_RMW;
     }
@@ -217,11 +219,11 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
     uint32 key_id = (uint32) rand() % CACHE_NUM_KEYS;
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
-    if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && (i == (machine_id * WORKERS_PER_MACHINE + g_id))) {
+    if (is_rmw) {
       key_id = (uint32_t) i;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
-    else if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && key_id == (uint32_t) machine_id * WORKERS_PER_MACHINE + g_id) {
+    else if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && key_id == (uint32_t) machine_id * WORKERS_PER_MACHINE + t_id) {
       key_id = (uint32_t) i + 1;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
@@ -229,7 +231,7 @@ void manufacture_trace(struct trace_command_uni **cmds, int g_id)
 
   }
 
-  if (g_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
+  if (t_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
                            "Trace w_size %d \n",
                          (double) (writes * 100) / TRACE_SIZE,
                          (double) (sc_writes * 100) / TRACE_SIZE,
