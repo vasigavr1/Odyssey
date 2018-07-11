@@ -82,6 +82,7 @@ int main(int argc, char *argv[])
   assert(MACHINE_NUM < 16); // the bit vector is 16 bits
 	if (USE_BIG_OBJECTS) assert(VALUE_SIZE % 8 == 0);
 	assert(VALUE_SIZE >= 2); // first round of release can overload the first 2 bytes of value
+  assert(sizeof(struct cache_key) ==  KEY_SIZE);
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
 

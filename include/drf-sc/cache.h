@@ -45,8 +45,10 @@
 #define CACHE_OP_LIN_PUT 118
 #define UPDATE_EPOCH_OP_GET 119
 //Cache Response
+#define RETRY_RMW_NO_ENTRIES 0
+#define RETRY_RMW_KEY_EXISTS 1
 #define RMW_SUCCESS 118
-#define RETRY_RMW 119
+
 #define EMPTY 120
 #define CACHE_GET_SUCCESS 121
 #define CACHE_PUT_SUCCESS 122
@@ -94,9 +96,11 @@ char* code_to_str(uint8_t code);
 /* Fixed-w_size 16 byte keys */
 struct cache_key {
 	cache_meta meta; // This should be 8B (unused --> in mica)
-	unsigned int bkt			:32;
-	unsigned int server			:16;
-	unsigned int tag			:16;
+	uint32_t bkt;//			:32;
+  uint16_t server;
+  uint16_t tag;
+//	unsigned int server			:16;
+//	unsigned int tag			:16;
 };
 
 

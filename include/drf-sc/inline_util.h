@@ -168,6 +168,13 @@ static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
   return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
 }
 
+// Calculate the thread global id
+static inline uint8_t gid_to_mid(uint16_t g_id)
+{
+  return (uint8_t) (g_id / WORKERS_PER_MACHINE);
+}
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
@@ -462,6 +469,31 @@ static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fif
   }
 }
 
+// Check if help needs to be triggered
+static inline bool trigger_help(struct prep_entry *entry, struct mica_resp resp, struct quorum_info *q_info)
+{
+  if (ENABLE_ASSERTIONS) assert (resp.rmw_entry >= 2);
+  uint8_t new_entry =  (uint8_t) (resp.rmw_entry - 2);
+  if (entry->state == SAME_KEY_RMW &&
+      (entry->ptr_to_rmw == new_entry) &&
+      (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
+      (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
+    entry->debug_cntr++;
+    if (entry->debug_cntr >= M_256) {
+      if (!q_info->send_vector[mid_to_rmid(gid_to_mid(entry->rmw_id.g_id))])
+        return true;
+    }
+  }
+  else {
+    entry->rmw_id.g_id = rmw.entry[new_entry].rmw_id.g_id;
+    entry->rmw_id.id = rmw.entry[new_entry].rmw_id.id;
+    entry->ptr_to_rmw = new_entry;
+  }
+  return false;
+}
+
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
 //---------------------------------------------------------------------------*/
@@ -593,7 +625,16 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
   uint32_t r_ptr = p_ops->r_push_ptr;
-  //  printf("Insert a r_rep %u \n", *(uint32_t *)r_rep);
+
+  if (inside_r_ptr > 0 && r_mes[r_mes_ptr].read[0].opcode == OP_RMW) {
+    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
+    r_mes_ptr = p_ops->r_fifo->push_ptr;
+    inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
+  }
+  if (DEBUG_READS)
+    green_printf("Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u \n",
+                 t_id, r_mes_ptr, inside_r_ptr);
   memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
   memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
   p_ops->read_info[r_ptr].epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
@@ -605,6 +646,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
     p_ops->r_fifo->backward_ptrs[r_mes_ptr] = r_ptr;
     uint64_t message_l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
     if (ENABLE_ASSERTIONS) {
+      assert(read->opcode != OP_RMW);
       if (message_l_id > MAX_R_COALESCE) {
         uint32_t prev_r_mes_ptr = (r_mes_ptr + R_FIFO_SIZE - 1) % R_FIFO_SIZE;
         uint64_t prev_l_id = *(uint64_t *) r_mes[prev_r_mes_ptr].l_id;
@@ -630,14 +672,14 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
                           (struct cache_key *)read));
   }
   p_ops->r_state[r_ptr] = VALID;
-  if (read->opcode == OP_ACQUIRE || read->opcode == OP_RMW) { // treat RMW as an acquire
+  if (read->opcode == OP_ACQUIRE) {
     memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
     if (unlikely(config_vector[machine_id] == DOWN_STABLE)) { // if a remote release has notified the machine it has lost messages
       if (cas_a_state(&config_vector[machine_id], DOWN_STABLE, UP_STABLE, t_id)) {
         // do this after the epoch_id in the read_info is filled, such the the epoch id is only incremented once
         epoch_id++;
         if (DEBUG_QUORUM)
-          yellow_printf("Thread %u, acquire increses the epoch id "
+          yellow_printf("Thread %u, acquire increases the epoch id "
                           "as a remote release has notified the machine it has lsot messages, new epoch id %u", t_id, epoch_id);
       }
     }
@@ -758,7 +800,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 }
 
 // setup a new r_rep entry
-static inline void set_up_r_rep_entry( struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
+static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
                                        struct r_rep_message *r_rep_mes)
 {
   r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr] = rem_m_id;
@@ -780,7 +822,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
 
   // If the r_rep has a different recipient or different l_id then create a new message
   // Because the criterion to advance the push ptr is on creating a new message,
-  // the pull ptr has to start from 1
+  // the pull ptr has to start from 1 // TODO in light of RMWs the criterion has to be extended
   if ((rem_m_id != r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr]) ||
        l_id != *(uint64_t *)r_rep_mes[r_rep_fifo->push_ptr].l_id) {
     MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE);
@@ -845,12 +887,109 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   }
 }
 
+
+// RMWs hijack the read fifo, to be send prepare broadcasts to all
+static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cache_op *prep,
+                                               uint64_t l_id,  uint8_t flag, uint16_t t_id)
+{
+  struct r_message *r_mes = p_ops->r_fifo->r_message;
+  uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
+  uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
+  bool fresh_mess = inside_r_ptr == 0;
+  bool mes_is_rmw = r_mes[r_mes_ptr].read[0].opcode == OP_RMW;
+
+  // Create new message if the current message is not fresh or not an RMW
+  if ((!fresh_mess) && (!mes_is_rmw)) {
+    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
+    r_mes_ptr = p_ops->r_fifo->push_ptr;
+    inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
+  }
+  if (DEBUG_RMW)
+    green_printf("Worker: %u, inserting an rmw in r_mes_ptr %u and inside ptr %u \n",
+                 t_id, r_mes_ptr, inside_r_ptr);
+  memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&prep->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+  r_mes[r_mes_ptr].read[inside_r_ptr].opcode = prep->opcode;
+  if (inside_r_ptr == 0) {
+    // printf("message_lid %lu, local_rid %lu, p_ops r_size %u \n", message_l_id, p_ops->local_r_id, p_ops->r_size);
+    memcpy(r_mes[r_mes_ptr].l_id, &l_id, 8);
+  }
+  if (unlikely(config_vector[machine_id] == DOWN_STABLE)) { // if a remote release has notified the machine it has lost messages
+    if (cas_a_state(&config_vector[machine_id], DOWN_STABLE, UP_STABLE, t_id)) {
+      // do this after the epoch_id in the read_info is filled, such the the epoch id is only incremented once
+      epoch_id++;
+      if (DEBUG_QUORUM)
+        yellow_printf("Thread %u, rmw increases the epoch id "
+                        "as a remote release has notified the machine it has lsot messages, new epoch id %u", t_id, epoch_id);
+    }
+  }
+  p_ops->r_fifo->bcast_size++;
+  r_mes[r_mes_ptr].coalesce_num++;
+  if (r_mes[r_mes_ptr].coalesce_num == MAX_R_COALESCE) {
+    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
+  }
+}
+
+// Insert an RMW in the local RMW structs
+static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uint16_t op_i,
+                              struct cache_op *ops, struct mica_resp resp, struct quorum_info *q_info,
+                              uint16_t t_id)
+{
+  struct cache_op *prep = &ops[op_i];
+  uint32_t session_id = 0;
+  memcpy(&session_id, prep, SESSION_BYTES);
+  if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
+  struct prep_entry *entry = &p_ops->prep_info->entry[session_id];
+  if (ENABLE_ASSERTIONS) {
+    assert(entry->state == INVALID_RMW ||
+           entry->state == NO_ENTRIES  ||
+           entry->state == SAME_KEY_RMW);
+  }
+  entry->opcode = OP_RMW;
+  memcpy(&entry->key, &prep->key.bkt, TRUE_KEY_SIZE);
+
+  // if the rmw is stuck because the key is being rmwed keep trying who you are waiting for
+  if (resp.type == RETRY_RMW_KEY_EXISTS) {
+    if (trigger_help(entry, resp, q_info));
+    // TODO we need the help here. Take care that if you do a new prepare here, the lid may have already be assigned
+  }
+
+  if (resp.type == RETRY_RMW_NO_ENTRIES || resp.type == RETRY_RMW_KEY_EXISTS) {
+    if (*old_op_i != op_i) memcpy(&ops[*old_op_i], &ops[op_i], KEY_SIZE + 2 + VALUE_SIZE);
+    if (DEBUG_RMW)
+      green_printf("Worker %u failed to do its RMW and moved it from position %u to %u \n",
+                   t_id, op_i, old_op_i);
+    (*old_op_i)++;
+    if (resp.type == RETRY_RMW_NO_ENTRIES) entry->state = NO_ENTRIES;
+    else entry->state = SAME_KEY_RMW;
+    // if the RMW is new copy the value
+    if (entry->state == INVALID_RMW) {
+      memcpy(entry->value, prep->value, VALUE_SIZE);
+    }
+  }
+  else { // the RMW has gotten an entry and is to be sent
+    entry->l_id = p_ops->prep_info->l_id;
+    entry->ptr_to_rmw = (uint8_t) (resp.rmw_entry - 2);
+    if (ENABLE_ASSERTIONS) {
+      assert(resp.type = RMW_SUCCESS);
+      assert(rmw.entry[entry->ptr_to_rmw].rmw_id.id == entry->l_id);
+    }
+    p_ops->prep_info->l_id++;
+    entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
+    insert_rmw_to_read_fifo(p_ops, prep, entry->l_id, 0, t_id);
+    entry->state = PROPOSED;
+  }
+}
+
+
 // Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
 static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id, uint16_t *old_op_i,
                                                  struct trace_command_uni *trace, struct cache_op *ops,
-                                                 struct pending_ops *p_ops, struct mica_resp *resp)
+                                                 struct pending_ops *p_ops, struct mica_resp *resp,
+                                                 struct quorum_info *q_info)
 {
-  int i = 0;
+  uint16_t i = 0;
   uint16_t writes_num = 0, reads_num = 0;
   uint8_t is_update = 0;
   int working_session = -1;
@@ -921,12 +1060,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       }
     }
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) ;
-    else if (resp[i].type == RETRY_RMW) {
-      if (tmp_op_i != i)
-        memcpy(&ops[tmp_op_i], &ops[i], KEY_SIZE + 2 + VALUE_SIZE);
-      if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved it from position %u to %u \n",
-                                  t_id, i, tmp_op_i);
-      tmp_op_i++;
+    else if (ops[i].opcode == OP_RMW) {
+      insert_rmw(p_ops, &tmp_op_i, i, ops, resp[i], q_info, t_id);
     }
     else if (ops[i].opcode == CACHE_OP_PUT || ops[i].opcode == OP_RELEASE)
       insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
@@ -1304,15 +1439,18 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) r_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
-  for (i = 0; i < coalesce_num; i++) {
-    p_ops->r_state[(backward_ptr + i) % PENDING_READS] = SENT;
-    if (DEBUG_READS)
-      yellow_printf("Read %d, message mes_size %d, version %u \n", i,
-             send_sgl[br_i].length, *(uint32_t *)r_mes->read[i].ts.version);
-    if (ENABLE_ASSERTIONS) {
-      assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT ||
-             r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE ||
-             r_mes->read[i].opcode == OP_RMW);
+  if (ENABLE_ASSERTIONS) assert(coalesce_num > 0);
+  if (r_mes->read[0].opcode != OP_RMW) {
+    for (i = 0; i < coalesce_num; i++) {
+      p_ops->r_state[(backward_ptr + i) % PENDING_READS] = SENT;
+      if (DEBUG_READS)
+        yellow_printf("Read %d, message mes_size %d, version %u \n", i,
+                      send_sgl[br_i].length, *(uint32_t *) r_mes->read[i].ts.version);
+      if (ENABLE_ASSERTIONS) {
+        assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT ||
+               r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE ||
+               r_mes->read[i].opcode == OP_RMW);
+      }
     }
   }
   if (DEBUG_READS)
@@ -1372,13 +1510,14 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
       t_stats[t_id].reads_sent += coalesce_num;
       t_stats[t_id].reads_sent_mes_num++;
     }
+    p_ops->r_fifo->bcast_size -= coalesce_num;
     // This message has been sent, do not add other reads to it!
-    if (coalesce_num < MAX_R_COALESCE) {
+    // this is tricky because prepares leave half-filled messages, make sure this is the last message to bcast
+    if (coalesce_num < MAX_R_COALESCE && p_ops->r_fifo->bcast_size == 0) {
       //yellow_printf("Broadcasting r_rep with coalesce num %u \n", coalesce_num);
       MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
       p_ops->r_fifo->r_message[p_ops->r_fifo->push_ptr].coalesce_num = 0;
     }
-    p_ops->r_fifo->bcast_size -= coalesce_num;
     reads_sent += coalesce_num;
     mes_sent++;
     MOD_ADD(bcast_pull_ptr, R_FIFO_SIZE);
@@ -1598,7 +1737,8 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
     if (polled_reads + r_num > MAX_INCOMING_R && ENABLE_ASSERTIONS) assert(false);
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
-      if (ENABLE_ASSERTIONS) if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE)
+      if (ENABLE_ASSERTIONS)
+        if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE && read->opcode != OP_RMW)
           red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, i, r_num);
       //printf("version %u \n", *(uint32_t*) read->ts.version);
       p_ops->ptrs_to_r_ops[polled_reads] = (struct read *)(((void *) read) - 3); //align with the cache op

@@ -113,6 +113,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 	// the following variables used to validate atomicity between a lock-free r_rep of an object
 	cache_meta prev_meta;
+  uint64_t rmw_l_id = p_ops->prep_info->l_id;
   uint32_t r_push_ptr = p_ops->r_push_ptr;
 	for(I = 0; I < op_num; I++) {
 		if(kv_ptr[I] != NULL) {
@@ -123,6 +124,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
 				key_in_store[I] = 1;
+
 				if ((*op)[I].opcode == CACHE_OP_GET || (*op)[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
@@ -190,18 +192,20 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               ts.m_id = kv_ptr[I]->key.meta.m_id;
               struct key *key = (struct key*) (((void*) &(*op)[I]) + sizeof(cache_meta));
               if (grab_RMW_entry(key, &ts, PROPOSED, (*op)[I].opcode,
-                                 (uint8_t)machine_id, &index, 0, t_id)) {
+                                 (uint8_t)machine_id, &index, rmw_l_id, t_id)) {
                 assert(index < 254);
                 kv_ptr[I]->opcode = (uint8_t) (index + 2);
                 resp[I].type = RMW_SUCCESS;
+                rmw_l_id++;
                 if (DEBUG_RMW) green_printf("Worker %u got entry %u for its RMW, new KVS opcode %u \n",
                                             t_id, index, kv_ptr[I]->opcode);
               }
               else assert(false);
             }
-            else resp[I].type = RETRY_RMW; // retry due to lack of local available entries
+            else resp[I].type = RETRY_RMW_NO_ENTRIES; // retry due to lack of local available entries
           }
-          else resp[I].type = RETRY_RMW; // retry because the key is currently being RMWed
+          else resp[I].type = RETRY_RMW_KEY_EXISTS; // retry because the key is currently being RMWed
+          resp[I].rmw_entry = kv_ptr[I]->opcode;
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {

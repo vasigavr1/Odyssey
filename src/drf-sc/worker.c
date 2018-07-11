@@ -217,7 +217,7 @@ void *worker(void *arg)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
 		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, &op_i, trace, ops,
-                                           p_ops, resp);
+                                           p_ops, resp, q_info);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

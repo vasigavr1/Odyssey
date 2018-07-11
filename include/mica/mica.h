@@ -51,9 +51,10 @@
 
 struct mica_resp {
 	uint8_t type;
-	uint8_t val_len;
-	uint16_t unused[3];	/* Make val_ptr 8-byte aligned */
-	uint8_t *val_ptr;
+	//uint8_t val_len;
+	//uint16_t unused[3];	/* Make val_ptr 8-byte aligned */
+	//uint8_t *val_ptr;
+	uint8_t rmw_entry;
 };
 
 struct remote_meta {

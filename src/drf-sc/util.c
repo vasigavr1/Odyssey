@@ -499,7 +499,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->prep_info = (struct prep_info *) malloc(sizeof(struct prep_info));
   memset((*p_ops)->prep_info, 0, sizeof(struct prep_info));
   (*p_ops)->prep_info->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
-  memset((*p_ops)->prep_info->prep_fifo, 0, sizeof(struct read_fifo));
+  memset((*p_ops)->prep_info->prep_fifo, 0, sizeof(struct prep_fifo));
 
   (*p_ops)->prep_info->prep_fifo->r_message =
     (struct r_message *) malloc(LOCAL_PREP_NUM * sizeof(struct r_message));

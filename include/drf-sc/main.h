@@ -174,11 +174,14 @@
 // RMWs
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
+#define RMW_WAIT_COUNTER M_256
 
 // RMW entry states
 #define INVALID_RMW 0
 #define PROPOSED 1 // has seen a propose
 #define ACCEPTED 2 // has acked an acccept
+#define NO_ENTRIES 3 // rmw has not been issued due to a lack of entries
+#define SAME_KEY_RMW 4  // there is already an entry for the key
 
 #define VC_NUM 2
 #define R_VC 0
@@ -230,7 +233,7 @@
 // DEBUG
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
-#define DEBUG_READS 0
+#define DEBUG_READS 1
 #define DEBUG_TS 0
 #define CHECK_DBG_COUNTERS 0
 #define VERBOSE_DBG_COUNTER 0
@@ -393,12 +396,14 @@ struct w_message_ud_req {
   struct w_message w_mes;
 };
 
+//
 struct read {
   struct ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];	/* 8B */
   uint8_t opcode;
 };
 
+//
 struct r_message {
   uint8_t l_id[8];
   uint8_t coalesce_num;
@@ -406,22 +411,24 @@ struct r_message {
   struct read read[MAX_R_COALESCE];
 };
 
-
+//
 struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
   struct r_message r_mes;
 };
 
+//
 struct read_fifo {
   struct r_message *r_message;
   uint32_t push_ptr;
-  uint32_t pull_ptr;
+  //uint32_t pull_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of reads not messages!
-  uint32_t size;
+  //uint32_t size;
   uint32_t backward_ptrs[R_FIFO_SIZE];
 };
 
+//
 struct write_fifo {
   struct w_message *w_message;
   uint32_t push_ptr;
@@ -432,6 +439,7 @@ struct write_fifo {
   uint32_t backward_ptrs[W_FIFO_SIZE];
 };
 
+//
 struct prep_fifo {
   struct r_message *r_message;
   uint32_t push_ptr;
@@ -440,6 +448,7 @@ struct prep_fifo {
   uint32_t size;
   uint32_t backward_ptrs[LOCAL_PREP_NUM];
 };
+
 
 // Sent when the timestamps are equal or smaller
 struct r_rep_small {
@@ -456,6 +465,7 @@ struct r_rep_big {
 
 };
 
+//
 struct r_rep_message {
   uint8_t l_id[8];
   uint8_t coalesce_num;
@@ -470,6 +480,7 @@ struct r_rep_message_ud_req {
   uint8_t unused[GRH_SIZE];
   struct r_rep_message r_rep_mes;
 };
+
 
 struct r_rep_fifo {
   struct r_rep_message *r_rep_message;
@@ -510,11 +521,23 @@ struct rmw_entry {
   atomic_flag lock;
 };
 
+struct prep_entry {
+  uint8_t opcode;
+  struct key key;
+  uint8_t state;
+  struct rmw_id rmw_id;
+  uint32_t debug_cntr;
+  uint64_t l_id;
+  uint8_t value[VALUE_SIZE];
+  uint8_t ptr_to_rmw;
+  uint16_t epoch_id;
+};
 
 struct prep_info {
-  struct rmw_entry enries[LOCAL_PREP_NUM];
+  struct prep_entry entry[LOCAL_PREP_NUM];
   struct prep_fifo *prep_fifo;
   uint16_t size;
+  uint64_t l_id; // highest l_id as of yet
 
 };
 
