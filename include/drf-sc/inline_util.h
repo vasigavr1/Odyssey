@@ -161,6 +161,13 @@ static inline void print_true_key(struct key *key)
 {
   printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
 }
+
+// Calculate the thread global id
+static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
+{
+  return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
@@ -302,7 +309,7 @@ static inline void print_q_info(struct quorum_info *q_info)
 // call it only if you have the lock of the KVS
 // the ts_tuple should be the old ts
 static inline bool grab_RMW_entry(struct key *key, struct ts_tuple *ts, uint8_t state,
-                                uint8_t opcode, uint8_t m_id, uint16_t *index, uint16_t t_id)
+                                uint8_t opcode, uint8_t m_id, uint16_t *index, uint64_t l_id, uint16_t t_id)
 {
   if (rmw.ef_size == 0) return false;
   uint32_t debug_cntr = 0;
@@ -333,9 +340,64 @@ static inline bool grab_RMW_entry(struct key *key, struct ts_tuple *ts, uint8_t 
     entry->old_ts = *ts;
     entry->new_ts.m_id = m_id;
     *(uint32_t *)entry->new_ts.version = (*(uint32_t *)ts->version) + 1;
+    entry->rmw_id.g_id = get_gid(m_id, t_id);
+    entry->rmw_id.id = l_id;
     entry->state = state;
     return true;
   }
+}
+
+// Look at an RMW entry to answer to a prepare message
+static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint16_t pos, uint8_t* value,
+                                           struct ts_tuple *rep_ts, uint8_t m_id,
+                                           uint64_t l_id, uint16_t t_id)
+{
+  uint8_t return_val = RMW_ACK_PREPARE;
+  struct rmw_entry *entry = &rmw.entry[pos];
+  struct ts_tuple new_ts;
+  // the prepare message contains the old ts
+  new_ts.m_id = m_id;
+  *(uint32_t *)new_ts.version = prep->key.meta.version + 2;
+
+  // If entry is in Accepted state you typically send back value and ts
+  if (entry->state == ACCEPTED) {
+    if (ENABLE_ASSERTIONS) {
+      if (compare_ts(&new_ts, &entry->new_ts) == EQUAL)
+        red_printf("Received a proposal with same TS an already accepted proposal \n");
+    }
+    // check the RMW_ID to make sure it's not a stuck RMW
+    if (entry->rmw_id.g_id == t_id && entry->rmw_id.id == l_id) {
+      red_printf("Received a proposal with same RMW id an already accepted proposal \n");
+      return_val = RMW_ACK_PREPARE;
+      entry->state = PROPOSED;
+    }
+    else {
+      memcpy(value, entry->value, VALUE_SIZE);
+      memcpy(rep_ts, &entry->new_ts, TS_TUPLE_SIZE);
+      return_val = RMW_ALREADY_ACCEPTED;
+    }
+  }
+  else if (rmw.entry[pos].state == PROPOSED) {
+    enum ts_compare ts_comp = compare_ts(&new_ts, &entry->new_ts);
+    switch(ts_comp) {
+      case GREATER: // new prepare has higher TS
+        return_val = RMW_ACK_PREPARE;
+        break;
+      case EQUAL:
+        return_val = RMW_ACK_PREPARE;
+        if (ENABLE_ASSERTIONS) {
+          //assert(false);
+          red_printf("Received a proposal with same TS an already acked proposal \n");
+        }
+        break;
+      case SMALLER:
+        return_val = RMW_NACK_PREPARE;
+        memcpy(rep_ts, &entry->new_ts, TS_TUPLE_SIZE);
+        break;
+      default : assert(false);
+    }
+  }
+  return return_val;
 }
 
 // Try to increment the local rmw counter, if it returns false it means it is maxed out
@@ -367,6 +429,38 @@ static inline bool rmw_version_is_valid (uint64_t version)
          version % 2 == 0;
 }
 
+// Fill the prepare Reply
+static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fifo *r_rep_fifo,
+                                       struct ts_tuple new_ts, uint8_t flag, uint8_t *value,
+                                       uint16_t t_id)
+{
+  switch (flag) {
+    case RMW_SMALLER_TS: // ts was stale, send TS and Value
+      if (DEBUG_RMW) green_printf("Worker %u: Prepare TS is stale \n", t_id);
+      r_rep->opcode = RMW_TS_STALE;
+      memcpy(&r_rep->ts, &new_ts, TS_TUPLE_SIZE);
+      memcpy(r_rep->value, value, VALUE_SIZE);
+      r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
+      break;
+    case RMW_NACK_PREPARE :
+      if (DEBUG_RMW) green_printf("Worker %u: Prepare TS gets nacked \n", t_id);
+      memcpy(&r_rep->ts, &new_ts, TS_TUPLE_SIZE);
+      r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
+      break;
+    case RMW_ACK_PREPARE:
+      if (DEBUG_RMW) green_printf("Worker %u: Read TS are equal \n", t_id);
+      r_rep->opcode = PREP_ACK;
+      break;
+    case RMW_ALREADY_ACCEPTED: // local is greater than remote
+      if (DEBUG_RMW) green_printf("Worker %u: A bigger Ts has bee accepted \n", t_id);
+      memcpy(&r_rep->ts, &new_ts, TS_TUPLE_SIZE);
+      memcpy(r_rep->value, value, VALUE_SIZE);
+      r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
+      break;
+    default:
+      assert(false);
+  }
+}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
@@ -379,8 +473,8 @@ static inline void print_wrkr_stats (uint16_t t_id)
   yellow_printf("Reads sent %ld/%ld \n", t_stats[t_id].reads_sent_mes_num, t_stats[t_id].reads_sent);
   yellow_printf("R_reps sent %ld/%ld \n", t_stats[t_id].r_reps_sent_mes_num, t_stats[t_id].r_reps_sent);
   green_printf("WORKER %u RECEIVED MESSAGES \n", t_id);
-  //yellow_printf("Writes sent %ld/%ld \n", t_stats[t_id].writes_sent_mes_num, t_stats[t_id].writes_sent);
-  //yellow_printf("Acks sent %ld/%ld \n", t_stats[t_id].acks_sent_mes_num, t_stats[t_id].acks_sent);
+  //yellow_printf("Writes sent %ld/%ld \n", t_stats[g_id].writes_sent_mes_num, t_stats[g_id].writes_sent);
+  //yellow_printf("Acks sent %ld/%ld \n", t_stats[g_id].acks_sent_mes_num, t_stats[g_id].acks_sent);
   yellow_printf("Reads received %ld/%ld \n", t_stats[t_id].received_reads_mes_num, t_stats[t_id].received_reads);
   yellow_printf("R_reps received %ld/%ld \n", t_stats[t_id].received_r_reps_mes_num, t_stats[t_id].received_r_reps);
 
@@ -394,7 +488,7 @@ static inline void print_wrkr_stats (uint16_t t_id)
                  t_stats[t_id].per_worker_acks_sent[i], i);
 
   }
-//  yellow_printf("Reads sent %ld/%ld \n", t_stats[t_id].r_reps_sent_mes_num, t_stats[t_id].r_reps_sent );
+//  yellow_printf("Reads sent %ld/%ld \n", t_stats[g_id].r_reps_sent_mes_num, t_stats[g_id].r_reps_sent );
 }
 
 
@@ -676,7 +770,7 @@ static inline void set_up_r_rep_entry( struct r_rep_fifo *r_rep_fifo, uint8_t re
 // Insert a new r_rep to the r_rep reply fifo
 static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *local_ts,
                                 struct ts_tuple *remote_ts, uint64_t l_id, uint16_t t_id,
-                                uint8_t rem_m_id, uint16_t op_i, uint8_t* payload, bool is_lin_put,
+                                uint8_t rem_m_id, uint16_t op_i, uint8_t* value, uint8_t r_rep_flag,
                                 bool false_positive) {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
@@ -698,39 +792,44 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   uint32_t inside_r_rep_ptr = r_rep_fifo->message_sizes[r_rep_fifo->push_ptr]; // This pointer is in bytes
   r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += R_REP_SMALL_SIZE;
   struct r_rep_big *r_rep = (struct r_rep_big *) (((void *)&r_rep_mes[r_rep_mes_ptr]) + inside_r_rep_ptr);
-
-  enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
-  if (machine_id == 0 && R_TO_W_DEBUG) {
-    if (ts_comp == EQUAL) green_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
-              *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
-    else red_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
+  if (r_rep_flag == READ || r_rep_flag == LIN_PUT) {
+    enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
+    if (machine_id == 0 && R_TO_W_DEBUG) {
+     if (ts_comp == EQUAL)
+       green_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
                     *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
+     else
+       red_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
+                  *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
+    }
+    switch (ts_comp) {
+     case SMALLER: // local is smaller than remote
+       //if (DEBUG_TS) printf("Read TS is smaller \n");
+       r_rep->opcode = TS_SMALLER;
+       break;
+     case EQUAL:
+       //if (DEBUG_TS) /printf("Read TS are equal \n");
+       r_rep->opcode = TS_EQUAL;
+       break;
+     case GREATER: // local is greater than remote
+       memcpy(&r_rep->ts, local_ts, TS_TUPLE_SIZE);
+       if (ENABLE_LIN && r_rep_flag == LIN_PUT) {
+         //This does not need the value, as it is going to do a write eventually
+         r_rep->opcode = TS_GREATER_LIN_PUT;
+         r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
+       } else {
+         if (DEBUG_TS) printf("Read TS is greater \n");
+         r_rep->opcode = TS_GREATER;
+         memcpy(r_rep->value, value, VALUE_SIZE);
+         r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
+       }
+       break;
+     default:
+       assert(false);
+    }
   }
-  switch (ts_comp) {
-    case SMALLER: // local is smaller than remote
-      //if (DEBUG_TS) printf("Read TS is smaller \n");
-      r_rep->opcode = TS_SMALLER;
-      break;
-    case EQUAL:
-      //if (DEBUG_TS) /printf("Read TS are equal \n");
-      r_rep->opcode = TS_EQUAL;
-      break;
-    case GREATER: // local is greater than remote
-      memcpy(&r_rep->ts, local_ts, TS_TUPLE_SIZE);
-      if (ENABLE_LIN && is_lin_put) {
-        //This does not need the value, as it is going to do a write eventually
-        r_rep->opcode = TS_GREATER_LIN_PUT;
-        r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_LIN_PUT_SIZE - R_REP_SMALL_SIZE);
-      }
-      else {
-        if (DEBUG_TS) printf("Read TS is greater \n");
-        r_rep->opcode = TS_GREATER;
-        memcpy(r_rep->value, payload, VALUE_SIZE);
-        r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
-      }
-      break;
-    default:
-      assert(false);
+  else { // response to an RMW
+    fill_rmw_prep_reply(r_rep, r_rep_fifo, *local_ts, r_rep_flag, value, t_id);
   }
   if (false_positive) {
     if (DEBUG_QUORUM)
@@ -740,7 +839,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   p_ops->r_rep_fifo->total_size++;
   r_rep_mes[r_rep_mes_ptr].coalesce_num++;
   if (ENABLE_ASSERTIONS) {
-    if (is_lin_put) assert(ENABLE_LIN);
+    if (r_rep_flag == LIN_PUT) assert(ENABLE_LIN);
     assert(r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
     assert(r_rep_mes[r_rep_mes_ptr].coalesce_num <= MAX_R_REP_COALESCE);
   }
@@ -795,7 +894,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
         break;
       }
     }
-    //cyan_printf("thread %d  next working session %d total ops %d\n", t_id, working_session, op_i);
+    //cyan_printf("thread %d  next working session %d total ops %d\n", g_id, working_session, op_i);
     if (ENABLE_ASSERTIONS) {
       assert(WRITE_RATIO > 0 || is_update == 0);
       if (is_update) assert(ops[op_i].val_len > 0);
@@ -809,7 +908,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   t_stats[t_id].cache_hits_per_thread += (op_i - *old_op_i);
 
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
-  //cyan_printf("thread %d  adds %d ops\n", t_id, op_i);
+  //cyan_printf("thread %d  adds %d ops\n", g_id, op_i);
   uint16_t tmp_op_i = 0;
   for (i = 0; i < op_i; i++) {
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
@@ -1010,7 +1109,7 @@ static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, 
 {
   struct ibv_send_wr *bad_send_wr;
   if (recvs_to_post_num > 0) {
-    // printf("Wrkr %d posting %d recvs\n", t_id,  recvs_to_post_num);
+    // printf("Wrkr %d posting %d recvs\n", g_id,  recvs_to_post_num);
     if (recvs_to_post_num) post_recvs_with_recv_info(recv_info, recvs_to_post_num);
     recv_info->posted_recvs += recvs_to_post_num;
   }
@@ -1124,7 +1223,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
                                     uint64_t *w_br_tx, struct recv_info *ack_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes)
 {
-  //  printf("Worker %d bcasting writes \n", t_id);
+  //  printf("Worker %d bcasting writes \n", g_id);
   uint8_t vc = W_VC;
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
@@ -1246,7 +1345,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
                                    uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
                                    uint16_t t_id, uint32_t *outstanding_reads)
 {
-  //  printf("Worker %d bcasting reads \n", t_id);
+  //  printf("Worker %d bcasting reads \n", g_id);
   uint8_t vc = R_VC;
   uint16_t reads_sent = 0, br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
@@ -1365,7 +1464,7 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
       cas_a_state(&config_vector[w_mes->m_id], DOWN_TRANSIENT, UP_STABLE, t_id);
       if (send_config_bit_vector[w_mes->m_id] == DOWN_TRANSIENT ||
           send_config_bit_vector[w_mes->m_id] == DOWN_STABLE) {
-        //red_printf("thread %u Acquire lowers the sent bit", t_id);
+        //red_printf("thread %u Acquire lowers the sent bit", g_id);
         atomic_store(&send_config_bit_vector[w_mes->m_id], UP_STABLE);
       }
       if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector[w_mes->m_id]);
@@ -1694,7 +1793,7 @@ static inline void wait_until_the_entire_r_rep(volatile struct r_rep_big *stuck_
           yellow_printf("R_rep %u/%u, opcode %u, byte_ptr %u , ptr %lu/%lu\n", i, r_rep_mes->coalesce_num, r_rep->opcode, byte_ptr,
                         r_rep, stuck_r_rep);
           if (r_rep->opcode == TS_GREATER) byte_ptr += R_REP_SIZE;
-          else if (r_rep->opcode == TS_GREATER_LIN_PUT) byte_ptr += R_REP_LIN_PUT_SIZE;
+          else if (r_rep->opcode == TS_GREATER_LIN_PUT) byte_ptr += R_REP_ONLY_TS_SIZE;
           else byte_ptr++;
         }
         for (int i = 0; i < R_REP_BUF_SLOTS; ++i) {
@@ -1729,7 +1828,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   while (polled_messages < completed_messages) {
   //while (incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY) {
     if (ENABLE_ASSERTIONS) assert(incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY);
-    //wait_for_the_entire_read(&incoming_rs[index].r_mes, t_id, index);
+    //wait_for_the_entire_read(&incoming_rs[index].r_mes, g_id, index);
     if (DEBUG_READS)
       yellow_printf("Worker sees a READ REPLY: %d at offset %d, l_id %lu, from machine %u with %u replies\n",
              incoming_r_reps[index].r_rep_mes.opcode, index,
@@ -1775,15 +1874,17 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     for (uint16_t i = 0; i < r_rep_num; i++) {
       struct r_rep_big *r_rep = (struct r_rep_big *)(((void *)r_rep_mes) + byte_ptr);
       if (ENABLE_ASSERTIONS) {
-        if (r_rep->opcode < TS_SMALLER || r_rep->opcode > TS_GREATER + FALSE_POSITIVE_OFFSET) {
+        if (r_rep->opcode < TS_SMALLER || r_rep->opcode > RMW_TS_STALE + FALSE_POSITIVE_OFFSET) {
           wait_until_the_entire_r_rep((volatile struct r_rep_big *) r_rep, incoming_r_reps, i,
                                       index, p_ops, byte_ptr, t_id);
           //red_printf("Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, i, r_rep_num);
         }
       }
-      if (r_rep->opcode == TS_GREATER || (r_rep->opcode == TS_GREATER + FALSE_POSITIVE_OFFSET))
+      if (r_rep->opcode == TS_GREATER || (r_rep->opcode == TS_GREATER + FALSE_POSITIVE_OFFSET) ||
+          r_rep->opcode == RMW_ACCEPTED || (r_rep->opcode == RMW_ACCEPTED + FALSE_POSITIVE_OFFSET) ||
+          r_rep->opcode == RMW_TS_STALE || (r_rep->opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET))
         byte_ptr += R_REP_SIZE;
-      else if (unlikely(r_rep->opcode == TS_GREATER_LIN_PUT)) byte_ptr += R_REP_LIN_PUT_SIZE;
+      else if (unlikely(r_rep->opcode == TS_GREATER_LIN_PUT)) byte_ptr += R_REP_ONLY_TS_SIZE;
       else byte_ptr++;
       polled_r_reps++;
       if (pull_lid >= l_id) {
@@ -1939,10 +2040,10 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     }
     if ((*sent_ack_tx) % ACK_SS_BATCH == 0) {
       ack_send_wr[i].send_flags |= IBV_SEND_SIGNALED;
-      // if (t_id == 0) green_printf("Sending ack %llu signaled \n", *sent_ack_tx);
+      // if (g_id == 0) green_printf("Sending ack %llu signaled \n", *sent_ack_tx);
     } else ack_send_wr[i].send_flags = IBV_SEND_INLINE;
     if ((*sent_ack_tx) % ACK_SS_BATCH == ACK_SS_BATCH - 1) {
-      // if (t_id == 0) green_printf("Polling for ack  %llu \n", *sent_ack_tx);
+      // if (g_id == 0) green_printf("Polling for ack  %llu \n", *sent_ack_tx);
       poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, POLL_CQ_ACK);
     }
     if (ack_i > 0) {
@@ -1960,7 +2061,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
     //w_recv_info->posted_recvs += recvs_to_post_num;
        // printf("Wrkr %d posting %u recvs and has a total of %u recvs for writes \n",
-        //       t_id, recvs_to_post_num,  w_recv_info->posted_recvs);
+        //       g_id, recvs_to_post_num,  w_recv_info->posted_recvs);
     if (ENABLE_ASSERTIONS) {
       assert(recvs_to_post_num <= MAX_RECV_W_WRS);
       //assert(w_recv_info->posted_recvs <= MAX_RECV_W_WRS);
@@ -2001,7 +2102,7 @@ static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
   while(p_ops->w_state[p_ops->w_pull_ptr] >= READY_PUT) {
     //if (DEBUG_ACKS)
     //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
-    //               t_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
+    //               g_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
     if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) {
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
@@ -2139,7 +2240,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
       if (p_ops->acks_seen[ack_ptr] == REMOTE_QUORUM) {
         if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
         //printf("Wrkr %d valid ack %u/%u, write at ptr %d is ready \n",
-            //   t_id, ack_i, ack_num,  ack_ptr);
+            //   g_id, ack_i, ack_num,  ack_ptr);
         if (unlikely(p_ops->w_state[ack_ptr] == SENT_BIT_VECTOR)) {
           p_ops->w_state[ack_ptr] = READY_BIT_VECTOR;
           convert_transient_to_stable_send_conf_vec(t_id);

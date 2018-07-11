@@ -55,12 +55,18 @@
 #define CACHE_ACK_SUCCESS 125
 #define CACHE_LAST_ACK_SUCCESS 126
 #define RETRY 127
+
+
 // READ_REPLIES
 #define READ_REPLY 27
 #define TS_SMALLER 28
 #define TS_EQUAL 29
 #define TS_GREATER_LIN_PUT 30
 #define TS_GREATER 31
+#define PREP_ACK 32
+#define PREP_NACK 33
+#define RMW_ACCEPTED 34 // will receive both TS and Value
+#define RMW_TS_STALE 35 // will receive botht TS and Value
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
 // previously considered to have failed

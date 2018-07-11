@@ -495,6 +495,16 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->r_fifo->r_message =
     (struct r_message *) malloc(R_FIFO_SIZE * sizeof(struct r_message));
   memset((*p_ops)->r_fifo->r_message, 0, R_FIFO_SIZE * sizeof(struct r_message));
+  // PREP STRUCT
+  (*p_ops)->prep_info = (struct prep_info *) malloc(sizeof(struct prep_info));
+  memset((*p_ops)->prep_info, 0, sizeof(struct prep_info));
+  (*p_ops)->prep_info->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
+  memset((*p_ops)->prep_info->prep_fifo, 0, sizeof(struct read_fifo));
+
+  (*p_ops)->prep_info->prep_fifo->r_message =
+    (struct r_message *) malloc(LOCAL_PREP_NUM * sizeof(struct r_message));
+  memset((*p_ops)->prep_info->prep_fifo->r_message, 0, LOCAL_PREP_NUM * sizeof(struct r_message));
+
 
 //  (*p_ops)->r_payloads = (struct read_payload *) malloc(pending_reads * sizeof(struct read_payload));
   (*p_ops)->ptrs_to_r_headers = (struct r_message **) malloc(MAX_INCOMING_R * sizeof(struct r_message *));

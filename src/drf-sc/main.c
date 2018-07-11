@@ -94,6 +94,9 @@ int main(int argc, char *argv[])
   assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE);
   assert(sizeof(struct w_message) == W_MES_SIZE);
 
+  // RMWs
+  assert(LOCAL_PREP_NUM >= SESSIONS_PER_THREAD);
+
 
 
 	assert(sizeof(cache_meta) == 8);

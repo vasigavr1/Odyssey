@@ -140,7 +140,7 @@
 #define MAX_R_REP_COALESCE MAX_R_COALESCE
 #define R_REP_MES_HEADER (8 + 3) //l_id, coalesce_num, m_id, opcode // and credits
 #define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
-#define R_REP_LIN_PUT_SIZE (TS_TUPLE_SIZE + 1)
+#define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
 #define R_REP_SMALL_SIZE (1)
 #define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * R_REP_SIZE))
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
@@ -169,6 +169,8 @@
 #define ACK_SIZE 14
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
 
+// Prepares
+#define LOCAL_PREP_NUM (SESSIONS_PER_THREAD)
 // RMWs
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
@@ -320,8 +322,10 @@ struct remote_qp {
 #define READ 0
 #define LIN_PUT 1
 #define RMW_SMALLER_TS 2
-#define RMW_NEW_ENTRY 3
-#define RMW_EXISTING_ENTRY 4
+#define RMW_ACK_PREPARE 3 // Send an 1-byte reply
+#define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
+#define RMW_NACK_PREPARE 5 // Send a TS, because you have already acked a higher Propose
+
 
 
 
@@ -340,8 +344,8 @@ struct quorum_info {
 	uint8_t last_active_rm_id;
 };
  struct rmw_id {
-   uint8_t t_id;
-   uint8_t id[8];
+   uint16_t g_id;
+   uint64_t id;
  };
 
 struct ts_tuple {
@@ -428,6 +432,15 @@ struct write_fifo {
   uint32_t backward_ptrs[W_FIFO_SIZE];
 };
 
+struct prep_fifo {
+  struct r_message *r_message;
+  uint32_t push_ptr;
+  uint32_t bcast_pull_ptr;
+  uint32_t bcast_size; // number of preps not messages!
+  uint32_t size;
+  uint32_t backward_ptrs[LOCAL_PREP_NUM];
+};
+
 // Sent when the timestamps are equal or smaller
 struct r_rep_small {
   uint8_t opcode;
@@ -472,7 +485,7 @@ struct r_rep_fifo {
 };
 
 
-// If a read
+//
 struct read_info {
   uint8_t rep_num;
   uint8_t times_seen_ts;
@@ -485,18 +498,39 @@ struct read_info {
   uint16_t epoch_id;
 };
 
+//
+struct rmw_entry {
+  uint8_t opcode;
+  struct key key;
+  uint8_t state;
+  struct rmw_id rmw_id;
+  struct ts_tuple old_ts;
+  struct ts_tuple new_ts;
+  uint8_t value[VALUE_SIZE];
+  atomic_flag lock;
+};
+
+
+struct prep_info {
+  struct rmw_entry enries[LOCAL_PREP_NUM];
+  struct prep_fifo *prep_fifo;
+  uint16_t size;
+
+};
+
 struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
   struct write **ptrs_to_w_ops; // used for remote writes
   struct read **ptrs_to_r_ops; // used for remote reads
 
-	struct write **ptrs_to_local_w; // used for the first phase of release
-	uint8_t *overwritten_values;
+  struct write **ptrs_to_local_w; // used for the first phase of release
+  uint8_t *overwritten_values;
   struct r_message **ptrs_to_r_headers;
 //  struct read_payload *r_payloads;
   struct read_info *read_info;
   struct r_rep_fifo *r_rep_fifo;
+  struct prep_info *prep_info;
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
@@ -516,18 +550,6 @@ struct pending_ops {
   bool all_sessions_stalled;
 };
 
-
-struct rmw_entry {
-  uint8_t opcode;
-  struct key key;
-  uint8_t state;
-  struct rmw_id rmw_id;
-  struct ts_tuple old_ts;
-  struct ts_tuple new_ts;
-  uint8_t value[VALUE_SIZE];
-  atomic_flag lock;
-};
-
 // Global struct that holds the RMW information
 // Cannot be a FIFO because the incoming commit messages must be processed, such that
 // acks to the commits mean that the RMW has happened
@@ -539,7 +561,6 @@ struct rmw_info {
   uint16_t ef_size; // ho many empty slots are there
 
   atomic_flag ef_lock;
-
   atomic_uint_fast16_t local_rmw_num;
   atomic_flag local_rmw_lock;
 
