@@ -4,7 +4,6 @@
 
 
 //Global Vars
-uint32_t* latency_counters;
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
@@ -27,7 +26,7 @@ int main(int argc, char *argv[])
 {
 
   green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu,"
-                 "read info %llu/%d\n",
+                 "read info %llu\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
                sizeof (struct read_info));
@@ -168,11 +167,15 @@ int main(int argc, char *argv[])
 	cache_init(0, WORKERS_PER_MACHINE); // the first ids are taken by the workers
 
 #if MEASURE_LATENCY == 1
+  memset(&latency_count, 0, sizeof(struct latency_counters));
 	latency_count.hot_writes  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.hot_writes, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
 	latency_count.hot_reads   = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-	latency_count.local_reqs  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-	latency_count.remote_reqs = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-  latency_count.total_measurements = 0;
+  memset(latency_count.hot_reads, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+	latency_count.releases  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.releases, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+	latency_count.acquires = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.acquires, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
 #endif
 	pthread_attr_t attr;
 	cpu_set_t pinned_hw_threads;

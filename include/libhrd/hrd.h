@@ -39,7 +39,7 @@
 #define HRD_Q_DEPTH 0	/* Used only by wrappers we do not care about */
 
 #define USE_BIG_OBJECTS 0
-#define EXTRA_CACHE_LINES 2
+#define EXTRA_CACHE_LINES 16
 #define BASE_VALUE_SIZE 32
 #define SHIFT_BITS (USE_BIG_OBJECTS == 1 ? 3 : 0) // number of bits to shift left or right to calculate the value length
 #define HRD_DEFAULT_PSN 3185	/* PSN for all queues */ // starting Packet Sequence Number
@@ -60,6 +60,8 @@
 
 #define HUGE_PAGE_SIZE 2097152
 #define LEVERAGE_TLB_COALESCING 1
+
+#define MTU 4096
 
 /*
  * Small max_inline_data reduces the QP's max WQE w_size, which reduces the

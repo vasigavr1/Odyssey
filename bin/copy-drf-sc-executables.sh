@@ -2,9 +2,12 @@
 HOSTS=( "houston" "sanantonio")
 HOSTS=( "houston" "sanantonio" "philly")
 HOSTS=( "houston" "sanantonio" "austin")
+#HOSTS=( "houston" "sanantonio" "austin" "indianapolis")
 #HOSTS=( "austin" "houston" "sanantonio")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" )
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" "baltimore" "chicago" "atlanta" "detroit")
+#HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "chicago" "atlanta" "detroit")
+HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly")
 LOCAL_HOST=`hostname`
 EXECUTABLES=("drf-sc" "run-drf-sc.sh")
 HOME_FOLDER="/home/user/drf-sc/src/drf-sc"

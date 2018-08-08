@@ -9,7 +9,7 @@ void *print_stats(void* no_arg) {
   long long all_clients_cache_hits = 0;
   double total_throughput = 0;
 
-  uint sleep_time = 1;
+  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 15 : 10;
   struct thread_stats *curr_c_stats, *prev_c_stats;
   curr_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
   prev_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
@@ -28,7 +28,7 @@ void *print_stats(void* no_arg) {
     all_clients_cache_hits = 0;
     print_count++;
     if (EXIT_ON_PRINT == 1 && print_count == PRINT_NUM) {
-      if (MEASURE_LATENCY && machine_id == 0) print_latency_stats();
+      if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE) print_latency_stats();
       printf("---------------------------------------\n");
       printf("------------RUN TERMINATED-------------\n");
       printf("---------------------------------------\n");
@@ -85,36 +85,40 @@ void *print_stats(void* no_arg) {
 
     memcpy(prev_c_stats, curr_c_stats, num_threads * (sizeof(struct thread_stats)));
     total_throughput = (all_clients_cache_hits) / seconds;
-
-//    printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
-//    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+  if (SHOW_STATS_LATENCY_STYLE)
     green_printf("%u %.2f \n", print_count, total_throughput);
-//    for (i = 0; i < num_threads; i++) {
-//      cyan_printf("T%d: ", i);
-//      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
-//                    all_stats.cache_hits_per_thread[i],
-//                    all_stats.reads_sent[i],
-//                    all_stats.writes_sent[i],
-//                    all_stats.quorum_reads_per_thread[i]);
-//      yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
-//                    all_stats.ack_batch_size[i],
-//                    all_stats.write_batch_size[i],
-//                    all_stats.r_batch_size[i],
-//                    all_stats.r_rep_batch_size[i]);
-//       yellow_printf(", RtoW %.2f%%, FW %.2f%%",
-//                     100 * all_stats.reads_that_become_writes[i],
-//                     100 * all_stats.failed_rem_write[i]);
-//        printf("\n");
-//    }
-//    printf("\n");
-//    printf("---------------------------------------\n");
-//    if (ENABLE_CACHE_STATS == 1)
-//      print_cache_stats(start, machine_id);
-//    // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
-//    if (DUMP_STATS_2_FILE == 1)
-//      dump_stats_2_file(&all_stats);
-//    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
-//    if (((int)total_throughput) == 0 && ENABLE_INFO_DUMP_ON_STALL) print_for_debug = true;
+  else {
+    printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
+    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+
+    for (i = 0; i < num_threads; i++) {
+      cyan_printf("T%d: ", i);
+      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
+                    all_stats.cache_hits_per_thread[i],
+                    all_stats.reads_sent[i],
+                    all_stats.writes_sent[i],
+                    all_stats.quorum_reads_per_thread[i]);
+      yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
+                    all_stats.ack_batch_size[i],
+                    all_stats.write_batch_size[i],
+                    all_stats.r_batch_size[i],
+                    all_stats.r_rep_batch_size[i]);
+      yellow_printf(", RtoW %.2f%%, FW %.2f%%",
+                    100 * all_stats.reads_that_become_writes[i],
+                    100 * all_stats.failed_rem_write[i]);
+      printf("\n");
+    }
+    printf("\n");
+    printf("---------------------------------------\n");
+    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+  }
+    if (ENABLE_CACHE_STATS == 1)
+      print_cache_stats(start, machine_id);
+    // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
+    if (DUMP_STATS_2_FILE == 1)
+      dump_stats_2_file(&all_stats);
+
+    if (((int)total_throughput) == 0 && ENABLE_INFO_DUMP_ON_STALL) print_for_debug = true;
   }
 
 }
@@ -126,42 +130,38 @@ void print_latency_stats(void){
     int i = 0;
     char filename[128];
     char* path = "../../results/latency";
-    const char * exectype[] = {
-            "BS", //baseline
-            "SC", //Sequential Consistency
-            "LIN", //Linearizability (non stalling)
-            "SS" //Strong Consistency (stalling)
+    const char * workload[] = {
+            "WRITES", //
+            "READS", //
+            "MIXED", //
     };
-
-    sprintf(filename, "%s/latency_stats_%s_%s_a_%d_v_%d_m_%d_c_%d_w_%d_r_%d_C_%d.csv", path,
-            DISABLE_CACHE == 1 ? "BS" : exectype[protocol],
-            LOAD_BALANCE == 1 ? "UNIF" : "SKEW",
-            SKEW_EXPONENT_A,
-            USE_BIG_OBJECTS == 1 ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE): BASE_VALUE_SIZE,
-            MACHINE_NUM, num_threads,
-            WORKERS_PER_MACHINE, WRITE_RATIO,
-            CACHE_BATCH_SIZE);
+  sprintf(filename, "%s/latency_%s_w_%d%s_%s.csv", path,
+            EMULATE_ABD == 1 ? "SC-ABD" : "DRF-SC",
+            WRITE_RATIO / 10, "%",
+            workload[MEASURE_READ_LATENCY]);
 
     latency_stats_fd = fopen(filename, "w");
-    fprintf(latency_stats_fd, "#---------------- Remote Reqs --------------\n");
+    fprintf(latency_stats_fd, "#---------------- ACQUIRES --------------\n");
     for(i = 0; i < LATENCY_BUCKETS; ++i)
-        fprintf(latency_stats_fd, "rr: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.remote_reqs[i]);
-    fprintf(latency_stats_fd, "rr: -1, %d\n",latency_count.remote_reqs[LATENCY_BUCKETS]); //print outliers
+        fprintf(latency_stats_fd, "reads: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.acquires[i]);
+    fprintf(latency_stats_fd, "reads: -1, %d\n", latency_count.acquires[LATENCY_BUCKETS]); //print outliers
+    fprintf(latency_stats_fd, "reads-hl: %d\n", latency_count.max_acq_lat); //print max
 
-    fprintf(latency_stats_fd, "#---------------- Local Reqs ---------------\n");
+    fprintf(latency_stats_fd, "#---------------- RELEASES ---------------\n");
     for(i = 0; i < LATENCY_BUCKETS; ++i)
-        fprintf(latency_stats_fd, "lr: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.local_reqs[i]);
-    fprintf(latency_stats_fd, "lr: -1, %d\n",latency_count.local_reqs[LATENCY_BUCKETS]); //print outliers
+        fprintf(latency_stats_fd, "writes: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.releases[i]);
+    fprintf(latency_stats_fd, "writes: -1, %d\n",latency_count.releases[LATENCY_BUCKETS]); //print outliers
+    fprintf(latency_stats_fd, "writes-hl: %d\n", latency_count.max_rel_lat); //print max
 
-    fprintf(latency_stats_fd, "#---------------- Hot Reads ----------------\n");
-    for(i = 0; i < LATENCY_BUCKETS; ++i)
-        fprintf(latency_stats_fd, "hr: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.hot_reads[i]);
-    fprintf(latency_stats_fd, "hr: -1, %d\n",latency_count.hot_reads[LATENCY_BUCKETS]); //print outliers
-
-    fprintf(latency_stats_fd, "#---------------- Hot Writes ---------------\n");
-    for(i = 0; i < LATENCY_BUCKETS; ++i)
-        fprintf(latency_stats_fd, "hw: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.hot_writes[i]);
-    fprintf(latency_stats_fd, "hw: -1, %d\n",latency_count.hot_writes[LATENCY_BUCKETS]); //print outliers
+//    fprintf(latency_stats_fd, "#---------------- Hot Reads ----------------\n");
+//    for(i = 0; i < LATENCY_BUCKETS; ++i)
+//        fprintf(latency_stats_fd, "hr: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.hot_reads[i]);
+//    fprintf(latency_stats_fd, "hr: -1, %d\n",latency_count.hot_reads[LATENCY_BUCKETS]); //print outliers
+//
+//    fprintf(latency_stats_fd, "#---------------- Hot Writes ---------------\n");
+//    for(i = 0; i < LATENCY_BUCKETS; ++i)
+//        fprintf(latency_stats_fd, "hw: %d, %d\n",i * (MAX_LATENCY / LATENCY_BUCKETS), latency_count.hot_writes[i]);
+//    fprintf(latency_stats_fd, "hw: -1, %d\n",latency_count.hot_writes[LATENCY_BUCKETS]); //print outliers
 
     fclose(latency_stats_fd);
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-#houston-sanantonio-philly-austin-indianapolis-chicago-detroit-baltimore-atlanta
-allIPs=(192.168.5.18 192.168.5.17 192.168.5.19 192.168.5.15 129.215.165.6  129.215.165.3 129.215.165.4 129.215.165.2 129.215.165.1)
+#houston-sanantonio-austin-indianapolis-philly-atlanta-chicago-detroit-baltimore
+allIPs=(192.168.5.18 192.168.5.17 192.168.5.19 192.168.5.16 192.168.5.15 192.168.5.11 192.168.5.13 )
 localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
 
 tmp=$((${#localIP}-1))
@@ -56,15 +56,21 @@ done
 
 
 blue "Removing hugepages"
-shm-rm.sh 1>/dev/null 2>/dev/null
+#shm-rm.sh 1>/dev/null 2>/dev/null
+
+for i in `seq 0 64`; do		# Lossy index and circular log
+	sudo ipcrm -M $i 2>/dev/null
+done
+sudo ipcrm -M 3185	2>/dev/null		# Request region at server
+sudo ipcrm -M 3186	2>/dev/null		# Response region at server
 
 
 blue "Reset server QP registry"
 #sudo killall memcached
 memcached -l 0.0.0.0 1>/dev/null 2>/dev/null &
 sleep 1
-
-blue "Running client and worker threads"
+#
+blue "Running  worker threads"
 sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
 	./drf-sc \
 	--local-ip $localIP \

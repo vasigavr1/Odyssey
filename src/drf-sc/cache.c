@@ -38,7 +38,7 @@ void cache_init(int cache_id, int num_threads) {
 	for(i = 0; i < num_threads; i++)
 		cache_meta_reset(&cache.meta[i]);
 	mica_init(&cache.hash_table, cache_id, CACHE_SOCKET, CACHE_NUM_BKTS, HERD_LOG_CAP);
-	cache_populate_fixed_len(&cache.hash_table, CACHE_NUM_KEYS, HERD_VALUE_SIZE);
+	cache_populate_fixed_len(&cache.hash_table, CACHE_NUM_KEYS, VALUE_SIZE);
 }
 
 
@@ -179,7 +179,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           MOD_ADD(r_push_ptr, PENDING_READS);
           resp[I].type = CACHE_GET_SUCCESS;
         }
-        else if ((*op)[I].opcode == OP_RMW) {
+        else if (ENABLE_RMWS && (*op)[I].opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode < 2) {
@@ -218,8 +218,8 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 		if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
 //			resp[I].val_len = 0;
 //			resp[I].val_ptr = NULL;
-      red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
-                 (*op)[I].key.bkt, kv_ptr[I]->key.bkt ,(*op)[I].key.server, kv_ptr[I]->key.server, (*op)[I].key.tag, kv_ptr[I]->key.tag);
+//      red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
+//                 (*op)[I].key.bkt, kv_ptr[I]->key.bkt ,(*op)[I].key.server, kv_ptr[I]->key.server, (*op)[I].key.tag, kv_ptr[I]->key.tag);
 			resp[I].type = CACHE_MISS;
 		}
 	}
@@ -424,14 +424,17 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           //On receiving the 1st round of an Acquire:
           // If the corresponding bit in the stable vector is set, then let the machine know
           // it lost messages and switch the bit to Transient state
-          bool false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
-          if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
+          bool false_positive = false;
+          if (!EMULATE_ABD) {
+            false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
+            if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
+          }
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, READ, false_positive);
 
         }
-        else if (op->opcode == OP_RMW) {
+        else if (ENABLE_RMWS && op->opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
           uint8_t flag = RMW_ACK_PREPARE;
           uint8_t tmp_value[VALUE_SIZE];
@@ -479,7 +482,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, flag, false_positive);
 
         }
-        else if (op->opcode == CACHE_OP_LIN_PUT) {
+        else if (ENABLE_LIN && op->opcode == CACHE_OP_LIN_PUT) {
           //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           do {
@@ -509,7 +512,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       }
     }
     if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-      red_printf("Cache_miss: bkt %u, server %u, tag %u \n", op->key.bkt, op->key.server, op->key.tag);
+//      red_printf("Cache_miss: bkt %u, server %u, tag %u \n", op->key.bkt, op->key.server, op->key.tag);
       assert(false); // cant have a miss since, it hit in the source's cache
     }
     if (zero_ops) {
@@ -667,7 +670,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 		//printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
 		op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
 		uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
-		memset(op.value, val, (uint8_t) val_len);
+		memset(op.value, val, (uint32_t) val_len);
 //    green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
 		mica_insert_one(kv, (struct mica_op *) &op, &resp);
 	}

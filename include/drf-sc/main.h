@@ -13,27 +13,24 @@
 #define TOTAL_CORES_ (TOTAL_CORES - 1)
 #define SOCKET_NUM 2
 #define PHYSICAL_CORES_PER_SOCKET 10
-#define PHYSICAL_CORE_DISTANCE 4 // distance between two physical cores of the same socket
-#define VIRTUAL_CORES_PER_SOCKET 20
-#define WORKER_HYPERTHREADING 1
+#define LOGICAL_CORES_PER_SOCKET 20
+#define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
+
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 2
+#define WORKERS_PER_MACHINE 37
+#define MACHINE_NUM 5
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
 #define CACHE_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
-
-#define ENABLE_MULTIPLE_SESSIONS 1
-
 #define SESSION_BYTES 3 // session ids must fit in 3 bytes i.e.
 
 
 
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 0
+#define EXIT_ON_PRINT 1
 #define PRINT_NUM 4
 #define DUMP_STATS_2_FILE 0
 
@@ -42,10 +39,9 @@
 -----------------DEBUGGING-------------------------
 --------------------------------------------------*/
 
-#define MEASURE_LATENCY 0
-#define REMOTE_LATENCY_MARK 100 // mark a remote request for measurement by attaching this to the imm_data of the wr
+
 #define USE_A_SINGLE_KEY 0
-#define DISABLE_HYPERTHREADING 0 // do not shcedule two threads on the same core
+#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
 #define DEFAULT_SL 0 //default service level
 
 
@@ -85,26 +81,43 @@
  * --------------------------------------------------------------------------------*/
 
 // CORE CONFIGURATION
-#define SESSIONS_PER_THREAD 32
+#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 10
+#define MEASURE_LATENCY 1
+#define LATENCY_MACHINE 0
+#define LATENCY_THREAD 15
+#define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define ENABLE_LIN 0
-#define R_CREDITS 3
-#define MAX_R_COALESCE 20
-#define W_CREDITS 6
+#define R_CREDITS 2
+#define MAX_R_COALESCE 40
+#define W_CREDITS 2
 #define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT M_1
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 1
+#define ENABLE_STAT_COUNTING 0
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH 200
-#define SC_RATIO 100// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES 1
-#define ENABLE_ACQUIRES 1
-#define ENABLE_RMWS 1
+#define MAX_OP_BATCH_ 200
+#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES_ 1
+#define ENABLE_ACQUIRES_ 1
+#define ENABLE_RMWS_ 0
+#define EMULATE_ABD 1 // Do not enforce releases to gather all credits or start a new message
+
+
+// ABD EMULATION
+#define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
+#define SC_RATIO (EMULATE_ABD == 1 ? 1000 : (SC_RATIO_))
+#define ENABLE_RELEASES (EMULATE_ABD == 1 ? 1 : (ENABLE_RELEASES_))
+#define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
+#define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
+
 #define ENABLE_NO_CONFLICT_RMW 1
+#define SHOW_STATS_LATENCY_STYLE 1
+
 
 
 #define QP_NUM 4
@@ -233,15 +246,15 @@
 // DEBUG
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
-#define DEBUG_READS 1
+#define DEBUG_READS 0
 #define DEBUG_TS 0
 #define CHECK_DBG_COUNTERS 0
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_RMW 1
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define DEBUG_RMW 0
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -312,14 +325,14 @@ struct remote_qp {
 #define SENT_RELEASE 5 // Release or second round of acquire!!
 #define SENT_BIT_VECTOR 6
 #define READY_PUT 7
-#define READY_RELEASE 8
+#define READY_RELEASE 8 // Release or second round of acquire!!
 #define READY_BIT_VECTOR 9
 
 // Possible write sources
 #define FROM_TRACE 0
 #define LIN_WRITE 1
 #define FROM_READ 2
-#define FROM_WRITE 3 //the second reound of a release
+#define FROM_WRITE 3 //the second round of a release
 
 // Possible flag values when inserting a read reply
 #define READ 0
@@ -701,12 +714,36 @@ struct thread_params {
 	int id;
 };
 
+typedef enum {
+  NO_REQ,
+  RELEASE,
+  ACQUIRE,
+  HOT_WRITE_REQ_BEFORE_SAVING_KEY,
+  HOT_WRITE_REQ,
+  HOT_READ_REQ,
+  LOCAL_REQ,
+  REMOTE_REQ
+} req_type;
+
+
+struct latency_flags {
+  req_type measured_req_flag;
+  uint32_t measured_sess_id;
+  struct cache_key* key_to_measure;
+  struct timespec start;
+};
+
+
 struct latency_counters{
-	uint32_t* remote_reqs;
-	uint32_t* local_reqs;
+	uint32_t* acquires;
+	uint32_t* releases;
 	uint32_t* hot_reads;
 	uint32_t* hot_writes;
 	long long total_measurements;
+  uint32_t max_acq_lat;
+  uint32_t max_rel_lat;
+	uint32_t max_read_lat;
+	uint32_t max_write_lat;
 };
 
 

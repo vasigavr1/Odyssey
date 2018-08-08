@@ -336,19 +336,28 @@ int spawn_stats_thread() {
 int pin_thread(int t_id) {
   int core;
   core = PHYSICAL_CORE_DISTANCE * t_id;
-  if(core > TOTAL_CORES_) { //if you run out of cores in numa node 0
+  if(core >= LOGICAL_CORES_PER_SOCKET) { //if you run out of cores in numa node 0
     if (WORKER_HYPERTHREADING) { //use hyperthreading rather than go to the other socket
-      core = PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET) + 2;
-      if (core > TOTAL_CORES_) { // now go to the other socket
-        core = PHYSICAL_CORE_DISTANCE * (t_id - 20) + 1 ;
-        if (core > TOTAL_CORES_) { // again do hyperthreading on the second socket
-          core = PHYSICAL_CORE_DISTANCE * (t_id - 30) + 3;
+      core = LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET);
+      if (core >= TOTAL_CORES_) { // now go to the other socket
+        core = PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET) + 1 ;
+        if (core >= LOGICAL_CORES_PER_SOCKET) { // again do hyperthreading on the second socket
+          core = LOGICAL_CORES_PER_SOCKET + 1 +
+                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
         }
       }
     }
     else { //spawn clients to numa node 1
-        core = (t_id - PHYSICAL_CORES_PER_SOCKET) * PHYSICAL_CORE_DISTANCE + 1;
+      core = PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET) + 1;
+      if (core >= LOGICAL_CORES_PER_SOCKET) { // start hyperthreading
+        core = LOGICAL_CORES_PER_SOCKET + (PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET));
+        if (core >= TOTAL_CORES_) {
+          core = LOGICAL_CORES_PER_SOCKET + 1 +
+                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
+        }
+      }
     }
+
   }
   assert(core >= 0 && core < TOTAL_CORES);
   return core;

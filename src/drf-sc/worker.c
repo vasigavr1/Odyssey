@@ -125,6 +125,7 @@ void *worker(void *arg)
   set_up_q_info(&q_info);
 
 
+
 	// TRACE
 	struct trace_command_uni *trace;
 	trace_init((void **)&trace, t_id);
@@ -132,10 +133,13 @@ void *worker(void *arg)
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
 	---------------------------------------------------------------------------*/
+  struct latency_flags latency_info = {
+    .measured_req_flag = NO_REQ,
+    .measured_sess_id = 0,
+  };
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
   uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0};
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
-	struct timespec start, end;
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
 
@@ -201,14 +205,14 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     // Either commit a read or convert it into a write
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      commit_reads(p_ops, t_id);
+      commit_reads(p_ops, &latency_info, t_id);
 
     /* ---------------------------------------------------------------------------
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
    // if (WRITE_RATIO > 0)
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
-              ack_recv_wc,  ack_recv_info, t_id, waiting_dbg_counter, &outstanding_writes);
+              ack_recv_wc,  ack_recv_info, &latency_info, t_id, waiting_dbg_counter, &outstanding_writes);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------
@@ -217,7 +221,7 @@ void *worker(void *arg)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
 		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, &op_i, trace, ops,
-                                           p_ops, resp, q_info);
+                                           p_ops, resp, q_info, &latency_info);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

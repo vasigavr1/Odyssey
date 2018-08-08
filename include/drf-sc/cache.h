@@ -12,10 +12,10 @@
 #include "main.h"
 #include "mica.h"
 #define CACHE_DEBUG 0
-#define CACHE_NUM_BKTS (2 *1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
-#define CACHE_NUM_KEYS (250 * 1000)
+#define CACHE_NUM_BKTS (2 * 1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
+#define CACHE_NUM_KEYS (1000 * 1000)
 
-#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+
 #define CACHE_BATCH_SIZE 500
 
 //Cache States
@@ -147,47 +147,6 @@ struct cache {
 	struct extended_cache_meta_stats aggregated_meta;
 	struct cache_meta_stats* meta;
 };
-
-typedef enum {
-	NO_REQ,
-	HOT_WRITE_REQ_BEFORE_SAVING_KEY,
-	HOT_WRITE_REQ,
-	HOT_READ_REQ,
-	LOCAL_REQ,
-	REMOTE_REQ
-} req_type;
-
-
-struct latency_flags {
-	req_type measured_req_flag;
-	uint16_t last_measured_op_i;
-	struct cache_key* key_to_measure;
-};
-
-//Add latency to histogram (in microseconds)
-static inline void bookkeep_latency(int useconds, req_type rt){
-	uint32_t** latency_counter;
-	switch (rt){
-		case REMOTE_REQ:
-			latency_counter = &latency_count.remote_reqs;
-			break;
-		case LOCAL_REQ:
-			latency_counter = &latency_count.local_reqs;
-			break;
-		case HOT_READ_REQ:
-			latency_counter = &latency_count.hot_reads;
-			break;
-		case HOT_WRITE_REQ:
-			latency_counter = &latency_count.hot_writes;
-			break;
-		default: assert(0);
-	}
-	latency_count.total_measurements++;
-	if (useconds > MAX_LATENCY)
-		(*latency_counter)[MAX_LATENCY]++;
-	else
-		(*latency_counter)[useconds / (MAX_LATENCY / LATENCY_BUCKETS)]++;
-}
 
 
 void str_to_binary(uint8_t* value, char* str, int size);

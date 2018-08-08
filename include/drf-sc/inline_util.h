@@ -73,6 +73,43 @@ static inline bool trigger_measurement(uint16_t local_client_id)
 		   local_client_id == 0 && machine_id == MACHINE_NUM -1;
 }
 
+//Add latency to histogram (in microseconds)
+static inline void bookkeep_latency(int useconds, req_type rt){
+  uint32_t** latency_counter;
+  switch (rt){
+    case ACQUIRE:
+      latency_counter = &latency_count.acquires;
+      if (useconds > latency_count.max_acq_lat) {
+        latency_count.max_acq_lat = (uint32_t) useconds;
+//        green_printf("Found max acq latency: %u/%d \n",
+//                     latency_count.max_acq_lat, useconds);
+      }
+      break;
+    case RELEASE:
+      latency_counter = &latency_count.releases;
+      if (useconds > latency_count.max_rel_lat) {
+        latency_count.max_rel_lat = (uint32_t) useconds;
+//        yellow_printf("Found max rel latency: %u/%d \n", latency_count.max_rel_lat, useconds);
+      }
+      break;
+    case HOT_READ_REQ:
+      latency_counter = &latency_count.hot_reads;
+      if (useconds > latency_count.max_read_lat) latency_count.max_read_lat = (uint32_t) useconds;
+      break;
+    case HOT_WRITE_REQ:
+      latency_counter = &latency_count.hot_writes;
+      if (useconds > latency_count.max_write_lat) latency_count.max_write_lat = (uint32_t) useconds;
+      break;
+    default: assert(0);
+  }
+  latency_count.total_measurements++;
+
+  if (useconds > MAX_LATENCY)
+    (*latency_counter)[LATENCY_BUCKETS]++;
+  else
+    (*latency_counter)[useconds / (MAX_LATENCY / LATENCY_BUCKETS)]++;
+}
+
 // Poll for the local reqs completion to measure a local req's latency
 static inline void poll_local_req_for_latency_measurement(struct latency_flags* latency_info, struct timespec* start,
 														  struct local_latency* local_measure)
@@ -96,25 +133,52 @@ static inline void poll_local_req_for_latency_measurement(struct latency_flags* 
 		}
 }
 
-static inline void report_remote_latency(struct latency_flags* latency_info, uint16_t prev_rem_req_i,
-										 struct ibv_wc* wc, struct timespec* start)
+
+//
+static inline void report_latency(struct latency_flags* latency_info)
 {
-	uint16_t i;
-	for (i = 0; i < prev_rem_req_i; i++) {
-		//	 printf("Looking for the req\n" );
-		if (wc[i].imm_data == REMOTE_LATENCY_MARK) {
-			struct timespec end;
-			clock_gettime(CLOCK_MONOTONIC, &end);
-			int useconds = ((end.tv_sec - start->tv_sec) * 1000000) +
-						   ((end.tv_nsec - start->tv_nsec) / 1000);  //(end.tv_nsec - start->tv_nsec) / 1000;
-			if (ENABLE_ASSERTIONS) assert(useconds > 0);
-			//		printf("Latency of a Remote r_rep %u us\n", useconds);
-			bookkeep_latency(useconds, REMOTE_REQ);
-			(latency_info->measured_req_flag) = NO_REQ;
-			break;
-		}
-	}
+  struct timespec end;
+  clock_gettime(CLOCK_MONOTONIC, &end);
+  int useconds = ((end.tv_sec - latency_info->start.tv_sec) * MILLION) +
+                 ((end.tv_nsec - latency_info->start.tv_nsec) / 1000);  //(end.tv_nsec - start->tv_nsec) / 1000;
+  if (ENABLE_ASSERTIONS) assert(useconds > 0);
+  //if (useconds > 1000)
+//    printf("Latency of a req of type %s is %u us, sess %u , thread reqs/ measured reqs: %ld \n",
+//           latency_info->measured_req_flag == RELEASE ? "RELEASE" : "ACQUIRE",
+//           useconds, latency_info->measured_sess_id,
+//           t_stats[0].cache_hits_per_thread / (latency_count.total_measurements + 1));
+  bookkeep_latency(useconds, latency_info->measured_req_flag);
+  (latency_info->measured_req_flag) = NO_REQ;
 }
+
+
+// Necessary bookkeeping to initiate the latency measurement
+static inline void start_measurement(struct latency_flags* latency_info, uint32_t sess_id, uint16_t t_id,
+                                     uint8_t opcode) {
+  uint8_t compare_op = MEASURE_READ_LATENCY ? OP_ACQUIRE : OP_RELEASE ;
+  if ((latency_info->measured_req_flag) == NO_REQ) {
+    if (t_stats[t_id].cache_hits_per_thread > M_1 &&
+      (MEASURE_READ_LATENCY == 2 || opcode == compare_op) &&
+      t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE) {
+      //printf("tag a key for latency measurement \n");
+      //if (opcode == CACHE_OP_GET) latency_info->measured_req_flag = HOT_READ_REQ;
+     // else if (opcode == CACHE_OP_PUT) {
+      //  latency_info->measured_req_flag = HOT_WRITE_REQ;
+      //}
+      //else
+      if (opcode == OP_RELEASE)
+        latency_info->measured_req_flag = RELEASE;
+      else if (opcode == OP_ACQUIRE) latency_info->measured_req_flag = ACQUIRE;
+      else if (ENABLE_ASSERTIONS) assert(false);
+      //green_printf("Measuring a req %llu, opcode %d, flag %d op_i %d \n",
+      //					 t_stats[t_id].cache_hits_per_thread, opcode, latency_info->measured_req_flag, latency_info->measured_sess_id);
+      latency_info->measured_sess_id = sess_id;
+      clock_gettime(CLOCK_MONOTONIC, &latency_info->start);
+      if (ENABLE_ASSERTIONS) assert(latency_info->measured_req_flag != NO_REQ);
+    }
+  }
+}
+
 
 static inline void print_thread_stats(uint16_t t_id) {
 
@@ -712,7 +776,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   if (source == FROM_TRACE) {
     // if the write is a release put it on a new message to
     // guarantee it is not batched with writes from the same session
-    if (write->opcode == OP_RELEASE && inside_w_ptr > 0) {
+    if (write->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
       MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
       w_mes_ptr = p_ops->w_fifo->push_ptr;
       w_mes[w_mes_ptr].w_num = 0;
@@ -987,7 +1051,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
 static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id, uint16_t *old_op_i,
                                                  struct trace_command_uni *trace, struct cache_op *ops,
                                                  struct pending_ops *p_ops, struct mica_resp *resp,
-                                                 struct quorum_info *q_info)
+                                                 struct quorum_info *q_info, struct latency_flags *latency_info)
 {
   uint16_t i = 0;
   uint16_t writes_num = 0, reads_num = 0;
@@ -1025,6 +1089,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       p_ops->session_has_pending_op[working_session] = true;
       memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
     }
+    if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
     //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
     while (p_ops->session_has_pending_op[working_session]) {
       working_session++;
@@ -1045,6 +1110,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   }
 
   t_stats[t_id].cache_hits_per_thread += (op_i - *old_op_i);
+  if (ENABLE_ASSERTIONS && (!ENABLE_RMWS)) assert(*old_op_i == 0);
 
   cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
   //cyan_printf("thread %d  adds %d ops\n", g_id, op_i);
@@ -1052,15 +1118,22 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   for (i = 0; i < op_i; i++) {
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
-      //yellow_printf("Cache_miss, session %d \n", *(uint32_t *) &ops[i]);
-      green_printf("Cache_miss: bkt %u, server %u, tag %u \n", ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
-      if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE) {
-        p_ops->session_has_pending_op[*(uint32_t *) &ops[i]] = false;
+      //green_printf("Cache_miss: bkt %u, server %u, tag %u \n", ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
+      if (ops[i].opcode == OP_RELEASE || ops[i].opcode == OP_ACQUIRE) {
+        uint32_t session_id = 0;
+        memcpy(&session_id, &ops[i], SESSION_BYTES);
+        //yellow_printf("Cache_miss, session %u \n", session_id);
+        p_ops->session_has_pending_op[session_id] = false;
         p_ops->all_sessions_stalled = false;
+        t_stats[t_id].cache_hits_per_thread--;
+        if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
+            latency_info->measured_req_flag != NO_REQ &&
+            session_id == latency_info->measured_sess_id)
+          latency_info->measured_req_flag = NO_REQ;
       }
     }
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) ;
-    else if (ops[i].opcode == OP_RMW) {
+    else if (ENABLE_RMWS && ops[i].opcode == OP_RMW) {
       insert_rmw(p_ops, &tmp_op_i, i, ops, resp[i], q_info, t_id);
     }
     else if (ops[i].opcode == CACHE_OP_PUT || ops[i].opcode == OP_RELEASE)
@@ -1289,20 +1362,23 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
     }
   }
   // Check if the release needs to send the vector bit to get quoromized
-  if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vec_state == DOWN_STABLE)) {
-    uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
-    create_bit_vector(bit_vector_to_send, t_id);
-    if (*(uint16_t*)bit_vector_to_send > 0) {
-      // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
-      memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value, SEND_CONF_VEC_SIZE);
-      memcpy(w_mes->write[0].value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
-      for (i = 0; i < MACHINE_NUM; i++)
-        if (send_config_bit_vector[i] != UP_STABLE)
-          cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
-      if (DEBUG_QUORUM)
-        green_printf("Thread %u Sending a release with a vector bit %u \n", t_id, *(uint16_t *) bit_vector_to_send);
-      w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
-      p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+  if (!EMULATE_ABD) {
+    if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vec_state == DOWN_STABLE)) {
+      uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
+      create_bit_vector(bit_vector_to_send, t_id);
+      if (*(uint16_t *) bit_vector_to_send > 0) {
+        // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
+        memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value,
+               SEND_CONF_VEC_SIZE);
+        memcpy(w_mes->write[0].value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
+        for (i = 0; i < MACHINE_NUM; i++)
+          if (send_config_bit_vector[i] != UP_STABLE)
+            cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
+        if (DEBUG_QUORUM)
+          green_printf("Thread %u Sending a release with a vector bit %u \n", t_id, *(uint16_t *) bit_vector_to_send);
+        w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
+        p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+      }
     }
   }
 
@@ -1364,7 +1440,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
   bool is_release;
   if (p_ops->w_fifo->bcast_size > 0) {
-    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE;
+    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE && (!EMULATE_ABD);
     uint16_t min_credits = is_release ? (uint16_t) W_CREDITS : (uint16_t)1;
     if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
                              &available_credits, r_send_wr, w_send_wr, min_credits, credit_debug_cnt, t_id))
@@ -1377,7 +1453,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
 
 
   while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
-    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE;
+    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE && (!EMULATE_ABD);
     if (is_release) {
       if (mes_sent > 0 || available_credits < W_CREDITS) {
         break;
@@ -1664,8 +1740,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
       }
-
-      handle_configuration_on_receiving_rel_acq(write, w_mes,t_id);
+      if (!EMULATE_ABD) handle_configuration_on_receiving_rel_acq(write, w_mes,t_id);
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
     }
@@ -1796,6 +1871,7 @@ static inline void forge_r_rep_wr(uint32_t r_rep_i, uint16_t mes_i, struct pendi
                  t_id, coalesce_num, send_sgl[mes_i].length,
                  *(uint64_t*)r_rep_mes->l_id, r_rep_fifo->rem_m_id[r_rep_i]);
   if (ENABLE_ASSERTIONS) {
+    assert(send_sgl[mes_i].length < MTU);
     assert(r_rep_fifo->rem_m_id[r_rep_i] < MACHINE_NUM);
     assert(coalesce_num > 0);
   }
@@ -2066,7 +2142,8 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   }
 }
 
-static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
+static inline void commit_reads(struct pending_ops *p_ops,
+                                struct latency_flags * latency_info, uint16_t t_id)
 {
   uint32_t pull_ptr = p_ops->r_pull_ptr;
   uint16_t writes_for_cache = 0;
@@ -2092,6 +2169,10 @@ static inline void commit_reads(struct pending_ops *p_ops, uint16_t t_id)
       else if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE) {
         p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
         p_ops->all_sessions_stalled = false;
+        if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
+          latency_info->measured_req_flag == ACQUIRE &&
+          p_ops->r_session_id[pull_ptr] == latency_info->measured_sess_id)
+          report_latency(latency_info);
       }
       else if (ENABLE_ASSERTIONS) assert(false);
 
@@ -2237,18 +2318,21 @@ static inline void wait_for_the_entire_ack(volatile struct ack_message *ack,
 }
 
 // Remove writes that have seen all acks
-static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
+static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags *latency_info,
+                                 uint16_t t_id)
 {
   while(p_ops->w_state[p_ops->w_pull_ptr] >= READY_PUT) {
+    if (ENABLE_ASSERTIONS && EMULATE_ABD)
+      assert(p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE);
     //if (DEBUG_ACKS)
     //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
     //               g_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
-    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) {
+    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) { // Release or second round of acquire!!
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
     }
-    if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR)) {
+    if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR && (!EMULATE_ABD))) {
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
       uint32_t w_size = p_ops->w_size;
       // take care to handle the case where the w_size == PENDING_WRITES
@@ -2298,7 +2382,7 @@ static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
                  p_ops->w_push_ptr, p_ops->w_size);
       red_printf("W state = %u at ptr  %u, size: %u \n",
                  p_ops->w_state[p_ops->w_pull_ptr], p_ops->w_pull_ptr, p_ops->w_size);
-      assert(false);
+      //assert(false);
     };
   }
 }
@@ -2306,12 +2390,13 @@ static inline void remove_writes(struct pending_ops *p_ops, uint16_t t_id)
 
 // Worker polls for acks
 static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t *pull_ptr,
-                                 struct pending_ops *p_ops,
-                                 uint16_t credits[][MACHINE_NUM],
-                                 struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
-                                 struct recv_info *ack_recv_info,
-                                 uint16_t t_id, uint32_t *dbg_counter,
-                                 uint32_t *outstanding_writes)
+                             struct pending_ops *p_ops,
+                             uint16_t credits[][MACHINE_NUM],
+                             struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
+                             struct recv_info *ack_recv_info,
+                             struct latency_flags *latency_info,
+                             uint16_t t_id, uint32_t *dbg_counter,
+                             uint32_t *outstanding_writes)
 {
   uint32_t index = *pull_ptr;
   uint32_t polled_messages = 0;
@@ -2386,7 +2471,13 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
           convert_transient_to_stable_send_conf_vec(t_id);
         }
         else if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
-        else p_ops->w_state[ack_ptr] = READY_RELEASE;
+        else {
+          p_ops->w_state[ack_ptr] = READY_RELEASE;
+          if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
+              latency_info->measured_req_flag != NO_REQ &&
+              p_ops->w_session_id[ack_ptr] == latency_info->measured_sess_id)
+            report_latency(latency_info);
+        }
       }
       MOD_ADD(ack_ptr, PENDING_WRITES);
     }
@@ -2397,9 +2488,8 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
   } // while
 
   *pull_ptr = index;
-  // Poll for the completion of the receives
   if (polled_messages > 0) {
-    remove_writes(p_ops, t_id);
+    remove_writes(p_ops, latency_info, t_id);
     if (ENABLE_ASSERTIONS) dbg_counter[ACK_QP_ID] = 0;
   }
   else {
