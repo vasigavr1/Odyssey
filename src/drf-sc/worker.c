@@ -45,7 +45,6 @@ void *worker(void *arg)
 
   // Initialize the RMW struct, before anyone tries to touch it
   if (t_id == 0) set_up_rmw_struct();
-
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/

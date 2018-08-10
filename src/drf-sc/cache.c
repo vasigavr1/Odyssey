@@ -49,7 +49,7 @@ void cache_init(int cache_id, int num_threads) {
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op **op, struct mica_resp *resp,
+inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op, struct mica_resp *resp,
                                  struct pending_ops *p_ops)
 {
 	int I, j;	/* I is batch index */
@@ -63,7 +63,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 #if CACHE_DEBUG == 2
 	for(I = 0; I < op_num; I++)
-		mica_print_op(&(*op)[I]);
+		mica_print_op(&op[I]);
 #endif
 
 	unsigned int bkt[CACHE_BATCH_SIZE];
@@ -76,10 +76,10 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 	 * for both GETs and PUTs.
 	 */
 	for(I = 0; I < op_num; I++) {
-		bkt[I] = (*op)[I].key.bkt & cache.hash_table.bkt_mask;
+		bkt[I] = op[I].key.bkt & cache.hash_table.bkt_mask;
 		bkt_ptr[I] = &cache.hash_table.ht_index[bkt[I]];
 		__builtin_prefetch(bkt_ptr[I], 0, 0);
-		tag[I] = (*op)[I].key.tag;
+		tag[I] = op[I].key.tag;
 
 		key_in_store[I] = 0;
 		kv_ptr[I] = NULL;
@@ -120,12 +120,12 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 			/* We had a tag match earlier. Now compare log entry. */
 			long long *key_ptr_log = (long long *) kv_ptr[I];
-			long long *key_ptr_req = (long long *) &(*op)[I];
+			long long *key_ptr_req = (long long *) &op[I];
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
 				key_in_store[I] = 1;
 
-				if ((*op)[I].opcode == CACHE_OP_GET || (*op)[I].opcode == OP_ACQUIRE) {
+				if (op[I].opcode == CACHE_OP_GET || op[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
 					do {
@@ -141,25 +141,25 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr[I]->value, VALUE_SIZE);
 					} while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
-          if (*(uint16_t *)prev_meta.epoch_id < epoch_id || (*op)[I].opcode == OP_ACQUIRE) {
-            p_ops->read_info[r_push_ptr].opcode = (*op)[I].opcode;
+          if (*(uint16_t *)prev_meta.epoch_id < epoch_id || op[I].opcode == OP_ACQUIRE) {
+            p_ops->read_info[r_push_ptr].opcode = op[I].opcode;
             MOD_ADD(r_push_ptr, PENDING_READS);
             resp[I].type = CACHE_GET_SUCCESS;
-            if (ENABLE_STAT_COUNTING && (*op)[I].opcode == CACHE_OP_GET) {
+            if (ENABLE_STAT_COUNTING && op[I].opcode == CACHE_OP_GET) {
               t_stats[t_id].quorum_reads++;
             }
           }
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
-          memcpy((void *)&(*op)[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
+          memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
 				}
-        else if ((*op)[I].opcode == CACHE_OP_PUT || (*op)[I].opcode == OP_RELEASE) {
-          if (ENABLE_ASSERTIONS) assert((*op)[I].val_len == kv_ptr[I]->val_len);
+        else if (op[I].opcode == CACHE_OP_PUT || op[I].opcode == OP_RELEASE) {
+          if (ENABLE_ASSERTIONS) assert(op[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
-          memcpy(kv_ptr[I]->value, (*op)[I].value, VALUE_SIZE);
-          optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *) &(*op)[I].key.meta.version);
+          memcpy(kv_ptr[I]->value, op[I].value, VALUE_SIZE);
+          optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *) &op[I].key.meta.version);
           resp[I].type = CACHE_PUT_SUCCESS;
 				}
-        else if ((*op)[I].opcode == CACHE_OP_LIN_PUT) {
+        else if (op[I].opcode == CACHE_OP_LIN_PUT) {
           //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           do {
@@ -173,28 +173,28 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               }
             }
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
-          (*op)[I].key.meta.m_id = (uint8_t) machine_id;
-          (*op)[I].key.meta.version = prev_meta.version;
+          op[I].key.meta.m_id = (uint8_t) machine_id;
+          op[I].key.meta.version = prev_meta.version;
           p_ops->read_info[r_push_ptr].opcode = CACHE_OP_LIN_PUT;
           MOD_ADD(r_push_ptr, PENDING_READS);
           resp[I].type = CACHE_GET_SUCCESS;
         }
-        else if (ENABLE_RMWS && (*op)[I].opcode == OP_RMW) {
+        else if (ENABLE_RMWS && op[I].opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
           optik_lock(&kv_ptr[I]->key.meta);
-          if (kv_ptr[I]->opcode < 2) {
-            // they key has no space, check if a new RMW is allowed subject to per machine limitations
+          if (kv_ptr[I]->opcode < RMW_KVS_OPC_OFFSET) {
+            // the key has no entry, check if a new RMW is allowed subject to per-machine limitations
             if (incr_local_rmw_counter()) {
               uint16_t index = 0;
               struct ts_tuple ts;
               // pass the old ts
               *(uint32_t *)ts.version = kv_ptr[I]->key.meta.version - 1;
               ts.m_id = kv_ptr[I]->key.meta.m_id;
-              struct key *key = (struct key*) (((void*) &(*op)[I]) + sizeof(cache_meta));
-              if (grab_RMW_entry(key, &ts, PROPOSED, (*op)[I].opcode,
+              struct key *key = (struct key*) (((void*) &op[I]) + sizeof(cache_meta));
+              if (grab_RMW_entry(key, &ts, PROPOSED, op[I].opcode,
                                  (uint8_t)machine_id, &index, rmw_l_id, t_id)) {
                 assert(index < 254);
-                kv_ptr[I]->opcode = (uint8_t) (index + 2);
+                kv_ptr[I]->opcode = (uint8_t) (index + RMW_KVS_OPC_OFFSET);
                 resp[I].type = RMW_SUCCESS;
                 rmw_l_id++;
                 if (DEBUG_RMW) green_printf("Worker %u got entry %u for its RMW, new KVS opcode %u \n",
@@ -209,7 +209,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
-        red_printf("wrong Opcode in cache: %d, req %d \n", (*op)[I].opcode, I);
+        red_printf("wrong Opcode in cache: %d, req %d \n", op[I].opcode, I);
         assert(0);
 				}
 			}
@@ -219,7 +219,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 //			resp[I].val_len = 0;
 //			resp[I].val_ptr = NULL;
 //      red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
-//                 (*op)[I].key.bkt, kv_ptr[I]->key.bkt ,(*op)[I].key.server, kv_ptr[I]->key.server, (*op)[I].key.tag, kv_ptr[I]->key.tag);
+//                 op[I].key.bkt, kv_ptr[I]->key.bkt ,op[I].key.server, kv_ptr[I]->key.server, op[I].key.tag, kv_ptr[I]->key.tag);
 			resp[I].type = CACHE_MISS;
 		}
 	}
@@ -435,7 +435,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
-          if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
+          if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW on op %u\n", t_id, I);
           uint8_t flag = RMW_ACK_PREPARE;
           uint8_t tmp_value[VALUE_SIZE];
           struct ts_tuple rep_ts;
@@ -446,14 +446,14 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           tmp_ts.m_id = kv_ptr[I]->key.meta.m_id;
           if (compare_ts(&tmp_ts, (struct ts_tuple *)&op->key.meta.m_id) != GREATER) {
             // if no Entry exists
-            if (kv_ptr[I]->opcode < 2) {
+            if (kv_ptr[I]->opcode < RMW_KVS_OPC_OFFSET) {
               assert(rmw.size < RMW_ENTRIES_NUM);
               uint16_t index = 0;
               struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
               if (grab_RMW_entry(key, (struct ts_tuple *)&op->key.meta.m_id, PROPOSED, op->opcode,
                                  p_ops->ptrs_to_r_headers[I]->m_id, &index, rmw_l_id, t_id)) {
                 assert(index < 254);
-                kv_ptr[I]->opcode = (uint8_t) (index + 2);
+                kv_ptr[I]->opcode = (uint8_t) (index + RMW_KVS_OPC_OFFSET);
                 if (DEBUG_RMW)
                   green_printf("Worker %u got entry %u for its RMW, new opcode %u \n",
                                t_id, index, kv_ptr[I]->opcode);
@@ -461,7 +461,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                 assert(false);
             }
             else { // Entry already exists
-              uint16_t index = (uint16_t) (kv_ptr[I]->opcode - 2);
+              uint16_t index = (uint16_t) (kv_ptr[I]->opcode - RMW_KVS_OPC_OFFSET);
               flag = prepare_snoops_entry(op, index, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id);
             }
           }

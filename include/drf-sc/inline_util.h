@@ -11,6 +11,15 @@
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
 ---------------------------------------------------------------------------*/
+static inline void my_assert(bool cond, const char *message)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (cond) {
+      red_printf("%s\n", message);
+      exit(0);
+    }
+  }
+}
 
 // swap 2 pointerss
 static inline void swap_pointers(void** ptr_1, void** ptr_2)
@@ -376,6 +385,36 @@ static inline void print_q_info(struct quorum_info *q_info)
                 q_info->first_active_rm_id, q_info->last_active_rm_id);
 }
 
+// Increment the per-request counters
+static inline void increment_per_req_counters(uint8_t opcode, uint16_t t_id)
+{
+  if (ENABLE_STAT_COUNTING) {
+    if (opcode == CACHE_OP_PUT) t_stats[t_id].writes_per_thread++;
+    else if (opcode == CACHE_OP_GET) t_stats[t_id].reads_per_thread++;
+    else if (opcode == OP_ACQUIRE) t_stats[t_id].acquires_per_thread++;
+    else if (opcode == OP_RELEASE) t_stats[t_id].releases_per_thread++;
+  }
+}
+
+// In case of a miss in the KVS clean up the op, sessions and what not
+static inline void clean_up_on_KVS_miss(struct cache_op *op, struct pending_ops *p_ops,
+                                        struct latency_flags *latency_info, uint16_t t_id)
+{
+  if (op->opcode == OP_RELEASE || op->opcode == OP_ACQUIRE) {
+    uint32_t session_id = 0;
+    memcpy(&session_id, op, SESSION_BYTES);
+    //yellow_printf("Cache_miss, session %u \n", session_id);
+    p_ops->session_has_pending_op[session_id] = false;
+    p_ops->all_sessions_stalled = false;
+    t_stats[t_id].cache_hits_per_thread--;
+    if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
+        latency_info->measured_req_flag != NO_REQ &&
+        session_id == latency_info->measured_sess_id)
+      latency_info->measured_req_flag = NO_REQ;
+  }
+}
+
+
 // Grab an entry of the RMW- non blocking,
 // call it only if you have the lock of the KVS
 // the ts_tuple should be the old ts
@@ -432,10 +471,8 @@ static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint16_t pos, 
 
   // If entry is in Accepted state you typically send back value and ts
   if (entry->state == ACCEPTED) {
-    if (ENABLE_ASSERTIONS) {
-      if (compare_ts(&new_ts, &entry->new_ts) == EQUAL)
-        red_printf("Received a proposal with same TS an already accepted proposal \n");
-    }
+    my_assert(compare_ts(&new_ts, &entry->new_ts) == EQUAL,
+              "Received a proposal with same TS an already accepted proposal");
     // check the RMW_ID to make sure it's not a stuck RMW
     if (entry->rmw_id.g_id == t_id && entry->rmw_id.id == l_id) {
       red_printf("Received a proposal with same RMW id an already accepted proposal \n");
@@ -456,10 +493,7 @@ static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint16_t pos, 
         break;
       case EQUAL:
         return_val = RMW_ACK_PREPARE;
-        if (ENABLE_ASSERTIONS) {
-          //assert(false);
-          red_printf("Received a proposal with same TS an already acked proposal \n");
-        }
+        my_assert(false, "Received a proposal with same TS an already proposed proposal");
         break;
       case SMALLER:
         return_val = RMW_NACK_PREPARE;
@@ -536,12 +570,12 @@ static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fif
 // Check if help needs to be triggered
 static inline bool trigger_help(struct prep_entry *entry, struct mica_resp resp, struct quorum_info *q_info)
 {
-  if (ENABLE_ASSERTIONS) assert (resp.rmw_entry >= 2);
+  my_assert(resp.rmw_entry < RMW_KVS_OPC_OFFSET, "The opcode in the KVS  is larger than 2");
   uint8_t new_entry =  (uint8_t) (resp.rmw_entry - 2);
   if (entry->state == SAME_KEY_RMW &&
-      (entry->ptr_to_rmw == new_entry) &&
-      (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
-      (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
+     (entry->ptr_to_rmw == new_entry) &&
+     (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
+     (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
     entry->debug_cntr++;
     if (entry->debug_cntr >= M_256) {
       if (!q_info->send_vector[mid_to_rmid(gid_to_mid(entry->rmw_id.g_id))])
@@ -963,6 +997,8 @@ static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cac
   bool mes_is_rmw = r_mes[r_mes_ptr].read[0].opcode == OP_RMW;
 
   // Create new message if the current message is not fresh or not an RMW
+  // because of the lids: RMW must have separate lids than reads
+  // and r_reps must be adjusted accordingly
   if ((!fresh_mess) && (!mes_is_rmw)) {
     MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
     r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
@@ -1015,26 +1051,29 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
 
   // if the rmw is stuck because the key is being rmwed keep trying who you are waiting for
   if (resp.type == RETRY_RMW_KEY_EXISTS) {
-    if (trigger_help(entry, resp, q_info));
+    if (trigger_help(entry, resp, q_info))
+      my_assert(false, "Help must be triggered");
     // TODO we need the help here. Take care that if you do a new prepare here, the lid may have already be assigned
   }
 
+  // if no slot is found for the RMW try in the next round (copy it in the next op)
   if (resp.type == RETRY_RMW_NO_ENTRIES || resp.type == RETRY_RMW_KEY_EXISTS) {
     if (*old_op_i != op_i) memcpy(&ops[*old_op_i], &ops[op_i], KEY_SIZE + 2 + VALUE_SIZE);
     if (DEBUG_RMW)
       green_printf("Worker %u failed to do its RMW and moved it from position %u to %u \n",
-                   t_id, op_i, old_op_i);
+                   t_id, op_i, *old_op_i);
     (*old_op_i)++;
-    if (resp.type == RETRY_RMW_NO_ENTRIES) entry->state = NO_ENTRIES;
-    else entry->state = SAME_KEY_RMW;
-    // if the RMW is new copy the value
+    // if the RMW is new, copy the value
     if (entry->state == INVALID_RMW) {
       memcpy(entry->value, prep->value, VALUE_SIZE);
     }
+    // Update the entry state regardless of whether the entry is new
+    if (resp.type == RETRY_RMW_NO_ENTRIES) entry->state = NO_ENTRIES;
+    else entry->state = SAME_KEY_RMW;
   }
   else { // the RMW has gotten an entry and is to be sent
     entry->l_id = p_ops->prep_info->l_id;
-    entry->ptr_to_rmw = (uint8_t) (resp.rmw_entry - 2);
+    entry->ptr_to_rmw = (uint8_t) (resp.rmw_entry - RMW_KVS_OPC_OFFSET);
     if (ENABLE_ASSERTIONS) {
       assert(resp.type = RMW_SUCCESS);
       assert(rmw.entry[entry->ptr_to_rmw].rmw_id.id == entry->l_id);
@@ -1075,12 +1114,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     if (is_update) writes_num++; else reads_num++;
     if (p_ops->w_size + writes_num >= PENDING_WRITES || p_ops->r_size + reads_num >= PENDING_READS)
       break;
-    if (ENABLE_STAT_COUNTING) {
-      if (trace[trace_iter].opcode == CACHE_OP_PUT) t_stats[t_id].writes_per_thread++;
-      else if (trace[trace_iter].opcode == CACHE_OP_GET) t_stats[t_id].reads_per_thread++;
-      else if (trace[trace_iter].opcode == OP_ACQUIRE) t_stats[t_id].acquires_per_thread++;
-      else if (trace[trace_iter].opcode == OP_RELEASE) t_stats[t_id].releases_per_thread++;
-    }
+    increment_per_req_counters(trace[trace_iter].opcode, t_id);
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
     ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
@@ -1112,25 +1146,14 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   t_stats[t_id].cache_hits_per_thread += (op_i - *old_op_i);
   if (ENABLE_ASSERTIONS && (!ENABLE_RMWS)) assert(*old_op_i == 0);
 
-  cache_batch_op_trace(op_i, t_id, &ops, resp, p_ops);
+  cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
   //cyan_printf("thread %d  adds %d ops\n", g_id, op_i);
   uint16_t tmp_op_i = 0;
   for (i = 0; i < op_i; i++) {
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
       //green_printf("Cache_miss: bkt %u, server %u, tag %u \n", ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
-      if (ops[i].opcode == OP_RELEASE || ops[i].opcode == OP_ACQUIRE) {
-        uint32_t session_id = 0;
-        memcpy(&session_id, &ops[i], SESSION_BYTES);
-        //yellow_printf("Cache_miss, session %u \n", session_id);
-        p_ops->session_has_pending_op[session_id] = false;
-        p_ops->all_sessions_stalled = false;
-        t_stats[t_id].cache_hits_per_thread--;
-        if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
-            latency_info->measured_req_flag != NO_REQ &&
-            session_id == latency_info->measured_sess_id)
-          latency_info->measured_req_flag = NO_REQ;
-      }
+      clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
     }
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) ;
     else if (ENABLE_RMWS && ops[i].opcode == OP_RMW) {

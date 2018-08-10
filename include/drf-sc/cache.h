@@ -12,7 +12,7 @@
 #include "main.h"
 #include "mica.h"
 #define CACHE_DEBUG 0
-#define CACHE_NUM_BKTS (2 * 1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
+#define CACHE_NUM_BKTS (8 * 1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
 #define CACHE_NUM_KEYS (1000 * 1000)
 
 
@@ -158,7 +158,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 
 /* The leader and follower send their local requests to this, reads get served
  * But writes do not get served, writes are only propagated here to see whether their keys exist */
-void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op **op,
+void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op,
                           struct mica_resp *resp, struct pending_ops *);
 /* The leader sends the writes to be committed with this function*/
 void cache_batch_op_updates(uint32_t , int , struct write**, uint32_t,  uint32_t, bool);

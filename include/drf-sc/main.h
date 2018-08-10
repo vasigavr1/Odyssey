@@ -15,11 +15,40 @@
 #define PHYSICAL_CORES_PER_SOCKET 10
 #define LOGICAL_CORES_PER_SOCKET 20
 #define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
-
+#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
-#define WORKERS_PER_MACHINE 37
-#define MACHINE_NUM 5
+// CORE CONFIGURATION
+#define WORKERS_PER_MACHINE 2
+#define MACHINE_NUM 2
+#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 10
+#define MEASURE_LATENCY 0
+#define LATENCY_MACHINE 0
+#define LATENCY_THREAD 15
+#define MEASURE_READ_LATENCY 2 // 2 means mixed
+#define ENABLE_LIN 0
+#define R_CREDITS 2
+#define MAX_R_COALESCE 40
+#define W_CREDITS 2
+#define MAX_W_COALESCE 15
+#define ENABLE_ASSERTIONS 1
+#define USE_QUORUM 1
+#define CREDIT_TIMEOUT M_1
+#define REL_CREDIT_TIMEOUT M_16
+#define ENABLE_ADAPTIVE_INLINING 0 // This did not help
+#define MIN_SS_BATCH 127// The minimum SS batch
+#define ENABLE_STAT_COUNTING 0
+#define MAXIMUM_INLINE_SIZE 188
+#define MAX_OP_BATCH_ 200
+#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES_ 1
+#define ENABLE_ACQUIRES_ 1
+#define ENABLE_RMWS_ 1
+#define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
+
+
+
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
@@ -41,7 +70,7 @@
 
 
 #define USE_A_SINGLE_KEY 0
-#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
+
 #define DEFAULT_SL 0 //default service level
 
 
@@ -80,32 +109,7 @@
  * --------------------------------------------------------------------------------
  * --------------------------------------------------------------------------------*/
 
-// CORE CONFIGURATION
-#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 10
-#define MEASURE_LATENCY 1
-#define LATENCY_MACHINE 0
-#define LATENCY_THREAD 15
-#define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define ENABLE_LIN 0
-#define R_CREDITS 2
-#define MAX_R_COALESCE 40
-#define W_CREDITS 2
-#define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 0
-#define USE_QUORUM 1
-#define CREDIT_TIMEOUT M_1
-#define REL_CREDIT_TIMEOUT M_16
-#define ENABLE_ADAPTIVE_INLINING 0 // This did not help
-#define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 0
-#define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH_ 200
-#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 1
-#define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
-#define EMULATE_ABD 1 // Do not enforce releases to gather all credits or start a new message
+
 
 
 // ABD EMULATION
@@ -187,6 +191,11 @@
 // RMWs
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
+// This is the magic number: each key overloads its opcode to denote if its being RMWed
+// if the opcode is 0, it has never been RMWed
+//if the opcode is 1, it has been RMWed but not active
+// 2-255 are pointers to the RMW array, which ranges from 0 to 253
+#define RMW_KVS_OPC_OFFSET 2
 #define RMW_WAIT_COUNTER M_256
 
 // RMW entry states
@@ -253,7 +262,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_RMW 0
+#define DEBUG_RMW 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -594,7 +603,7 @@ struct rmw_info {
   uint16_t empty_fifo[RMW_ENTRIES_NUM];
   uint16_t ef_push_ptr; // empty fifo push ptr
   uint16_t ef_pull_ptr;
-  uint16_t ef_size; // ho many empty slots are there
+  uint16_t ef_size; // how many empty slots are there
 
   atomic_flag ef_lock;
   atomic_uint_fast16_t local_rmw_num;
