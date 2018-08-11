@@ -247,6 +247,19 @@ static inline uint8_t gid_to_mid(uint16_t g_id)
   return (uint8_t) (g_id / WORKERS_PER_MACHINE);
 }
 
+//
+static inline void debug_message_when_polling_r_reps(struct r_rep_message *r_rep_mes, uint32_t index)
+{
+  if ((DEBUG_READS && r_rep_mes->opcode == READ_REPLY) ||
+      (DEBUG_RMW   && r_rep_mes->opcode == PREP_REPLY)) {
+    yellow_printf("Worker sees a READ REPLY: %d at offset %d, l_id %lu, from machine %u with %u replies\n",
+                  r_rep_mes->opcode, index,
+                  r_rep_mes->l_id,
+                  r_rep_mes->m_id,
+                  r_rep_mes->coalesce_num);
+  }
+}
+
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD GENERIC -----------------------------
@@ -899,11 +912,14 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 
 // setup a new r_rep entry
 static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
-                                       struct r_rep_message *r_rep_mes)
+                                       struct r_rep_message *r_rep_mes, bool is_rmw)
 {
+  r_rep_mes->coalesce_num = 0;
+  r_rep_fifo->mes_size++;
+  r_rep_mes->opcode = (uint8_t) (is_rmw ? PREP_REPLY : READ_REPLY);
   r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr] = rem_m_id;
   //r_rep_mes[r_rep_fifo->push_ptr].credits = 1;
-  memcpy(r_rep_mes[r_rep_fifo->push_ptr].l_id, &l_id, 8);
+  memcpy(r_rep_mes->l_id, &l_id, 8);
   r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] = R_REP_MES_HEADER;
 }
 
@@ -914,25 +930,28 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
                                 bool false_positive) {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
+  bool is_rmw = !(r_rep_flag == READ || r_rep_flag == LIN_PUT);
+  bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
 
    /* A reply message corresponds to exactly one read message
     * to avoid reasoning about l_ids, credits and so on */
 
   // If the r_rep has a different recipient or different l_id then create a new message
   // Because the criterion to advance the push ptr is on creating a new message,
-  // the pull ptr has to start from 1 // TODO in light of RMWs the criterion has to be extended
-  if ((rem_m_id != r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr]) ||
-       l_id != *(uint64_t *)r_rep_mes[r_rep_fifo->push_ptr].l_id) {
-    MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE);
-    r_rep_mes[r_rep_fifo->push_ptr].coalesce_num = 0;
-    r_rep_fifo->mes_size++;
-    set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, r_rep_mes);
+  // the pull ptr has to start from 1 (because we start by incrementing the push pointer).
+  // Update: because rmw prepares have different lids, that can coincidentally match with read lids
+  // the criterion is extended to also check the message's opcode
+  if ((rem_m_id != r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr])   ||
+     (l_id != *(uint64_t *)r_rep_mes[r_rep_fifo->push_ptr].l_id) ||
+     (is_rmw && current_message_is_r_rep)) {
+    MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE); // Keep this here: push ptr is used calling the function below
+    set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, &r_rep_mes[r_rep_fifo->push_ptr], is_rmw);
   }
   uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
   uint32_t inside_r_rep_ptr = r_rep_fifo->message_sizes[r_rep_fifo->push_ptr]; // This pointer is in bytes
   r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += R_REP_SMALL_SIZE;
   struct r_rep_big *r_rep = (struct r_rep_big *) (((void *)&r_rep_mes[r_rep_mes_ptr]) + inside_r_rep_ptr);
-  if (r_rep_flag == READ || r_rep_flag == LIN_PUT) {
+  if (!is_rmw) {
     enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
     if (machine_id == 0 && R_TO_W_DEBUG) {
      if (ts_comp == EQUAL)
@@ -2066,14 +2085,10 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   // Start polling
   while (polled_messages < completed_messages) {
   //while (incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY) {
-    if (ENABLE_ASSERTIONS) assert(incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY);
+    my_assert(incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY ||
+              incoming_r_reps[index].r_rep_mes.opcode == PREP_REPLY, "Read reply message opcode is wrong");
     //wait_for_the_entire_read(&incoming_rs[index].r_mes, g_id, index);
-    if (DEBUG_READS)
-      yellow_printf("Worker sees a READ REPLY: %d at offset %d, l_id %lu, from machine %u with %u replies\n",
-             incoming_r_reps[index].r_rep_mes.opcode, index,
-             *(uint64_t *)incoming_r_reps[index].r_rep_mes.l_id,
-                    incoming_r_reps[index].r_rep_mes.m_id,
-                    incoming_r_reps[index].r_rep_mes.coalesce_num);
+    debug_message_when_polling_r_reps(&incoming_r_reps[index].r_rep_mes, index);
     struct r_rep_message *r_rep_mes = (struct r_rep_message*) &incoming_r_reps[index].r_rep_mes;
     uint8_t r_rep_num = r_rep_mes->coalesce_num;
     polled_messages++;

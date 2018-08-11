@@ -37,8 +37,8 @@
 					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 				</MakeCommands>
 			</Target>
-			<Target title="abd">
-				<Option output="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/abd" prefix_auto="0" extension_auto="0"/>
+			<Target title="drf-sc">
+				<Option output="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/drf-sc" prefix_auto="0" extension_auto="0"/>
 				<Option working_dir="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug"/>
 				<Option object_output="./"/>
 				<Option type="1"/>
@@ -58,14 +58,14 @@
 					<Add directory="/usr/include"/>
 				</Compiler>
 				<MakeCommands>
-					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 abd"/>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 drf-sc"/>
 					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
 					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 				</MakeCommands>
 			</Target>
-			<Target title="abd/fast">
-				<Option output="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/abd" prefix_auto="0" extension_auto="0"/>
+			<Target title="drf-sc/fast">
+				<Option output="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/drf-sc" prefix_auto="0" extension_auto="0"/>
 				<Option working_dir="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug"/>
 				<Option object_output="./"/>
 				<Option type="1"/>
@@ -85,7 +85,7 @@
 					<Add directory="/usr/include"/>
 				</Compiler>
 				<MakeCommands>
-					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 abd/fast"/>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 drf-sc/fast"/>
 					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
 					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
@@ -93,67 +93,67 @@
 			</Target>
 		</Build>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/drf-sc/cache.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/drf-sc/inline_util.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/drf-sc/main.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/drf-sc/util.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/libhrd/hrd.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/libhrd/hrd_sizes.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/mica/city.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/mica/mica.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/optik_mod.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/utils.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/cache.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/main.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/stats.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/util.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/worker.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/libhrd/hrd_conn.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/libhrd/hrd_util.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/mica/city.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/mica/mica.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/mica/test.c">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/usr/include/infiniband/verbs.h">
-			<Option target="abd"/>
+			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/CMakeLists.txt">
 			<Option virtualFolder="CMake Files\"/>

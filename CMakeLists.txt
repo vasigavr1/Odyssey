@@ -41,8 +41,8 @@ set(SOURCE_FILES
 
 
 
-add_executable(abd ${SOURCE_FILES})
+add_executable(drf-sc ${SOURCE_FILES})
 
-target_link_libraries(abd pthread ibverbs rt memcached numa rdmacm)
+target_link_libraries(drf-sc pthread ibverbs rt memcached numa rdmacm)
 
 
