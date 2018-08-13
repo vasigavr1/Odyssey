@@ -188,22 +188,23 @@
 
 // Prepares
 #define LOCAL_PREP_NUM (SESSIONS_PER_THREAD)
+
 // RMWs
+#define BYTES_OVERRIDEN_IN_KVS_VALUE 4
+#define RMW_VALUE_SIZE 8 // rmw cannot be more than 8 bytes
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
-// This is the magic number: each key overloads its opcode to denote if its being RMWed
-// if the opcode is 0, it has never been RMWed
-//if the opcode is 1, it has been RMWed but not active
-// 2-255 are pointers to the RMW array, which ranges from 0 to 253
-#define RMW_KVS_OPC_OFFSET 2
+
+#define KEY_HAS_NEVER_BEEN_RMWED 0
+#define KEY_HAS_BEEN_RMWED 1
+
 #define RMW_WAIT_COUNTER M_256
 
-// RMW entry states
+// RMW entry states && prepare entries
 #define INVALID_RMW 0
-#define PROPOSED 1 // has seen a propose
-#define ACCEPTED 2 // has acked an acccept
-#define NO_ENTRIES 3 // rmw has not been issued due to a lack of entries
-#define SAME_KEY_RMW 4  // there is already an entry for the key
+#define PROPOSED 1 // has seen a propose || has been proposed
+#define ACCEPTED 2 // has acked an acccept || has fired accepts
+#define SAME_KEY_RMW 3  // there is already an entry for the key
 
 #define VC_NUM 2
 #define R_VC 0
@@ -261,7 +262,7 @@
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
-#define DEBUG_QUORUM 0
+#define DEBUG_QUORUM 1
 #define DEBUG_RMW 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
@@ -543,22 +544,21 @@ struct rmw_entry {
   atomic_flag lock;
 };
 
-struct prep_entry {
+struct prop_entry {
   uint8_t opcode;
   struct key key;
   uint8_t state;
   struct rmw_id rmw_id;
   uint32_t debug_cntr;
   uint64_t l_id;
-  uint8_t value[VALUE_SIZE];
-  uint8_t ptr_to_rmw;
+  uint8_t value[RMW_VALUE_SIZE];
+  uint32_t ptr_to_rmw;
   uint16_t epoch_id;
+  uint8_t acks;
 };
 
-struct prep_info {
-  struct prep_entry entry[LOCAL_PREP_NUM];
-  struct prep_fifo *prep_fifo;
-  uint16_t size;
+struct prop_info {
+  struct prop_entry entry[LOCAL_PREP_NUM];
   uint64_t l_id; // highest l_id as of yet
 
 };
@@ -575,7 +575,7 @@ struct pending_ops {
 //  struct read_payload *r_payloads;
   struct read_info *read_info;
   struct r_rep_fifo *r_rep_fifo;
-  struct prep_info *prep_info;
+  struct prop_info *prop_info;
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
@@ -587,9 +587,9 @@ struct pending_ops {
   uint32_t r_push_ptr;
   uint32_t w_pull_ptr;
   uint32_t r_pull_ptr;
-  uint32_t prep_pull_ptr; // Where to pull prepares from
   uint32_t w_size;
   uint32_t r_size;
+  uint32_t prop_size; // TODO add this if needed
   uint8_t *acks_seen;
   bool *session_has_pending_op;
   bool all_sessions_stalled;
@@ -716,6 +716,7 @@ extern atomic_uint_fast8_t send_config_bit_vec_state;
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;
+extern atomic_uint_fast32_t next_rmw_entry_available;
 
 
 

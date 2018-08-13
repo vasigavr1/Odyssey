@@ -113,7 +113,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 	// the following variables used to validate atomicity between a lock-free r_rep of an object
 	cache_meta prev_meta;
-  uint64_t rmw_l_id = p_ops->prep_info->l_id;
+  uint64_t rmw_l_id = p_ops->prop_info->l_id;
   uint32_t r_push_ptr = p_ops->r_push_ptr;
 	for(I = 0; I < op_num; I++) {
 		if(kv_ptr[I] != NULL) {
@@ -124,7 +124,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
 				key_in_store[I] = 1;
-
 				if (op[I].opcode == CACHE_OP_GET || op[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
@@ -181,31 +180,30 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
         }
         else if (ENABLE_RMWS && op[I].opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
+          uint32_t entry = 0;
           optik_lock(&kv_ptr[I]->key.meta);
-          if (kv_ptr[I]->opcode < RMW_KVS_OPC_OFFSET) {
-            // the key has no entry, check if a new RMW is allowed subject to per-machine limitations
-            if (incr_local_rmw_counter()) {
-              uint16_t index = 0;
-              struct ts_tuple ts;
-              // pass the old ts
-              *(uint32_t *)ts.version = kv_ptr[I]->key.meta.version - 1;
-              ts.m_id = kv_ptr[I]->key.meta.m_id;
-              struct key *key = (struct key*) (((void*) &op[I]) + sizeof(cache_meta));
-              if (grab_RMW_entry(key, &ts, PROPOSED, op[I].opcode,
-                                 (uint8_t)machine_id, &index, rmw_l_id, t_id)) {
-                assert(index < 254);
-                kv_ptr[I]->opcode = (uint8_t) (index + RMW_KVS_OPC_OFFSET);
-                resp[I].type = RMW_SUCCESS;
-                rmw_l_id++;
-                if (DEBUG_RMW) green_printf("Worker %u got entry %u for its RMW, new KVS opcode %u \n",
-                                            t_id, index, kv_ptr[I]->opcode);
-              }
-              else assert(false);
-            }
-            else resp[I].type = RETRY_RMW_NO_ENTRIES; // retry due to lack of local available entries
+          // if it's the first RMW
+          if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
+            struct key *key = (struct key*) (((void*) &op[I]) + sizeof(cache_meta));
+            entry = grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
+                                  (uint8_t) machine_id, rmw_l_id, t_id);
+            resp[I].type = RMW_SUCCESS;
+            kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
           }
-          else resp[I].type = RETRY_RMW_KEY_EXISTS; // retry because the key is currently being RMWed
-          resp[I].rmw_entry = kv_ptr[I]->opcode;
+          // key has been RMWed before
+          else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
+            entry = *(uint32_t *) kv_ptr[I]->value;
+            check_entry_validity(&op[I], entry);
+            struct rmw_entry *rmw_entry = &rmw.entry[entry];
+            if (rmw_entry->state == INVALID_RMW) {
+              // remember that key is locked and thus this entry is also locked
+              activate_RMW_entry(PROPOSED, kv_ptr[I], rmw_entry, op[I].opcode,
+                                 (uint8_t)machine_id, rmw_l_id, t_id);
+              resp[I].type = RMW_SUCCESS;
+            }
+            else resp[I].type = RETRY_RMW_KEY_EXISTS;
+          }
+          resp[I].rmw_entry = entry;
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
@@ -446,24 +444,20 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           tmp_ts.m_id = kv_ptr[I]->key.meta.m_id;
           if (compare_ts(&tmp_ts, (struct ts_tuple *)&op->key.meta.m_id) != GREATER) {
             // if no Entry exists
-            if (kv_ptr[I]->opcode < RMW_KVS_OPC_OFFSET) {
-              assert(rmw.size < RMW_ENTRIES_NUM);
-              uint16_t index = 0;
+            if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
               struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
-              if (grab_RMW_entry(key, (struct ts_tuple *)&op->key.meta.m_id, PROPOSED, op->opcode,
-                                 p_ops->ptrs_to_r_headers[I]->m_id, &index, rmw_l_id, t_id)) {
-                assert(index < 254);
-                kv_ptr[I]->opcode = (uint8_t) (index + RMW_KVS_OPC_OFFSET);
-                if (DEBUG_RMW)
-                  green_printf("Worker %u got entry %u for its RMW, new opcode %u \n",
-                               t_id, index, kv_ptr[I]->opcode);
-              } else
-                assert(false);
+              uint32_t entry = grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
+                                     (uint8_t) machine_id, rmw_l_id, t_id);
+              kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
+              if (DEBUG_RMW)
+                green_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
+                             t_id, entry, kv_ptr[I]->opcode);
             }
-            else { // Entry already exists
-              uint16_t index = (uint16_t) (kv_ptr[I]->opcode - RMW_KVS_OPC_OFFSET);
-              flag = prepare_snoops_entry(op, index, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id);
+            else if(kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
+              uint32_t entry = *(uint32_t *)kv_ptr[I]->value;
+              flag = prepare_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id);
             }
+            else my_assert(false, "KVS opcode is wrong!");
           }
           else { // handle the case where the KVS ts is bigger than the incoming Prepare
             if (DEBUG_RMW) {
@@ -640,7 +634,6 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
   }
 
 }
-
 
 
 

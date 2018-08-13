@@ -45,7 +45,7 @@
 #define CACHE_OP_LIN_PUT 118
 #define UPDATE_EPOCH_OP_GET 119
 //Cache Response
-#define RETRY_RMW_NO_ENTRIES 0
+//#define RETRY_RMW_NO_ENTRIES 0
 #define RETRY_RMW_KEY_EXISTS 1
 #define RMW_SUCCESS 118
 
@@ -66,10 +66,10 @@
 #define TS_EQUAL 29
 #define TS_GREATER_LIN_PUT 30
 #define TS_GREATER 31
-#define PREP_ACK 32
-#define PREP_NACK 33
+#define PROP_ACK 32
+#define PROP_NACK 33 // will receive that TS
 #define RMW_ACCEPTED 34 // will receive both TS and Value
-#define RMW_TS_STALE 35 // will receive botht TS and Value
+#define RMW_TS_STALE 35 // will receive both TS and Value
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
 // previously considered to have failed
@@ -107,9 +107,9 @@ struct cache_key {
 
 struct cache_op {
 	struct cache_key key;	/* This must be the 1st field and 16B aligned */
-	uint8_t opcode;
+	uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
 	uint8_t val_len;
-	uint8_t value[MICA_MAX_VALUE];
+	uint8_t value[MICA_MAX_VALUE]; // if it's an RMW the first 8 bytes point to the entry
 };
 
 

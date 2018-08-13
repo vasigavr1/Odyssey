@@ -19,6 +19,7 @@ atomic_bool print_for_debug;
 const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
 struct rmw_info rmw;
+atomic_uint_fast32_t next_rmw_entry_available;
 
 
 
@@ -55,7 +56,7 @@ int main(int argc, char *argv[])
   green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
 
-  red_printf("MAX allowed pending RMWs per machine %d and total %d \n", RMW_ENTRIES_PER_MACHINE, RMW_ENTRIES_NUM);
+//  red_printf("MAX allowed pending RMWs per machine %d and total %d \n", RMW_ENTRIES_PER_MACHINE, RMW_ENTRIES_NUM);
 //  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
 //	assert(LEADER_MACHINE < MACHINE_NUM);
 //	assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
@@ -84,7 +85,7 @@ int main(int argc, char *argv[])
   assert(sizeof(struct cache_key) ==  KEY_SIZE);
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
-
+  assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE)); // RMW requires the value to be at least this many bytes
 
 //
 //  yellow_printf("WRITE: w_size of write recv slot %d w_size of w_message %lu , "
@@ -115,7 +116,7 @@ int main(int argc, char *argv[])
 	}
   print_for_debug = false;
 	send_config_bit_vec_state = STABLE_STATE;
-
+	next_rmw_entry_available = 0;
 
 	struct thread_params *param_arr;
 	pthread_t *thread_arr;

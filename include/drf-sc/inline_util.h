@@ -14,9 +14,9 @@
 static inline void my_assert(bool cond, const char *message)
 {
   if (ENABLE_ASSERTIONS) {
-    if (cond) {
+    if (!cond) {
       red_printf("%s\n", message);
-      exit(0);
+      assert(false);
     }
   }
 }
@@ -43,6 +43,13 @@ static inline bool keys_are_equal(struct cache_key* key1, struct cache_key* key2
 	return (key1->bkt    == key2->bkt &&
 			key1->server == key2->server &&
 			key1->tag    == key2->tag) ? true : false;
+}
+
+// Check whether 2 key hashes are equal
+static inline bool true_keys_are_equal(struct key* key1, struct key* key2) {
+  return (key1->bkt    == key2->bkt &&
+          key1->server == key2->server &&
+          key1->tag    == key2->tag) ? true : false;
 }
 
 // Compares two timestamps, returns SMALLER if ts1 < ts2
@@ -142,7 +149,6 @@ static inline void poll_local_req_for_latency_measurement(struct latency_flags* 
 		}
 }
 
-
 //
 static inline void report_latency(struct latency_flags* latency_info)
 {
@@ -159,7 +165,6 @@ static inline void report_latency(struct latency_flags* latency_info)
   bookkeep_latency(useconds, latency_info->measured_req_flag);
   (latency_info->measured_req_flag) = NO_REQ;
 }
-
 
 // Necessary bookkeeping to initiate the latency measurement
 static inline void start_measurement(struct latency_flags* latency_info, uint32_t sess_id, uint16_t t_id,
@@ -187,7 +192,6 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
     }
   }
 }
-
 
 static inline void print_thread_stats(uint16_t t_id) {
 
@@ -247,11 +251,11 @@ static inline uint8_t gid_to_mid(uint16_t g_id)
   return (uint8_t) (g_id / WORKERS_PER_MACHINE);
 }
 
-//
+//The purpose of this is to save some space in function that polls read replies
 static inline void debug_message_when_polling_r_reps(struct r_rep_message *r_rep_mes, uint32_t index)
 {
-  if ((DEBUG_READS && r_rep_mes->opcode == READ_REPLY) ||
-      (DEBUG_RMW   && r_rep_mes->opcode == PREP_REPLY)) {
+  if ((DEBUG_READS && (r_rep_mes->opcode == READ_REPLY)) ||
+      (DEBUG_RMW   && (r_rep_mes->opcode == PREP_REPLY))) {
     yellow_printf("Worker sees a READ REPLY: %d at offset %d, l_id %lu, from machine %u with %u replies\n",
                   r_rep_mes->opcode, index,
                   r_rep_mes->l_id,
@@ -427,51 +431,61 @@ static inline void clean_up_on_KVS_miss(struct cache_op *op, struct pending_ops 
   }
 }
 
-
-// Grab an entry of the RMW- non blocking,
-// call it only if you have the lock of the KVS
-// the ts_tuple should be the old ts
-static inline bool grab_RMW_entry(struct key *key, struct ts_tuple *ts, uint8_t state,
-                                uint8_t opcode, uint8_t m_id, uint16_t *index, uint64_t l_id, uint16_t t_id)
+static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cache_op *kv_ptr,
+                                  uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
 {
-  if (rmw.ef_size == 0) return false;
-  uint32_t debug_cntr = 0;
-  do {
-    if (ENABLE_ASSERTIONS) {
-      debug_cntr++;
-      if (debug_cntr == B_4_)
-        red_printf("Worker %u cant grab the lock on the EF of rmw \n", t_id);
-    }
-  } while (atomic_flag_test_and_set(&rmw.ef_lock));
+  uint32_t next_entry =
+    atomic_fetch_add_explicit(&next_rmw_entry_available, 1, memory_order_relaxed);
+  my_assert(next_entry < RMW_ENTRIES_NUM, "Failed to grab an RMW entry");
+  memcpy(kv_ptr->value, &next_entry, BYTES_OVERRIDEN_IN_KVS_VALUE);
+  struct rmw_entry *entry = &rmw.entry[next_entry];
 
-  // have the ef lock
-  if (rmw.ef_size == 0) {
-    atomic_flag_clear(&rmw.ef_lock);
-    return false;
-  }
-  else {
-    *index = rmw.empty_fifo[rmw.ef_pull_ptr];
-    rmw.ef_size--;
-    MOD_ADD(rmw.ef_pull_ptr, RMW_ENTRIES_NUM);
-    // unlock
-    atomic_flag_clear(&rmw.ef_lock);
-    // I can freely change that RMW entry without grabbing its lock because
-    // the KVS does not yet have a pointer to the RMW entry
-    struct rmw_entry *entry = &rmw.entry[*index];
-    entry->opcode = opcode;
-    entry->key = *key;
-    entry->old_ts = *ts;
-    entry->new_ts.m_id = m_id;
-    *(uint32_t *)entry->new_ts.version = (*(uint32_t *)ts->version) + 1;
-    entry->rmw_id.g_id = get_gid(m_id, t_id);
-    entry->rmw_id.id = l_id;
-    entry->state = state;
-    return true;
+  // construct the old ts
+  struct ts_tuple old_ts;
+  *(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
+  old_ts.m_id = kv_ptr->key.meta.m_id;
+
+  entry->opcode = opcode;
+  entry->key = *key;
+  entry->old_ts = old_ts;
+  entry->new_ts.m_id = m_id;
+  *(uint32_t *)entry->new_ts.version = (*(uint32_t *)old_ts.version) + 1;
+  entry->rmw_id.g_id = get_gid(m_id, t_id);
+  entry->rmw_id.id = l_id;
+  entry->state = state;
+  return next_entry;
+}
+
+// Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
+static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, struct rmw_entry *entry,
+                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
+{
+  struct ts_tuple old_ts;
+  // pass the old ts
+  *(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
+  old_ts.m_id = kv_ptr->key.meta.m_id;
+  entry->opcode = opcode;
+  entry->old_ts = old_ts;
+  entry->new_ts.m_id = m_id;
+  *(uint32_t *)entry->new_ts.version = (*(uint32_t *)old_ts.version) + 1;
+  entry->rmw_id.g_id = get_gid(m_id, t_id);
+  entry->rmw_id.id = l_id;
+  entry->state = state;
+}
+
+// Check if the key in the entry matches the key in the KVS
+static inline void check_entry_validity(struct cache_op *op, uint32_t entry)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
+    struct key *entry_key = &rmw.entry[entry].key;
+    my_assert(true_keys_are_equal(key, entry_key), "Entry does not contain the same key");
   }
 }
 
+
 // Look at an RMW entry to answer to a prepare message
-static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint16_t pos, uint8_t* value,
+static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint32_t pos, uint8_t* value,
                                            struct ts_tuple *rep_ts, uint8_t m_id,
                                            uint64_t l_id, uint16_t t_id)
 {
@@ -564,10 +578,11 @@ static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fif
       if (DEBUG_RMW) green_printf("Worker %u: Prepare TS gets nacked \n", t_id);
       memcpy(&r_rep->ts, &new_ts, TS_TUPLE_SIZE);
       r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
+      r_rep->opcode = PROP_NACK;
       break;
     case RMW_ACK_PREPARE:
       if (DEBUG_RMW) green_printf("Worker %u: Read TS are equal \n", t_id);
-      r_rep->opcode = PREP_ACK;
+      r_rep->opcode = PROP_ACK;
       break;
     case RMW_ALREADY_ACCEPTED: // local is greater than remote
       if (DEBUG_RMW) green_printf("Worker %u: A bigger Ts has bee accepted \n", t_id);
@@ -581,17 +596,16 @@ static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fif
 }
 
 // Check if help needs to be triggered
-static inline bool trigger_help(struct prep_entry *entry, struct mica_resp resp, struct quorum_info *q_info)
+static inline bool trigger_help(struct prop_entry *entry, struct mica_resp resp, struct quorum_info *q_info)
 {
-  my_assert(resp.rmw_entry < RMW_KVS_OPC_OFFSET, "The opcode in the KVS  is larger than 2");
-  uint8_t new_entry =  (uint8_t) (resp.rmw_entry - 2);
+  uint32_t new_entry =  resp.rmw_entry;
   if (entry->state == SAME_KEY_RMW &&
      (entry->ptr_to_rmw == new_entry) &&
      (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
      (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
     entry->debug_cntr++;
     if (entry->debug_cntr >= M_256) {
-      if (!q_info->send_vector[mid_to_rmid(gid_to_mid(entry->rmw_id.g_id))])
+      if (!q_info->send_vector[mid_to_rmid(gid_to_mid(entry->rmw_id.g_id))]) //TODO think about this
         return true;
     }
   }
@@ -603,6 +617,29 @@ static inline bool trigger_help(struct prep_entry *entry, struct mica_resp resp,
   return false;
 }
 
+// Search in the prepare entries for an lid (used when receiving a prep reply)
+static inline int search_prep_entries_with_l_id(struct prop_info* prep_info, uint8_t state, uint64_t l_id)
+{
+  for (uint16_t i = 0; i < LOCAL_PREP_NUM; i++) {
+    if (prep_info->entry[i].state == state &&
+        prep_info->entry[i].l_id == l_id)
+      return i;
+  }
+  return -1; // i.e. l_id not found!!
+
+}
+
+// If the prep reply contains many replies move to the next message
+// according to the current message
+static inline void move_ptr_to_next_prep_reply(uint16_t *byte_ptr, uint8_t opcode)
+{
+  if (opcode == RMW_ACCEPTED || (opcode == RMW_ACCEPTED + FALSE_POSITIVE_OFFSET) ||
+      opcode == RMW_TS_STALE || (opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET))
+    (*byte_ptr) += R_REP_SIZE;
+  else if ((opcode == PROP_NACK) || (opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET))
+    (*byte_ptr) += R_REP_ONLY_TS_SIZE;
+  else (*byte_ptr)++;
+}
 
 
 /* ---------------------------------------------------------------------------
@@ -1005,7 +1042,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
 }
 
 
-// RMWs hijack the read fifo, to be send prepare broadcasts to all
+// RMWs hijack the read fifo, to send prepare broadcasts to all
 static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cache_op *prep,
                                                uint64_t l_id,  uint8_t flag, uint16_t t_id)
 {
@@ -1059,49 +1096,44 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
   uint32_t session_id = 0;
   memcpy(&session_id, prep, SESSION_BYTES);
   if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
-  struct prep_entry *entry = &p_ops->prep_info->entry[session_id];
+  struct prop_entry *prep_entry = &p_ops->prop_info->entry[session_id];
   if (ENABLE_ASSERTIONS) {
-    assert(entry->state == INVALID_RMW ||
-           entry->state == NO_ENTRIES  ||
-           entry->state == SAME_KEY_RMW);
+    assert(prep_entry->state == INVALID_RMW ||
+           prep_entry->state == SAME_KEY_RMW);
   }
-  entry->opcode = OP_RMW;
-  memcpy(&entry->key, &prep->key.bkt, TRUE_KEY_SIZE);
+  prep_entry->opcode = OP_RMW;
+  memcpy(&prep_entry->key, &prep->key.bkt, TRUE_KEY_SIZE);
 
   // if the rmw is stuck because the key is being rmwed keep trying who you are waiting for
   if (resp.type == RETRY_RMW_KEY_EXISTS) {
-    if (trigger_help(entry, resp, q_info))
+    if (trigger_help(prep_entry, resp, q_info))
       my_assert(false, "Help must be triggered");
     // TODO we need the help here. Take care that if you do a new prepare here, the lid may have already be assigned
   }
 
-  // if no slot is found for the RMW try in the next round (copy it in the next op)
-  if (resp.type == RETRY_RMW_NO_ENTRIES || resp.type == RETRY_RMW_KEY_EXISTS) {
+  // if RMW entry was occupied, put in the next op to try next round
+  if (resp.type == RETRY_RMW_KEY_EXISTS) {
     if (*old_op_i != op_i) memcpy(&ops[*old_op_i], &ops[op_i], KEY_SIZE + 2 + VALUE_SIZE);
-    if (DEBUG_RMW)
-      green_printf("Worker %u failed to do its RMW and moved it from position %u to %u \n",
-                   t_id, op_i, *old_op_i);
+    if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved "
+                                  "it from position %u to %u \n", t_id, op_i, *old_op_i);
     (*old_op_i)++;
-    // if the RMW is new, copy the value
-    if (entry->state == INVALID_RMW) {
-      memcpy(entry->value, prep->value, VALUE_SIZE);
+    // if the RMW is new, copy the value and change the state
+    if (prep_entry->state == INVALID_RMW) {
+      memcpy(prep_entry->value, prep->value, RMW_VALUE_SIZE);
+      prep_entry->state = SAME_KEY_RMW;
     }
-    // Update the entry state regardless of whether the entry is new
-    if (resp.type == RETRY_RMW_NO_ENTRIES) entry->state = NO_ENTRIES;
-    else entry->state = SAME_KEY_RMW;
   }
-  else { // the RMW has gotten an entry and is to be sent
-    entry->l_id = p_ops->prep_info->l_id;
-    entry->ptr_to_rmw = (uint8_t) (resp.rmw_entry - RMW_KVS_OPC_OFFSET);
-    if (ENABLE_ASSERTIONS) {
-      assert(resp.type = RMW_SUCCESS);
-      assert(rmw.entry[entry->ptr_to_rmw].rmw_id.id == entry->l_id);
-    }
-    p_ops->prep_info->l_id++;
-    entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
-    insert_rmw_to_read_fifo(p_ops, prep, entry->l_id, 0, t_id);
-    entry->state = PROPOSED;
+  else if (resp.type == RMW_SUCCESS){ // the RMW has gotten an entry and is to be sent
+    prep_entry->l_id = p_ops->prop_info->l_id;
+    prep_entry->ptr_to_rmw = resp.rmw_entry;
+    my_assert(rmw.entry[prep_entry->ptr_to_rmw].rmw_id.id == prep_entry->l_id,
+              "lids of rmw_entry and prep_entry don't match");
+    p_ops->prop_info->l_id++;
+    prep_entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
+    insert_rmw_to_read_fifo(p_ops, prep, prep_entry->l_id, 0, t_id);
+    prep_entry->state = PROPOSED;
   }
+  else my_assert(false, "Wrong resp type in RMW");
 }
 
 
@@ -1658,7 +1690,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 //---------------------------------------------------------------------------*/
 
 // Keep track of the write messages to send the appropriate acks
-static inline void  ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint64_t l_id)
+static inline void ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint64_t l_id)
 {
   if (ENABLE_ASSERTIONS && DEBUG_QUORUM) {
     if(unlikely(*(uint64_t *) ack->local_id) + ack->ack_num != l_id) {
@@ -1775,8 +1807,8 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) {
         if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
-          write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT &&
-          write->opcode != OP_RELEASE_BIT_VECTOR)
+           write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT &&
+           write->opcode != OP_RELEASE_BIT_VECTOR)
           red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
@@ -1977,6 +2009,48 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
 
 }
 
+static inline void handle_the_prep_replies(struct pending_ops *p_ops, struct r_rep_message *r_rep_mes)
+{
+
+  my_assert(false, "received prep reply");
+  struct prop_info *prop_info = p_ops->prop_info;
+  uint8_t r_rep_num = r_rep_mes->coalesce_num;
+  // Find the request that the reply is referring to
+  uint64_t l_id = *(uint64_t *) (r_rep_mes->l_id);
+  my_assert(l_id < prop_info->l_id, "prep rep, received with higher lid, than highest possible");
+
+  uint16_t byte_ptr = R_REP_MES_HEADER;
+  for (uint16_t i = 0; i < r_rep_num; i++) {
+    // First attempt to find the entry the response if for
+    int entry_i = search_prep_entries_with_l_id(prop_info, PROPOSED, l_id);
+    if (entry_i == -1) continue;
+    struct prop_entry *prep_entry = &prop_info->entry[entry_i];
+    struct r_rep_big *r_rep = (struct r_rep_big *)(((void *)r_rep_mes) + byte_ptr);
+    // if there are more replies move the byte_ptr with respect to the current rep
+    if (i < r_rep_num - 1) move_ptr_to_next_prep_reply(&byte_ptr, r_rep->opcode);
+    if (unlikely(r_rep->opcode) > RMW_TS_STALE) r_rep->opcode -= FALSE_POSITIVE_OFFSET;
+
+    if (r_rep->opcode == PROP_ACK) {
+      prep_entry->acks++;
+      if (prep_entry->acks == REMOTE_QUORUM) {
+        //TODO: insert an accept
+      }
+    }
+    else if (r_rep->opcode == PROP_NACK) {
+      // TODO: an easy solution is to add a cache_op and delete this entry
+    }
+    else if (r_rep->opcode == RMW_ACCEPTED) {
+      // TODO: If my ts is bigger than the accepted TS then you need to help
+    }
+    else if (r_rep->opcode == RMW_TS_STALE) {
+      // TODO: write the new value and restart the RMW
+    }
+
+  }
+
+
+}
+
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
 static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_info * read_info)
 {
@@ -2088,22 +2162,30 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     my_assert(incoming_r_reps[index].r_rep_mes.opcode == READ_REPLY ||
               incoming_r_reps[index].r_rep_mes.opcode == PREP_REPLY, "Read reply message opcode is wrong");
     //wait_for_the_entire_read(&incoming_rs[index].r_mes, g_id, index);
-    debug_message_when_polling_r_reps(&incoming_r_reps[index].r_rep_mes, index);
+    debug_message_when_polling_r_reps((struct r_rep_message*) &incoming_r_reps[index].r_rep_mes, index);
     struct r_rep_message *r_rep_mes = (struct r_rep_message*) &incoming_r_reps[index].r_rep_mes;
-    uint8_t r_rep_num = r_rep_mes->coalesce_num;
+    credits[R_VC][r_rep_mes->m_id]++;
+    if (ENABLE_ASSERTIONS) {
+      my_assert(r_rep_mes->m_id < MACHINE_NUM, "Received r_rep with m_id >= Machine_NUM");
+      my_assert(r_rep_mes->coalesce_num > 0, "Received r_rep with coalesce num = 0");
+      my_assert(credits[R_VC][r_rep_mes->m_id] <= R_CREDITS, "Too many read credits, after incrementing");
+    }
     polled_messages++;
-    r_rep_mes->opcode = 5; // a random meaningless opcode
     MOD_ADD(index, R_REP_BUF_SLOTS);
+    // If it is a reply to a prepare call a different handler
+    if (r_rep_mes->opcode == PREP_REPLY) {
+      handle_the_prep_replies(p_ops, r_rep_mes);
+      r_rep_mes->opcode = 5;
+      continue;
+      //
+    }
+    r_rep_mes->opcode = 5; // a random meaningless opcode
+    uint8_t r_rep_num = r_rep_mes->coalesce_num;
     // Find the request that the reply is referring to
     uint64_t l_id = *(uint64_t *) (r_rep_mes->l_id);
     uint64_t pull_lid = p_ops->local_r_id; // l_id at the pull pointer
     uint32_t r_ptr; // a pointer in the FIFO, from where r_rep refers to
-    credits[R_VC][r_rep_mes->m_id]++;
-    if (ENABLE_ASSERTIONS) {
-      assert(r_rep_mes->m_id < MACHINE_NUM);
-      assert(r_rep_mes->coalesce_num > 0);
-      assert(credits[R_VC][r_rep_mes->m_id] <= R_CREDITS);
-    }
+
     // if the pending read FIFO is empty it means the r_reps are for committed messages.
     if (p_ops->r_size == 0 ) {
       if (!USE_QUORUM) assert(false);
@@ -2140,7 +2222,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
         byte_ptr += R_REP_SIZE;
       else if (unlikely(r_rep->opcode == TS_GREATER_LIN_PUT)) byte_ptr += R_REP_ONLY_TS_SIZE;
       else byte_ptr++;
-      polled_r_reps++;
+      polled_r_reps++; // TODO this is useless (?)
       if (pull_lid >= l_id) {
         if (l_id + i < pull_lid) continue;
       }
