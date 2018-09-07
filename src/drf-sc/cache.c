@@ -53,7 +53,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
                                  struct pending_ops *p_ops)
 {
 	int I, j;	/* I is batch index */
-	long long stalled_brces = 0;
 #if CACHE_DEBUG == 1
 	//assert(cache.hash_table != NULL);
 	assert(op != NULL);
@@ -231,7 +230,6 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
                                    uint32_t pull_ptr,  uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
-  long long stalled_brces = 0;
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
 	assert(op != NULL);
@@ -334,7 +332,6 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                                  uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
-  long long stalled_brces = 0;
   struct read **reads = p_ops->ptrs_to_r_ops;
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
@@ -598,7 +595,7 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
         else if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
-            // if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id); // this assert is wrong, local writes can happen after a local read but reach remote desitnations faster
+            // if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id); // this assert is wrong, local writes can happen after a local read but reach remote destinations faster
             memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
             if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
               memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
@@ -634,7 +631,6 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
   }
 
 }
-
 
 
 void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {

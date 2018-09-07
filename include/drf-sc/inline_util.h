@@ -431,6 +431,7 @@ static inline void clean_up_on_KVS_miss(struct cache_op *op, struct pending_ops 
   }
 }
 
+// the first time a key gets RMWed, it grabs an RMW entry that lasts for life, the entry is protected by the KVS lock
 static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cache_op *kv_ptr,
                                   uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
 {
@@ -483,7 +484,6 @@ static inline void check_entry_validity(struct cache_op *op, uint32_t entry)
   }
 }
 
-
 // Look at an RMW entry to answer to a prepare message
 static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint32_t pos, uint8_t* value,
                                            struct ts_tuple *rep_ts, uint8_t m_id,
@@ -533,33 +533,33 @@ static inline uint8_t prepare_snoops_entry(struct cache_op *prep, uint32_t pos, 
 }
 
 // Try to increment the local rmw counter, if it returns false it means it is maxed out
-static inline bool incr_local_rmw_counter()
-{
-  if (rmw.local_rmw_num == RMW_ENTRIES_PER_MACHINE) return false;
-  atomic_flag_test_and_set(&rmw.local_rmw_lock);
-   if (rmw.local_rmw_num < RMW_ENTRIES_PER_MACHINE) {
-     rmw.local_rmw_num++;
-     atomic_flag_clear(&rmw.local_rmw_lock);
-     return true;
-   }
-   else {
-     atomic_flag_clear(&rmw.local_rmw_lock);
-     return false;
-   }
-}
+//static inline bool incr_local_rmw_counter()
+//{
+//  if (rmw.local_rmw_num == RMW_ENTRIES_PER_MACHINE) return false;
+//  atomic_flag_test_and_set(&rmw.local_rmw_lock);
+//   if (rmw.local_rmw_num < RMW_ENTRIES_PER_MACHINE) {
+//     rmw.local_rmw_num++;
+//     atomic_flag_clear(&rmw.local_rmw_lock);
+//     return true;
+//   }
+//   else {
+//     atomic_flag_clear(&rmw.local_rmw_lock);
+//     return false;
+//   }
+//}
 
 // Decrement the local rmw counter, it must always work
-static inline void decr_local_rmw_counter()
-{
-  if (ENABLE_ASSERTIONS) assert(rmw.local_rmw_num > 0);
-  atomic_fetch_sub(&rmw.local_rmw_num, 1);
-}
+//static inline void decr_local_rmw_counter()
+//{
+//  if (ENABLE_ASSERTIONS) assert(rmw.local_rmw_num > 0);
+//  atomic_fetch_sub(&rmw.local_rmw_num, 1);
+//}
 
-static inline bool rmw_version_is_valid (uint64_t version)
-{
-  return version == atomic_load_explicit(&rmw.version, memory_order_seq_cst) &&
-         version % 2 == 0;
-}
+//static inline bool rmw_version_is_valid (uint64_t version)
+//{
+//  return version == atomic_load_explicit(&rmw.version, memory_order_seq_cst) &&
+//         version % 2 == 0;
+//}
 
 // Fill the prepare Reply
 static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fifo *r_rep_fifo,
@@ -641,6 +641,96 @@ static inline void move_ptr_to_next_prep_reply(uint16_t *byte_ptr, uint8_t opcod
   else (*byte_ptr)++;
 }
 
+
+// Perform some basic checks when inserting a write to a fresh message
+static inline void debug_checks_when_inserting_a_write
+  (const uint8_t source, const uint8_t inside_w_ptr, const uint32_t w_mes_ptr,
+   struct w_message *w_mes, const uint64_t message_l_id,
+   struct pending_ops *p_ops, const uint32_t w_ptr, const uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    // In a fresh message check that the lid is consistent with the previous emssage
+    if (inside_w_ptr == 0) {
+      if (message_l_id > MAX_W_COALESCE) {
+        uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
+        uint64_t prev_l_id = *(uint64_t *) w_mes[prev_w_mes_ptr].l_id;
+        uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
+        if (message_l_id != prev_l_id + prev_coalesce) {
+          red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
+                     t_id, message_l_id, prev_l_id, prev_coalesce);
+        }
+      }
+    }
+
+    // Check the versions
+    assert ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) < B_4_EXACT);
+    if ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) % 2 != 0) {
+      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
+                 *(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version, source);
+      assert (false);
+    }
+    // Check that the buffer is not occupied
+    if (unlikely(p_ops->w_state[w_ptr] != INVALID))
+      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size %u \n",
+                 t_id, p_ops->w_state[w_ptr], w_ptr,
+                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
+    //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
+    assert(p_ops->w_state[w_ptr] == INVALID);
+  }
+
+}
+
+// Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
+static inline void write_bookkeeping_in_insertion_based_on_source
+                  (struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
+                   const uint32_t incoming_pull_ptr, uint8_t *inside_w_ptr_, uint32_t *w_mes_ptr_,
+                   struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
+{
+  uint8_t inside_w_ptr = *inside_w_ptr_;
+  uint32_t w_mes_ptr = *w_mes_ptr_;
+  my_assert(source <= FROM_READ, "When inserting a write source is too high. Have you enabled lin writes?");
+  if (source == FROM_TRACE) {
+    // if the write is a release put it on a new message to
+    // guarantee it is not batched with writes from the same session
+    if (write->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
+      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+      w_mes_ptr = p_ops->w_fifo->push_ptr;
+      w_mes[w_mes_ptr].w_num = 0;
+      inside_w_ptr = 0;
+    }
+    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
+           4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
+    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
+  }
+  else if (unlikely(source == FROM_WRITE)) {
+    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
+    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
+    if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
+    if (DEBUG_QUORUM) {
+      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
+      print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
+    }
+  }
+  else { //source is: FROM_READ: 2nd round of read/acquire or LIN_WRITE: 2nd write of a lin write (disabled)
+    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
+    if (r_info->opcode == OP_ACQUIRE) {
+      if (unlikely(r_info->fp_detected)) {
+        w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
+        r_info->fp_detected = false;
+        if (DEBUG_QUORUM)
+          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
+      }
+      else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
+    }
+    else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
+  }
+
+  // Make sure the pointed values are correct
+  (*inside_w_ptr_) = inside_w_ptr;
+  (*w_mes_ptr_) = w_mes_ptr;
+
+}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD DEBUGGING -----------------------------
@@ -828,7 +918,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
         epoch_id++;
         if (DEBUG_QUORUM)
           yellow_printf("Thread %u, acquire increases the epoch id "
-                          "as a remote release has notified the machine it has lsot messages, new epoch id %u", t_id, epoch_id);
+                          "as a remote release has notified the machine it has lost messages, new epoch id %u\n", t_id, epoch_id);
       }
     }
   }
@@ -844,9 +934,10 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
 }
 
 
+
 // Insert a new local or remote write to the pending writes
-static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, uint8_t source,
-                                uint32_t incoming_pull_ptr, uint16_t t_id)
+static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
+                                const uint32_t incoming_pull_ptr, uint16_t t_id)
 {
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
@@ -856,78 +947,20 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
   uint32_t w_ptr = p_ops->w_push_ptr;
+  uint64_t message_l_id;
   //printf("Insert a write %u \n", *(uint32_t *)write);
-  if (source == FROM_TRACE) {
-    // if the write is a release put it on a new message to
-    // guarantee it is not batched with writes from the same session
-    if (write->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
-      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-      w_mes_ptr = p_ops->w_fifo->push_ptr;
-      w_mes[w_mes_ptr].w_num = 0;
-      inside_w_ptr = 0;
-    }
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
-           4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
-    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
-  }
-  else if (unlikely(source == FROM_WRITE)) {
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
-    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
-    if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
-    if (DEBUG_QUORUM) {
-      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
-      print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
-    }
-  }
-  else {
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
-    if (r_info->opcode == OP_ACQUIRE) {
-      if (unlikely(r_info->fp_detected)) {
-        w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
-        r_info->fp_detected = false;
-        if (DEBUG_QUORUM)
-          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
-      }
-      else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
-    }
-    else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
-  }
+
+  write_bookkeeping_in_insertion_based_on_source(p_ops, write, source, incoming_pull_ptr,
+                                                 &inside_w_ptr, &w_mes_ptr, w_mes,  r_info, t_id);
   if (inside_w_ptr == 0) {
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
-    uint64_t message_l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
-    if (ENABLE_ASSERTIONS) {
-      if (ENABLE_ASSERTIONS) assert ((*(uint32_t *)w_mes[w_mes_ptr].write[inside_w_ptr].version) < B_4_EXACT);
-      if((*(uint32_t *)w_mes[w_mes_ptr].write[inside_w_ptr].version) % 2 != 0) {
-        red_printf("Version to insert %u, comes from read %u \n",
-                   *(uint32_t *)w_mes[w_mes_ptr].write[inside_w_ptr].version, source);
-        assert (false);
-      }
-
-      if (message_l_id > MAX_W_COALESCE) {
-        uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
-        uint64_t prev_l_id = *(uint64_t *) w_mes[prev_w_mes_ptr].l_id;
-        uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
-        if (message_l_id != prev_l_id + prev_coalesce) {
-          red_printf("Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
-                     message_l_id, prev_l_id, prev_coalesce);
-        }
-      }
-    }
+    message_l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
     //printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
     memcpy(w_mes[w_mes_ptr].l_id, &message_l_id, 8);
   }
-  if (ENABLE_ASSERTIONS) {
-    if (unlikely(p_ops->w_state[w_ptr] != INVALID))
-      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size %u \n",
-                 t_id, p_ops->w_state[w_ptr], w_ptr,
-                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
-     //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
-    assert(p_ops->w_state[w_ptr] == INVALID);
-    //if (!comes_from_read)
-      //assert(keys_are_equal((struct cache_key *) &w_mes[w_mes_ptr].write[inside_w_ptr],
-      //                     (struct cache_key *)write));
-  }
+  if (ENABLE_ASSERTIONS)
+    debug_checks_when_inserting_a_write(source, inside_w_ptr, w_mes_ptr, w_mes,
+                                        message_l_id, p_ops, w_ptr, t_id);
   p_ops->w_state[w_ptr] = VALID;
   if (source != FROM_READ) {
     if (write->opcode == OP_RELEASE || write->opcode == OP_RELEASE_SECOND_ROUND)
@@ -946,6 +979,10 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     w_mes[p_ops->w_fifo->push_ptr].w_num = 0;
   }
 }
+
+
+
+
 
 // setup a new r_rep entry
 static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
@@ -1345,7 +1382,8 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
     if (credits[vc][q_info->active_ids[i]] < min_credits) {
       time_out_cnt[vc]++;
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
-        if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u \n", t_id, q_info->active_ids[i]);
+        if (DEBUG_QUORUM) red_printf("Worker %u timed_out on machine %u  writes  done %lu \n",
+                                     t_id, q_info->active_ids[i], t_stats[t_id].writes_sent);
         update_q_info(q_info, credits, min_credits, vc, t_id);
         update_bcast_wr_links(q_info, r_send_wr, t_id);
         update_bcast_wr_links(q_info, w_send_wr, t_id);
@@ -2009,7 +2047,9 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
 
 }
 
-static inline void handle_the_prep_replies(struct pending_ops *p_ops, struct r_rep_message *r_rep_mes)
+
+// Handle a proposal reply
+static inline void handle_the_prop_replies(struct pending_ops *p_ops, struct r_rep_message *r_rep_mes)
 {
 
   my_assert(false, "received prep reply");
@@ -2032,10 +2072,12 @@ static inline void handle_the_prep_replies(struct pending_ops *p_ops, struct r_r
 
     if (r_rep->opcode == PROP_ACK) {
       prep_entry->acks++;
+      // Quorum of prep acks gathered: send an accept
       if (prep_entry->acks == REMOTE_QUORUM) {
         //TODO: insert an accept
       }
     }
+      //
     else if (r_rep->opcode == PROP_NACK) {
       // TODO: an easy solution is to add a cache_op and delete this entry
     }
@@ -2174,7 +2216,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     MOD_ADD(index, R_REP_BUF_SLOTS);
     // If it is a reply to a prepare call a different handler
     if (r_rep_mes->opcode == PREP_REPLY) {
-      handle_the_prep_replies(p_ops, r_rep_mes);
+      handle_the_prop_replies(p_ops, r_rep_mes);
       r_rep_mes->opcode = 5;
       continue;
       //
@@ -2262,6 +2304,9 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   }
 }
 
+// Handle acked reads: trigger second round if needed, update the KVS if needed
+// Handle the first round of Lin Writes
+// Increment the epoch_id after an acquire that learnt the node has missed messages
 static inline void commit_reads(struct pending_ops *p_ops,
                                 struct latency_flags * latency_info, uint16_t t_id)
 {

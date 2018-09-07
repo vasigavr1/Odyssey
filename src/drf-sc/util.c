@@ -455,9 +455,9 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 void set_up_rmw_struct()
 {
   memset(&rmw, 0, sizeof(struct rmw_info));
-  for (uint16_t i = 0; i < RMW_ENTRIES_NUM; i++)
-    rmw.empty_fifo[i] = i;
-  rmw.ef_size = RMW_ENTRIES_NUM;
+//  for (uint16_t i = 0; i < RMW_ENTRIES_NUM; i++)
+//    rmw.empty_fifo[i] = i;
+//  rmw.ef_size = RMW_ENTRIES_NUM;
 }
 
 // Initialize the pending ops struct

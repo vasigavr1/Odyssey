@@ -21,7 +21,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 2
 #define MACHINE_NUM 2
-#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 10
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -34,17 +34,17 @@
 #define MAX_W_COALESCE 15
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT M_1
+#define CREDIT_TIMEOUT M_128
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 0
+#define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 200
-#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 20// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
 
 
@@ -532,18 +532,20 @@ struct read_info {
   uint16_t epoch_id;
 };
 
-//
+// the first time a key gets RMWed, it grabs an RMW entry
+// that lasts for life, the entry is protected by the KVS lock
 struct rmw_entry {
-  uint8_t opcode;
+  uint8_t opcode; // what kind of RMW
   struct key key;
   uint8_t state;
   struct rmw_id rmw_id;
   struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   uint8_t value[VALUE_SIZE];
-  atomic_flag lock;
+  //atomic_flag lock;
 };
 
+// Entry that keep pending thread-local RMWs, the entries are accessed with session id
 struct prop_entry {
   uint8_t opcode;
   struct key key;
@@ -557,6 +559,7 @@ struct prop_entry {
   uint8_t acks;
 };
 
+// Local state of pending RMWs - one entry per session
 struct prop_info {
   struct prop_entry entry[LOCAL_PREP_NUM];
   uint64_t l_id; // highest l_id as of yet
@@ -600,18 +603,18 @@ struct pending_ops {
 // acks to the commits mean that the RMW has happened
 struct rmw_info {
   struct rmw_entry entry[RMW_ENTRIES_NUM];
-  uint16_t empty_fifo[RMW_ENTRIES_NUM];
-  uint16_t ef_push_ptr; // empty fifo push ptr
-  uint16_t ef_pull_ptr;
-  uint16_t ef_size; // how many empty slots are there
+//  uint16_t empty_fifo[RMW_ENTRIES_NUM];
+//  uint16_t ef_push_ptr; // empty fifo push ptr
+//  uint16_t ef_pull_ptr;
+//  uint16_t ef_size; // how many empty slots are there
 
-  atomic_flag ef_lock;
-  atomic_uint_fast16_t local_rmw_num;
-  atomic_flag local_rmw_lock;
+//  atomic_flag ef_lock;
+//  atomic_uint_fast16_t local_rmw_num;
+//  atomic_flag local_rmw_lock;
 
-  uint32_t size;
-  uint8_t lock;
-  uint64_t version; // allow for lock free reads of the struct
+//  uint32_t size;
+//  uint8_t lock;
+//  uint64_t version; // allow for lock free reads of the struct
 };
 
 //typedef _Atomic struct rmw_info atomic_rmw_info;
