@@ -154,7 +154,8 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           if (ENABLE_ASSERTIONS) assert(op[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
           memcpy(kv_ptr[I]->value, op[I].value, VALUE_SIZE);
-          optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *) &op[I].key.meta.version);
+          // This also writes the new version to op
+          optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *)&op[I].key.meta.version);
           resp[I].type = CACHE_PUT_SUCCESS;
 				}
         else if (op[I].opcode == CACHE_OP_LIN_PUT) {
@@ -192,7 +193,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // key has been RMWed before
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
-            check_entry_validity(&op[I], entry);
+            check_entry_validity(&op[I], entry); // this is wrapped into ENABLE_ASSERTIONS
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
@@ -203,6 +204,9 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             else resp[I].type = RETRY_RMW_KEY_EXISTS;
           }
           resp[I].rmw_entry = entry;
+          // We need to put the old timestamp in the op too, both to send it and to store it for later
+          op[I].key.meta.m_id = kv_ptr[I]->key.meta.m_id;
+          op[I].key.meta.version = kv_ptr[I]->key.meta.version - 1;
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
@@ -431,7 +435,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW on op %u\n", t_id, I);
-          uint8_t flag = RMW_ACK_PREPARE;
+          uint8_t flag = RMW_ACK_PROPOSE;
           uint8_t tmp_value[VALUE_SIZE];
           struct ts_tuple rep_ts;
           uint64_t rmw_l_id = (*(uint64_t*) p_ops->ptrs_to_r_headers[0]->l_id) + I;
@@ -452,7 +456,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             }
             else if(kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
               uint32_t entry = *(uint32_t *)kv_ptr[I]->value;
-              flag = prepare_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id);
+              flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id,
+                                          t_id);
             }
             else my_assert(false, "KVS opcode is wrong!");
           }

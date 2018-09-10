@@ -44,7 +44,7 @@
 #define SC_RATIO_ 20// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
 
 
@@ -340,17 +340,17 @@ struct remote_qp {
 
 // Possible write sources
 #define FROM_TRACE 0
-#define LIN_WRITE 1
-#define FROM_READ 2
-#define FROM_WRITE 3 //the second round of a release
-
+#define FROM_READ 1
+#define FROM_WRITE 2 //the second round of a release
+#define FOR_ACCEPT 3
+#define LIN_WRITE 5
 // Possible flag values when inserting a read reply
 #define READ 0
 #define LIN_PUT 1
 #define RMW_SMALLER_TS 2
-#define RMW_ACK_PREPARE 3 // Send an 1-byte reply
+#define RMW_ACK_PROPOSE 3 // Send an 1-byte reply
 #define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
-#define RMW_NACK_PREPARE 5 // Send a TS, because you have already acked a higher Propose
+#define RMW_NACK_PROPOSE 5 // Send a TS, because you have already acked a higher Propose
 
 
 
@@ -547,13 +547,14 @@ struct rmw_entry {
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
 struct prop_entry {
-  uint8_t opcode;
+  struct ts_tuple old_ts;
   struct key key;
+  uint8_t opcode;
+  uint8_t value[RMW_VALUE_SIZE];
   uint8_t state;
   struct rmw_id rmw_id;
   uint32_t debug_cntr;
   uint64_t l_id;
-  uint8_t value[RMW_VALUE_SIZE];
   uint32_t ptr_to_rmw;
   uint16_t epoch_id;
   uint8_t acks;
