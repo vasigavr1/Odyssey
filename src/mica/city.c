@@ -275,7 +275,7 @@ uint64 CityHash64WithSeeds(const char *s, size_t len,
   return HashLen16(CityHash64(s, len) - seed0, seed1);
 }
 
-// A subroutine for CityHash128().  Returns a decent 128-bit hash for strings
+// A subroutine for CityHash128().  Returns a decent 128-bit_vec hash for strings
 // of any length representable in signed long.  Based on City and Murmur.
 static uint128 CityMurmur(const char *s, size_t len, uint128 seed) {
   uint64 a = Uint128Low64(seed);
@@ -368,7 +368,7 @@ uint128 CityHash128WithSeed(const char *s, size_t len, uint128 seed) {
     v = WeakHashLen32WithSeeds(s + len - tail_done, v.first + z, v.second);
   }
   // At this point our 56 bytes of state should contain more than
-  // enough information for a strong 128-bit hash.  We use two
+  // enough information for a strong 128-bit_vec hash.  We use two
   // different 56-byte-to-8-byte hashes to get a 16-byte final result.
   x = HashLen16(x, v.first);
   y = HashLen16(y + z, w.first);

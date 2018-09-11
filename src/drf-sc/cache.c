@@ -421,8 +421,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               memcpy(tmp_value, kv_ptr[I]->value, VALUE_SIZE);
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           //On receiving the 1st round of an Acquire:
-          // If the corresponding bit in the stable vector is set, then let the machine know
-          // it lost messages and switch the bit to Transient state
+          // If the corresponding bit_vec in the stable vector is set, then let the machine know
+          // it lost messages and switch the bit_vec to Transient state
           bool false_positive = false;
           if (!EMULATE_ABD) {
             false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);

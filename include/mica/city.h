@@ -32,7 +32,7 @@
 // well on hash-quality tests.
 //
 // CityHash128() is optimized for relatively long strings and returns
-// a 128-bit hash.  For strings more than about 2000 bytes it can be
+// a 128-bit_vec hash.  For strings more than about 2000 bytes it can be
 // faster than CityHash64().
 //
 // Functions in the CityHash family are not suitable for cryptography.
@@ -67,7 +67,7 @@ struct _uint128 {
 // Hash function for a byte array.
 uint64 CityHash64(const char *buf, size_t len);
 
-// Hash function for a byte array.  For convenience, a 64-bit seed is also
+// Hash function for a byte array.  For convenience, a 64-bit_vec seed is also
 // hashed into the result.
 uint64 CityHash64WithSeed(const char *buf, size_t len, uint64 seed);
 
@@ -79,7 +79,7 @@ uint64 CityHash64WithSeeds(const char *buf, size_t len,
 // Hash function for a byte array.
 uint128 CityHash128(const char *s, size_t len);
 
-// Hash function for a byte array.  For convenience, a 128-bit seed is also
+// Hash function for a byte array.  For convenience, a 128-bit_vec seed is also
 // hashed into the result.
 uint128 CityHash128WithSeed(const char *s, size_t len, uint128 seed);
 

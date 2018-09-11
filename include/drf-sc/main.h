@@ -19,8 +19,8 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 2
-#define MACHINE_NUM 2
+#define WORKERS_PER_MACHINE 8
+#define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 10
 #define MEASURE_LATENCY 0
@@ -34,17 +34,17 @@
 #define MAX_W_COALESCE 15
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT M_128
+#define CREDIT_TIMEOUT M_16
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 200
-#define SC_RATIO_ 20// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
 
 
@@ -263,8 +263,9 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 1
+#define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -459,7 +460,7 @@ struct write_fifo {
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of prepares not messages!
   uint32_t size;
-  uint32_t backward_ptrs[W_FIFO_SIZE];
+  uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
 
 //
@@ -703,6 +704,30 @@ struct thread_stats { // 2 cache lines
 #define UP_TRANSIENT 1
 #define DOWN_STABLE 2
 #define DOWN_TRANSIENT 3
+#define DOWN_TRANSIENT_OWNED 4
+
+// Id of the local Release owning a send bit_vec
+struct send_bit {
+  atomic_flag lock;
+  uint8_t bit; // UP_STABLE, DOWN_STABLE, DOWN_TRANSIENT,DOWN_TRANSIENT_OWNED
+  uint16_t owner_t_id;
+  uint64_t owner_local_w_id;
+};
+
+struct send_bit_vector {
+  atomic_flag state_lock;
+  uint8_t state; // denotes if any bits are raised, to accelerate the common case
+  struct send_bit bit_vec[MACHINE_NUM];
+};
+
+extern struct send_bit_vector send_bit_vector;
+
+// Id of the Release owning a send bit_vec
+struct config_bit_owner {
+  uint16_t t_id;
+  uint16_t m_id;
+  uint64_t local_r_id;
+};
 
 
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
@@ -715,8 +740,9 @@ extern atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
 
 // The send vector does not contain all failed nodes,
 // but only those locally detected
-extern atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
-extern atomic_uint_fast8_t send_config_bit_vec_state;
+//extern atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
+//extern struct bit_vec send_bit_vector[MACHINE_NUM];
+//extern atomic_uint_fast8_t send_config_bit_vec_state;
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;

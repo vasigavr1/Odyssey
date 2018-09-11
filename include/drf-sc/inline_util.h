@@ -342,50 +342,161 @@ static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, u
                                         (atomic_uint_fast16_t) new_state);
 }
 
-// Lower a bit in the send vector if it is risen
-static inline bool cas_sent_bit_vector_state(uint16_t t_id, uint16_t m_id, uint8_t old_state, uint8_t new_state)
-{
-  bool return_val = atomic_compare_exchange_strong(&send_config_bit_vector[m_id],(atomic_uint_fast8_t *) &old_state,
-                                       (atomic_uint_fast16_t) new_state);
-  // Do a check to raise the flag that releases should stop sending the bit vector
-  if (new_state == UP_STABLE) {
-    for (uint16_t i = 0; i < MACHINE_NUM; i++) {
-      if (i == machine_id) continue;
-      if (send_config_bit_vector[i] != UP_STABLE)
-        return return_val;
-    }
-    send_config_bit_vec_state = UP_STABLE;
+// Lower a bit_vec in the send vector if it is risen
+//static inline bool cas_sent_bit_vector_state(uint16_t t_id, uint16_t m_id, uint8_t old_state, uint8_t new_state)
+//{
+//  bool return_val =
+//    atomic_compare_exchange_strong(&send_config_bit_vector[m_id],(atomic_uint_fast8_t *) &old_state,
+//                                   (atomic_uint_fast16_t) new_state);
+//
+//  // Do a check to raise the flag that releases should stop sending the bit_vec vector
+//  if (new_state == UP_STABLE) {
+//    for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+//      if (i == machine_id) continue;
+//      if (send_config_bit_vector[i] != UP_STABLE)
+//        return return_val;
+//    }
+//    send_config_bit_vec_state = UP_STABLE;
+//  }
+//  return return_val;
+//}
+
+//------SEND BITS HANDLERS---------
+// 1. On Detecting a failure bring the corresponding machine's bit_vec to DOWN STABLE
+// 2. On Sending a Release containing a failure, convert the corresponding bits to
+//    Transient and give ownership if there is none
+// 3. On the Release quoromizing a failure transition the corresponding bit_vec to UP_STABLE
+//    iff the Release owns them
+// 4. Create the bit vector to be sent with the first round of a Release
+
+// 1. Detecet a failure: Bring a give send bit_vec to state DOWN_STABLE
+static inline void set_send_bit_after_detecting_failure(const uint16_t t_id, const uint16_t m_id) {
+  if (DEBUG_BIT_VECS)
+    yellow_printf("Wrkr %u handles Send bit vec after failure to machine %u, send bit %u, state %u \n",
+                t_id, m_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state);
+
+  if (send_bit_vector.bit_vec[m_id].bit != DOWN_STABLE) {
+    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
+    send_bit_vector.bit_vec[m_id].bit = DOWN_STABLE;
+    atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_release);
   }
-  return return_val;
+
+  if (send_bit_vector.state != DOWN_STABLE) {
+    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
+    send_bit_vector.state = DOWN_STABLE;
+    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
+  }
+  if (DEBUG_BIT_VECS) green_printf("Wrkr %u After: send bit %u, state %u \n",
+                t_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state);
+}
+
+//2. On Sending a Release containing a failure
+static inline void take_ownership_of_send_bits(const uint16_t t_id, const uint64_t local_w_id)
+{
+  if (DEBUG_BIT_VECS)
+    yellow_printf("Wrkr %u A release is looking to take ownership of failures local_w_id %u \n", t_id, local_w_id);
+  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+    bool debug_flag = false;
+    uint8_t *bit = &send_bit_vector.bit_vec[m_i].bit;
+    // if it's down but not owned then own it
+    if (*bit == DOWN_STABLE) {
+      while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_acquire));
+      if (*bit == DOWN_STABLE) {
+        *bit = DOWN_TRANSIENT_OWNED;
+        send_bit_vector.bit_vec[m_i].owner_t_id = t_id;
+        send_bit_vector.bit_vec[m_i].owner_local_w_id = local_w_id;
+        if (DEBUG_BIT_VECS) debug_flag = true;
+      }
+      atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_release);
+    }
+    if (DEBUG_BIT_VECS && debug_flag)
+      green_printf("Wrkr %u got ownership of failure on m_id %u, bit %u  owned t_id %u, owned local_w_id %u \n",
+                   t_id, m_i, *bit, send_bit_vector.bit_vec[m_i].owner_t_id, send_bit_vector.bit_vec[m_i].owner_local_w_id);
+  }
+}
+
+// 3. After the frist round of a Release raise the bit_vec iff owned
+static inline void raise_send_bit_iff_owned(const uint16_t t_id, const uint64_t local_w_id)
+{
+  if (DEBUG_BIT_VECS)
+    yellow_printf("Wrkr %u A release is looking if it owns a failure local_w_id %u, total state %u \n",
+                  t_id, local_w_id, send_bit_vector.state);
+  bool there_are_failed_machines = false;
+  // First change the state  of the owned bits
+  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+    bool debug_flag = false;
+    uint8_t *bit = &send_bit_vector.bit_vec[m_i].bit;
+    if (*bit == DOWN_TRANSIENT_OWNED) { // if the bit_vec is owned
+      if (send_bit_vector.bit_vec[m_i].owner_local_w_id == local_w_id &&
+          send_bit_vector.bit_vec[m_i].owner_t_id == t_id) { // if it is owned by me
+
+        // Grab the lock
+        while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_acquire));
+          if (*bit == DOWN_TRANSIENT_OWNED) { // Check again if the bit_vec is owned
+            if (send_bit_vector.bit_vec[m_i].owner_local_w_id == local_w_id &&
+                send_bit_vector.bit_vec[m_i].owner_t_id == t_id) { // if it is owned by me
+              *bit = UP_STABLE;
+              debug_flag = true;
+            }
+          }
+        atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_release);
+      }
+      if (DEBUG_BIT_VECS && debug_flag)
+        green_printf("Wrkr %u Release had ownership of failure on m_id %u, bit %u  owned t_id %u, owned local_w_id %u \n",
+                     t_id, m_i, *bit, send_bit_vector.bit_vec[m_i].owner_t_id, send_bit_vector.bit_vec[m_i].owner_local_w_id);
+    }
+    if (*bit != UP_STABLE) there_are_failed_machines = true; // look out for any failed machines
+  }
+
+  if (!there_are_failed_machines && send_bit_vector.state != UP_STABLE) { // if no failed machines try to change state
+    bool debug_flag = false;
+    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
+    for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+      if (send_bit_vector.bit_vec[m_i].bit != UP_STABLE) {
+        there_are_failed_machines = true;
+        break;
+      }
+    }
+    if (!there_are_failed_machines) {
+      send_bit_vector.state = UP_STABLE;
+      debug_flag = true;
+    }
+    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
+    if (DEBUG_BIT_VECS  && debug_flag)
+      yellow_printf("Wrkr %u Release local_w_id %u, raised the total state %u \n",
+                    t_id, local_w_id, send_bit_vector.state);
+  }
+
+
 }
 
 
-// When receiving a reply to the first round of a release
-static inline void convert_transient_to_stable_send_conf_vec(uint16_t t_id)
-{
-  if (DEBUG_QUORUM)
-    green_printf("Thread %u received a reply to a release\n",
-                 t_id);
-  for (uint16_t i = 0; i < MACHINE_NUM; i++) {
-    if (send_config_bit_vector[i] == DOWN_TRANSIENT) {
-      cas_sent_bit_vector_state(t_id, i, DOWN_TRANSIENT, UP_STABLE);
-    }
-  }
-  if (DEBUG_QUORUM)
-    green_printf("Thread %u received a reply to a release\n",
-                                  t_id);
-}
+//// When receiving a reply to the first round of a release
+//static inline void convert_transient_to_stable_send_conf_vec(uint16_t t_id)
+//{
+//  if (DEBUG_QUORUM)
+//    green_printf("Thread %u received a reply to a release\n",
+//                 t_id);
+//  for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+//    if (send_config_bit_vector[i] == DOWN_TRANSIENT) {
+//      cas_sent_bit_vector_state(t_id, i, DOWN_TRANSIENT, UP_STABLE);
+//    }
+//  }
+//  if (DEBUG_QUORUM)
+//    green_printf("Thread %u received a reply to a release\n",
+//                                  t_id);
+//}
 
-// Create a bit vector to be put inside the release
+// Create a bit_vec vector to be put inside the release
 static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
 {
   uint64_t bit_vect = 0;
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {
     if (i == machine_id) continue;
-    if (send_config_bit_vector[i] != UP_STABLE)
+    if (send_bit_vector.bit_vec[i].bit != UP_STABLE)
       bit_vect = bit_vect | machine_bit_id[i];
   }
-  memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
+  memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE); // TODO this memcpy is supsicious, is it necessary?
 }
 
 // Prints out information about the participants
@@ -725,7 +836,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
         w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
         r_info->fp_detected = false;
         if (DEBUG_QUORUM)
-          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit\n", t_id);
+          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit_vec\n", t_id);
       }
       else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
     }
@@ -1170,7 +1281,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
               "lids of rmw_entry and prop_entry don't match");
     p_ops->prop_info->l_id++;
     prop_entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
-    memcpy(&prop_entry->old_ts, &prop->key.meta.m_id, TS_TUPLE_SIZE);
+    memcpy(&prop_entry->old_ts, (void *)&prop->key.meta.m_id, TS_TUPLE_SIZE);
     insert_rmw_to_read_fifo(p_ops, prop, prop_entry->l_id, 0, t_id);
     prop_entry->state = PROPOSED;
   }
@@ -1285,10 +1396,9 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
       config_vector[i] = DOWN_STABLE;
-      cas_sent_bit_vector_state(t_id, i, UP_STABLE, DOWN_STABLE);
-      send_config_bit_vec_state = DOWN_STABLE;
-      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit for machine %u, send vector bit %u \n",
-                                      i, send_config_bit_vector[i]);
+      set_send_bit_after_detecting_failure(t_id, i);
+      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
+                                      i, send_bit_vector.bit_vec[i].bit);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -1480,9 +1590,9 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
   }
-  // Check if the release needs to send the vector bit to get quoromized
+  // Check if the release needs to send the vector bit_vec to get quoromized
   if (!EMULATE_ABD) {
-    if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_config_bit_vec_state == DOWN_STABLE)) {
+    if (unlikely (w_mes->write[0].opcode == OP_RELEASE && send_bit_vector.state == DOWN_STABLE)) {
       uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
       create_bit_vector(bit_vector_to_send, t_id);
       if (*(uint16_t *) bit_vector_to_send > 0) {
@@ -1490,11 +1600,13 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
         memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value,
                SEND_CONF_VEC_SIZE);
         memcpy(w_mes->write[0].value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
-        for (i = 0; i < MACHINE_NUM; i++)
-          if (send_config_bit_vector[i] != UP_STABLE)
-            cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
+        // l_d can be used raw, because Release is guaranteed to be the first message
+        take_ownership_of_send_bits(t_id, *(uint64_t *)w_mes->l_id);
+//        for (i = 0; i < MACHINE_NUM; i++)
+//          if (send_config_bit_vector[i] != UP_STABLE)
+//            cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
         if (DEBUG_QUORUM)
-          green_printf("Thread %u Sending a release with a vector bit %u \n", t_id, *(uint16_t *) bit_vector_to_send);
+          green_printf("Thread %u Sending a release with a vector bit_vec %u \n", t_id, *(uint16_t *) bit_vector_to_send);
         w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
         p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
       }
@@ -1783,30 +1895,30 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   }
 }
 
-//Handle the configuration bit vector on receiving a release or the second round of an acquire
+//Handle the configuration bit_vec vector on receiving a release or the second round of an acquire
 static inline void handle_configuration_on_receiving_rel_acq(struct write *write, struct w_message *w_mes,
                                                              uint16_t t_id)
 {
-  // If the corresponding bit is set in Transient State then flip the bit and transition its state to Stable
+  // If the corresponding bit_vec is set in Transient State then flip the bit_vec and transition its state to Stable
   // Also reset the Send Vector: the machine will do quorum reads after that acquire anyway
   if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
     if (config_vector[w_mes->m_id] == DOWN_TRANSIENT) {
       if (DEBUG_QUORUM)
-        yellow_printf("Worker %u rectifies the vector bit %u after seeing the second "
-                        "round of an acquire for machine %u, send vector bit %u \n",
-                      t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_config_bit_vector[w_mes->m_id]);
+        yellow_printf("Worker %u rectifies the vector bit_vec %u after seeing the second "
+                        "round of an acquire for machine %u, send vector bit_vec %u \n",
+                      t_id, (uint8_t) config_vector[w_mes->m_id], w_mes->m_id, send_bit_vector.bit_vec[w_mes->m_id].bit);
       cas_a_state(&config_vector[w_mes->m_id], DOWN_TRANSIENT, UP_STABLE, t_id);
-      if (send_config_bit_vector[w_mes->m_id] == DOWN_TRANSIENT ||
-          send_config_bit_vector[w_mes->m_id] == DOWN_STABLE) {
-        //red_printf("thread %u Acquire lowers the sent bit", g_id);
-        atomic_store(&send_config_bit_vector[w_mes->m_id], UP_STABLE);
-      }
-      if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector[w_mes->m_id]);
+//      if (send_config_bit_vector[w_mes->m_id] == DOWN_TRANSIENT ||
+//          send_config_bit_vector[w_mes->m_id] == DOWN_STABLE) {
+//        //red_printf("thread %u Acquire lowers the sent bit_vec", g_id);
+//        atomic_store(&send_config_bit_vector[w_mes->m_id], UP_STABLE);
+//      }
+//      if (DEBUG_QUORUM) yellow_printf("send vector %u after changing it \n", send_config_bit_vector[w_mes->m_id]);
     }
     write->opcode = OP_ACQUIRE;
   }
   // On receiving the 1st round of a Release:
-  // apply the change to the stable vector and set the bit that gets changed to Stable state.
+  // apply the change to the stable vector and set the bit_vec that gets changed to Stable state.
   // Do not change the sent vector
   if (unlikely(write->opcode == OP_RELEASE_BIT_VECTOR)) {
     uint16_t recv_conf_bit_vec = *(uint16_t *) write->value;
@@ -1814,7 +1926,7 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
       if (recv_conf_bit_vec & machine_bit_id[m_i]) {
           config_vector[m_i] = DOWN_STABLE;
           if (DEBUG_QUORUM)
-            green_printf("Worker %u updates the kept config bit vector: received: %u, m_id %u \n",
+            green_printf("Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
                          t_id, recv_conf_bit_vec, m_i);
       }
     }
@@ -2643,7 +2755,8 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
             //   g_id, ack_i, ack_num,  ack_ptr);
         if (unlikely(p_ops->w_state[ack_ptr] == SENT_BIT_VECTOR)) {
           p_ops->w_state[ack_ptr] = READY_BIT_VECTOR;
-          convert_transient_to_stable_send_conf_vec(t_id);
+          raise_send_bit_iff_owned(t_id, l_id + ack_i);
+//          convert_transient_to_stable_send_conf_vec(t_id);
         }
         else if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
         else {
