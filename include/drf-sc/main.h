@@ -34,7 +34,7 @@
 #define MAX_W_COALESCE 10
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT B_4_EXACT // M_16 //
+#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -141,13 +141,16 @@
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
 #define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
 
+// post some extra receives to avoid spurious out_of_buffer errors
+#define RECV_WR_SAFETY_MARGIN 2
 
 // READS
 #define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
 #define R_MES_HEADER (10) // local id + coalesce num + m_id
 #define R_MES_SIZE (R_MES_HEADER + (R_SIZE * MAX_R_COALESCE))
 #define R_RECV_SIZE (GRH_SIZE + R_MES_SIZE)
-#define MAX_RECV_R_WRS (R_CREDITS * REM_MACH_NUM)
+
+#define MAX_RECV_R_WRS ((R_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
 #define MAX_INCOMING_R (MAX_RECV_R_WRS * MAX_R_COALESCE)
 #define MAX_R_WRS (MESSAGES_IN_BCAST_BATCH)
 #define R_SEND_SIZE (R_MES_SIZE)
@@ -169,7 +172,7 @@
 //#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE) // not correct
 
 // Writes
-#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + 0)
+#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
 #define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
 #define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_W_COALESCE)
 
@@ -272,7 +275,7 @@
 #define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 1
 #define DEBUG_RECEIVES 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 

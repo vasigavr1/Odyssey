@@ -11,7 +11,7 @@ void *worker(void *arg)
 		cyan_printf("MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
 		assert(false);
 	}
-  cyan_printf("Worker %u is running \n", t_id);
+  //cyan_printf("Worker %u is running \n", t_id);
 
 	int *recv_q_depths, *send_q_depths;
   set_up_queue_depths(&recv_q_depths, &send_q_depths);
@@ -22,7 +22,7 @@ void *worker(void *arg)
 												QP_NUM, TOTAL_BUF_SIZE,	/* num_dgram_qps, dgram_buf_size */
 												MASTER_SHM_KEY + t_id, /* key */
 												recv_q_depths, send_q_depths); /* Depth of the dgram RECV Q*/
-  cyan_printf("Worker %u init cb \n", t_id);
+
   uint32_t ack_buf_push_ptr = 0, ack_buf_pull_ptr = 0,
     w_buf_push_ptr = 0, w_buf_pull_ptr = 0,  r_buf_push_ptr = 0, r_buf_pull_ptr = 0,
     r_rep_buf_push_ptr = 0, r_rep_buf_pull_ptr = 0;
@@ -49,7 +49,6 @@ void *worker(void *arg)
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/
-  cyan_printf("Worker %u is calling the function \n", t_id);
 	setup_connections_and_spawn_stats_thread(gid, cb);
 
 	/* -----------------------------------------------------

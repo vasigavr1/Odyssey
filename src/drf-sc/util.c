@@ -23,14 +23,14 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)
 
             /* Get the UD queue pair for the ith machine */
             wrkr_qp[i][qp_i] = NULL;
-//            printf("Leader %d is Looking for follower %s \n", l_id, worker_name);
+            //printf("Leader %d is Looking for follower %s \n", l_id, worker_name);
             while(wrkr_qp[i][qp_i] == NULL) {
                 wrkr_qp[i][qp_i] = hrd_get_published_qp(worker_name);
                 if(wrkr_qp[i][qp_i] == NULL)
                     usleep(200000);
             }
-             green_printf("main:Worker %d found qp %d of  wrkr %d. Worker LID: %d\n",
-                    g_id, qp_i, i, wrkr_qp[i][qp_i]->lid);
+             // green_printf("main:Worker %d found qp %d of  wrkr %d. Worker LID: %d\n",
+               //     g_id, qp_i, i, wrkr_qp[i][qp_i]->lid);
             struct ibv_ah_attr ah_attr = {
                 //-----INFINIBAND----------
                 .is_global = 0,
@@ -390,14 +390,14 @@ int pin_threads_avoiding_collisions(int c_id) {
 void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb)
 {
   uint32_t qp_i;
-  cyan_printf("Wrkr attempting to %d publish its dgrams \n", global_id);
+  //cyan_printf("Wrkr attempting to %d publish its dgrams \n", global_id);
   for (qp_i = 0; qp_i < qp_num; qp_i++) {
     char dgram_qp_name[QP_NAME_SIZE];
     sprintf(dgram_qp_name, "%s-%d-%d", qp_name, global_id, qp_i);
     hrd_publish_dgram_qp(cb, qp_i, dgram_qp_name, DEFAULT_SL);
     // yellow_printf("Wrkr %d published dgram %s \n", global_id, dgram_qp_name);
   }
-  yellow_printf("Wrkr %d published its dgrams \n", global_id);
+  //yellow_printf("Wrkr %d published its dgrams \n", global_id);
 }
 
 // Followers and leaders both use this to establish connections

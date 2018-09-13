@@ -1386,11 +1386,9 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   return trace_iter;
 }
 
-
 /* ---------------------------------------------------------------------------
-//------------------------------ BROADCASTS -----------------------------
+//------------------------------CONFIGURATION -----------------------------
 //---------------------------------------------------------------------------*/
-
 // Update the quorum info, use this one a timeout
 static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[][MACHINE_NUM],
                                  uint16_t min_credits, uint8_t vc, uint16_t t_id)
@@ -1430,7 +1428,7 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
 
 // Bring back a machine
 static inline void revive_machine(struct quorum_info *q_info,
-                                 uint8_t revived_mach_id)
+                                  uint8_t revived_mach_id)
 {
 
   uint8_t rm_id = mid_to_rmid(revived_mach_id);
@@ -1485,7 +1483,12 @@ static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv
   }
 }
 
-// Update the quorum info, use this one a timeout
+
+/* ---------------------------------------------------------------------------
+//------------------------------ BROADCASTS -----------------------------
+//---------------------------------------------------------------------------*/
+
+
 static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
                                     uint16_t mes_sent, uint8_t vc)
 {
@@ -1493,7 +1496,7 @@ static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quor
     if (ENABLE_ASSERTIONS) {
       assert(credits[vc][q_info->active_ids[i]] >= mes_sent);
       assert(q_info->active_ids[i] != machine_id && q_info->active_ids[i] < MACHINE_NUM);
-      assert(q_info->active_num == REM_MACH_NUM); // TODO remove
+      //assert(q_info->active_num == REM_MACH_NUM); // debug no-failure case
     }
     credits[vc][q_info->active_ids[i]] -= mes_sent;
   }
@@ -1520,7 +1523,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
         if (DEBUG_QUORUM)
           red_printf("Worker %u timed_out on machine %u  for vc % u, writes  done %lu \n",
                      t_id, q_info->active_ids[i], vc, t_stats[t_id].writes_sent);
-        assert(false);
+        // assert(false);
         update_q_info(q_info, credits, min_credits, vc, t_id);
         update_bcast_wr_links(q_info, r_send_wr, t_id);
         update_bcast_wr_links(q_info, w_send_wr, t_id);
@@ -1972,7 +1975,11 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 {
   uint32_t polled_messages = 0, polled_writes = 0;
   int completed_messages =  ibv_poll_cq(w_recv_cq, W_BUF_SLOTS, w_recv_wc);
-  if (DEBUG_RECEIVES) w_recv_info->posted_recvs-=completed_messages;
+  if (DEBUG_RECEIVES) {
+    w_recv_info->posted_recvs-=completed_messages;
+    if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
+      red_printf("Wrkr %u some remote machine has created credits out of thin air \n", t_id);
+  }
   if (completed_messages <= 0) return;
   uint32_t index = *pull_ptr;
   // Start polling
