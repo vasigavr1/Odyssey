@@ -11,6 +11,7 @@ void *worker(void *arg)
 		cyan_printf("MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
 		assert(false);
 	}
+  cyan_printf("Worker %u is running \n", t_id);
 
 	int *recv_q_depths, *send_q_depths;
   set_up_queue_depths(&recv_q_depths, &send_q_depths);
@@ -21,7 +22,7 @@ void *worker(void *arg)
 												QP_NUM, TOTAL_BUF_SIZE,	/* num_dgram_qps, dgram_buf_size */
 												MASTER_SHM_KEY + t_id, /* key */
 												recv_q_depths, send_q_depths); /* Depth of the dgram RECV Q*/
-
+  cyan_printf("Worker %u init cb \n", t_id);
   uint32_t ack_buf_push_ptr = 0, ack_buf_pull_ptr = 0,
     w_buf_push_ptr = 0, w_buf_pull_ptr = 0,  r_buf_push_ptr = 0, r_buf_pull_ptr = 0,
     r_rep_buf_push_ptr = 0, r_rep_buf_pull_ptr = 0;
@@ -38,7 +39,7 @@ void *worker(void *arg)
 	/* Fill the RECV queue that receives the Broadcasts, we need to do this early */
   // Pre post receives for writes
   pre_post_recvs(&w_buf_push_ptr, cb->dgram_qp[W_QP_ID], cb->dgram_buf_mr->lkey, (void *)w_buffer,
-                   W_BUF_SLOTS, MAX_RECV_W_WRS, W_QP_ID, W_RECV_SIZE);
+                   W_BUF_SLOTS, MAX_RECV_W_WRS, W_QP_ID, (uint32_t) W_RECV_SIZE);
   // Pre post receives for reads
   pre_post_recvs(&r_buf_push_ptr, cb->dgram_qp[R_QP_ID], cb->dgram_buf_mr->lkey, (void *)r_buffer,
                  R_BUF_SLOTS, MAX_RECV_R_WRS, R_QP_ID, R_RECV_SIZE);
@@ -48,6 +49,7 @@ void *worker(void *arg)
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/
+  cyan_printf("Worker %u is calling the function \n", t_id);
 	setup_connections_and_spawn_stats_thread(gid, cb);
 
 	/* -----------------------------------------------------
@@ -120,6 +122,7 @@ void *worker(void *arg)
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl, ack_recv_wr, ack_recv_sgl,
                          r_rep_recv_wr, r_rep_recv_sgl, cb, r_rep_mr, acks, t_id);
   set_up_credits(credits);
+  assert(credits[R_VC][0] == R_CREDITS && credits[W_VC][0] == W_CREDITS);
   struct quorum_info *q_info;
   set_up_q_info(&q_info);
 
@@ -139,6 +142,7 @@ void *worker(void *arg)
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
   uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0};
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
+  uint64_t debug_lids = 0;
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
 
@@ -158,7 +162,7 @@ void *worker(void *arg)
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
       (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > M_32) && (!slept)) {
       uint seconds = 10;
-      if (t_id == 0) yellow_printf("Worker %u is going to sleep for %u secs\n", t_id, seconds);
+      if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", t_id, seconds);
       sleep(seconds); slept = true;
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
@@ -238,7 +242,7 @@ void *worker(void *arg)
     //if (WRITE_RATIO > 0)
     broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
-                     ack_recv_info, t_id, &outstanding_writes);
+                     ack_recv_info, t_id, &outstanding_writes, &debug_lids);
 	}
 	return NULL;
 }

@@ -15,35 +15,35 @@
 #define PHYSICAL_CORES_PER_SOCKET 10
 #define LOGICAL_CORES_PER_SOCKET 20
 #define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
-#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
+#define WORKER_HYPERTHREADING 1 // shcedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 8
+#define WORKERS_PER_MACHINE 29
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 10
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define ENABLE_LIN 0
-#define R_CREDITS 2
+#define R_CREDITS 1
 #define MAX_R_COALESCE 40
 #define W_CREDITS 2
-#define MAX_W_COALESCE 15
+#define MAX_W_COALESCE 10
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT M_16
+#define CREDIT_TIMEOUT B_4_EXACT // M_16 //
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 200
-#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 1
-#define ENABLE_ACQUIRES_ 1
+#define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES_ 0
+#define ENABLE_ACQUIRES_ 0
 #define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
 
@@ -59,7 +59,7 @@
 
 
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 1
+#define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
 #define DUMP_STATS_2_FILE 0
 
@@ -169,7 +169,7 @@
 //#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE) // not correct
 
 // Writes
-#define MAX_RECV_W_WRS (W_CREDITS * REM_MACH_NUM)
+#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + 0)
 #define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
 #define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_W_COALESCE)
 
@@ -183,7 +183,7 @@
 // Acks
 #define MAX_RECV_ACK_WRS (REM_MACH_NUM * W_CREDITS)
 #define MAX_ACK_WRS (MACHINE_NUM)
-#define ACK_SIZE 14
+#define ACK_SIZE 14 // bytes like everytinh else
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
 
 // Prepares
@@ -232,6 +232,12 @@
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
 #define PENDING_WRITES (MAX_OP_BATCH + 1)
 #define W_FIFO_SIZE (PENDING_WRITES)
+
+// The w_fifo needs to have a safety slot that cannot be touched
+// such that the fifo push ptr can never coincide with its pull ptr
+// zeroing its w_num, as such we take care to allow
+// one fewer pending write than slots in the w_ifo
+#define MAX_ALLOWED_W_SIZE (W_FIFO_SIZE - 1)
 #define R_FIFO_SIZE (PENDING_READS)
 
 #define W_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 1))
@@ -265,7 +271,8 @@
 #define DEBUG_QUORUM 1
 #define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 1
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define DEBUG_RECEIVES 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -370,15 +377,18 @@ struct quorum_info {
 	uint8_t first_active_rm_id;
 	uint8_t last_active_rm_id;
 };
+
  struct rmw_id {
    uint16_t g_id;
    uint64_t id;
  };
 
+// format of a Timestamp tuple (Lamport clock)
 struct ts_tuple {
   uint8_t m_id;
   uint8_t version[4];
 };
+
 // The format of an ack message
 struct ack_message {
 	uint8_t local_id[8]; // the first local id that is being acked
@@ -456,9 +466,9 @@ struct read_fifo {
 struct write_fifo {
   struct w_message *w_message;
   uint32_t push_ptr;
-  uint32_t pull_ptr;
+  //uint32_t pull_ptr;
   uint32_t bcast_pull_ptr;
-  uint32_t bcast_size; // number of prepares not messages!
+  uint32_t bcast_size; // number of writes not messages!
   uint32_t size;
   uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
@@ -720,7 +730,18 @@ struct send_bit_vector {
   struct send_bit bit_vec[MACHINE_NUM];
 };
 
+
+
+
+// This bit vector shows failures that were identified locally
+// Releases must send out such a failure and clear the corresponding
+// bit after the failure has been quoromized
 extern struct send_bit_vector send_bit_vector;
+
+// This bit vector shows failures that were identified locally or remotely
+// Remote acquires will read those failures and flip the bits after the have
+// increased their epoch id
+extern struct send_bit_Vector conf_bit_vector;
 
 // Id of the Release owning a send bit_vec
 struct config_bit_owner {

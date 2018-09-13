@@ -29,8 +29,8 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)
                 if(wrkr_qp[i][qp_i] == NULL)
                     usleep(200000);
             }
-            // printf("main:Worker %d found clt %d. Worker LID: %d\n",
-            //        l_id, i, wrkr_qp[i][qp_i]->lid);
+             green_printf("main:Worker %d found qp %d of  wrkr %d. Worker LID: %d\n",
+                    g_id, qp_i, i, wrkr_qp[i][qp_i]->lid);
             struct ibv_ah_attr ah_attr = {
                 //-----INFINIBAND----------
                 .is_global = 0,
@@ -390,12 +390,14 @@ int pin_threads_avoiding_collisions(int c_id) {
 void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb)
 {
   uint32_t qp_i;
+  cyan_printf("Wrkr attempting to %d publish its dgrams \n", global_id);
   for (qp_i = 0; qp_i < qp_num; qp_i++) {
     char dgram_qp_name[QP_NAME_SIZE];
     sprintf(dgram_qp_name, "%s-%d-%d", qp_name, global_id, qp_i);
     hrd_publish_dgram_qp(cb, qp_i, dgram_qp_name, DEFAULT_SL);
-//    printf("Thread %d published dgram %s \n", global_id, dgram_qp_name);
+    // yellow_printf("Wrkr %d published dgram %s \n", global_id, dgram_qp_name);
   }
+  yellow_printf("Wrkr %d published its dgrams \n", global_id);
 }
 
 // Followers and leaders both use this to establish connections
@@ -644,7 +646,7 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack
                             struct ibv_recv_wr *r_rep_recv_wr, struct ibv_sge *r_rep_recv_sgl,
                             struct hrd_ctrl_blk *cb, struct ibv_mr *r_rep_mr,
                             struct ack_message *acks, uint16_t remote_thread) {
-  uint16_t i, j;
+  uint16_t i;
   // ACKS
   for (i = 0; i < MAX_ACK_WRS; ++i) {
     ack_send_wr[i].wr.ud.ah = remote_qp[i][remote_thread][ACK_QP_ID].ah;
@@ -723,7 +725,7 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
 {
   uint32_t i;//, j;
   for(i = 0; i < number_of_recvs; i++) {
-        hrd_post_dgram_recv(recv_qp,	(buf + *push_ptr * message_size),
+        hrd_post_dgram_recv(recv_qp,	(buf + ((*push_ptr) * message_size)),
                             message_size, lkey);
       MOD_ADD(*push_ptr, max_reqs);
   }
