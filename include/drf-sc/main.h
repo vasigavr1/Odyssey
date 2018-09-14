@@ -15,14 +15,14 @@
 #define PHYSICAL_CORES_PER_SOCKET 10
 #define LOGICAL_CORES_PER_SOCKET 20
 #define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
-#define WORKER_HYPERTHREADING 1 // shcedule two threads on the same core
+#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 29
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define SESSIONS_PER_THREAD 2
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -42,8 +42,8 @@
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 200
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 0
-#define ENABLE_ACQUIRES_ 0
+#define ENABLE_RELEASES_ 1
+#define ENABLE_ACQUIRES_ 1
 #define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
 
@@ -120,7 +120,7 @@
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
 
 #define ENABLE_NO_CONFLICT_RMW 1
-#define SHOW_STATS_LATENCY_STYLE 1
+#define SHOW_STATS_LATENCY_STYLE 0
 
 
 
@@ -275,6 +275,7 @@
 #define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 1
 #define DEBUG_RECEIVES 1
+#define DEBUG_SESSIONS 1
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -613,6 +614,15 @@ struct pending_ops {
   bool all_sessions_stalled;
 };
 
+#define SES_DBG_STATE_ACQ 1
+#define SES_DBG_STATE_REL 2
+
+struct session_dbg {
+	uint32_t dbg_cnt[SESSIONS_PER_THREAD];
+	uint8_t is_release[SESSIONS_PER_THREAD];
+	uint32_t request_id[SESSIONS_PER_THREAD];
+};
+
 // Global struct that holds the RMW information
 // Cannot be a FIFO because the incoming commit messages must be processed, such that
 // acks to the commits mean that the RMW has happened
@@ -714,23 +724,29 @@ struct thread_stats { // 2 cache lines
 #define STABLE_STATE 0
 #define TRANSIENT_STATE 1
 #define UP_STABLE 0
-#define UP_TRANSIENT 1
-#define DOWN_STABLE 2
-#define DOWN_TRANSIENT 3
-#define DOWN_TRANSIENT_OWNED 4
+#define DOWN_STABLE 1
+#define DOWN_TRANSIENT_OWNED 2
+#define UNUSED_STATE 3 // used to denote that the field will not be used
 
-// Id of the local Release owning a send bit_vec
-struct send_bit {
+// A bit of a bit vector: can be a send bit vector
+// or a configuration bit vector and can be owned
+// by a release or an acquire respectively
+struct a_bit_of_vec {
   atomic_flag lock;
-  uint8_t bit; // UP_STABLE, DOWN_STABLE, DOWN_TRANSIENT,DOWN_TRANSIENT_OWNED
+  atomic_uint_fast8_t bit; // UP_STABLE, DOWN_STABLE, DOWN_TRANSIENT_OWNED
+	uint16_t owner_m_id; // useful only for cong bits  where owner acquires are remote
   uint16_t owner_t_id;
-  uint64_t owner_local_w_id;
+  uint64_t owner_local_wr_id; // id of a release/acquire that owns the bit
+
 };
 
-struct send_bit_vector {
+struct bit_vector {
+	// state_lock and state are used only for send_bits (i.e. by releases),
+	// because otherwise every release would have to check every bit
+	// acquires on the other hand need only check one bit
   atomic_flag state_lock;
   uint8_t state; // denotes if any bits are raised, to accelerate the common case
-  struct send_bit bit_vec[MACHINE_NUM];
+  struct a_bit_of_vec bit_vec[MACHINE_NUM];
 };
 
 
@@ -739,19 +755,13 @@ struct send_bit_vector {
 // This bit vector shows failures that were identified locally
 // Releases must send out such a failure and clear the corresponding
 // bit after the failure has been quoromized
-extern struct send_bit_vector send_bit_vector;
+extern struct bit_vector send_bit_vector;
 
 // This bit vector shows failures that were identified locally or remotely
 // Remote acquires will read those failures and flip the bits after the have
 // increased their epoch id
-extern struct send_bit_Vector conf_bit_vector;
+extern struct bit_vector conf_bit_vector;
 
-// Id of the Release owning a send bit_vec
-struct config_bit_owner {
-  uint16_t t_id;
-  uint16_t m_id;
-  uint64_t local_r_id;
-};
 
 
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
@@ -759,14 +769,6 @@ extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
-extern atomic_uint_fast8_t config_vector[MACHINE_NUM];
-extern atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
-
-// The send vector does not contain all failed nodes,
-// but only those locally detected
-//extern atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
-//extern struct bit_vec send_bit_vector[MACHINE_NUM];
-//extern atomic_uint_fast8_t send_config_bit_vec_state;
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;

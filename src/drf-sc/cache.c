@@ -402,7 +402,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       long long *key_ptr_req = (long long *) op;
       if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[I] = 1;
-        if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) {
+        if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE ||
+            op->opcode == OP_ACQUIRE_FP || op->opcode == OP_ACQUIRE_OWNER) {
           //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           uint8_t tmp_value[VALUE_SIZE];
@@ -423,14 +424,14 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           //On receiving the 1st round of an Acquire:
           // If the corresponding bit_vec in the stable vector is set, then let the machine know
           // it lost messages and switch the bit_vec to Transient state
-          bool false_positive = false;
-          if (!EMULATE_ABD) {
-            false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
-            if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
-          }
+//          bool false_positive = false;
+//          if (!EMULATE_ABD) {
+//            false_positive = op->opcode == OP_ACQUIRE && (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
+//            if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
+//          }
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, READ, false_positive);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, READ, op->opcode);
 
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
@@ -471,11 +472,11 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
 
-          bool false_positive = (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
-          if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
+//          bool false_positive = (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
+//          if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
           insert_r_rep(p_ops, &rep_ts, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, flag, false_positive);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, flag, op->opcode);
 
         }
         else if (ENABLE_LIN && op->opcode == CACHE_OP_LIN_PUT) {
@@ -495,7 +496,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, LIN_PUT, false);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, LIN_PUT, op->opcode);
 
         }
         else {

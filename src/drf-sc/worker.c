@@ -140,8 +140,14 @@ void *worker(void *arg)
   };
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
   uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0};
+  struct session_dbg *ses_dbg;
+  if (DEBUG_SESSIONS) {
+    ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
+    memset(ses_dbg, 0, sizeof(struct session_dbg));
+  }
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
   uint64_t debug_lids = 0;
+
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
 
@@ -223,7 +229,8 @@ void *worker(void *arg)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
 		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, &op_i, trace, ops,
-                                           p_ops, resp, q_info, &latency_info);
+                                           p_ops, resp, q_info, &latency_info,
+                                           ses_dbg);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

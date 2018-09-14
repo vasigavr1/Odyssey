@@ -34,7 +34,8 @@
 #define OP_LIN_RELEASE 108
 #define OP_RELEASE 109
 #define OP_ACQUIRE 110
-
+#define OP_ACQUIRE_FP 10 // An incoming acquire that detected a false positive
+#define OP_ACQUIRE_OWNER 11 // The acquire found a failure and owns it too
 #define CACHE_OP_GET 111
 #define CACHE_OP_PUT 112
 #define CACHE_OP_UPD 113

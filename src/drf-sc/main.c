@@ -8,14 +8,9 @@ struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 
-//atomic_uint_fast8_t send_config_bit_vector[MACHINE_NUM];
-//struct bit_vec send_bit_vector[MACHINE_NUM];
-//atomic_uint_fast8_t send_config_bit_vec_state;
+struct bit_vector send_bit_vector;
+struct bit_vector conf_bit_vector;
 
-struct send_bit_vector send_bit_vector;
-
-atomic_uint_fast8_t config_vector[MACHINE_NUM];
-atomic_uint_fast8_t config_vect_state[MACHINE_NUM];
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
@@ -82,7 +77,7 @@ int main(int argc, char *argv[])
   assert(SESSIONS_PER_THREAD > 0);
   assert(MAX_OP_BATCH < CACHE_BATCH_SIZE);
   assert(ENABLE_LIN == 0); // Lin is not implemented
-  assert(MACHINE_NUM < 16); // the bit_vec vector is 16 bits
+  assert(MACHINE_NUM < 16); // the bit_vec vector is 16 bits-- can be extended
 	if (USE_BIG_OBJECTS) assert(VALUE_SIZE % 8 == 0);
 	assert(VALUE_SIZE >= 2); // first round of release can overload the first 2 bytes of value
   assert(sizeof(struct cache_key) ==  KEY_SIZE);
@@ -106,23 +101,23 @@ int main(int argc, char *argv[])
 	assert(sizeof(cache_meta) == 8);
   assert(MACHINE_NUM <= 255); // cache meta has 1 B for machine id
 
-  // TODO CLEAN UP THE INITIALIZATIONS
+
 	int i, c;
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
 	remote_IP = (char *)malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
-  memset(&send_bit_vector, 0, sizeof(struct send_bit_vector));
+  // This (sadly) seems to be the only way to initialize the locks
+  // in struct_bit_vector, i.e. the atomic_flags
+  memset(&send_bit_vector, 0, sizeof(struct bit_vector));
+  memset(&conf_bit_vector, 0, sizeof(struct bit_vector));
   for (i = 0; i < MACHINE_NUM; i++) {
-//		config_vect_state[i] =  STABLE_STATE;
-		config_vector[i] = UP_STABLE;
-//		send_config_bit_vector[i] = UP_STABLE;
-
-//    send_bit_vector.bit_vec[i].lock = ATOMIC_FLAG_INIT;
+    conf_bit_vector.bit_vec[i].bit = UP_STABLE;
     send_bit_vector.bit_vec[i].bit = UP_STABLE;
 	}
-//  send_bit_vector.state_lock = ATOMIC_FLAG_INIT;
+  //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
   send_bit_vector.state = UP_STABLE;
+  conf_bit_vector.state = UNUSED_STATE;
 
 
 
