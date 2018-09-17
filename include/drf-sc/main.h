@@ -22,7 +22,7 @@
 #define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 2
+#define SESSIONS_PER_THREAD 22
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -614,13 +614,11 @@ struct pending_ops {
   bool all_sessions_stalled;
 };
 
-#define SES_DBG_STATE_ACQ 1
-#define SES_DBG_STATE_REL 2
-
+// A helper to debug sessions by remembering which write holds a given session
 struct session_dbg {
 	uint32_t dbg_cnt[SESSIONS_PER_THREAD];
-	uint8_t is_release[SESSIONS_PER_THREAD];
-	uint32_t request_id[SESSIONS_PER_THREAD];
+	//uint8_t is_release[SESSIONS_PER_THREAD];
+	//uint32_t request_id[SESSIONS_PER_THREAD];
 };
 
 // Global struct that holds the RMW information

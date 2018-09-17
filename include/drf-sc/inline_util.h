@@ -279,16 +279,11 @@ static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_op
     ses_dbg->dbg_cnt[sess_id]++;
     if (ses_dbg->dbg_cnt[sess_id] == M_1) {
       red_printf("Wrkr %u Session %u seems to be stuck \n", t_id, sess_id);
-
       ses_dbg->dbg_cnt[sess_id] = 0;
     }
   }
 }
 
-static inline void set_sess_debug_dependency(uint32_t sess_id, uint16_t t_id)
-{
-
-}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ ABD GENERIC -----------------------------
@@ -903,6 +898,9 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   else if (unlikely(source == FROM_WRITE)) { // Second round of a release
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
     w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
+    if (DEBUG_SESSIONS)
+      cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
+                  t_id, write->opcode, w_mes[w_mes_ptr].write[inside_w_ptr].opcode, inside_w_ptr, w_mes_ptr);
     if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
     if (DEBUG_QUORUM) {
       printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
@@ -1237,8 +1235,12 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
                                         message_l_id, p_ops, w_ptr, t_id);
   p_ops->w_state[w_ptr] = VALID;
   if (source != FROM_READ) { //source = FROM_WRITE || FROM_TRACE || LIN_WRITE
-    if (write->opcode == OP_RELEASE || write->opcode == OP_RELEASE_SECOND_ROUND)
+    if (write->opcode == OP_RELEASE || write->opcode == OP_RELEASE_BIT_VECTOR)
       memcpy(&p_ops->w_session_id[w_ptr], write, SESSION_BYTES);
+    if (DEBUG_SESSIONS) {
+      if (write->opcode == OP_RELEASE_BIT_VECTOR)
+        cyan_printf("Wrkr: %u second round of release by session %u \n", t_id, p_ops->w_session_id[w_ptr]);
+    }
     if (source == LIN_WRITE) memset(write, 0, 3); // empty the read info such that it can be reused
   }
   else if (r_info->opcode == OP_ACQUIRE) // data reads need not care about the session id as they are not blocking
@@ -1458,9 +1460,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       working_session = i;
       break;
     }
-    else if (ENABLE_ASSERTIONS)
-      debug_sessions(ses_dbg, p_ops, i, t_id);
-
+    else if (ENABLE_ASSERTIONS) debug_sessions(ses_dbg, p_ops, i, t_id);
   }
   //   printf("working session = %d\n", working_session);
   if (ENABLE_ASSERTIONS) assert(working_session != -1);
@@ -1611,7 +1611,7 @@ static inline void revive_machine(struct quorum_info *q_info,
 }
 
 // Update the links between the send Work Requests for broadcasts given the quorum information
-static inline void update_bcast_wr_links (struct quorum_info *q_info, struct ibv_send_wr *wr, uint16_t t_id)
+static inline void update_bcast_wr_links(struct quorum_info *q_info, struct ibv_send_wr *wr, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
   uint8_t prev_i = 0, avail_mach = 0;
@@ -1778,9 +1778,13 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
 //          if (send_config_bit_vector[i] != UP_STABLE)
 //            cas_sent_bit_vector_state(t_id, i, DOWN_STABLE, DOWN_TRANSIENT);
         if (DEBUG_QUORUM)
-          green_printf("Thread %u Sending a release with a vector bit_vec %u \n", t_id, *(uint16_t *) bit_vector_to_send);
+          green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id, *(uint16_t *) bit_vector_to_send);
         w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
         p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+        if (DEBUG_SESSIONS)
+          cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
+                      t_id, p_ops->w_session_id[backward_ptr],
+                      p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
       }
     }
   }
@@ -2837,6 +2841,9 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       struct cache_op op;
       memcpy((void *) &op, &p_ops->w_session_id[w_pull_ptr], SESSION_BYTES);
       memcpy((void *) &op.key.meta.m_id, rel, W_SIZE);
+      if (DEBUG_SESSIONS)
+        cyan_printf("Wrkr: %u Inserting the write for the second round of the release opcode %u that carried a bit vector: session %u\n",
+                    t_id, op.opcode, p_ops->w_session_id[w_pull_ptr]);
       insert_write(p_ops, &op, FROM_WRITE, w_pull_ptr, t_id); // the push pointer is not needed because the session id is inside the op
       if (ENABLE_ASSERTIONS) {
         p_ops->ptrs_to_local_w[w_pull_ptr] =  NULL;
