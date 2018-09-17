@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 2
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -274,8 +274,8 @@
 #define DEBUG_QUORUM 1
 #define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 1
-#define DEBUG_RECEIVES 1
-#define DEBUG_SESSIONS 1
+#define DEBUG_RECEIVES 0
+#define DEBUG_SESSIONS 0
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -355,6 +355,7 @@ struct remote_qp {
 #define FROM_READ 1
 #define FROM_WRITE 2 //the second round of a release
 #define FOR_ACCEPT 3
+#define FROM_ACQUIRE 4
 #define LIN_WRITE 5
 // Possible flag values when inserting a read reply
 #define READ 0
@@ -363,7 +364,7 @@ struct remote_qp {
 #define RMW_ACK_PROPOSE 3 // Send an 1-byte reply
 #define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
 #define RMW_NACK_PROPOSE 5 // Send a TS, because you have already acked a higher Propose
-
+#define NO_OP_ACQ_FLIP_BIT 6 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
 
 
 
@@ -536,7 +537,7 @@ struct r_rep_fifo {
 
 //
 struct read_info {
-  uint8_t rep_num;
+  uint8_t rep_num; // replies num
   uint8_t times_seen_ts;
   bool seen_larger_ts;
 	uint8_t opcode;

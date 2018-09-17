@@ -95,6 +95,95 @@ static inline bool trigger_measurement(uint16_t local_client_id)
 		   local_client_id == 0 && machine_id == MACHINE_NUM -1;
 }
 
+// Calculate the thread global id
+static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
+{
+  return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
+}
+
+// Calculate the thread global id
+static inline uint8_t gid_to_mid(uint16_t g_id)
+{
+  return (uint8_t) (g_id / WORKERS_PER_MACHINE);
+}
+
+
+// Convert a machine id to a "remote machine id"
+static inline uint8_t  mid_to_rmid(uint8_t m_id)
+{
+  return m_id < machine_id ? m_id : (uint8_t)(m_id - 1);
+}
+
+// Convert a "remote machine id" to a machine id
+static inline uint8_t  rmid_to_mid(uint8_t rm_id)
+{
+  return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
+}
+
+// Generic CAS
+static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
+{
+  return atomic_compare_exchange_strong(state, (atomic_uint_fast8_t *) &old_state,
+                                        (atomic_uint_fast16_t) new_state);
+}
+
+/* ---------------------------------------------------------------------------
+//------------------------------ RDMA GENERIC -----------------------------
+//---------------------------------------------------------------------------*/
+// Post Receives for acknowledgements
+static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t recv_num)
+{
+  if (recv_num == 0) return;
+  uint16_t j;
+  struct ibv_recv_wr *bad_recv_wr;
+  for (j = 0; j < recv_num; j++) {
+    recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
+//    printf("Posting a receive at push ptr %u at address %lu \n", recv->w_push_ptr, recv->recv_sgl[j].addr);
+    MOD_ADD(recv->push_ptr, recv->buf_slots);
+    recv->recv_wr[j].next = (j == recv_num - 1) ?
+                            NULL : &recv->recv_wr[j + 1];
+  }
+  int ret = ibv_post_recv(recv->recv_qp, &recv->recv_wr[0], &bad_recv_wr);
+  if (ENABLE_ASSERTIONS) CPE(ret, "ibv_post_recv error", ret);
+}
+
+/* Fill @wc with @num_comps comps from this @cq. Exit on error. */
+static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, uint8_t caller_flag)
+{
+  int comps = 0;
+  uint32_t debug_cnt = 0;
+  while(comps < num_comps) {
+    if (ENABLE_ASSERTIONS && debug_cnt > M_256) {
+      printf("Someone is stuck waiting for a completion %d / %d , type %u  \n", comps, num_comps, caller_flag );
+      debug_cnt = 0;
+    }
+    int new_comps = ibv_poll_cq(cq, num_comps - comps, &wc[comps]);
+    if(new_comps != 0) {
+//			 printf("I see completions %d\n", new_comps);
+      /* Ideally, we should check from comps -> new_comps - 1 */
+      if(ENABLE_ASSERTIONS && wc[comps].status != 0) {
+        fprintf(stderr, "Bad wc status %d\n", wc[comps].status);
+        exit(0);
+      }
+      comps += new_comps;
+    }
+    if (ENABLE_ASSERTIONS) debug_cnt++;
+  }
+  return debug_cnt;
+}
+
+static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *send_wr, uint16_t wr_num)
+{
+  int flag = mes_size < MAXIMUM_INLINE_SIZE ? IBV_SEND_INLINE : 0;
+  for (uint16_t i = 0; i < wr_num; i++)
+    send_wr[i].send_flags = flag;
+}
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------ LATENCY MEASUREMENTS-------------------------
+//---------------------------------------------------------------------------*/
+
 //Add latency to histogram (in microseconds)
 static inline void bookkeep_latency(int useconds, req_type rt){
   uint32_t** latency_counter;
@@ -199,6 +288,201 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+//------------------------------DEBUGGING-------------------------------------
+//---------------------------------------------------------------------------*/
+static inline void print_wrkr_stats (uint16_t t_id)
+{
+  green_printf("WORKER %u SENT MESSAGES \n", t_id);
+  yellow_printf("Writes sent %ld/%ld \n", t_stats[t_id].writes_sent_mes_num, t_stats[t_id].writes_sent);
+  yellow_printf("Acks sent %ld/%ld \n", t_stats[t_id].acks_sent_mes_num, t_stats[t_id].acks_sent);
+  yellow_printf("Reads sent %ld/%ld \n", t_stats[t_id].reads_sent_mes_num, t_stats[t_id].reads_sent);
+  yellow_printf("R_reps sent %ld/%ld \n", t_stats[t_id].r_reps_sent_mes_num, t_stats[t_id].r_reps_sent);
+  green_printf("WORKER %u RECEIVED MESSAGES \n", t_id);
+  //yellow_printf("Writes sent %ld/%ld \n", t_stats[g_id].writes_sent_mes_num, t_stats[g_id].writes_sent);
+  //yellow_printf("Acks sent %ld/%ld \n", t_stats[g_id].acks_sent_mes_num, t_stats[g_id].acks_sent);
+  yellow_printf("Reads received %ld/%ld \n", t_stats[t_id].received_reads_mes_num, t_stats[t_id].received_reads);
+  yellow_printf("R_reps received %ld/%ld \n", t_stats[t_id].received_r_reps_mes_num, t_stats[t_id].received_r_reps);
+
+  for (uint8_t i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    cyan_printf("FROM/ TO MACHINE %u \n", i);
+    yellow_printf("Acks Received %lu/%lu from machine id %u \n", t_stats[t_id].per_worker_acks_mes_received[i],
+                  t_stats[t_id].per_worker_acks_received[i], i);
+    yellow_printf("Writes Received %lu from machine id %u\n", t_stats[t_id].per_worker_writes_received[i], i);
+    yellow_printf("Acks Sent %lu/%lu to machine id %u \n", t_stats[t_id].per_worker_acks_mes_sent[i],
+                  t_stats[t_id].per_worker_acks_sent[i], i);
+
+  }
+//  yellow_printf("Reads sent %ld/%ld \n", t_stats[g_id].r_reps_sent_mes_num, t_stats[g_id].r_reps_sent );
+}
+
+
+// Leader checks its debug counters
+static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_dbg_counter,
+                                     struct pending_ops *p_ops, void *buf,
+                                     uint32_t r_pull_ptr, uint32_t w_pull_ptr,
+                                     uint32_t ack_pull_ptr, uint32_t r_rep_pull_ptr,
+                                     uint16_t t_id)
+{
+
+//  volatile struct  w_message_ud_req *w_buffer =
+//    (volatile struct w_message_ud_req *)(buf + ACK_BUF_SIZE);
+//  volatile struct  r_message_ud_req *r_buffer =
+//    (volatile struct r_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
+
+  // ACKS
+  if (unlikely(wait_dbg_counter[ACK_QP_ID] > M_512)) {
+    red_printf("Worker %d waits for acks \n", t_id);
+    if (VERBOSE_DBG_COUNTER) {
+      struct ack_message_ud_req *ack_buf = (struct ack_message_ud_req *) (buf);
+      struct ack_message *ack = &ack_buf[ack_pull_ptr].ack;
+      uint64_t l_id = *(uint64_t *) ack->local_id;
+      uint8_t message_opc = ack->opcode;
+      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
+                  t_id, ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
+      MOD_ADD(ack_pull_ptr, ACK_BUF_SLOTS);
+      ack = &ack_buf[ack_pull_ptr].ack;
+      l_id = *(uint64_t *) ack->local_id;
+      message_opc = ack->opcode;
+      cyan_printf("Next index %u,polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
+                  ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
+      for (int i = 0; i < ACK_BUF_SLOTS; ++i) {
+        if (ack_buf[i].ack.opcode == CACHE_OP_ACK) {
+          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, *(uint64_t *) ack_buf[i].ack.local_id);
+        } else
+          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, *(uint64_t *) ack_buf[i].ack.local_id,
+                     ack_buf[i].ack.m_id);
+
+      }
+    }
+    print_wrkr_stats(t_id);
+    wait_dbg_counter[ACK_QP_ID] = 0;
+    //exit(0);
+  }
+  // R_REPS
+  if (unlikely(wait_dbg_counter[R_REP_QP_ID] > M_512)) {
+    red_printf("Worker %d waits for r_reps \n", t_id);
+    if (VERBOSE_DBG_COUNTER) {
+      struct r_rep_message_ud_req *r_rep_buf =
+        (struct r_rep_message_ud_req *) (buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
+      struct r_rep_message *r_rep = &r_rep_buf[r_rep_pull_ptr].r_rep_mes;
+      uint64_t l_id = *(uint64_t *) r_rep->l_id;
+      uint8_t message_opc = r_rep->opcode;
+      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
+                  t_id, r_rep_pull_ptr, message_opc, r_rep->opcode, l_id, p_ops->local_r_id);
+      MOD_ADD(r_rep_pull_ptr, R_REP_BUF_SLOTS);
+      r_rep = &r_rep_buf[r_rep_pull_ptr].r_rep_mes;
+      l_id = *(uint64_t *) r_rep->l_id;
+      message_opc = r_rep->opcode;
+      cyan_printf("Next index %u,polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
+                  r_rep_pull_ptr, message_opc, r_rep->opcode, l_id, p_ops->local_r_id);
+      for (int i = 0; i < R_REP_BUF_SLOTS; ++i) {
+        if (r_rep_buf[i].r_rep_mes.opcode == READ_REPLY) {
+          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, *(uint64_t *) r_rep_buf[i].r_rep_mes.l_id);
+        } else
+          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i,
+                     *(uint64_t *) r_rep_buf[i].r_rep_mes.l_id,
+                     r_rep_buf[i].r_rep_mes.m_id);
+
+      }
+    }
+    print_wrkr_stats(t_id);
+    wait_dbg_counter[R_REP_QP_ID] = 0;
+    //exit(0);
+  }
+  if (unlikely(wait_dbg_counter[R_QP_ID] > M_512)) {
+    red_printf("Worker %d waits for reads \n", t_id);
+    print_wrkr_stats(t_id);
+    wait_dbg_counter[R_QP_ID] = 0;
+  }
+  if (unlikely(credit_debug_cnt[W_VC] > M_512)) {
+    red_printf("Worker %d lacks write credits \n", t_id);
+    print_wrkr_stats(t_id);
+    credit_debug_cnt[W_VC] = 0;
+  }
+  if (unlikely(credit_debug_cnt[R_VC] > M_512)) {
+    red_printf("Worker %d lacks read credits \n", t_id);
+    print_wrkr_stats(t_id);
+    credit_debug_cnt[R_VC] = 0;
+  }
+}
+
+static inline void debug_and_count_stats_when_broadcasting_writes
+  (struct pending_ops *p_ops, uint32_t bcast_pull_ptr,
+   uint8_t coalesce_num, uint16_t t_id, uint64_t* expected_l_id_to_send,
+   uint16_t br_i, uint32_t *outstanding_writes)
+{
+  if (ENABLE_ASSERTIONS) {
+    uint64_t lid_to_send = *(uint64_t *)p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
+    if (lid_to_send != (*expected_l_id_to_send)) {
+      red_printf("Wrkr %u, expected l_id %lu lid_to send %u\n",
+                 t_id, (*expected_l_id_to_send), lid_to_send);
+      assert(false);
+    }
+    (*expected_l_id_to_send) = lid_to_send + coalesce_num;
+    if (coalesce_num == 0) {
+      red_printf("Wrkr %u coalesce_num is %u, bcast_size %u, w_size %u, push_ptr %u, pull_ptr %u"
+                   " mes fifo push_ptr %u, mes fifo pull ptr %u l_id %lu"
+                   " bcast_pull_ptr %u, br_i %u\n",
+                 t_id, coalesce_num, p_ops->w_fifo->bcast_size,
+                 p_ops->w_size,
+                 p_ops->w_push_ptr, p_ops->w_pull_ptr,
+                 p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr,
+                 *(uint64_t *)p_ops->w_fifo->w_message[bcast_pull_ptr].l_id,
+                 bcast_pull_ptr, br_i);
+    }
+    assert(coalesce_num > 0);
+    assert(p_ops->w_fifo->bcast_size >= coalesce_num);
+    (*outstanding_writes) += coalesce_num;
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].writes_sent += coalesce_num;
+    t_stats[t_id].writes_sent_mes_num++;
+  }
+}
+
+
+// Perform some basic checks when inserting a write to a fresh message
+static inline void debug_checks_when_inserting_a_write
+  (const uint8_t source, const uint8_t inside_w_ptr, const uint32_t w_mes_ptr,
+   struct w_message *w_mes, const uint64_t message_l_id,
+   struct pending_ops *p_ops, const uint32_t w_ptr, const uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    // In a fresh message check that the lid is consistent with the previous emssage
+    if (inside_w_ptr == 0) {
+      if (message_l_id > MAX_W_COALESCE) {
+        uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
+        uint64_t prev_l_id = *(uint64_t *) w_mes[prev_w_mes_ptr].l_id;
+        uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
+        if (message_l_id != prev_l_id + prev_coalesce) {
+          red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
+                     t_id, message_l_id, prev_l_id, prev_coalesce);
+        }
+      }
+    }
+
+    // Check the versions
+    assert ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) < B_4_EXACT);
+    if ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) % 2 != 0) {
+      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
+                 *(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version, source);
+      assert (false);
+    }
+    // Check that the buffer is not occupied
+    if (unlikely(p_ops->w_state[w_ptr] != INVALID))
+      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size %u \n",
+                 t_id, p_ops->w_state[w_ptr], w_ptr,
+                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
+    //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
+    assert(p_ops->w_state[w_ptr] == INVALID);
+  }
+
+}
+
+
 static inline void print_thread_stats(uint16_t t_id) {
 
     yellow_printf("Cache hits: %u \nReads: %lu \nWrites: %lu \nReleases: %lu \nAcquires: %lu \nQ Reads: %lu "
@@ -245,17 +529,6 @@ static inline void print_true_key(struct key *key)
   printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
 }
 
-// Calculate the thread global id
-static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
-{
-  return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
-}
-
-// Calculate the thread global id
-static inline uint8_t gid_to_mid(uint16_t g_id)
-{
-  return (uint8_t) (g_id / WORKERS_PER_MACHINE);
-}
 
 //The purpose of this is to save some space in function that polls read replies
 static inline void debug_message_when_polling_r_reps(struct r_rep_message *r_rep_mes, uint32_t index)
@@ -284,77 +557,27 @@ static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_op
   }
 }
 
-
-/* ---------------------------------------------------------------------------
-//------------------------------ ABD GENERIC -----------------------------
-//---------------------------------------------------------------------------*/
-// Post Receives for acknowledgements
-static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t recv_num)
+// Prints out information about the participants
+static inline void print_q_info(struct quorum_info *q_info)
 {
-  if (recv_num == 0) return;
-  uint16_t j;
-  struct ibv_recv_wr *bad_recv_wr;
-  for (j = 0; j < recv_num; j++) {
-    recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
-//    printf("Posting a receive at push ptr %u at address %lu \n", recv->w_push_ptr, recv->recv_sgl[j].addr);
-    MOD_ADD(recv->push_ptr, recv->buf_slots);
-    recv->recv_wr[j].next = (j == recv_num - 1) ?
-                            NULL : &recv->recv_wr[j + 1];
+  yellow_printf("-----QUORUM INFO----- \n");
+  green_printf("Active m_ids: \n");
+  for (uint8_t i = 0; i < q_info->active_num; i++) {
+    green_printf("%u) %u \n", i, q_info->active_ids[i]);
   }
-  int ret = ibv_post_recv(recv->recv_qp, &recv->recv_wr[0], &bad_recv_wr);
-  if (ENABLE_ASSERTIONS) CPE(ret, "ibv_post_recv error", ret);
-}
-
-/* Fill @wc with @num_comps comps from this @cq. Exit on error. */
-static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, uint8_t caller_flag)
-{
-  int comps = 0;
-  uint32_t debug_cnt = 0;
-  while(comps < num_comps) {
-    if (ENABLE_ASSERTIONS && debug_cnt > M_256) {
-      printf("Someone is stuck waiting for a completion %d / %d , type %u  \n", comps, num_comps, caller_flag );
-      debug_cnt = 0;
-    }
-    int new_comps = ibv_poll_cq(cq, num_comps - comps, &wc[comps]);
-    if(new_comps != 0) {
-//			 printf("I see completions %d\n", new_comps);
-      /* Ideally, we should check from comps -> new_comps - 1 */
-      if(ENABLE_ASSERTIONS && wc[comps].status != 0) {
-        fprintf(stderr, "Bad wc status %d\n", wc[comps].status);
-        exit(0);
-      }
-      comps += new_comps;
-    }
-    if (ENABLE_ASSERTIONS) debug_cnt++;
+  red_printf("Missing m_ids: \n");
+  for (uint8_t i = 0; i < q_info->missing_num; i++) {
+    red_printf("%u) %u \n", i, q_info->missing_ids[i]);
   }
-  return debug_cnt;
+  yellow_printf("Send vector : ");
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    yellow_printf("%d ", q_info->send_vector[i]);
+  }
+  yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
+                q_info->first_active_rm_id, q_info->last_active_rm_id);
 }
 
-static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *send_wr, uint16_t wr_num)
-{
-  int flag = mes_size < MAXIMUM_INLINE_SIZE ? IBV_SEND_INLINE : 0;
-  for (uint16_t i = 0; i < wr_num; i++)
-    send_wr[i].send_flags = flag;
-}
 
-// Convert a machine id to a "remote machine id"
-static inline uint8_t  mid_to_rmid(uint8_t m_id)
-{
-  return m_id < machine_id ? m_id : (uint8_t)(m_id - 1);
-}
-
-// Convert a "remote machine id" to a machine id
-static inline uint8_t  rmid_to_mid(uint8_t rm_id)
-{
-  return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
-}
-
-// Generic CAS
-static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
-{
-  return atomic_compare_exchange_strong(state, (atomic_uint_fast8_t *) &old_state,
-                                        (atomic_uint_fast16_t) new_state);
-}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
@@ -400,8 +623,7 @@ static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id)
 // 4. On receiving the first round of an Acquire bring the bit to DOWN_TRANSIENT_OWNED
 // Return the opcode an acquire should ahve going in to the cache
 // If it found no failure it should be OP_ACQUIRE
-// If it found a failure but does not own it it should be OP_ACQUIRE_FP
-// If it found a failure and owns it it should be OP_ACQUIRE_OWNER
+// If it found a failure it should be OP_ACQUIRE_FP
 static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const uint64_t local_r_id,
                                                 const uint16_t acq_m_id)
 {
@@ -428,11 +650,10 @@ static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const ui
                  t_id, acq_m_id, conf_bit_vector.bit_vec[acq_m_id].bit,
                  conf_bit_vector.bit_vec[acq_m_id].owner_t_id,
                  conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id);
-  return owned_a_failure ? (uint8_t) OP_ACQUIRE_OWNER : (uint8_t) OP_ACQUIRE_FP;
+  return  OP_ACQUIRE_FP;
 }
 
-//TODO this does not work 1) because the 2nd round of the acquire will send a local write id and
-// 2) because there is NO guarantee an Acquire will reach a machine in its second round
+//TODO this does not work 1)  because there is NO guarantee an Acquire will reach a machine in its second round
 // 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
 //    bring that bit to UP_STABLE
 static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t local_r_id,
@@ -443,28 +664,31 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
                   t_id, acq_m_id, local_r_id);
   // First change the state  of the owned bits
     bool debug_flag = false;
-    if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {/* &&
+    if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED &&
         conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id == local_r_id &&
         conf_bit_vector.bit_vec[acq_m_id].owner_t_id == t_id &&
-        conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // if the bit_vec is owned by me*/
+        conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // if the bit_vec is owned by me
       // Grab the lock
       while (!atomic_flag_test_and_set_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_acquire));
-      if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {/* &&
+      if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED &&
           conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id == local_r_id &&
           conf_bit_vector.bit_vec[acq_m_id].owner_t_id == t_id &&
-          conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // Check again if the bit_vec is owned by me*/
+          conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // Check again if the bit_vec is owned by me
         conf_bit_vector.bit_vec[acq_m_id].bit = UP_STABLE;
         debug_flag = true;
       }
       atomic_flag_clear_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_release);
     }
-    if (DEBUG_BIT_VECS && debug_flag)
-      green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u, "
+
+    if (DEBUG_BIT_VECS && debug_flag) {
+      assert(conf_bit_vector.bit_vec[acq_m_id].bit == UP_STABLE);
+      green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
                      "owned t_id %u, owned local_w_id %u, owned m_id %u \n",
-                   t_id, acq_m_id, conf_bit_vector.bit_vec[acq_m_id].bit,
+                   t_id, acq_m_id, conf_bit_vector.bit_vec[acq_m_id].bit, UP_STABLE,
                    conf_bit_vector.bit_vec[acq_m_id].owner_t_id,
                    conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id,
                    conf_bit_vector.bit_vec[acq_m_id].owner_m_id);
+    }
 
 }
 
@@ -608,29 +832,9 @@ static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
 }
 
 
-//---------------------------------------------------------------------------
-
-
-
-// Prints out information about the participants
-static inline void print_q_info(struct quorum_info *q_info)
-{
-  yellow_printf("-----QUORUM INFO----- \n");
-  green_printf("Active m_ids: \n");
-  for (uint8_t i = 0; i < q_info->active_num; i++) {
-    green_printf("%u) %u \n", i, q_info->active_ids[i]);
-  }
-  red_printf("Missing m_ids: \n");
-  for (uint8_t i = 0; i < q_info->missing_num; i++) {
-    red_printf("%u) %u \n", i, q_info->missing_ids[i]);
-  }
-  yellow_printf("Send vector : ");
-  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
-    yellow_printf("%d ", q_info->send_vector[i]);
-  }
-  yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
-                q_info->first_active_rm_id, q_info->last_active_rm_id);
-}
+/* ---------------------------------------------------------------------------
+//------------------------------ DRF-SPECIFIC UTILITY-------------------------
+//---------------------------------------------------------------------------*/
 
 // Increment the per-request counters
 static inline void increment_per_req_counters(uint8_t opcode, uint16_t t_id)
@@ -661,9 +865,62 @@ static inline void clean_up_on_KVS_miss(struct cache_op *op, struct pending_ops 
   }
 }
 
+// Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
+static inline void write_bookkeeping_in_insertion_based_on_source
+                  (struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
+                   const uint32_t incoming_pull_ptr, uint8_t *inside_w_ptr_, uint32_t *w_mes_ptr_,
+                   struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
+{
+  my_assert(*inside_w_ptr_ < MAX_W_COALESCE, "Inside pointer must not point to the last message");
+  uint8_t inside_w_ptr = *inside_w_ptr_;
+  uint32_t w_mes_ptr = *w_mes_ptr_;
+  my_assert(source <= FOR_ACCEPT, "When inserting a write source is too high. Have you enabled lin writes?");
+  if (source == FROM_TRACE) {
+    // if the write is a release put it on a new message to
+    // guarantee it is not batched with writes from the same session
+    if (write->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
+      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+      w_mes_ptr = p_ops->w_fifo->push_ptr;
+      w_mes[w_mes_ptr].w_num = 0;
+      inside_w_ptr = 0;
+    }
+    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
+           4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
+    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
+  }
+  else if (unlikely(source == FROM_WRITE)) { // Second round of a release
+    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
+    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
+    if (DEBUG_SESSIONS)
+      cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
+                  t_id, write->opcode, w_mes[w_mes_ptr].write[inside_w_ptr].opcode, inside_w_ptr, w_mes_ptr);
+    if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
+    if (DEBUG_QUORUM) {
+      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
+      print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
+    }
+  }
+  else { //source is: FROM_READ: 2nd round of read/acquire or LIN_WRITE: 2nd write of a lin write (disabled)
+    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
+    if (r_info->opcode == OP_ACQUIRE)
+      w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
+    else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
+  }
+
+  // Make sure the pointed values are correct
+  (*inside_w_ptr_) = inside_w_ptr;
+  (*w_mes_ptr_) = w_mes_ptr;
+
+}
+
+/* ---------------------------------------------------------------------------
+//------------------------------ RMW------------------------------------------
+//---------------------------------------------------------------------------*/
+
 // the first time a key gets RMWed, it grabs an RMW entry that lasts for life, the entry is protected by the KVS lock
 static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cache_op *kv_ptr,
-                                  uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
+                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
 {
   uint32_t next_entry =
     atomic_fetch_add_explicit(&next_rmw_entry_available, 1, memory_order_relaxed);
@@ -830,9 +1087,9 @@ static inline bool trigger_help(struct prop_entry *entry, struct mica_resp resp,
 {
   uint32_t new_entry =  resp.rmw_entry;
   if (entry->state == SAME_KEY_RMW &&
-     (entry->ptr_to_rmw == new_entry) &&
-     (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
-     (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
+      (entry->ptr_to_rmw == new_entry) &&
+      (rmw.entry[new_entry].rmw_id.id == entry->rmw_id.id) &&
+      (rmw.entry[new_entry].rmw_id.g_id == entry->rmw_id.g_id)) {
     entry->debug_cntr++;
     if (entry->debug_cntr >= M_256) {
       if (!q_info->send_vector[mid_to_rmid(gid_to_mid(entry->rmw_id.g_id))]) //TODO think about this
@@ -872,262 +1129,14 @@ static inline void move_ptr_to_next_prop_reply(uint16_t *byte_ptr, uint8_t opcod
 }
 
 
-// Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
-static inline void write_bookkeeping_in_insertion_based_on_source
-                  (struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
-                   const uint32_t incoming_pull_ptr, uint8_t *inside_w_ptr_, uint32_t *w_mes_ptr_,
-                   struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
-{
-  my_assert(*inside_w_ptr_ < MAX_W_COALESCE, "Inside pointer must not point to the last message");
-  uint8_t inside_w_ptr = *inside_w_ptr_;
-  uint32_t w_mes_ptr = *w_mes_ptr_;
-  my_assert(source <= FOR_ACCEPT, "When inserting a write source is too high. Have you enabled lin writes?");
-  if (source == FROM_TRACE) {
-    // if the write is a release put it on a new message to
-    // guarantee it is not batched with writes from the same session
-    if (write->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
-      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-      w_mes_ptr = p_ops->w_fifo->push_ptr;
-      w_mes[w_mes_ptr].w_num = 0;
-      inside_w_ptr = 0;
-    }
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
-           4 + TRUE_KEY_SIZE + 2 + VALUE_SIZE);
-    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
-  }
-  else if (unlikely(source == FROM_WRITE)) { // Second round of a release
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
-    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
-    if (DEBUG_SESSIONS)
-      cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
-                  t_id, write->opcode, w_mes[w_mes_ptr].write[inside_w_ptr].opcode, inside_w_ptr, w_mes_ptr);
-    if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
-    if (DEBUG_QUORUM) {
-      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
-      print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
-    }
-  }
-  else { //source is: FROM_READ: 2nd round of read/acquire or LIN_WRITE: 2nd write of a lin write (disabled)
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
-    if (r_info->opcode == OP_ACQUIRE) {
-      if (unlikely(r_info->fp_detected)) {
-        w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
-        r_info->fp_detected = false;
-        if (DEBUG_QUORUM)
-          yellow_printf("Worker %u sending the second round of acquire to flip the remote vector bit_vec\n", t_id);
-      }
-      else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_ACQUIRE;
-    }
-    else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
-  }
-
-  // Make sure the pointed values are correct
-  (*inside_w_ptr_) = inside_w_ptr;
-  (*w_mes_ptr_) = w_mes_ptr;
-
-}
-
-/* ---------------------------------------------------------------------------
-//------------------------------ ABD DEBUGGING -----------------------------
-//---------------------------------------------------------------------------*/
-static inline void print_wrkr_stats (uint16_t t_id)
-{
-  green_printf("WORKER %u SENT MESSAGES \n", t_id);
-  yellow_printf("Writes sent %ld/%ld \n", t_stats[t_id].writes_sent_mes_num, t_stats[t_id].writes_sent);
-  yellow_printf("Acks sent %ld/%ld \n", t_stats[t_id].acks_sent_mes_num, t_stats[t_id].acks_sent);
-  yellow_printf("Reads sent %ld/%ld \n", t_stats[t_id].reads_sent_mes_num, t_stats[t_id].reads_sent);
-  yellow_printf("R_reps sent %ld/%ld \n", t_stats[t_id].r_reps_sent_mes_num, t_stats[t_id].r_reps_sent);
-  green_printf("WORKER %u RECEIVED MESSAGES \n", t_id);
-  //yellow_printf("Writes sent %ld/%ld \n", t_stats[g_id].writes_sent_mes_num, t_stats[g_id].writes_sent);
-  //yellow_printf("Acks sent %ld/%ld \n", t_stats[g_id].acks_sent_mes_num, t_stats[g_id].acks_sent);
-  yellow_printf("Reads received %ld/%ld \n", t_stats[t_id].received_reads_mes_num, t_stats[t_id].received_reads);
-  yellow_printf("R_reps received %ld/%ld \n", t_stats[t_id].received_r_reps_mes_num, t_stats[t_id].received_r_reps);
-
-  for (uint8_t i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    cyan_printf("FROM/ TO MACHINE %u \n", i);
-    yellow_printf("Acks Received %lu/%lu from machine id %u \n", t_stats[t_id].per_worker_acks_mes_received[i],
-                  t_stats[t_id].per_worker_acks_received[i], i);
-    yellow_printf("Writes Received %lu from machine id %u\n", t_stats[t_id].per_worker_writes_received[i], i);
-    yellow_printf("Acks Sent %lu/%lu to machine id %u \n", t_stats[t_id].per_worker_acks_mes_sent[i],
-                 t_stats[t_id].per_worker_acks_sent[i], i);
-
-  }
-//  yellow_printf("Reads sent %ld/%ld \n", t_stats[g_id].r_reps_sent_mes_num, t_stats[g_id].r_reps_sent );
-}
-
-
-// Leader checks its debug counters
-static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_dbg_counter,
-                                     struct pending_ops *p_ops, void *buf,
-                                     uint32_t r_pull_ptr, uint32_t w_pull_ptr,
-                                     uint32_t ack_pull_ptr, uint32_t r_rep_pull_ptr,
-                                     uint16_t t_id)
-{
-
-//  volatile struct  w_message_ud_req *w_buffer =
-//    (volatile struct w_message_ud_req *)(buf + ACK_BUF_SIZE);
-//  volatile struct  r_message_ud_req *r_buffer =
-//    (volatile struct r_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
-
-  // ACKS
-  if (unlikely(wait_dbg_counter[ACK_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for acks \n", t_id);
-    if (VERBOSE_DBG_COUNTER) {
-      struct ack_message_ud_req *ack_buf = (struct ack_message_ud_req *) (buf);
-      struct ack_message *ack = &ack_buf[ack_pull_ptr].ack;
-      uint64_t l_id = *(uint64_t *) ack->local_id;
-      uint8_t message_opc = ack->opcode;
-      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
-                  t_id, ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
-      MOD_ADD(ack_pull_ptr, ACK_BUF_SLOTS);
-      ack = &ack_buf[ack_pull_ptr].ack;
-      l_id = *(uint64_t *) ack->local_id;
-      message_opc = ack->opcode;
-      cyan_printf("Next index %u,polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
-                  ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
-      for (int i = 0; i < ACK_BUF_SLOTS; ++i) {
-        if (ack_buf[i].ack.opcode == CACHE_OP_ACK) {
-          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, *(uint64_t *) ack_buf[i].ack.local_id);
-        } else
-          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, *(uint64_t *) ack_buf[i].ack.local_id,
-                     ack_buf[i].ack.m_id);
-
-      }
-    }
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[ACK_QP_ID] = 0;
-    //exit(0);
-  }
-  // R_REPS
-  if (unlikely(wait_dbg_counter[R_REP_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for r_reps \n", t_id);
-    if (VERBOSE_DBG_COUNTER) {
-      struct r_rep_message_ud_req *r_rep_buf =
-        (struct r_rep_message_ud_req *) (buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
-      struct r_rep_message *r_rep = &r_rep_buf[r_rep_pull_ptr].r_rep_mes;
-      uint64_t l_id = *(uint64_t *) r_rep->l_id;
-      uint8_t message_opc = r_rep->opcode;
-      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
-                  t_id, r_rep_pull_ptr, message_opc, r_rep->opcode, l_id, p_ops->local_r_id);
-      MOD_ADD(r_rep_pull_ptr, R_REP_BUF_SLOTS);
-      r_rep = &r_rep_buf[r_rep_pull_ptr].r_rep_mes;
-      l_id = *(uint64_t *) r_rep->l_id;
-      message_opc = r_rep->opcode;
-      cyan_printf("Next index %u,polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
-                  r_rep_pull_ptr, message_opc, r_rep->opcode, l_id, p_ops->local_r_id);
-      for (int i = 0; i < R_REP_BUF_SLOTS; ++i) {
-        if (r_rep_buf[i].r_rep_mes.opcode == READ_REPLY) {
-          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, *(uint64_t *) r_rep_buf[i].r_rep_mes.l_id);
-        } else
-          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i,
-                     *(uint64_t *) r_rep_buf[i].r_rep_mes.l_id,
-                     r_rep_buf[i].r_rep_mes.m_id);
-
-      }
-    }
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[R_REP_QP_ID] = 0;
-    //exit(0);
-  }
-  if (unlikely(wait_dbg_counter[R_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for reads \n", t_id);
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[R_QP_ID] = 0;
-  }
-  if (unlikely(credit_debug_cnt[W_VC] > M_512)) {
-    red_printf("Worker %d lacks write credits \n", t_id);
-    print_wrkr_stats(t_id);
-    credit_debug_cnt[W_VC] = 0;
-  }
-  if (unlikely(credit_debug_cnt[R_VC] > M_512)) {
-    red_printf("Worker %d lacks read credits \n", t_id);
-    print_wrkr_stats(t_id);
-    credit_debug_cnt[R_VC] = 0;
-  }
-}
-
-static inline void debug_and_count_stats_when_broadcasting_writes
-                    (struct pending_ops *p_ops, uint32_t bcast_pull_ptr,
-                     uint8_t coalesce_num, uint16_t t_id, uint64_t* expected_l_id_to_send,
-                     uint16_t br_i, uint32_t *outstanding_writes)
-{
-  if (ENABLE_ASSERTIONS) {
-    uint64_t lid_to_send = *(uint64_t *)p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
-    if (lid_to_send != (*expected_l_id_to_send)) {
-      red_printf("Wrkr %u, expected l_id %lu lid_to send %u\n",
-                 t_id, (*expected_l_id_to_send), lid_to_send);
-      assert(false);
-    }
-    (*expected_l_id_to_send) = lid_to_send + coalesce_num;
-    if (coalesce_num == 0) {
-      red_printf("Wrkr %u coalesce_num is %u, bcast_size %u, w_size %u, push_ptr %u, pull_ptr %u"
-                   " mes fifo push_ptr %u, mes fifo pull ptr %u l_id %lu"
-                   " bcast_pull_ptr %u, br_i %u\n",
-                 t_id, coalesce_num, p_ops->w_fifo->bcast_size,
-                 p_ops->w_size,
-                 p_ops->w_push_ptr, p_ops->w_pull_ptr,
-                 p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr,
-                 *(uint64_t *)p_ops->w_fifo->w_message[bcast_pull_ptr].l_id,
-                 bcast_pull_ptr, br_i);
-    }
-    assert(coalesce_num > 0);
-    assert(p_ops->w_fifo->bcast_size >= coalesce_num);
-    (*outstanding_writes) += coalesce_num;
-  }
-  if (ENABLE_STAT_COUNTING) {
-    t_stats[t_id].writes_sent += coalesce_num;
-    t_stats[t_id].writes_sent_mes_num++;
-  }
-}
-
-
-// Perform some basic checks when inserting a write to a fresh message
-static inline void debug_checks_when_inserting_a_write
-  (const uint8_t source, const uint8_t inside_w_ptr, const uint32_t w_mes_ptr,
-   struct w_message *w_mes, const uint64_t message_l_id,
-   struct pending_ops *p_ops, const uint32_t w_ptr, const uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    // In a fresh message check that the lid is consistent with the previous emssage
-    if (inside_w_ptr == 0) {
-      if (message_l_id > MAX_W_COALESCE) {
-        uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
-        uint64_t prev_l_id = *(uint64_t *) w_mes[prev_w_mes_ptr].l_id;
-        uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
-        if (message_l_id != prev_l_id + prev_coalesce) {
-          red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
-                     t_id, message_l_id, prev_l_id, prev_coalesce);
-        }
-      }
-    }
-
-    // Check the versions
-    assert ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) < B_4_EXACT);
-    if ((*(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version) % 2 != 0) {
-      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
-                 *(uint32_t *) w_mes[w_mes_ptr].write[inside_w_ptr].version, source);
-      assert (false);
-    }
-    // Check that the buffer is not occupied
-    if (unlikely(p_ops->w_state[w_ptr] != INVALID))
-      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size %u \n",
-                 t_id, p_ops->w_state[w_ptr], w_ptr,
-                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
-    //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
-    assert(p_ops->w_state[w_ptr] == INVALID);
-  }
-
-}
-
-
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
 // Worker inserts a new local read to the read fifo it maintains
-static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read, uint16_t t_id)
+static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read, uint8_t source, uint16_t t_id)
 {
+  my_assert(source == FROM_TRACE || source == FROM_ACQUIRE, "The flag in inserting reads is wrong");
+  // cache_op * read should only be accessed if flag == FROM TRACE
   struct r_message *r_mes = p_ops->r_fifo->r_message;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
@@ -1142,18 +1151,30 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   if (DEBUG_READS)
     green_printf("Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u \n",
                  t_id, r_mes_ptr, inside_r_ptr);
-  memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-  memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *)&read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-  p_ops->read_info[r_ptr].epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
 
-  r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
+  // this means that the purpose of the read is solely to flip remote bits
+  if (source == FROM_ACQUIRE) {
+    // overload the key with local_r_id
+    memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
+    r_mes[r_mes_ptr].read[inside_r_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
+    p_ops->read_info[r_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
+    cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
+                t_id, r_mes[r_mes_ptr].read[inside_r_ptr].opcode, *(uint64_t *)r_mes[r_mes_ptr].read[inside_r_ptr].key);
+
+  }
+  else {
+    memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *) &read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+    memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *) &read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+    p_ops->read_info[r_ptr].epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
+    r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
+  }
   //if (read->opcode == CACHE_OP_LIN_PUT) r_mes[r_mes_ptr].read[inside_r_ptr].opcode = CACHE_OP_LIN_PUT;
   //else r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode;
   if (inside_r_ptr == 0) {
     p_ops->r_fifo->backward_ptrs[r_mes_ptr] = r_ptr;
     uint64_t message_l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
     if (ENABLE_ASSERTIONS) {
-      assert(read->opcode != OP_RMW);
+      if (source == FROM_TRACE) assert(read->opcode != OP_RMW);
       if (message_l_id > MAX_R_COALESCE) {
         uint32_t prev_r_mes_ptr = (r_mes_ptr + R_FIFO_SIZE - 1) % R_FIFO_SIZE;
         uint64_t prev_l_id = *(uint64_t *) r_mes[prev_r_mes_ptr].l_id;
@@ -1175,14 +1196,17 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
                  t_stats[t_id].cache_hits_per_thread, p_ops->r_size);
     //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
     assert(p_ops->r_state[r_ptr] == INVALID);
-    assert(keys_are_equal((struct cache_key *) (((void *)&r_mes[r_mes_ptr].read[inside_r_ptr]) - 3),
-                          (struct cache_key *)read));
+    if (source == FROM_TRACE)
+      assert(keys_are_equal((struct cache_key *) (((void *)&r_mes[r_mes_ptr].read[inside_r_ptr]) - 3),
+                           (struct cache_key *)read));
   }
   p_ops->r_state[r_ptr] = VALID;
-  if (read->opcode == OP_ACQUIRE) {
-    memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
-    // Query the conf to see if the machine has lost messages
-    on_starting_an_acquire_query_the_conf(t_id);
+  if (source == FROM_TRACE) {
+    if (read->opcode == OP_ACQUIRE) {
+      memcpy(&p_ops->r_session_id[r_ptr], read, SESSION_BYTES); // session id has to fit in 3 bytes
+      // Query the conf to see if the machine has lost messages
+      on_starting_an_acquire_query_the_conf(t_id);
+    }
   }
   if (ENABLE_ASSERTIONS) assert(p_ops->r_session_id[r_ptr] <= SESSIONS_PER_THREAD);
   MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
@@ -1279,7 +1303,8 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
                                 uint8_t read_opcode) {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
-  bool is_rmw = !(r_rep_flag == READ || r_rep_flag == LIN_PUT);
+  bool is_rmw = (r_rep_flag == RMW_SMALLER_TS || r_rep_flag == RMW_ACK_PROPOSE ||
+                 r_rep_flag == RMW_ALREADY_ACCEPTED || r_rep_flag == RMW_NACK_PROPOSE);
   bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
 
    /* A reply message corresponds to exactly one read message
@@ -1300,7 +1325,11 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   uint32_t inside_r_rep_ptr = r_rep_fifo->message_sizes[r_rep_fifo->push_ptr]; // This pointer is in bytes
   r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += R_REP_SMALL_SIZE;
   struct r_rep_big *r_rep = (struct r_rep_big *) (((void *)&r_rep_mes[r_rep_mes_ptr]) + inside_r_rep_ptr);
-  if (!is_rmw) {
+
+  if (unlikely(r_rep_flag == NO_OP_ACQ_FLIP_BIT)) {
+    r_rep->opcode = TS_EQUAL;
+  }
+  else if (!is_rmw) {
     enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
     if (machine_id == 0 && R_TO_W_DEBUG) {
      if (ts_comp == EQUAL)
@@ -1339,7 +1368,9 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   else { // response to an RMW
     fill_rmw_prep_reply(r_rep, r_rep_fifo, *local_ts, r_rep_flag, value, t_id);
   }
-  if (read_opcode == OP_ACQUIRE_FP || read_opcode == OP_ACQUIRE_OWNER) {
+
+  if (read_opcode == OP_ACQUIRE_FP) {
+    if (ENABLE_ASSERTIONS) assert(r_rep_flag != NO_OP_ACQ_FLIP_BIT);
     if (DEBUG_QUORUM)
       yellow_printf("Worker %u Letting machine %u know that I believed it failed \n", t_id, rem_m_id);
     r_rep->opcode += FALSE_POSITIVE_OFFSET;
@@ -1528,7 +1559,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     else if (ops[i].opcode == CACHE_OP_PUT || ops[i].opcode == OP_RELEASE)
       insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
     else {
-      insert_read(p_ops, &ops[i], t_id);
+      insert_read(p_ops, &ops[i],FROM_TRACE, t_id);
     }
   }
   *old_op_i = tmp_op_i;
@@ -1757,7 +1788,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
       assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
              w_mes->write[i].opcode == OP_RELEASE ||
              w_mes->write[i].opcode == OP_ACQUIRE ||
-             w_mes->write[i].opcode == OP_ACQUIRE_FLIP_BIT ||
+             //w_mes->write[i].opcode == OP_ACQUIRE_FLIP_BIT || // no longer allowed
              w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND);
       //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
     }
@@ -1929,7 +1960,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
       if (ENABLE_ASSERTIONS) {
         assert(r_mes->read[i].opcode == CACHE_OP_GET || r_mes->read[i].opcode == CACHE_OP_LIN_PUT ||
                r_mes->read[i].opcode == OP_ACQUIRE || r_mes->read[i].opcode == OP_LIN_RELEASE ||
-               r_mes->read[i].opcode == OP_RMW);
+               r_mes->read[i].opcode == OP_RMW || r_mes->read[i].opcode == OP_ACQUIRE_FLIP_BIT);
       }
     }
   }
@@ -2065,7 +2096,6 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
-    if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
     if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
@@ -2080,18 +2110,10 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
   }
 }
 
-//Handle the configuration bit_vec vector on receiving a release or the second round of an acquire
-static inline void handle_configuration_on_receiving_rel_acq(struct write *write, struct w_message *w_mes,
-                                                             uint16_t write_i, uint16_t t_id)
+//Handle the configuration bit_vec vector on receiving a release
+static inline void handle_configuration_on_receiving_rel(struct write *write, uint16_t t_id)
 {
-  // On receiving the 2nd round of an Acquire:
-  // If the corresponding bit_vec is set in DOWN_TRANSIENT_OWNED then flip the bit_vec iff its owned by this acquire
-  if (unlikely(write->opcode == OP_ACQUIRE_FLIP_BIT)) {
-    uint64 local_r_id = (*(uint64_t *)w_mes->l_id) + write_i;
-    raise_conf_bit_iff_owned(t_id, local_r_id, (uint16_t) w_mes->m_id);
-//    green_printf("local_r _id %lu \n", local_r_id); assert(false);
-    write->opcode = OP_ACQUIRE;
-  }
+
   // On receiving the 1st round of a Release:
   // apply the change to the stable vector and set the bit_vec that gets changed to Stable state.
   // Do not change the sent vector
@@ -2106,6 +2128,7 @@ static inline void handle_configuration_on_receiving_rel_acq(struct write *write
       }
     }
   } // we do not change the op back to OP_RELEASE, because we want to avoid making the actual write to the KVS
+  // (because it only contains a bit vector)
 }
 
 // Poll for the write broadcasts
@@ -2144,14 +2167,14 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) {
         if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
-           write->opcode != OP_ACQUIRE && write->opcode != OP_ACQUIRE_FLIP_BIT &&
+           write->opcode != OP_ACQUIRE && //write->opcode != OP_ACQUIRE_FLIP_BIT &&
            write->opcode != OP_RELEASE_BIT_VECTOR)
           red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
         if ((*(uint32_t *)write->version) % 2 != 0) {
           red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
         }
       }
-      if (!EMULATE_ABD) handle_configuration_on_receiving_rel_acq(write, w_mes, i, t_id);
+      if (!EMULATE_ABD) handle_configuration_on_receiving_rel(write, t_id);
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
     }
@@ -2180,9 +2203,11 @@ static inline void wait_for_the_entire_read(volatile struct r_message *r_mes,
 {
   uint32_t debug_cntr = 0;
   while (r_mes->read[r_mes->coalesce_num - 1].opcode != CACHE_OP_GET) {
-    if (r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_LIN_PUT) return;
-    if (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) return;
-    if (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_RMW) return;
+
+    if ((r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_LIN_PUT) ||
+        (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) ||
+        (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_RMW) ||
+          r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
     if (ENABLE_ASSERTIONS) {
       assert(false);
       debug_cntr++;
@@ -2224,12 +2249,15 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
       if (ENABLE_ASSERTIONS)
-        if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE && read->opcode != OP_RMW)
+        if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE
+           && read->opcode != OP_RMW && read->opcode != OP_ACQUIRE_FLIP_BIT)
           red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, i, r_num);
       //printf("version %u \n", *(uint32_t*) read->ts.version);
       if (read->opcode == OP_ACQUIRE)
         read->opcode = take_ownership_of_a_conf_bit(t_id, (* (uint64_t *)r_mes->l_id) + i,
                                                     (uint16_t) r_mes->m_id);
+      if (read->opcode == OP_ACQUIRE_FLIP_BIT)
+        raise_conf_bit_iff_owned(t_id, *(uint64_t *) read->key, (uint16_t) r_mes->m_id);
       p_ops->ptrs_to_r_ops[polled_reads] = (struct read *)(((void *) read) - 3); //align with the cache op
       p_ops->ptrs_to_r_headers[polled_reads] = r_mes;
       polled_reads++;
@@ -2406,8 +2434,10 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
     read_info->fp_detected = true;
     if (DEBUG_QUORUM) yellow_printf("Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
     r_rep->opcode -= FALSE_POSITIVE_OFFSET;
-    if (ENABLE_ASSERTIONS)
+    if (ENABLE_ASSERTIONS) {
       assert(r_rep->opcode >= TS_SMALLER && r_rep->opcode <= TS_GREATER);
+      assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
+    }
   }
 
   if (r_rep->opcode == TS_GREATER || r_rep->opcode == TS_GREATER_LIN_PUT) {
@@ -2617,9 +2647,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
 {
   uint32_t pull_ptr = p_ops->r_pull_ptr;
   uint16_t writes_for_cache = 0;
-  // Acquire needs to have a second round irrespective of the
+  // Acquire needs to have a second READ round irrespective of the
   // timestamps if it is charged with flipping a bit
-  // TODO if bit is not owned why have second round?
   bool acq_second_round_to_flip_bit;
   // A read must have a second round trip if the timestamp has not been seen by a quorum
   // i.e. if it has been seen locally but not from a REMOTE_QUORUM
@@ -2629,8 +2658,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
   // write_local_kvs : Write the local KVS if the ts has not been seen locally
   bool write_local_kvs;
   while(p_ops->r_state[pull_ptr] == READY) {
-    acq_second_round_to_flip_bit = p_ops-> read_info[pull_ptr].fp_detected;
-    insert_write_flag = acq_second_round_to_flip_bit ||
+    acq_second_round_to_flip_bit = p_ops->read_info[pull_ptr].fp_detected;
+    insert_write_flag =
          (!p_ops->read_info[pull_ptr].seen_larger_ts && p_ops->read_info[pull_ptr].times_seen_ts < REMOTE_QUORUM) ||
          (p_ops->read_info[pull_ptr].seen_larger_ts && p_ops->read_info[pull_ptr].times_seen_ts <= REMOTE_QUORUM);
     write_local_kvs = p_ops->read_info[pull_ptr].seen_larger_ts ||
@@ -2640,7 +2669,11 @@ static inline void commit_reads(struct pending_ops *p_ops,
     if (ENABLE_ASSERTIONS) {
       assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE || epoch_id > 0); // cant be a read if epoch_id is 0
       assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE ||
+             p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT ||
              p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET);
+
+      if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT)
+        assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs);
     }
 
     // DEBUG info -- TODO: print the flags here
@@ -2650,8 +2683,10 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
     // Break condition: this read cannot be processed, and thus no subsequent read will be processed
     if ((insert_write_flag && (p_ops->w_size >= MAX_ALLOWED_W_SIZE)) ||
-        (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R)))
-          break;
+        (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R))    ||
+        (acq_second_round_to_flip_bit) && (p_ops->r_size >= PENDING_READS))
+      break;
+
     //Reads that need to go to cache
     if (write_local_kvs) {
       if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET)
@@ -2666,15 +2701,22 @@ static inline void commit_reads(struct pending_ops *p_ops,
     }
     // In the off chance that the acquire needs a second round for fault tolerance
     if (unlikely(acq_second_round_to_flip_bit)) {
-      if (p_ops-> read_info[pull_ptr].epoch_id == epoch_id) {
+      if (p_ops->read_info[pull_ptr].epoch_id == epoch_id) {
         epoch_id++;
         if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
+        // The read must have the sturct key overloaded with the original acquire l_id
+        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent  %u \n",
+                    t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id);
+        insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
       }
+      p_ops->read_info[pull_ptr].fp_detected = false;
     }
+
+
     // Acquires that wont have a second round and thus must free the session
     // if the local kvs needs to be written but the read need not have a second round
     // then we need to remove the read as it is done
-    if (!insert_write_flag && !acq_second_round_to_flip_bit &&
+    if (!insert_write_flag &&
         (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE)) {
       p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
@@ -2819,6 +2861,10 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
     }
+
+    // This case is tricky because in order to remove the release we must add another release
+    // but if the queue was full that would deadlock, therefore we must remove the write before inserting
+    // the second round of the release
     if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR && (!EMULATE_ABD))) {
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
       uint32_t w_size = p_ops->w_size;
@@ -2829,7 +2875,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
       p_ops->w_size--;
 
-      if (w_size == PENDING_WRITES) { // this can deadlock: we need to remove a write to add a write
+      if (ENABLE_ASSERTIONS && w_size == MAX_ALLOWED_W_SIZE) {
         red_printf("p_ops is full sized -- it should still work %u \n", w_size);
         //assert(false);
       }

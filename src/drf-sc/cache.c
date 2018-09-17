@@ -360,14 +360,18 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
      */
   for(I = 0; I < op_num; I++) {
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + I) % max_op_size];
+    if (unlikely(op->opcode == OP_ACQUIRE_FLIP_BIT)) continue; // This message is only meant to flip a bit and is thus a NO-OP
     bkt[I] = op->key.bkt & cache.hash_table.bkt_mask;
     bkt_ptr[I] = &cache.hash_table.ht_index[bkt[I]];
     __builtin_prefetch(bkt_ptr[I], 0, 0);
     tag[I] = op->key.tag;
 
     key_in_store[I] = 0;
-    kv_ptr[I] = NULL;  }
+    kv_ptr[I] = NULL;
+  }
   for(I = 0; I < op_num; I++) {
+    struct cache_op *op = (struct cache_op*) reads[(pull_ptr + I) % max_op_size];
+    if (unlikely(op->opcode == OP_ACQUIRE_FLIP_BIT)) continue;
     for(j = 0; j < 8; j++) {
       if(bkt_ptr[I]->slots[j].in_use == 1 &&
          bkt_ptr[I]->slots[j].tag == tag[I]) {
@@ -396,6 +400,12 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(I = 0; I < op_num; I++) {
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + I) % max_op_size];
+    if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
+      insert_r_rep(p_ops, NULL, NULL,
+                   *(uint64_t *) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
+                   p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, NO_OP_ACQ_FLIP_BIT, op->opcode);
+      continue;
+    }
     if(kv_ptr[I] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
       long long *key_ptr_log = (long long *) kv_ptr[I];
@@ -403,7 +413,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[I] = 1;
         if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE ||
-            op->opcode == OP_ACQUIRE_FP || op->opcode == OP_ACQUIRE_OWNER) {
+            op->opcode == OP_ACQUIRE_FP) {
           //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           uint8_t tmp_value[VALUE_SIZE];

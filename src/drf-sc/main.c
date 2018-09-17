@@ -58,48 +58,48 @@ int main(int argc, char *argv[])
 //  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
 //	assert(LEADER_MACHINE < MACHINE_NUM);
 //	assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
-	assert(sizeof(struct key) == TRUE_KEY_SIZE);
+	static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
 //  assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
 //  assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
 //  assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect
-  assert(CACHE_BATCH_SIZE > MAX_INCOMING_W);
-  assert(CACHE_BATCH_SIZE > MAX_INCOMING_R);
-  assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE);
-  assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE);
-  assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE);
-  assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE);
-  assert(SESSIONS_PER_THREAD < M_16);
-  assert(MAX_W_COALESCE < 256);
-  assert(MAX_R_COALESCE < 256);
-  assert(MAX_R_REP_COALESCE < 256);
+  static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_W, "");
+  static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_R, "");
+  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
+  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
+  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
+  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(SESSIONS_PER_THREAD < M_16, "");
+  static_assert(MAX_W_COALESCE < 256, "");
+  static_assert(MAX_R_COALESCE < 256, "");
+  static_assert(MAX_R_REP_COALESCE < 256, "");
 
-  assert(MAX_R_REP_COALESCE == MAX_R_COALESCE);
-  assert(SESSIONS_PER_THREAD > 0);
-  assert(MAX_OP_BATCH < CACHE_BATCH_SIZE);
-  assert(ENABLE_LIN == 0); // Lin is not implemented
-  assert(MACHINE_NUM < 16); // the bit_vec vector is 16 bits-- can be extended
-	if (USE_BIG_OBJECTS) assert(VALUE_SIZE % 8 == 0);
-	assert(VALUE_SIZE >= 2); // first round of release can overload the first 2 bytes of value
-  assert(sizeof(struct cache_key) ==  KEY_SIZE);
+  static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
+  static_assert(SESSIONS_PER_THREAD > 0, "");
+  static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
+  static_assert(ENABLE_LIN == 0, "Lin is not implemented");
+  static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
+	static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
+  static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
+  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
 //  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
 //  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
-  assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE)); // RMW requires the value to be at least this many bytes
+  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
 
 //
 //  yellow_printf("WRITE: w_size of write recv slot %d w_size of w_message %lu , "
 //           "value w_size %d, w_size of cache op %lu , sizeof udreq w message %lu \n",
 //         LDR_W_RECV_SIZE, sizeof(struct w_message), VALUE_SIZE,
 //         sizeof(struct cache_op), sizeof(struct w_message_ud_req));
-  assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE);
-  assert(sizeof(struct w_message) == W_MES_SIZE);
+  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
 
   // RMWs
-  assert(LOCAL_PREP_NUM >= SESSIONS_PER_THREAD);
+  static_assert(LOCAL_PREP_NUM >= SESSIONS_PER_THREAD, "");
 
 
 
-	assert(sizeof(cache_meta) == 8);
-  assert(MACHINE_NUM <= 255); // cache meta has 1 B for machine id
+  static_assert(sizeof(cache_meta) == 8, "");
+  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
 
 
 	int i, c;

@@ -29,13 +29,16 @@
 #define OP_RMW 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
-// signal that this is the second round of an acquire that flips the config bit_vec
+// The sender sends this opcode to flip a bit it owns after an acquire detected a failure
 #define OP_ACQUIRE_FLIP_BIT 107
 #define OP_LIN_RELEASE 108
 #define OP_RELEASE 109
 #define OP_ACQUIRE 110
-#define OP_ACQUIRE_FP 10 // An incoming acquire that detected a false positive
-#define OP_ACQUIRE_OWNER 11 // The acquire found a failure and owns it too
+// The receiver renames the opcode of an OP_ACQUIRE  to this to recognize
+// that the acquire detected a failure and add the offset to the reply opcode
+#define OP_ACQUIRE_FP 10
+
+
 #define CACHE_OP_GET 111
 #define CACHE_OP_PUT 112
 #define CACHE_OP_UPD 113
