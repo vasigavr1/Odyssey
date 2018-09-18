@@ -736,8 +736,23 @@ struct a_bit_of_vec {
 	uint16_t owner_m_id; // useful only for cong bits  where owner acquires are remote
   uint16_t owner_t_id;
   uint64_t owner_local_wr_id; // id of a release/acquire that owns the bit
-
 };
+
+
+struct owner {
+	uint16_t owner_m_id; // useful only for cong bits  where owner acquires are remote
+	uint16_t owner_t_id;
+	uint64_t owner_local_wr_id; // id of a release/acquire that owns the bit
+};
+
+
+//
+struct multiple_owner_bit {
+	atomic_flag lock;
+	atomic_uint_fast8_t bit;
+	struct owner owners[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD];
+};
+
 
 struct bit_vector {
 	// state_lock and state are used only for send_bits (i.e. by releases),
@@ -749,7 +764,7 @@ struct bit_vector {
 };
 
 
-
+extern struct multiple_owner_bit send_bit_vec_mo[MACHINE_NUM];
 
 // This bit vector shows failures that were identified locally
 // Releases must send out such a failure and clear the corresponding

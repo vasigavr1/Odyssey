@@ -2704,11 +2704,12 @@ static inline void commit_reads(struct pending_ops *p_ops,
       if (p_ops->read_info[pull_ptr].epoch_id == epoch_id) {
         epoch_id++;
         if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
-        // The read must have the sturct key overloaded with the original acquire l_id
-        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent  %u \n",
-                    t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id);
-        insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
       }
+      // The read must have the sturct key overloaded with the original acquire l_id
+      if (DEBUG_BIT_VECS)
+        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent  %u \n",
+                  t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id);
+      insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
       p_ops->read_info[pull_ptr].fp_detected = false;
     }
 
