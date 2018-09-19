@@ -159,7 +159,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           resp[I].type = CACHE_PUT_SUCCESS;
 				}
         else if (op[I].opcode == CACHE_OP_LIN_PUT) {
-          //Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
           do {
             prev_meta = kv_ptr[I]->key.meta;

@@ -9,7 +9,8 @@ struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 
 struct bit_vector send_bit_vector;
-struct bit_vector conf_bit_vector;
+//struct bit_vector conf_bit_vector;
+struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 
 atomic_char qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
@@ -81,15 +82,10 @@ int main(int argc, char *argv[])
 	static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
-//  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
-//  assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
+
   static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
 
-//
-//  yellow_printf("WRITE: w_size of write recv slot %d w_size of w_message %lu , "
-//           "value w_size %d, w_size of cache op %lu , sizeof udreq w message %lu \n",
-//         LDR_W_RECV_SIZE, sizeof(struct w_message), VALUE_SIZE,
-//         sizeof(struct cache_op), sizeof(struct w_message_ud_req));
+
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
 
@@ -110,19 +106,15 @@ int main(int argc, char *argv[])
   // This (sadly) seems to be the only way to initialize the locks
   // in struct_bit_vector, i.e. the atomic_flags
   memset(&send_bit_vector, 0, sizeof(struct bit_vector));
-  memset(&conf_bit_vector, 0, sizeof(struct bit_vector));
+  memset(conf_bit_vec, 0, MACHINE_NUM * sizeof(struct multiple_owner_bit));
   for (i = 0; i < MACHINE_NUM; i++) {
-    conf_bit_vector.bit_vec[i].bit = UP_STABLE;
+    conf_bit_vec[i].bit = UP_STABLE;
     send_bit_vector.bit_vec[i].bit = UP_STABLE;
 	}
   //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
   send_bit_vector.state = UP_STABLE;
-  conf_bit_vector.state = UNUSED_STATE;
-
-
 
   print_for_debug = false;
-//	send_config_bit_vec_state = STABLE_STATE;
 	next_rmw_entry_available = 0;
 
 	struct thread_params *param_arr;

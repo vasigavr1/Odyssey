@@ -578,7 +578,6 @@ static inline void print_q_info(struct quorum_info *q_info)
 }
 
 
-
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -589,8 +588,11 @@ static inline void print_q_info(struct quorum_info *q_info)
  *    may be the common machine of the release quorum and acquire quorum and thus the failure may not be visible
  *    to the acquire by the rest of the nodes it will reach. At that point the acquire must raise its conf bit
  *    to UP_STABLE, such that it can catch further failures
- * 4. On receiving the first round of an Acquire bring the bit to DOWN_TRANSIENT_OWNED
- *    if it's DOWN _STABLE and give the acquire ownership of the bit
+ * 4. On receiving the first round of an Acquire, bring the bit to DOWN_TRANSIENT_OWNED
+ *    if it's DOWN _STABLE and give the acquire ownership of the bit.
+ *    Subsequent Acquires will all get ownership of the bit: each bit has
+ *    SESSIONS_PER_THREAD * WORKERS_PER_MACHINE owner-slots, such that it can accommodate all
+ *    possible acquires from each machine
  * 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
  *    bring that bit to UP_STABLE*/
 
@@ -599,10 +601,10 @@ static inline void print_q_info(struct quorum_info *q_info)
 // be more efficient with debugging information
 static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t m_id, uint8_t new_state)
 {
-  if (conf_bit_vector.bit_vec[m_id].bit != new_state) {
-    while (!atomic_flag_test_and_set_explicit(&conf_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
-    conf_bit_vector.bit_vec[m_id].bit = new_state;
-    atomic_flag_clear_explicit(&conf_bit_vector.bit_vec[m_id].lock, memory_order_release);
+  if (conf_bit_vec[m_id].bit != new_state) {
+    while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[m_id].lock, memory_order_acquire));
+    conf_bit_vec[m_id].bit = new_state;
+    atomic_flag_clear_explicit(&conf_bit_vec[m_id].lock, memory_order_release);
   }
 }
 
@@ -611,7 +613,7 @@ static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t
 //    if some remote release has raised the bit, then incrase epoch id and flip the bit
 static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id)
 {
-  if (unlikely(conf_bit_vector.bit_vec[machine_id].bit ==  DOWN_STABLE)) {
+  if (unlikely(conf_bit_vec[machine_id].bit == DOWN_STABLE)) {
     epoch_id++;
     set_conf_bit_to_new_state(t_id, (uint16_t) machine_id, UP_STABLE);
     if (DEBUG_BIT_VECS)
@@ -621,35 +623,35 @@ static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id)
 }
 
 // 4. On receiving the first round of an Acquire bring the bit to DOWN_TRANSIENT_OWNED
-// Return the opcode an acquire should ahve going in to the cache
+// and register the acquire's local_r_id as one of the bit's owners
+// Return the opcode an acquire should have going in to the cache
 // If it found no failure it should be OP_ACQUIRE
 // If it found a failure it should be OP_ACQUIRE_FP
 static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const uint64_t local_r_id,
                                                 const uint16_t acq_m_id)
 {
-  if (conf_bit_vector.bit_vec[acq_m_id].bit == UP_STABLE) return OP_ACQUIRE;
+  if (conf_bit_vec[acq_m_id].bit == UP_STABLE) return OP_ACQUIRE;
   if (DEBUG_BIT_VECS)
     yellow_printf("Wrkr %u An acquire from machine %u  is looking to take ownership "
                     "of a bit: local_r_id %u \n", t_id, acq_m_id, local_r_id);
   bool owned_a_failure = false;
-  // if it's down but not owned then own it
-  if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_STABLE) {
-    while (!atomic_flag_test_and_set_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_acquire));
-    if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_STABLE) {
-      conf_bit_vector.bit_vec[acq_m_id].bit = DOWN_TRANSIENT_OWNED;
-      conf_bit_vector.bit_vec[acq_m_id].owner_t_id = t_id;
-      conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id = local_r_id;
-      conf_bit_vector.bit_vec[acq_m_id].owner_m_id = acq_m_id;
-      owned_a_failure = true;
-    }
-    atomic_flag_clear_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_release);
+  // if it's down, own it, even if it is already owned
+
+  while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
+  if (conf_bit_vec[acq_m_id].bit != UP_STABLE) {
+    uint32_t ses_i = conf_bit_vec[acq_m_id].sess_num[t_id];
+    conf_bit_vec[acq_m_id].owners[t_id][ses_i] = local_r_id;
+    MOD_ADD(conf_bit_vec[acq_m_id].sess_num[t_id], SESSIONS_PER_THREAD);
+    owned_a_failure = true;
+    conf_bit_vec[acq_m_id].bit = DOWN_TRANSIENT_OWNED;
   }
+  atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
+
   if (DEBUG_BIT_VECS && owned_a_failure)
     green_printf("Wrkr %u acquire from machine %u got ownership of its failure, "
                    "bit %u  owned t_id %u, owned local_r_id %u \n",
-                 t_id, acq_m_id, conf_bit_vector.bit_vec[acq_m_id].bit,
-                 conf_bit_vector.bit_vec[acq_m_id].owner_t_id,
-                 conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id);
+                 t_id, acq_m_id, conf_bit_vec[acq_m_id].bit,
+                 t_id, local_r_id);
   return  OP_ACQUIRE_FP;
 }
 
@@ -663,32 +665,32 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
     yellow_printf("Wrkr %u An acquire from machine %u  is looking if it owns a failure local_r_id %u \n",
                   t_id, acq_m_id, local_r_id);
   // First change the state  of the owned bits
-    bool debug_flag = false;
-    if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED &&
-        conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id == local_r_id &&
-        conf_bit_vector.bit_vec[acq_m_id].owner_t_id == t_id &&
-        conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // if the bit_vec is owned by me
-      // Grab the lock
-      while (!atomic_flag_test_and_set_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_acquire));
-      if (conf_bit_vector.bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED &&
-          conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id == local_r_id &&
-          conf_bit_vector.bit_vec[acq_m_id].owner_t_id == t_id &&
-          conf_bit_vector.bit_vec[acq_m_id].owner_m_id == acq_m_id) { // Check again if the bit_vec is owned by me
-        conf_bit_vector.bit_vec[acq_m_id].bit = UP_STABLE;
-        debug_flag = true;
+  bool bit_gets_flipped = false;
+  if (conf_bit_vec[acq_m_id].bit != DOWN_TRANSIENT_OWNED) return;
+  // Grab the lock
+  while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
+  if (conf_bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {
+    uint32_t max_sess = conf_bit_vec[acq_m_id].sess_num[t_id];
+    for (uint32_t ses_i = 0; ses_i < max_sess; ses_i++) {
+      if (conf_bit_vec[acq_m_id].owners[t_id][ses_i] == local_r_id) {
+        conf_bit_vec[acq_m_id].bit = UP_STABLE;
+        bit_gets_flipped = true;
+        break;
       }
-      atomic_flag_clear_explicit(&conf_bit_vector.bit_vec[acq_m_id].lock, memory_order_release);
     }
+    if (bit_gets_flipped)  // "invalidate" all owners
+      memset(conf_bit_vec[acq_m_id].sess_num, 0, WORKERS_PER_MACHINE * sizeof(*conf_bit_vec[acq_m_id].sess_num));
+  }
+  atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
 
-    if (DEBUG_BIT_VECS && debug_flag) {
-      assert(conf_bit_vector.bit_vec[acq_m_id].bit == UP_STABLE);
-      green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
-                     "owned t_id %u, owned local_w_id %u, owned m_id %u \n",
-                   t_id, acq_m_id, conf_bit_vector.bit_vec[acq_m_id].bit, UP_STABLE,
-                   conf_bit_vector.bit_vec[acq_m_id].owner_t_id,
-                   conf_bit_vector.bit_vec[acq_m_id].owner_local_wr_id,
-                   conf_bit_vector.bit_vec[acq_m_id].owner_m_id);
-    }
+
+  if (DEBUG_BIT_VECS && bit_gets_flipped) {
+    assert(conf_bit_vec[acq_m_id].bit == UP_STABLE);
+    green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
+                   "owned t_id %u, owned local_w_id %u\n",
+                 t_id, acq_m_id, conf_bit_vec[acq_m_id].bit, UP_STABLE,
+                 t_id, local_r_id);
+  }
 
 }
 
@@ -719,7 +721,7 @@ static inline void set_send_and_conf_bit_after_detecting_failure(const uint16_t 
     yellow_printf("Wrkr %u handles Send and conf bit vec after failure to machine %u,"
                     " send bit %u, state %u, conf_bit %u \n",
                   t_id, m_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
-                  conf_bit_vector.bit_vec[m_id].bit);
+                  conf_bit_vec[m_id].bit);
 
   if (send_bit_vector.bit_vec[m_id].bit != DOWN_STABLE) {
     while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
@@ -738,7 +740,7 @@ static inline void set_send_and_conf_bit_after_detecting_failure(const uint16_t 
   if (DEBUG_BIT_VECS)
     green_printf("Wrkr %u After: send bit %u, state %u, conf_bit %u \n",
                  t_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
-                 conf_bit_vector.bit_vec[m_id].bit);
+                 conf_bit_vec[m_id].bit);
 }
 
 //2. On Sending a Release containing a failure
@@ -1158,9 +1160,9 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
     memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
     r_mes[r_mes_ptr].read[inside_r_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
     p_ops->read_info[r_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
-    cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
+    if (DEBUG_BIT_VECS)
+      cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
                 t_id, r_mes[r_mes_ptr].read[inside_r_ptr].opcode, *(uint64_t *)r_mes[r_mes_ptr].read[inside_r_ptr].key);
-
   }
   else {
     memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *) &read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);

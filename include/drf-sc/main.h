@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 2
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -271,9 +271,9 @@
 #define VERBOSE_DBG_COUNTER 0
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
-#define DEBUG_QUORUM 1
-#define DEBUG_BIT_VECS 1
-#define DEBUG_RMW 1
+#define DEBUG_QUORUM 0
+#define DEBUG_BIT_VECS 0
+#define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 0
 #define PUT_A_MACHINE_TO_SLEEP 1
@@ -732,49 +732,42 @@ struct thread_stats { // 2 cache lines
 // by a release or an acquire respectively
 struct a_bit_of_vec {
   atomic_flag lock;
-  atomic_uint_fast8_t bit; // UP_STABLE, DOWN_STABLE, DOWN_TRANSIENT_OWNED
-	uint16_t owner_m_id; // useful only for cong bits  where owner acquires are remote
+  uint8_t bit; // UP_STABLE, DOWN_STABLE, DOWN_TRANSIENT_OWNED
   uint16_t owner_t_id;
   uint64_t owner_local_wr_id; // id of a release/acquire that owns the bit
 };
-
-
-struct owner {
-	uint16_t owner_m_id; // useful only for cong bits  where owner acquires are remote
-	uint16_t owner_t_id;
-	uint64_t owner_local_wr_id; // id of a release/acquire that owns the bit
-};
-
-
-//
-struct multiple_owner_bit {
-	atomic_flag lock;
-	atomic_uint_fast8_t bit;
-	struct owner owners[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD];
-};
-
 
 struct bit_vector {
 	// state_lock and state are used only for send_bits (i.e. by releases),
 	// because otherwise every release would have to check every bit
 	// acquires on the other hand need only check one bit
-  atomic_flag state_lock;
-  uint8_t state; // denotes if any bits are raised, to accelerate the common case
-  struct a_bit_of_vec bit_vec[MACHINE_NUM];
+	atomic_flag state_lock;
+	uint8_t state; // denotes if any bits are raised, to accelerate the common case
+	struct a_bit_of_vec bit_vec[MACHINE_NUM];
 };
-
-
-extern struct multiple_owner_bit send_bit_vec_mo[MACHINE_NUM];
 
 // This bit vector shows failures that were identified locally
 // Releases must send out such a failure and clear the corresponding
 // bit after the failure has been quoromized
 extern struct bit_vector send_bit_vector;
 
+//
+struct multiple_owner_bit {
+	atomic_flag lock;
+	uint8_t bit;
+	// this is not the actual sess_i of the owner, but a proxy of it
+	// it counts how many sessions own a bit from a given remote thread
+	uint32_t sess_num[WORKERS_PER_MACHINE];
+	//A bit can be owned only by the machine it belongs to
+	uint64_t owners[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD];
+};
+
+
 // This bit vector shows failures that were identified locally or remotely
 // Remote acquires will read those failures and flip the bits after the have
 // increased their epoch id
-extern struct bit_vector conf_bit_vector;
+extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
+
 
 
 
