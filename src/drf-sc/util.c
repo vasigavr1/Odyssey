@@ -192,13 +192,11 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     }
     else if (is_update) {
       if (is_sc && ENABLE_RELEASES) {
-        if (ENABLE_LIN) (*cmds)[i].opcode = OP_LIN_RELEASE;
-        else (*cmds)[i].opcode = OP_RELEASE;
+        (*cmds)[i].opcode = OP_RELEASE;
         sc_writes++;
       }
       else {
-        if (ENABLE_LIN) (*cmds)[i].opcode = CACHE_OP_LIN_PUT;
-        else (*cmds)[i].opcode = CACHE_OP_PUT;
+        (*cmds)[i].opcode = CACHE_OP_PUT;
         writes++;
       }
 

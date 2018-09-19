@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 28
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -274,8 +274,8 @@
 #define DEBUG_QUORUM 0
 #define DEBUG_BIT_VECS 0
 #define DEBUG_RMW 0
-#define DEBUG_RECEIVES 0
-#define DEBUG_SESSIONS 0
+#define DEBUG_RECEIVES 1
+#define DEBUG_SESSIONS 1
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -353,13 +353,14 @@ struct remote_qp {
 // Possible write sources
 #define FROM_TRACE 0
 #define FROM_READ 1
-#define FROM_WRITE 2 //the second round of a release
-#define FOR_ACCEPT 3
-#define FROM_ACQUIRE 4
-#define LIN_WRITE 5
+//#define RELEASE_SECOND 2 // after the read ts for a release
+#define RELEASE_THIRD 3 // for the third round of a release
+#define FOR_ACCEPT 4
+#define FROM_ACQUIRE 5
+
 // Possible flag values when inserting a read reply
 #define READ 0
-#define LIN_PUT 1
+#define READ_TS 1
 #define RMW_SMALLER_TS 2
 #define RMW_ACK_PROPOSE 3 // Send an 1-byte reply
 #define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
@@ -543,6 +544,8 @@ struct read_info {
 	uint8_t opcode;
   struct ts_tuple ts_to_read;
   uint8_t key[TRUE_KEY_SIZE];
+	// the value read locally, a greater value received or
+	// in case of a 2-round write, the value to be written
   uint8_t value[VALUE_SIZE];
   bool fp_detected; //detected false positive
   uint16_t epoch_id;

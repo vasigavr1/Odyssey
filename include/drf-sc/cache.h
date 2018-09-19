@@ -31,29 +31,27 @@
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // The sender sends this opcode to flip a bit it owns after an acquire detected a failure
 #define OP_ACQUIRE_FLIP_BIT 107
-#define OP_LIN_RELEASE 108
 #define OP_RELEASE 109
 #define OP_ACQUIRE 110
 // The receiver renames the opcode of an OP_ACQUIRE  to this to recognize
 // that the acquire detected a failure and add the offset to the reply opcode
 #define OP_ACQUIRE_FP 10
-
-
 #define CACHE_OP_GET 111
 #define CACHE_OP_PUT 112
-#define CACHE_OP_UPD 113
-#define CACHE_OP_INV 114
 #define CACHE_OP_ACK 115
-#define CACHE_OP_BRC 116       //Warning although this is cache opcode it's returned by cache to either Broadcast upd or inv
 #define ACK_NOT_YET_SENT 117
-#define CACHE_OP_LIN_PUT 118
+#define CACHE_OP_GET_TS 118
 #define UPDATE_EPOCH_OP_GET 119
+#define CACHE_OP_LIN_PUT 120
+
+
 //Cache Response
 //#define RETRY_RMW_NO_ENTRIES 0
 #define RETRY_RMW_KEY_EXISTS 1
 #define RMW_SUCCESS 118
 
 #define EMPTY 120
+#define CACHE_GET_TS_SUCCESS 21
 #define CACHE_GET_SUCCESS 121
 #define CACHE_PUT_SUCCESS 122
 #define CACHE_LOCAL_GET_SUCCESS 123
@@ -61,14 +59,21 @@
 #define CACHE_ACK_SUCCESS 125
 #define CACHE_LAST_ACK_SUCCESS 126
 #define RETRY 127
-
+#define CACHE_MISS 130
+#define CACHE_GET_STALL 131
+#define CACHE_PUT_STALL 132
+#define CACHE_UPD_FAIL 133
+#define CACHE_INV_FAIL 134
+#define CACHE_ACK_FAIL 135
+#define CACHE_GET_FAIL 136
+#define CACHE_PUT_FAIL 137
 
 // READ_REPLIES
 #define PREP_REPLY 26 // an r_rep message can be a reply to a read or a prep
 #define READ_REPLY 27
 #define TS_SMALLER 28
 #define TS_EQUAL 29
-#define TS_GREATER_LIN_PUT 30
+#define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
 #define TS_GREATER 31
 #define PROP_ACK 32
 #define PROP_NACK 33 // will receive that TS
@@ -83,14 +88,7 @@
 #define KEY_HIT 220
 
 
-#define CACHE_MISS 130
-#define CACHE_GET_STALL 131
-#define CACHE_PUT_STALL 132
-#define CACHE_UPD_FAIL 133
-#define CACHE_INV_FAIL 134
-#define CACHE_ACK_FAIL 135
-#define CACHE_GET_FAIL 136
-#define CACHE_PUT_FAIL 137
+
 
 #define UNSERVED_CACHE_MISS 140
 

@@ -150,7 +150,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
           memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
 				}
-        else if (op[I].opcode == CACHE_OP_PUT || op[I].opcode == OP_RELEASE) {
+        else if (op[I].opcode == CACHE_OP_PUT) {
           if (ENABLE_ASSERTIONS) assert(op[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
           memcpy(kv_ptr[I]->value, op[I].value, VALUE_SIZE);
@@ -158,7 +158,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *)&op[I].key.meta.version);
           resp[I].type = CACHE_PUT_SUCCESS;
 				}
-        else if (op[I].opcode == CACHE_OP_LIN_PUT) {
+        else if (op[I].opcode == OP_RELEASE) { // read the timestamp
           uint32_t debug_cntr = 0;
           do {
             prev_meta = kv_ptr[I]->key.meta;
@@ -166,16 +166,18 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             if (ENABLE_ASSERTIONS) {
               debug_cntr++;
               if (debug_cntr == M_4) {
-                printf("Worker %u stuck on reading the TS for a lin write\n", t_id);
+                printf("Worker %u stuck on reading the TS for a read TS\n", t_id);
                 debug_cntr = 0;
               }
             }
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           op[I].key.meta.m_id = (uint8_t) machine_id;
           op[I].key.meta.version = prev_meta.version;
-          p_ops->read_info[r_push_ptr].opcode = CACHE_OP_LIN_PUT;
+          p_ops->read_info[r_push_ptr].opcode = op[I].opcode;
+          // Store the value to be written in the read_info to be used in the second round
+          memcpy(p_ops->read_info[r_push_ptr].value, op[I].value, VALUE_SIZE);
           MOD_ADD(r_push_ptr, PENDING_READS);
-          resp[I].type = CACHE_GET_SUCCESS;
+          resp[I].type = CACHE_GET_TS_SUCCESS;
         }
         else if (ENABLE_RMWS && op[I].opcode == OP_RMW) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
@@ -488,11 +490,9 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, flag, op->opcode);
 
         }
-        else if (ENABLE_LIN && op->opcode == CACHE_OP_LIN_PUT) {
-          //Lock free reads through versioning (successful when version is even)
+        else if (op->opcode == CACHE_OP_GET_TS) {
           uint32_t debug_cntr = 0;
           do {
-            //memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
             if (ENABLE_ASSERTIONS) {
               debug_cntr++;
               if (debug_cntr % M_4 == 0) {
@@ -505,7 +505,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, LIN_PUT, op->opcode);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, READ_TS, op->opcode);
 
         }
         else {
@@ -846,14 +846,8 @@ char* code_to_str(uint8_t code){
 			return "CACHE_OP_GET";
 		case CACHE_OP_PUT:
 			return "CACHE_OP_PUT";
-		case CACHE_OP_UPD:
-			return "CACHE_OP_UPD";
-		case CACHE_OP_INV:
-			return "CACHE_OP_INV";
 		case CACHE_OP_ACK:
 			return "CACHE_OP_ACK";
-		case CACHE_OP_BRC:
-			return "CACHE_OP_BRC";
 		case UNSERVED_CACHE_MISS:
 			return "UNSERVED_CACHE_MISS";
 		case VALID_STATE:
