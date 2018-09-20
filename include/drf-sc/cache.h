@@ -16,7 +16,7 @@
 #define CACHE_NUM_KEYS (1000 * 1000)
 
 
-#define CACHE_BATCH_SIZE 500
+//#define CACHE_BATCH_SIZE 500
 
 //Cache States
 #define VALID_STATE 1
@@ -172,5 +172,8 @@ void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_
 
 void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id, struct read_info **writes,
 																								uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
+
+// Send an isolated write to the cache-no batching
+void cache_isolated_op(int t_id, struct write *write);
 
 #endif

@@ -64,12 +64,12 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 	for(I = 0; I < op_num; I++)
 		mica_print_op(&op[I]);
 #endif
-
-	unsigned int bkt[CACHE_BATCH_SIZE];
-	struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-	unsigned int tag[CACHE_BATCH_SIZE];
-	int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-	struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  if (ENABLE_ASSERTIONS) assert (op_num <= MAX_OP_BATCH);
+	unsigned int bkt[MAX_OP_BATCH];
+	struct mica_bkt *bkt_ptr[MAX_OP_BATCH];
+	unsigned int tag[MAX_OP_BATCH];
+	int key_in_store[MAX_OP_BATCH];	/* Is this key in the datastore? */
+	struct cache_op *kv_ptr[MAX_OP_BATCH];	/* Ptr to KV item in log */
 	/*
 	 * We first lookup the key in the datastore. The first two @I loops work
 	 * for both GETs and PUTs.
@@ -246,12 +246,12 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
   for(I = 0; I < op_num; I++)
 		mica_print_op(&(*op)[I]);
 #endif
-
-  unsigned int bkt[CACHE_BATCH_SIZE];
-  struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-  unsigned int tag[CACHE_BATCH_SIZE];
-  int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-  struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_W);
+  unsigned int bkt[MAX_INCOMING_W];
+  struct mica_bkt *bkt_ptr[MAX_INCOMING_W];
+  unsigned int tag[MAX_INCOMING_W];
+  int key_in_store[MAX_INCOMING_W];	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr[MAX_INCOMING_W];	/* Ptr to KV item in log */
   /*
      * We first lookup the key in the datastore. The first two @I loops work
      * for both GETs and PUTs.
@@ -349,12 +349,12 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   for(I = 0; I < op_num; I++)
 		mica_print_op(&(*op)[I]);
 #endif
-
-  unsigned int bkt[CACHE_BATCH_SIZE];
-  struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-  unsigned int tag[CACHE_BATCH_SIZE];
-  int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-  struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
+  unsigned int bkt[MAX_INCOMING_R];
+  struct mica_bkt *bkt_ptr[MAX_INCOMING_R];
+  unsigned int tag[MAX_INCOMING_R];
+  int key_in_store[MAX_INCOMING_R];	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr[MAX_INCOMING_R];	/* Ptr to KV item in log */
   /*
      * We first lookup the key in the datastore. The first two @I loops work
      * for both GETs and PUTs.
@@ -534,7 +534,6 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
                                                        uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
-  long long stalled_brces = 0;
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
 	assert(op != NULL);
@@ -546,12 +545,12 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
   for(I = 0; I < op_num; I++)
 		mica_print_op(&(*op)[I]);
 #endif
-
-  unsigned int bkt[CACHE_BATCH_SIZE];
-  struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-  unsigned int tag[CACHE_BATCH_SIZE];
-  int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-  struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
+  unsigned int bkt[MAX_INCOMING_R];
+  struct mica_bkt *bkt_ptr[MAX_INCOMING_R];
+  unsigned int tag[MAX_INCOMING_R];
+  int key_in_store[MAX_INCOMING_R];	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr[MAX_INCOMING_R];	/* Ptr to KV item in log */
   /*
      * We first lookup the key in the datastore. The first two @I loops work
      * for both GETs and PUTs.
@@ -646,6 +645,106 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
   }
 
 }
+
+
+// Send an isolated write to the cache-no batching
+inline void cache_isolated_op(int t_id, struct write *write)
+{
+  uint32_t op_num = 1;
+  int j;	/* I is batch index */
+#if CACHE_DEBUG == 1
+  //assert(cache.hash_table != NULL);
+	assert(op != NULL);
+	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
+	assert(resp != NULL);
+#endif
+
+#if CACHE_DEBUG == 2
+  for(I = 0; I < op_num; I++)
+		mica_print_op(&(*op)[I]);
+#endif
+
+  unsigned int bkt;
+  struct mica_bkt *bkt_ptr;
+  unsigned int tag;
+  int key_in_store;	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr;	/* Ptr to KV item in log */
+  /*
+   * We first lookup the key in the datastore. The first two @I loops work
+   * for both GETs and PUTs.
+   */
+  struct cache_op *op = (struct cache_op*) (((void *) write) - 3);
+  //print_true_key((struct key *) write->key);
+  //printf("op bkt %u\n", op->key.bkt);
+  bkt = op->key.bkt & cache.hash_table.bkt_mask;
+  bkt_ptr = &cache.hash_table.ht_index[bkt];
+  //__builtin_prefetch(bkt_ptr, 0, 0);
+  tag = op->key.tag;
+
+  key_in_store = 0;
+  kv_ptr = NULL;
+
+
+  for(j = 0; j < 8; j++) {
+    if(bkt_ptr->slots[j].in_use == 1 &&
+       bkt_ptr->slots[j].tag == tag) {
+      uint64_t log_offset = bkt_ptr->slots[j].offset &
+                            cache.hash_table.log_mask;
+      /*
+               * We can interpret the log entry as mica_op, even though it
+               * may not contain the full MICA_MAX_VALUE value.
+               */
+      kv_ptr = (struct cache_op *) &cache.hash_table.ht_log[log_offset];
+
+      /* Small values (1--64 bytes) can span 2 cache lines */
+      //__builtin_prefetch(kv_ptr, 0, 0);
+      //__builtin_prefetch((uint8_t *) kv_ptr + 64, 0, 0);
+
+      /* Detect if the head has wrapped around for this index entry */
+      if(cache.hash_table.log_head - bkt_ptr->slots[j].offset >= cache.hash_table.log_cap) {
+        kv_ptr = NULL;	/* If so, we mark it "not found" */
+      }
+
+      break;
+    }
+  }
+
+  // the following variables used to validate atomicity between a lock-free r_rep of an object
+  if(kv_ptr != NULL) {
+    /* We had a tag match earlier. Now compare log entry. */
+    long long *key_ptr_log = (long long *) kv_ptr;
+    long long *key_ptr_req = (long long *) op;
+    if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+      key_in_store = 1;
+      if (ENABLE_ASSERTIONS) {
+        if (op->opcode != OP_RELEASE) {
+          red_printf("wrong Opcode in cache: %d, m_id %u, val_len %u, version %u , \n",
+                     op->opcode,  op->key.meta.m_id,
+                     op->val_len, op->key.meta.version);
+          assert(false);
+        }
+      }
+      //red_printf("op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
+      if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
+      optik_lock(&kv_ptr->key.meta);
+      if (optik_is_greater_version(kv_ptr->key.meta, op->key.meta)) {
+        memcpy(kv_ptr->value, op->value, VALUE_SIZE);
+        optik_unlock(&kv_ptr->key.meta, op->key.meta.m_id, op->key.meta.version);
+      }
+      else {
+        optik_unlock_decrement_version(&kv_ptr->key.meta);
+      }
+    }
+  }
+  if(key_in_store == 0) {  //Cache miss --> We get here if either tag or log key match failed
+    if (ENABLE_ASSERTIONS) assert(false);
+  }
+
+
+
+}
+
+
 
 
 void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {

@@ -63,8 +63,8 @@ int main(int argc, char *argv[])
 //  assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
 //  assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
 //  assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect
-  static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_W, "");
-  static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_R, "");
+  //static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_W, "");
+  //static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_R, "");
   static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
   static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
   static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 
   static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
   static_assert(SESSIONS_PER_THREAD > 0, "");
-  static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
+  //static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
   static_assert(ENABLE_LIN == 0, "Lin is not implemented");
   static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
 	static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");

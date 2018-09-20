@@ -75,12 +75,11 @@ void *print_stats(void* no_arg) {
       all_stats.failed_rem_write[i] = (curr_c_stats[i].failed_rem_writes - prev_c_stats[i].failed_rem_writes) /
                                   (double) (curr_c_stats[i].received_writes -
                                             prev_c_stats[i].received_writes);
-      if (WRITE_RATIO < 1000  && ENABLE_LIN)
-        all_stats.reads_that_become_writes[i] = (curr_c_stats[i].read_to_write - prev_c_stats[i].read_to_write) * 1000 /
-                                      (double)((curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO));
-      else
-        all_stats.reads_that_become_writes[i] = (curr_c_stats[i].read_to_write - prev_c_stats[i].read_to_write) /
-                                                (double)((curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent));
+
+      uint64_t curr_true_read_sent = curr_c_stats[i].reads_sent - curr_c_stats[i].releases_per_thread; // TODO this does not account for out-of-epoch writes
+      uint64_t prev_true_read_sent = prev_c_stats[i].reads_sent - prev_c_stats[i].releases_per_thread;
+      all_stats.reads_that_become_writes[i] = (curr_c_stats[i].read_to_write - prev_c_stats[i].read_to_write) /
+                                              (double)((curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent));
     }
 
     memcpy(prev_c_stats, curr_c_stats, num_threads * (sizeof(struct thread_stats)));

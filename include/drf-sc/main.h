@@ -262,7 +262,8 @@
 #define SEND_R_REP_Q_DEPTH ((2 * R_REP_SS_BATCH) + 3)
 
 
-// DEBUG
+// DEBUG-- It may be that ENABLE_ASSERTIONS
+// must be up for these to work
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
