@@ -481,6 +481,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->read_info = (struct read_info *) malloc(pending_reads * sizeof(struct read_info));
   memset((*p_ops)->read_info, 0, pending_reads * sizeof(struct read_info));
 
+  (*p_ops)->p_ooe_writes =
+    (struct pending_out_of_epoch_writes *) malloc(sizeof(struct pending_out_of_epoch_writes));
+  memset((*p_ops)->p_ooe_writes, 0, sizeof(struct pending_out_of_epoch_writes));
+
   // R_REP_FIFO
   (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) malloc(sizeof(struct r_rep_fifo));
   memset((*p_ops)->r_rep_fifo, 0, sizeof(struct r_rep_fifo));

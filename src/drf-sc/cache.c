@@ -126,6 +126,11 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 				if (op[I].opcode == CACHE_OP_GET || op[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
+          if (op[I].opcode == CACHE_OP_GET && p_ops->p_ooe_writes->size > 0) {
+            uint8_t *val_ptr;
+            if (search_out_of_epoch_writes(p_ops, (struct key *)&op[I].key.bkt, t_id, (void **) &val_ptr))
+              memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
+          }
 					do {
 						// memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
             prev_meta = kv_ptr[I]->key.meta;
@@ -148,7 +153,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             }
           }
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
-          memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
+          memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE); // TODO is this needed for local accesses?
 				}
           // Put has to be 2 rounds (readTs + write) if it is out-of-epoch
         else if (op[I].opcode == CACHE_OP_PUT) {
@@ -162,6 +167,10 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             p_ops->read_info[r_push_ptr].opcode = op[I].opcode;
             // Store the value to be written in the read_info to be used in the second round
             memcpy(p_ops->read_info[r_push_ptr].value, op[I].value, VALUE_SIZE);
+            memcpy(&p_ops->read_info[r_push_ptr].ts_to_read, (void *) &op[I].key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
+            p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
+            p_ops->p_ooe_writes->size++;
+            MOD_ADD(p_ops->p_ooe_writes->push_ptr, PENDING_READS);
             MOD_ADD(r_push_ptr, PENDING_READS);
             resp[I].type = CACHE_GET_TS_SUCCESS;
           }
@@ -632,14 +641,17 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t
           }
           if (r_info_version < *(uint32_t *)op->ts_to_read.version)
             rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
+          // remove the write from the pending out-of-epoch writes
+          p_ops->p_ooe_writes->size--;
+          MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
         }
-        else if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
+        else if (op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
             // if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id); // this assert is wrong, local writes can happen after a local read but reach remote destinations faster
             memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
             if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
-              memcpy((void*) kv_ptr[I]->key.meta.epoch_id, &op->epoch_id, EPOCH_BYTES);
+              *(uint16_t *) kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
             optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
           }
           else {

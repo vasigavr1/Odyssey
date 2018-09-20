@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 28
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -273,7 +273,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 0
+#define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 1
 #define DEBUG_SESSIONS 1
@@ -592,6 +592,13 @@ struct prop_info {
 
 };
 
+struct pending_out_of_epoch_writes {
+  uint32_t size; //number of pending ooe writes
+  uint32_t push_ptr;
+  uint32_t pull_ptr;
+  uint32_t r_info_ptrs[PENDING_READS]; // ptrs to the read_info struct of p_ops
+};
+
 struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
@@ -605,6 +612,8 @@ struct pending_ops {
   struct read_info *read_info;
   struct r_rep_fifo *r_rep_fifo;
   struct prop_info *prop_info;
+  //
+  struct pending_out_of_epoch_writes *p_ooe_writes;
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
