@@ -37,6 +37,11 @@ set(SOURCE_FILES
         #optik
         include/optik/optik_mod.h
         include/optik/utils.h
+        include/optik/random.h
+        include/optik/getticks.h
+        include/optik/atomic_ops_if.h
+        include/optik/ssalloc.h
+        include/optik/measurements.h
         /usr/include/infiniband/verbs.h)
 
 

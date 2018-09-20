@@ -116,7 +116,22 @@
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/mica/mica.h">
 			<Option target="drf-sc"/>
 		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/atomic_ops_if.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/getticks.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/measurements.h">
+			<Option target="drf-sc"/>
+		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/optik_mod.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/random.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/ssalloc.h">
 			<Option target="drf-sc"/>
 		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/utils.h">

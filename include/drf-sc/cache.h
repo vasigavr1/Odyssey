@@ -42,7 +42,7 @@
 #define ACK_NOT_YET_SENT 117
 #define CACHE_OP_GET_TS 118
 #define UPDATE_EPOCH_OP_GET 119
-#define CACHE_OP_LIN_PUT 120
+
 
 
 //Cache Response
@@ -170,8 +170,9 @@ void cache_batch_op_updates(uint32_t , int , struct write**, uint32_t,  uint32_t
 void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
                           uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
-void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id, struct read_info **writes,
-																								uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
+void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t t_id, struct read_info **writes,
+                                                struct pending_ops *,
+                                                uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
 // Send an isolated write to the cache-no batching
 void cache_isolated_op(int t_id, struct write *write);

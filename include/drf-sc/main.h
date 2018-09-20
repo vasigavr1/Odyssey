@@ -550,6 +550,11 @@ struct read_info {
   uint8_t value[VALUE_SIZE];
   bool fp_detected; //detected false positive
   uint16_t epoch_id;
+  // when a data out-of-epoch write is inserted in a write message,
+  // there is a chance we may need to change its version, so we need to
+  // remember where it is stored in the w_fifo
+  uint32_t w_mes_ptr;
+  uint8_t inside_w_ptr;
 };
 
 // the first time a key gets RMWed, it grabs an RMW entry

@@ -150,13 +150,27 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
           memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
 				}
+          // Put has to be 2 rounds (readTs + write) if it is out-of-epoch
         else if (op[I].opcode == CACHE_OP_PUT) {
           if (ENABLE_ASSERTIONS) assert(op[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
-          memcpy(kv_ptr[I]->value, op[I].value, VALUE_SIZE);
-          // This also writes the new version to op
-          optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *)&op[I].key.meta.version);
-          resp[I].type = CACHE_PUT_SUCCESS;
+          // OUT_OF_EPOCH
+          if (*(uint16_t *)kv_ptr[I]->key.meta.epoch_id < epoch_id) {
+            op[I].key.meta.version = kv_ptr[I]->key.meta.version - 1;
+            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+            op[I].key.meta.m_id = (uint8_t) machine_id;
+            p_ops->read_info[r_push_ptr].opcode = op[I].opcode;
+            // Store the value to be written in the read_info to be used in the second round
+            memcpy(p_ops->read_info[r_push_ptr].value, op[I].value, VALUE_SIZE);
+            MOD_ADD(r_push_ptr, PENDING_READS);
+            resp[I].type = CACHE_GET_TS_SUCCESS;
+          }
+          else { // IN-EPOCH
+            memcpy(kv_ptr[I]->value, op[I].value, VALUE_SIZE);
+            // This also writes the new version to op
+            optik_unlock_write(&kv_ptr[I]->key.meta, (uint8_t) machine_id, (uint32_t *) &op[I].key.meta.version);
+            resp[I].type = CACHE_PUT_SUCCESS;
+          }
 				}
         else if (op[I].opcode == OP_RELEASE) { // read the timestamp
           uint32_t debug_cntr = 0;
@@ -530,7 +544,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 
 // The worker uses this to send in the lin writes after receiving a write_quorum of read replies for them
 // Additionally worker sends reads that received a higher timestamp and thus have to be applied as writes
-inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id, struct read_info **writes,
+inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t t_id, struct read_info **writes,
+                                                       struct pending_ops *p_ops,
                                                        uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
@@ -599,12 +614,24 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
       if(key_ptr_log[1] == key_ptr_req[0]) { //Cache Hit
         key_in_store[I] = 1;
         cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
-        if (op->opcode == CACHE_OP_LIN_PUT) {
+        // The write must be performed with the max TS out of the one stored in the KV and read_info
+        if (op->opcode == CACHE_OP_PUT) {
+          uint32_t r_info_version = *(uint32_t *) op->ts_to_read.version;
           optik_lock(&kv_ptr[I]->key.meta);
-          if (!optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) //{
+          // Change epoch if needed
+          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
+            *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
+          // find the the max ts and write it in the kvs
+          if (!optik_is_greater_version(kv_ptr[I]->key.meta, op_meta))
             (*(uint32_t *) op->ts_to_read.version) = kv_ptr[I]->key.meta.version + 1;
           memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
           optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
+          if (ENABLE_ASSERTIONS) {
+            assert(op->ts_to_read.m_id == machine_id);
+            assert(r_info_version <= *(uint32_t *)op->ts_to_read.version);
+          }
+          if (r_info_version < *(uint32_t *)op->ts_to_read.version)
+            rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
         }
         else if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
@@ -637,6 +664,7 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, int t_id
       }
     }
     if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
+      if (ENABLE_ASSERTIONS) assert(false);
     }
     if (zero_ops) {
       // printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);

@@ -603,10 +603,13 @@ static inline void checks_when_commiting_a_read(struct pending_ops *p_ops, uint3
   assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE ||
          p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT ||
          p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET ||
-         p_ops->read_info[pull_ptr].opcode == OP_RELEASE);
+         p_ops->read_info[pull_ptr].opcode == OP_RELEASE ||
+         p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT);
   if(p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET) assert(epoch_id > 0);
   if (p_ops->read_info[pull_ptr].opcode == OP_RELEASE)
     assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs);
+  if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT)
+    assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs);
   if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT)
     assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs);
 
@@ -932,7 +935,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       print_true_key((struct key*)w_mes[w_mes_ptr].write[inside_w_ptr].key);
     }
   }
-  else { //2nd round of read/acquire or 2nd round of release
+  else { //source = FROM_READ: 2nd round of read/write/acquire/release
     // if the write is a release put it on a new message to
     // guarantee it is not batched with writes from the same session
     if (r_info->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
@@ -941,16 +944,26 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       w_mes[w_mes_ptr].w_num = 0;
       inside_w_ptr = 0;
     }
+    // when a data out-of-epoch write is inserted in a write message,
+    // there is a chance we may need to change its version, so we need to
+    // remember where it is stored in the w_fifo
+    if (r_info->opcode == CACHE_OP_PUT) { //
+      r_info->w_mes_ptr = w_mes_ptr;
+      r_info->inside_w_ptr = inside_w_ptr;
+    }
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
     if (r_info->opcode == CACHE_OP_GET || r_info->opcode == UPDATE_EPOCH_OP_GET)
       w_mes[w_mes_ptr].write[inside_w_ptr].opcode = CACHE_OP_PUT;
     else w_mes[w_mes_ptr].write[inside_w_ptr].opcode = r_info->opcode;
-    if (ENABLE_ASSERTIONS)
-      if(!(r_info->opcode == CACHE_OP_GET || r_info->opcode == OP_RELEASE ||
-        r_info->opcode == UPDATE_EPOCH_OP_GET || r_info->opcode == OP_ACQUIRE))
+    if (ENABLE_ASSERTIONS) {
+      assert(source == FROM_READ);
+      if (!(r_info->opcode == CACHE_OP_GET || r_info->opcode == CACHE_OP_PUT ||
+            r_info->opcode == OP_RELEASE || r_info->opcode == UPDATE_EPOCH_OP_GET ||
+            r_info->opcode == OP_ACQUIRE))
         red_printf("Wrkr %u Wrong opcode %u in the read_info when inserting a read \n",
                    t_id, r_info->opcode);
+    }
   }
   // Make sure the pointed values are correct
   (*inside_w_ptr_) = inside_w_ptr;
@@ -1010,12 +1023,27 @@ static inline void set_flags_before_commiting_a_read(struct pending_ops *p_ops, 
                                                      bool *write_local_kvs, uint16_t t_id)
 {
   (*acq_second_round_to_flip_bit) = p_ops->read_info[pull_ptr].fp_detected;
-  (*insert_write_flag) = p_ops->read_info[pull_ptr].opcode == OP_RELEASE ||
+  (*insert_write_flag) = p_ops->read_info[pull_ptr].opcode == OP_RELEASE || p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT ||
                       (!p_ops->read_info[pull_ptr].seen_larger_ts && p_ops->read_info[pull_ptr].times_seen_ts < REMOTE_QUORUM) ||
                       (p_ops->read_info[pull_ptr].seen_larger_ts && p_ops->read_info[pull_ptr].times_seen_ts <= REMOTE_QUORUM);
   (*write_local_kvs) = (p_ops->read_info[pull_ptr].opcode != OP_RELEASE) &&
-                    (p_ops->read_info[pull_ptr].seen_larger_ts ||
-                     (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET)); // a simple read is quorum only if the kvs epoch is behind..
+                       (p_ops->read_info[pull_ptr].seen_larger_ts ||
+                       (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET) || // a simple read is quorum only if the kvs epoch is behind..
+                       (p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT));  // out-of-epoch write
+}
+
+
+static inline void  rectify_version_of_w_mes(struct pending_ops *p_ops, struct read_info *r_info,
+                                             uint32_t tmp_version, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    red_printf("Worker: %u, KVS has bigger version %u than read-info %u -> w_message must "
+               "be rectified in position w_mes: %u, inside_ptr: %u\n",
+               t_id, *(uint32_t *) r_info->ts_to_read.version, tmp_version,
+               r_info->w_mes_ptr, r_info->inside_w_ptr);
+    assert(*(uint32_t *)p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version == tmp_version);
+  }
+  memcpy(p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version, r_info->ts_to_read.version, 4);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1266,11 +1294,11 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
       cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
                 t_id, r_mes[r_mes_ptr].read[inside_r_ptr].opcode, *(uint64_t *)r_mes[r_mes_ptr].read[inside_r_ptr].key);
   }
-  else {
+  else { // FROM TRACE: out of epoch reads/writes, acquires and releases
     memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *) &read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(&p_ops->read_info[r_ptr].ts_to_read, (void *) &read->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     p_ops->read_info[r_ptr].epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
-    r_mes[r_mes_ptr].read[inside_r_ptr].opcode = read->opcode == OP_RELEASE ?
+    r_mes[r_mes_ptr].read[inside_r_ptr].opcode = (read->opcode == OP_RELEASE || read->opcode == CACHE_OP_PUT) ?
                                                  (uint8_t) CACHE_OP_GET_TS : read->opcode;
   }
 
@@ -1323,7 +1351,6 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
   }
 }
 
-
 // Insert a new local or remote write to the pending writes
 static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
                                 const uint32_t incoming_pull_ptr, uint16_t t_id)
@@ -1369,7 +1396,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
       //  cyan_printf("Wrkr: %u third round of release by session %u \n", t_id, p_ops->w_session_id[w_ptr]);
     }
   }
-  else if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) // data reads need not care about the session id as they are not blocking
+  // source = FROM_READ: data reads/writes need not care about the session id as they are not blocking it
+  else if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE)
     p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
 
   if (ENABLE_ASSERTIONS) if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
@@ -1383,7 +1411,6 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     w_mes[p_ops->w_fifo->push_ptr].w_num = 0;
   }
 }
-
 
 // setup a new r_rep entry
 static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
@@ -1603,7 +1630,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     is_update = (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT ||
                  trace[trace_iter].opcode == (uint8_t) OP_RELEASE);
     // Create some back pressure from the buffers, since the sessions may never be stalled
-    if (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT) writes_num++; else reads_num++;
+    if (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
+    reads_num++; // A write (relaxed or release) can first trigger a read
     if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE || p_ops->r_size + reads_num >= PENDING_READS)
       break;
     increment_per_req_counters(trace[trace_iter].opcode, t_id);
@@ -1658,9 +1686,11 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     else if (ENABLE_RMWS && ops[i].opcode == OP_RMW) {
       insert_rmw(p_ops, &tmp_op_i, i, ops, resp[i], q_info, t_id);
     }
-    else if (ops[i].opcode == CACHE_OP_PUT)
+    else if (resp[i].type == CACHE_PUT_SUCCESS)
       insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
     else {
+      if (ENABLE_ASSERTIONS) assert(resp[i].type == CACHE_GET_SUCCESS ||
+                                    resp[i].type == CACHE_GET_TS_SUCCESS);
       insert_read(p_ops, &ops[i], FROM_TRACE, t_id);
     }
   }
@@ -1872,7 +1902,6 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
                               struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
                               uint8_t vc, uint16_t t_id) {
-  uint16_t i;
   struct ibv_wc signal_send_wc;
   struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_i];
   uint32_t backward_ptr = p_ops->w_fifo->backward_ptrs[w_mes_i];
@@ -1893,7 +1922,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   // else if the write is a release that does not need to quoromize failures go to cache
   else if (w_mes->write[0].opcode == OP_RELEASE){
     cache_isolated_op(t_id, &w_mes->write[0]);
-  }// todo go to cache
+  }
 
   // Set the w_state for each write
   set_w_state_for_each_write(p_ops, w_mes, backward_ptr, coalesce_num, t_id);
@@ -2503,8 +2532,9 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
 
   if (r_rep->opcode == TS_GREATER || r_rep->opcode == TS_GREATER_TS_ONLY) {
     if (ENABLE_ASSERTIONS) {
-      if (r_rep->opcode == TS_GREATER_TS_ONLY) assert(read_info->opcode == OP_RELEASE);
-      else assert(read_info->opcode != OP_RELEASE);
+      if (r_rep->opcode == TS_GREATER_TS_ONLY)
+        assert(read_info->opcode == OP_RELEASE || read_info->opcode == CACHE_OP_PUT);
+      else assert(read_info->opcode != OP_RELEASE && read_info->opcode != CACHE_OP_PUT);
     }
     if (!read_info->seen_larger_ts) { // If this is the first "Greater" ts
       read_info->ts_to_read = r_rep->ts;
@@ -2713,9 +2743,10 @@ static inline void commit_reads(struct pending_ops *p_ops,
   // A read must have a second round trip if the timestamp has not been seen by a quorum
   // i.e. if it has been seen locally but not from a REMOTE_QUORUM
   // or has not been seen locally and has not been seen by a full QUORUM
-  // or if it is the second round of an acquire for flip bit reasons
+  // or if it is the first round of a release or an out-of-epoch write
   bool insert_write_flag;
   // write_local_kvs : Write the local KVS if the ts has not been seen locally
+  // or if it is an out-of-epoch write (but NOT a Release!!)
   bool write_local_kvs;
   while(p_ops->r_state[pull_ptr] == READY) {
     //set the flags for each read
@@ -2737,14 +2768,18 @@ static inline void commit_reads(struct pending_ops *p_ops,
         p_ops->read_info[pull_ptr].opcode = UPDATE_EPOCH_OP_GET;
       p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
+      // An out-of-epoch write will get its TS set when inserting a write,
+      // so there is no need to do it here
     }
 
     //INSERT WRITE: Reads that need to be converted to writes: second round of read/acquire
     if (insert_write_flag) {
-      if (p_ops->read_info[pull_ptr].opcode == OP_RELEASE) {
+      if (p_ops->read_info[pull_ptr].opcode == OP_RELEASE ||
+          p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT) {
         p_ops->read_info[pull_ptr].ts_to_read.m_id = (uint8_t) machine_id;
         *(uint32_t *)p_ops->read_info[pull_ptr].ts_to_read.version += 2;
-        memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
+        if (p_ops->read_info[pull_ptr].opcode == OP_RELEASE)
+          memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
       }
       else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
 
@@ -2786,7 +2821,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
   p_ops->r_pull_ptr = pull_ptr;
   if (writes_for_cache > 0)
     cache_batch_op_lin_writes_and_unseen_reads(writes_for_cache, t_id, (struct read_info **) p_ops->ptrs_to_r_ops,
-                                                 0, MAX_INCOMING_R, false);
+                                              p_ops, 0, MAX_INCOMING_R, false);
 }
 
 // Send a batched ack that denotes the first local write id and the number of subsequent lids that are being acked
