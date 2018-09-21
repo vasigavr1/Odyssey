@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 35
-#define MACHINE_NUM 2
+#define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
 #define MEASURE_LATENCY 0
@@ -40,12 +40,12 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH_ 200
+#define MAX_OP_BATCH_ 10
 #define SC_RATIO_ 0//250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define ENABLE_RMWS_ 0
-#define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
+#define EMULATE_ABD 1// Do not enforce releases to gather all credits or start a new message
 
 
 
@@ -242,6 +242,7 @@
 // one fewer pending write than slots in the w_ifo
 #define MAX_ALLOWED_W_SIZE (W_FIFO_SIZE - 1)
 #define R_FIFO_SIZE (PENDING_READS)
+#define MAX_ALLOWED_R_SIZE (R_FIFO_SIZE - 1)
 
 #define W_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 1))
 #define R_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 2))
@@ -627,6 +628,7 @@ struct pending_ops {
   uint32_t r_pull_ptr;
   uint32_t w_size;
   uint32_t r_size;
+	uint32_t virt_r_size;
   uint32_t prop_size; // TODO add this if needed
   uint8_t *acks_seen;
   bool *session_has_pending_op;

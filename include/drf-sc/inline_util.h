@@ -1365,6 +1365,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
     }
   }
   if (ENABLE_ASSERTIONS) assert(p_ops->r_session_id[r_ptr] <= SESSIONS_PER_THREAD);
+  // Increase the virtual size by 2 if the req is an acquire
+  p_ops->virt_r_size+= p_ops->read_info[p_ops->r_push_ptr].opcode == OP_ACQUIRE ? 2 : 1;
   MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
   p_ops->r_size++;
   p_ops->r_fifo->bcast_size++;
@@ -1655,8 +1657,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
                  trace[trace_iter].opcode == (uint8_t) OP_RELEASE);
     // Create some back pressure from the buffers, since the sessions may never be stalled
     if (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
-    reads_num++; // A write (relaxed or release) can first trigger a read
-    if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE || p_ops->r_size + reads_num >= PENDING_READS)
+    reads_num+= trace[trace_iter].opcode == (uint8_t) OP_ACQUIRE ? 2 : 1; // A write (relaxed or release) can first trigger a read
+    if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE || p_ops->virt_r_size + reads_num >= MAX_ALLOWED_R_SIZE)
       break;
     increment_per_req_counters(trace[trace_iter].opcode, t_id);
     memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
@@ -2779,6 +2781,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
    * 1 not deadlock and 2 not overwrite a read_info that will later get taken to the cache
    * That means that the fifo must have free slots equal to SESSION_PER_THREADS because
    * this many acquires can possibly exist in the fifo*/
+  if (ENABLE_ASSERTIONS) assert(p_ops->virt_r_size < PENDING_READS);
   while(p_ops->r_state[pull_ptr] == READY) {
     //set the flags for each read
     set_flags_before_commiting_a_read(p_ops, pull_ptr, &acq_second_round_to_flip_bit, &insert_write_flag,
@@ -2850,8 +2853,10 @@ static inline void commit_reads(struct pending_ops *p_ops,
     // Clean-up code
     memset(&p_ops->read_info[pull_ptr], 0, 3); // a lin write uses these bytes for the session id but it's still fine to clear them
     p_ops->r_state[pull_ptr] = INVALID;
-    MOD_ADD(pull_ptr, PENDING_READS);
     p_ops->r_size--;
+    p_ops->virt_r_size -= p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE ? 2 : 1;
+    if (ENABLE_ASSERTIONS) assert(p_ops->virt_r_size < PENDING_READS);
+    MOD_ADD(pull_ptr, PENDING_READS);
     p_ops->local_r_id++;
   }
   p_ops->r_pull_ptr = pull_ptr;
