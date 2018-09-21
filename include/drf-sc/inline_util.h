@@ -605,6 +605,8 @@ static inline void checks_when_commiting_a_read(struct pending_ops *p_ops, uint3
          p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET ||
          p_ops->read_info[pull_ptr].opcode == OP_RELEASE ||
          p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT);
+  if (p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT)
+    assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs);
   if(p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET) assert(epoch_id > 0);
   if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET)
     assert(!acq_second_round_to_flip_bit && !insert_write_flag);
@@ -948,11 +950,11 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     }
     // when a data out-of-epoch write is inserted in a write message,
     // there is a chance we may need to change its version, so we need to
-    // remember where it is stored in the w_fifo
-    if (r_info->opcode == CACHE_OP_PUT) { //
-      r_info->w_mes_ptr = w_mes_ptr;
-      r_info->inside_w_ptr = inside_w_ptr;
-    }
+    // remember where it is stored in the w_fifo --- NOT Needed
+    //if (r_info->opcode == CACHE_OP_PUT) { //
+    //  r_info->w_mes_ptr = w_mes_ptr;
+    //  r_info->inside_w_ptr = inside_w_ptr;
+    //}
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
     w_mes[w_mes_ptr].write[inside_w_ptr].opcode = r_info->opcode;
@@ -1033,18 +1035,18 @@ static inline void set_flags_before_commiting_a_read(struct pending_ops *p_ops, 
                        (p_ops->read_info[pull_ptr].opcode == CACHE_OP_PUT));  // out-of-epoch write
 }
 
-// In case of an out-of-epoch write that found a bigger TS
+// In case of an out-of-epoch write that found a bigger TS --NOT NEEDED
 static inline void rectify_version_of_w_mes(struct pending_ops *p_ops, struct read_info *r_info,
                                              uint32_t tmp_version, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) {
-    red_printf("Worker: %u, KVS has bigger version %u than read-info %u -> w_message must "
-               "be rectified in position w_mes: %u, inside_ptr: %u\n",
-               t_id, *(uint32_t *) r_info->ts_to_read.version, tmp_version,
-               r_info->w_mes_ptr, r_info->inside_w_ptr);
-    assert(*(uint32_t *)p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version == tmp_version);
-  }
-  memcpy(p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version, r_info->ts_to_read.version, 4);
+//  if (ENABLE_ASSERTIONS) {
+//    red_printf("Worker: %u, KVS has bigger version %u than read-info %u -> w_message must "
+//               "be rectified in position w_mes: %u, inside_ptr: %u\n",
+//               t_id, *(uint32_t *) r_info->ts_to_read.version, tmp_version,
+//               r_info->w_mes_ptr, r_info->inside_w_ptr);
+//    assert(*(uint32_t *)p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version == tmp_version);
+//  }
+//  memcpy(p_ops->w_fifo->w_message[r_info->w_mes_ptr].write[r_info->inside_w_ptr].version, r_info->ts_to_read.version, 4);
 }
 
 // returns true if the key was found
@@ -1055,6 +1057,11 @@ static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops, struct 
   for (uint32_t i = 0; i < writes->size; i++) {
     if (true_keys_are_equal((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
       *val_ptr = (void*) p_ops->read_info[writes->r_info_ptrs[w_i]].value;
+      red_printf("Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
+      //print_true_key(read_key);
+      //red_printf("write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
+      //red_printf("size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
+      //          writes->size, writes->push_ptr, writes->pull_ptr, writes->r_info_ptrs[w_i]);
       return true;
     }
     MOD_ADD(w_i, PENDING_READS);
@@ -2766,6 +2773,12 @@ static inline void commit_reads(struct pending_ops *p_ops,
   // write_local_kvs : Write the local KVS if the ts has not been seen locally
   // or if it is an out-of-epoch write (but NOT a Release!!)
   bool write_local_kvs;
+
+  /* Because it's possible for a read to insert another read i.e OP_ACQUIRE->OP_ACQUIRE_FLIP_BIT
+   * we need to make sure that even if all requests do that the fifo will have enough space to:
+   * 1 not deadlock and 2 not overwrite a read_info that will later get taken to the cache
+   * That means that the fifo must have free slots equal to SESSION_PER_THREADS because
+   * this many acquires can possibly exist in the fifo*/
   while(p_ops->r_state[pull_ptr] == READY) {
     //set the flags for each read
     set_flags_before_commiting_a_read(p_ops, pull_ptr, &acq_second_round_to_flip_bit, &insert_write_flag,
@@ -2782,7 +2795,9 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
     //CACHE: Reads that need to go to cache
     if (write_local_kvs) {
-      if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET)
+      // if a read did not see a larger ts it should only change the epoch
+      if (p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET &&
+        (!p_ops->read_info[pull_ptr].seen_larger_ts))
         p_ops->read_info[pull_ptr].opcode = UPDATE_EPOCH_OP_GET;
       p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
@@ -2812,8 +2827,11 @@ static inline void commit_reads(struct pending_ops *p_ops,
       }
       // The read must have the sturct key overloaded with the original acquire l_id
       if (DEBUG_BIT_VECS)
-        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent  %u \n",
-                  t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id);
+        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent %u, "
+                    "read_info pull_ptr %u, read_info push_ptr %u read fifo size %u  \n",
+                    t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id, pull_ptr,
+                    p_ops->r_push_ptr, p_ops->r_size);
+      /* */
       insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
       p_ops->read_info[pull_ptr].fp_detected = false;
     }
@@ -2837,11 +2855,9 @@ static inline void commit_reads(struct pending_ops *p_ops,
     p_ops->local_r_id++;
   }
   p_ops->r_pull_ptr = pull_ptr;
-  //if (epoch_id > 0) green_printf("going to the cache\n");
   if (writes_for_cache > 0)
-    cache_batch_op_lin_writes_and_unseen_reads(writes_for_cache, t_id, (struct read_info **) p_ops->ptrs_to_r_ops,
-                                              p_ops, 0, MAX_INCOMING_R, false);
-  //if (epoch_id > 0) green_printf("back from the cache\n");
+    cache_batch_op_first_read_round(writes_for_cache, t_id, (struct read_info **) p_ops->ptrs_to_r_ops,
+                                    p_ops, 0, MAX_INCOMING_R, false);
 }
 
 // Send a batched ack that denotes the first local write id and the number of subsequent lids that are being acked

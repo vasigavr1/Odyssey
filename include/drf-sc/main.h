@@ -19,8 +19,8 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 3
+#define WORKERS_PER_MACHINE 35
+#define MACHINE_NUM 2
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
 #define MEASURE_LATENCY 0
@@ -41,11 +41,11 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 200
-#define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 0//250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define ENABLE_RMWS_ 0
-#define EMULATE_ABD 0 // Do not enforce releases to gather all credits or start a new message
+#define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
 
@@ -231,9 +231,9 @@
 #define TOTAL_BUF_SIZE (R_BUF_SIZE + R_REP_BUF_SIZE + W_BUF_SIZE + ACK_BUF_SIZE)
 #define TOTAL_BUF_SLOTS (R_BUF_SLOTS + R_REP_BUF_SLOTS + W_BUF_SLOTS + ACK_BUF_SLOTS)
 
-#define PENDING_READS (MAX_OP_BATCH + 1)
+#define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1)) // that allows for reads to insert reads
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
-#define PENDING_WRITES (MAX_OP_BATCH + 1)
+#define PENDING_WRITES MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define W_FIFO_SIZE (PENDING_WRITES)
 
 // The w_fifo needs to have a safety slot that cannot be touched
@@ -552,9 +552,9 @@ struct read_info {
   uint16_t epoch_id;
   // when a data out-of-epoch write is inserted in a write message,
   // there is a chance we may need to change its version, so we need to
-  // remember where it is stored in the w_fifo
-  uint32_t w_mes_ptr;
-  uint8_t inside_w_ptr;
+  // remember where it is stored in the w_fifo -- NOT NEEDED
+//  uint32_t w_mes_ptr;
+//  uint8_t inside_w_ptr;
 };
 
 // the first time a key gets RMWed, it grabs an RMW entry

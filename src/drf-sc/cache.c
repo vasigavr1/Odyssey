@@ -126,25 +126,32 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 				if (op[I].opcode == CACHE_OP_GET || op[I].opcode == OP_ACQUIRE) {
 					//Lock free reads through versioning (successful when version is even)
           uint32_t debug_cntr = 0;
+          bool value_forwarded = false; // has a pending out-of-epoch write forwarded its value to this
           if (op[I].opcode == CACHE_OP_GET && p_ops->p_ooe_writes->size > 0) {
             uint8_t *val_ptr;
-            if (search_out_of_epoch_writes(p_ops, (struct key *)&op[I].key.bkt, t_id, (void **) &val_ptr))
+            if (search_out_of_epoch_writes(p_ops, (struct key *)&op[I].key.bkt, t_id, (void **) &val_ptr)) {
               memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
-          }
-					do {
-						// memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
-            prev_meta = kv_ptr[I]->key.meta;
-            if (ENABLE_ASSERTIONS) {
-              debug_cntr++;
-              if (debug_cntr == M_4) {
-                printf("Worker %u stuck on a local read \n", t_id);
-                debug_cntr = 0;
-              }
+              //red_printf("Wrkr %u Forwarding a value \n", t_id);
+              value_forwarded = true;
             }
-            memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr[I]->value, VALUE_SIZE);
-					} while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
+          }
+          if (!value_forwarded) {
+            do {
+              // memcpy((void*) &prev_meta, (void*) &(kv_ptr[I]->key.meta), sizeof(cache_meta));
+              prev_meta = kv_ptr[I]->key.meta;
+              if (ENABLE_ASSERTIONS) {
+                debug_cntr++;
+                if (debug_cntr == M_4) {
+                  printf("Worker %u stuck on a local read \n", t_id);
+                  debug_cntr = 0;
+                }
+              }
+              memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr[I]->value, VALUE_SIZE);
+            } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
+          }
           // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
-          if (*(uint16_t *)prev_meta.epoch_id < epoch_id || op[I].opcode == OP_ACQUIRE) {
+          if (!value_forwarded &&
+             (*(uint16_t *)prev_meta.epoch_id < epoch_id || op[I].opcode == OP_ACQUIRE)) {
             p_ops->read_info[r_push_ptr].opcode = op[I].opcode;
             MOD_ADD(r_push_ptr, PENDING_READS);
             resp[I].type = CACHE_GET_SUCCESS;
@@ -152,10 +159,10 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               t_stats[t_id].quorum_reads++;
             }
           }
-          else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally
+          else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally or has been forwarded
           memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE); // TODO is this needed for local accesses?
 				}
-          // Put has to be 2 rounds (readTs + write) if it is out-of-epoch
+          // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
         else if (op[I].opcode == CACHE_OP_PUT) {
           if (ENABLE_ASSERTIONS) assert(op[I].val_len == kv_ptr[I]->val_len);
           optik_lock(&kv_ptr[I]->key.meta);
@@ -234,7 +241,8 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
-        red_printf("wrong Opcode in cache: %d, req %d \n", op[I].opcode, I);
+        red_printf("Wrkr %u: cache_batch_op_trace wrong opcode in cache: %d, req %d \n",
+                   t_id, op[I].opcode, I);
         assert(0);
 				}
 			}
@@ -254,7 +262,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 // THE API IS DIFFERENT HERE, THIS TAKES AN ARRAY OF POINTERS RATHER THAN A POINTER TO AN ARRAY
 // YOU have to give a pointer to the beggining of the array of the pointers or else you will not
 // be able to wrap around to your array
-inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write **writes,
+inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write **writes,
                                    uint32_t pull_ptr,  uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
@@ -325,8 +333,9 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
         key_in_store[I] = 1;
         if (ENABLE_ASSERTIONS) {
           if (op->opcode != CACHE_OP_PUT && op->opcode != OP_RELEASE && op->opcode != OP_ACQUIRE) {
-            red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
-                       op->opcode, I, op->key.meta.m_id,
+            red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
+                         "m_id %u, val_len %u, version %u , \n",
+                       t_id, op->opcode, I, op->key.meta.m_id,
                        op->val_len, op->key.meta.version);
             assert(0);
           }
@@ -340,7 +349,7 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct write 
         }
         else {
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          t_stats[thread_id].failed_rem_writes++;
+          t_stats[t_id].failed_rem_writes++;
         }
       }
     }
@@ -553,9 +562,9 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 
 // The worker uses this to send in the lin writes after receiving a write_quorum of read replies for them
 // Additionally worker sends reads that received a higher timestamp and thus have to be applied as writes
-inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t t_id, struct read_info **writes,
-                                                       struct pending_ops *p_ops,
-                                                       uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
+inline void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, struct read_info **writes,
+                                            struct pending_ops *p_ops,
+                                            uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
 #if CACHE_DEBUG == 1
@@ -639,19 +648,20 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t
             assert(op->ts_to_read.m_id == machine_id);
             assert(r_info_version <= *(uint32_t *)op->ts_to_read.version);
           }
-          if (r_info_version < *(uint32_t *)op->ts_to_read.version)
-            rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
+          // rectifying is not needed!
+          //if (r_info_version < *(uint32_t *)op->ts_to_read.version)
+           // rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
           // remove the write from the pending out-of-epoch writes
           p_ops->p_ooe_writes->size--;
           MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
         }
-        else if (op->opcode == OP_ACQUIRE) { // a read resulted on receiving a higher timestamp than expected
+        else if (op->opcode == OP_ACQUIRE || op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
           optik_lock(&kv_ptr[I]->key.meta);
+
           if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
-            // if (ENABLE_ASSERTIONS) assert(op->ts_to_read.m_id != machine_id); // this assert is wrong, local writes can happen after a local read but reach remote destinations faster
-            memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
             if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
               *(uint16_t *) kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
+            memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
             optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
           }
           else {
@@ -668,8 +678,8 @@ inline void cache_batch_op_lin_writes_and_unseen_reads(uint32_t op_num, uint16_t
           }
         }
         else {
-          red_printf("wrong Opcode in cache: %d, req %d, m_id %u,version %u , \n",
-                     op->opcode, I, writes[(pull_ptr + I) % max_op_size]->ts_to_read.m_id,
+          red_printf("Wrkr %u: read-first-round wrong opcode in cache: %d, req %d, m_id %u,version %u , \n",
+                     t_id, op->opcode, I, writes[(pull_ptr + I) % max_op_size]->ts_to_read.m_id,
                      *(uint32_t *)writes[(pull_ptr + I) % max_op_size]->ts_to_read.version);
           assert(0);
         }
@@ -758,8 +768,8 @@ inline void cache_isolated_op(int t_id, struct write *write)
       key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
         if (op->opcode != OP_RELEASE) {
-          red_printf("wrong Opcode in cache: %d, m_id %u, val_len %u, version %u , \n",
-                     op->opcode,  op->key.meta.m_id,
+          red_printf("Wrkr %u: cache_isolated_op: wrong pcode : %d, m_id %u, val_len %u, version %u , \n",
+                     t_id, op->opcode,  op->key.meta.m_id,
                      op->val_len, op->key.meta.version);
           assert(false);
         }
