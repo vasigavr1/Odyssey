@@ -596,10 +596,12 @@ static inline void print_q_info(struct quorum_info *q_info)
                 q_info->first_active_rm_id, q_info->last_active_rm_id);
 }
 
+// From commit reads
 static inline void checks_when_commiting_a_read(struct pending_ops *p_ops, uint32_t pull_ptr,
                                                 bool acq_second_round_to_flip_bit, bool insert_write_flag,
                                                 bool write_local_kvs, uint16_t t_id)
 {
+  if (acq_second_round_to_flip_bit) assert(p_ops->virt_r_size < MAX_ALLOWED_R_SIZE);
   assert(p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE ||
          p_ops->read_info[pull_ptr].opcode == OP_ACQUIRE_FLIP_BIT ||
          p_ops->read_info[pull_ptr].opcode == CACHE_OP_GET ||
@@ -624,6 +626,15 @@ static inline void checks_when_commiting_a_read(struct pending_ops *p_ops, uint3
 }
 
 
+//
+static inline void check_read_fifo_metadata(struct pending_ops *p_ops, struct r_message *r_mes,
+                                            uint16_t t_id)
+{
+  assert(p_ops->virt_r_size <= MAX_ALLOWED_R_SIZE);
+  assert(p_ops->r_size <= p_ops->virt_r_size);
+  assert(r_mes->coalesce_num <= MAX_R_COALESCE);
+  assert(p_ops->r_session_id[p_ops->r_push_ptr] <= SESSIONS_PER_THREAD);
+}
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -808,7 +819,8 @@ static inline void take_ownership_of_send_bits(const uint16_t t_id, const uint64
     }
     if (DEBUG_BIT_VECS && debug_flag)
       green_printf("Wrkr %u got ownership of failure on m_id %u, bit %u  owned t_id %u, owned local_w_id %u \n",
-                   t_id, m_i, send_bit_vector.bit_vec[m_i].bit, send_bit_vector.bit_vec[m_i].owner_t_id, send_bit_vector.bit_vec[m_i].owner_local_wr_id);
+                   t_id, m_i, send_bit_vector.bit_vec[m_i].bit, send_bit_vector.bit_vec[m_i].owner_t_id,
+                   send_bit_vector.bit_vec[m_i].owner_local_wr_id);
   }
 }
 
@@ -1057,7 +1069,7 @@ static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops, struct 
   for (uint32_t i = 0; i < writes->size; i++) {
     if (true_keys_are_equal((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
       *val_ptr = (void*) p_ops->read_info[writes->r_info_ptrs[w_i]].value;
-      red_printf("Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
+      //red_printf("Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
       //print_true_key(read_key);
       //red_printf("write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
       //red_printf("size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
@@ -1364,13 +1376,15 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *read,
       if (read->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id);
     }
   }
-  if (ENABLE_ASSERTIONS) assert(p_ops->r_session_id[r_ptr] <= SESSIONS_PER_THREAD);
+
   // Increase the virtual size by 2 if the req is an acquire
   p_ops->virt_r_size+= p_ops->read_info[p_ops->r_push_ptr].opcode == OP_ACQUIRE ? 2 : 1;
-  MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
   p_ops->r_size++;
   p_ops->r_fifo->bcast_size++;
   r_mes[r_mes_ptr].coalesce_num++;
+  if (ENABLE_ASSERTIONS)
+    check_read_fifo_metadata(p_ops, &r_mes[r_mes_ptr], t_id);
+  MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
   if (r_mes[r_mes_ptr].coalesce_num == MAX_R_COALESCE) {
     MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
     r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
@@ -1745,6 +1759,8 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       set_send_and_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
 //      if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
 //                                      i, send_bit_vector.bit_vec[i].bit);
+      if (!DEBUG_BIT_VECS)
+        red_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -2792,8 +2808,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
     // Break condition: this read cannot be processed, and thus no subsequent read will be processed
     if ((insert_write_flag && (p_ops->w_size >= MAX_ALLOWED_W_SIZE)) ||
-        (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R)) ||
-        (acq_second_round_to_flip_bit) && (p_ops->r_size >= PENDING_READS))
+        (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R)))// ||
+       // (acq_second_round_to_flip_bit) && (p_ops->virt_r_size >= MAX_ALLOWED_R_SIZE))
       break;
 
     //CACHE: Reads that need to go to cache
@@ -2824,16 +2840,16 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
     // FAULT_TOLERANCE: In the off chance that the acquire needs a second round for fault tolerance
     if (unlikely(acq_second_round_to_flip_bit)) {
-      if (p_ops->read_info[pull_ptr].epoch_id == epoch_id) {
-        epoch_id++;
-        if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
-      }
-      // The read must have the sturct key overloaded with the original acquire l_id
+      //if (p_ops->read_info[pull_ptr].epoch_id == epoch_id) {
+      epoch_id++; // epoch_id should be incremented always even it has been incremented since the acquire fired
+      if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %u \n", t_id, (uint16_t) epoch_id);
+      //}
+      // The read must have the struct key overloaded with the original acquire l_id
       if (DEBUG_BIT_VECS)
         cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent %u, "
-                    "read_info pull_ptr %u, read_info push_ptr %u read fifo size %u  \n",
+                    "read_info pull_ptr %u, read_info push_ptr %u read fifo size %u, virtual size: %u  \n",
                     t_id, p_ops->read_info[pull_ptr].opcode, p_ops->local_r_id, pull_ptr,
-                    p_ops->r_push_ptr, p_ops->r_size);
+                    p_ops->r_push_ptr, p_ops->r_size, p_ops->virt_r_size);
       /* */
       insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
       p_ops->read_info[pull_ptr].fp_detected = false;
@@ -2989,7 +3005,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       p_ops->w_size--;
 
       if (ENABLE_ASSERTIONS && w_size == MAX_ALLOWED_W_SIZE) {
-        red_printf("p_ops is full sized -- it should still work %u \n", w_size);
+        red_printf("Wrkr %u p_ops is full sized -- it still works %u \n", t_id, w_size);
         //assert(false);
       }
       struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];

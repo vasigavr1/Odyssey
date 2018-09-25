@@ -40,12 +40,12 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH_ 10
-#define SC_RATIO_ 0//250// this is out of 1000, e.g. 10 means 1%
+#define MAX_OP_BATCH_ 50
+#define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define ENABLE_RMWS_ 0
-#define EMULATE_ABD 1// Do not enforce releases to gather all credits or start a new message
+#define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
 
@@ -230,8 +230,8 @@
 
 #define TOTAL_BUF_SIZE (R_BUF_SIZE + R_REP_BUF_SIZE + W_BUF_SIZE + ACK_BUF_SIZE)
 #define TOTAL_BUF_SLOTS (R_BUF_SLOTS + R_REP_BUF_SLOTS + W_BUF_SLOTS + ACK_BUF_SLOTS)
-
-#define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1)) // that allows for reads to insert reads
+// that allows for reads to insert reads
+#define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
 #define PENDING_WRITES MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define W_FIFO_SIZE (PENDING_WRITES)
@@ -274,10 +274,10 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 1
+#define DEBUG_BIT_VECS 0
 #define DEBUG_RMW 0
-#define DEBUG_RECEIVES 1
-#define DEBUG_SESSIONS 1
+#define DEBUG_RECEIVES 0
+#define DEBUG_SESSIONS 0
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -628,6 +628,10 @@ struct pending_ops {
   uint32_t r_pull_ptr;
   uint32_t w_size;
   uint32_t r_size;
+  // virtual read size: because acquires can result in one more read,
+  // knowing the size of the read fifo is not enough to know if
+  // you can add an element. Virtual read size captures this by
+  // getting incremented by 2, every time an acquire is inserted
 	uint32_t virt_r_size;
   uint32_t prop_size; // TODO add this if needed
   uint8_t *acks_seen;

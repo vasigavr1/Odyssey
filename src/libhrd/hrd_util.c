@@ -125,8 +125,9 @@ hrd_resolve_port_index(struct hrd_ctrl_blk *cb, int port_index)
 			if(port_attr.phys_state != IBV_PORT_ACTIVE &&
 				port_attr.phys_state != IBV_PORT_ACTIVE_DEFER) {
 #ifndef __cplusplus
-				printf("HRD: Ignoring port %d of device %d. State is %s\n",
-					port_i, dev_i, ibv_port_state_str(port_attr.phys_state));
+        ;
+				//printf("HRD: Ignoring port %d of device %d. State is %s\n",
+				//	port_i, dev_i, ibv_port_state_str(port_attr.phys_state));
 #else
 				printf("HRD: Ignoring port %d of device %d. State is %s\n",
 					port_i, dev_i,
