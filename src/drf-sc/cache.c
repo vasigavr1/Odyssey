@@ -235,6 +235,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             else resp[I].type = RETRY_RMW_KEY_EXISTS;
           }
           resp[I].rmw_entry = entry;
+          resp[I].kv_pair_ptr = &kv_ptr[I]->key.meta;
           // We need to put the old timestamp in the op too, both to send it and to store it for later
           op[I].key.meta.m_id = kv_ptr[I]->key.meta.m_id;
           op[I].key.meta.version = kv_ptr[I]->key.meta.version - 1;
@@ -495,21 +496,21 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                                      (uint8_t) machine_id, rmw_l_id, t_id);
               kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
               if (DEBUG_RMW)
-                green_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
-                             t_id, entry, kv_ptr[I]->opcode);
+                yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
+                               t_id, entry, kv_ptr[I]->opcode);
             }
             else if(kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
               uint32_t entry = *(uint32_t *)kv_ptr[I]->value;
-              flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id,
-                                          t_id);
+              flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
+                                          rmw_l_id, t_id);
             }
             else my_assert(false, "KVS opcode is wrong!");
           }
           else { // handle the case where the KVS ts is bigger than the incoming Prepare
             if (DEBUG_RMW) {
-              green_printf("Stale Prepare, prepare version %u, prepare m_id %u, kvs version %u, kvs m_id %u \n",
-                           op->key.meta.version, op->key.meta.m_id,
-                           kv_ptr[I]->key.meta.version, kv_ptr[I]->key.meta.m_id);
+              yellow_printf("Stale Prepare, prepare version %u, prepare m_id %u, kvs version %u, kvs m_id %u \n",
+                            op->key.meta.version, op->key.meta.m_id,
+                            kv_ptr[I]->key.meta.version, kv_ptr[I]->key.meta.m_id);
             }
             flag = RMW_SMALLER_TS;
           }

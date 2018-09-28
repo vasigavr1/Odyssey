@@ -69,7 +69,7 @@
 #define CACHE_PUT_FAIL 137
 
 // READ_REPLIES
-#define PREP_REPLY 26 // an r_rep message can be a reply to a read or a prep
+#define PROP_REPLY 26 // an r_rep message can be a reply to a read or a prop
 #define READ_REPLY 27
 #define TS_SMALLER 28
 #define TS_EQUAL 29

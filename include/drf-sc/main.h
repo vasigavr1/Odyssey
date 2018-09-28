@@ -19,8 +19,8 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 35
-#define MACHINE_NUM 3
+#define WORKERS_PER_MACHINE 1
+#define MACHINE_NUM 2
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
 #define MEASURE_LATENCY 0
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -64,14 +64,7 @@
 #define DUMP_STATS_2_FILE 0
 
 
-/*-------------------------------------------------
------------------DEBUGGING-------------------------
---------------------------------------------------*/
 
-
-#define USE_A_SINGLE_KEY 0
-
-#define DEFAULT_SL 0 //default service level
 
 
 
@@ -189,14 +182,15 @@
 #define ACK_SIZE 14 // bytes like everytinh else
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
 
-// Prepares
-#define LOCAL_PREP_NUM (SESSIONS_PER_THREAD)
+// Proposes
+#define LOCAL_PROP_NUM (SESSIONS_PER_THREAD)
 
 // RMWs
 #define BYTES_OVERRIDEN_IN_KVS_VALUE 4
 #define RMW_VALUE_SIZE 8 // rmw cannot be more than 8 bytes
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
+
 
 #define KEY_HAS_NEVER_BEEN_RMWED 0
 #define KEY_HAS_BEEN_RMWED 1
@@ -234,14 +228,14 @@
 #define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
 #define PENDING_WRITES MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
-#define W_FIFO_SIZE (PENDING_WRITES)
+#define W_FIFO_SIZE (PENDING_WRITES + LOCAL_PROP_NUM) // Accepts use the write fifo
 
 // The w_fifo needs to have a safety slot that cannot be touched
 // such that the fifo push ptr can never coincide with its pull ptr
 // zeroing its w_num, as such we take care to allow
 // one fewer pending write than slots in the w_ifo
 #define MAX_ALLOWED_W_SIZE (W_FIFO_SIZE - 1)
-#define R_FIFO_SIZE (PENDING_READS)
+#define R_FIFO_SIZE (PENDING_READS + LOCAL_PROP_NUM) // Proposes use the read fifo
 #define MAX_ALLOWED_R_SIZE (R_FIFO_SIZE - 1)
 
 #define W_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 1))
@@ -263,8 +257,14 @@
 #define SEND_R_REP_Q_DEPTH ((2 * R_REP_SS_BATCH) + 3)
 
 
-// DEBUG-- It may be that ENABLE_ASSERTIONS
-// must be up for these to work
+/*-------------------------------------------------
+-----------------DEBUGGING-------------------------
+--------------------------------------------------*/
+
+
+#define USE_A_SINGLE_KEY 0
+#define DEFAULT_SL 0 //default service level
+//It may be that ENABLE_ASSERTIONS  must be up for these to work
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
@@ -275,7 +275,7 @@
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
 #define DEBUG_BIT_VECS 0
-#define DEBUG_RMW 0
+#define DEBUG_RMW 1
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 0
 #define PUT_A_MACHINE_TO_SLEEP 1
@@ -369,6 +369,11 @@ struct remote_qp {
 #define RMW_NACK_PROPOSE 5 // Send a TS, because you have already acked a higher Propose
 #define NO_OP_ACQ_FLIP_BIT 6 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
 
+// Possible flags when accepting
+#define ACCEPT_ACK 1
+#define NACK_ACCEPT_HIGHER_TS_PROPOSAL 2
+#define NACK_ACCEPT_HIGHER_TS_ACCEPTANCE 3
+#define NACK_ACCEPT_LOWER_TS_ACCEPTANCE 4
 
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
@@ -386,9 +391,12 @@ struct quorum_info {
 	uint8_t last_active_rm_id;
 };
 
+// unique RMW id-- each machine must remember how many
+// RMW each thread has committed, to avoid committing an RMW twice
  struct rmw_id {
-   uint16_t g_id;
-   uint64_t id;
+   uint16_t g_id; // global thread id
+   uint64_t id; // the local rmw id of the source
+
  };
 
 // format of a Timestamp tuple (Lamport clock)
@@ -415,8 +423,6 @@ struct ack_message_ud_req {
 
 
 struct write {
-  //uint8_t unused[2];
-  //uint8_t w_num; // the first write holds the coalesce number for the entire message
   uint8_t m_id;
   uint8_t version[4];
   uint8_t key[TRUE_KEY_SIZE];	/* 8B */
@@ -432,6 +438,16 @@ struct w_message {
   struct write write[MAX_W_COALESCE];
 };
 
+struct accept {
+	uint8_t g_id[2]; // this is useful when helping
+	uint8_t t_rmw_id[8];
+	struct ts_tuple old_ts;
+	uint8_t key[TRUE_KEY_SIZE];
+	uint8_t opcode;
+	uint8_t m_id; // which machine sends the accept
+	uint8_t value[VALUE_SIZE];
+};
+
 
 struct w_message_ud_req {
   uint8_t unused[GRH_SIZE];
@@ -441,7 +457,7 @@ struct w_message_ud_req {
 //
 struct read {
   struct ts_tuple ts;
-  uint8_t key[TRUE_KEY_SIZE];	/* 8B */
+  uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
 };
 
@@ -488,7 +504,7 @@ struct prep_fifo {
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of preps not messages!
   uint32_t size;
-  uint32_t backward_ptrs[LOCAL_PREP_NUM];
+  uint32_t backward_ptrs[LOCAL_PROP_NUM];
 };
 
 
@@ -572,23 +588,28 @@ struct rmw_entry {
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
-struct prop_entry {
+struct rmw_local_entry {
   struct ts_tuple old_ts;
   struct key key;
   uint8_t opcode;
   uint8_t value[RMW_VALUE_SIZE];
   uint8_t state;
-  struct rmw_id rmw_id;
-  uint32_t debug_cntr;
-  uint64_t l_id;
-  uint32_t ptr_to_rmw;
+  struct rmw_id rmw_id; // this is implicitly the l_id TODO do we need this for the help?
+  uint8_t prop_acks;
+  uint8_t accept_acks;
   uint16_t epoch_id;
-  uint8_t acks;
+  uint32_t debug_cntr;
+  uint32_t index_to_rmw; // this is an index into the global rmw structure
+  uint64_t l_id;
+  cache_meta *ptr_to_kv_pair;
+
+
 };
 
 // Local state of pending RMWs - one entry per session
+// Accessed with session id!
 struct prop_info {
-  struct prop_entry entry[LOCAL_PREP_NUM];
+  struct rmw_local_entry entry[LOCAL_PROP_NUM];
   uint64_t l_id; // highest l_id as of yet
 
 };

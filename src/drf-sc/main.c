@@ -89,8 +89,11 @@ int main(int argc, char *argv[])
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
 
+
   // RMWs
-  static_assert(LOCAL_PREP_NUM >= SESSIONS_PER_THREAD, "");
+  static_assert(LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
+	static_assert(sizeof(struct accept) == W_MES_HEADER + sizeof(struct write), "");
+  static_assert(MACHINE_NUM * WORKERS_PER_MACHINE < K_64, "global thread ids are stored in uint16_t");
 
 
 
