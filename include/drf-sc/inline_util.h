@@ -101,12 +101,11 @@ static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
   return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
 }
 
-// Calculate the thread global id
+// Calculate the machineid out of the thread global id
 static inline uint8_t gid_to_mid(uint16_t g_id)
 {
   return (uint8_t) (g_id / WORKERS_PER_MACHINE);
 }
-
 
 // Convert a machine id to a "remote machine id"
 static inline uint8_t  mid_to_rmid(uint8_t m_id)
@@ -115,9 +114,35 @@ static inline uint8_t  mid_to_rmid(uint8_t m_id)
 }
 
 // Convert a "remote machine id" to a machine id
-static inline uint8_t  rmid_to_mid(uint8_t rm_id)
+static inline uint8_t rmid_to_mid(uint8_t rm_id)
 {
   return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
+}
+
+// Calculate the global session id
+static inline uint16_t get_glob_sess_id(uint8_t m_id, uint16_t t_id, uint16_t sess_id)
+{
+  return (uint16_t) ((m_id * SESSIONS_PER_MACHINE) +
+                     (t_id * SESSIONS_PER_THREAD)  +
+                      sess_id);
+}
+
+// Get the machine id out of a global session id
+static inline uint8_t glob_ses_id_to_m_id(uint16_t glob_sess_id)
+{
+  return (uint8_t) (glob_sess_id / SESSIONS_PER_MACHINE);
+}
+
+// Get the machine id out of a global session id
+static inline uint16_t glob_ses_id_to_t_id(uint16_t glob_sess_id)
+{
+  return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) / SESSIONS_PER_THREAD);
+}
+
+// Get the sess id out of a global session id
+static inline uint16_t glob_ses_id_to_sess_id(uint16_t glob_sess_id)
+{
+  return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) % SESSIONS_PER_THREAD);
 }
 
 // Generic CAS
@@ -129,7 +154,7 @@ static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, u
 
 static inline bool rmw_ids_are_equal(struct rmw_id *id1, struct rmw_id *id2)
 {
-  return id1->g_id == id2->g_id && id1->id == id2->id;
+  return id1->glob_sess_id == id2->glob_sess_id && id1->id == id2->id;
 }
 
 /* ---------------------------------------------------------------------------
@@ -640,6 +665,15 @@ static inline void check_read_fifo_metadata(struct pending_ops *p_ops, struct r_
   assert(r_mes->coalesce_num <= MAX_R_COALESCE);
   assert(p_ops->r_session_id[p_ops->r_push_ptr] <= SESSIONS_PER_THREAD);
 }
+
+static inline void check_global_sess_id(uint8_t machine_id, uint16_t t_id,
+                                        uint16_t session_id, uint16_t glob_sess_id)
+{
+  assert(glob_ses_id_to_m_id(glob_sess_id) == machine_id);
+  assert(glob_ses_id_to_t_id(glob_sess_id) == t_id);
+  assert(glob_ses_id_to_sess_id(glob_sess_id) == session_id);
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -1092,7 +1126,8 @@ static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops, struct 
 
 // the first time a key gets RMWed, it grabs an RMW entry that lasts for life, the entry is protected by the KVS lock
 static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cache_op *kv_ptr,
-                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
+                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint32_t log_no,
+                                      uint16_t glob_sess_id, uint16_t t_id)
 {
   uint32_t next_entry =
     atomic_fetch_add_explicit(&next_rmw_entry_available, 1, memory_order_relaxed);
@@ -1100,37 +1135,45 @@ static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cac
   memcpy(kv_ptr->value, &next_entry, BYTES_OVERRIDEN_IN_KVS_VALUE);
   struct rmw_entry *glob_entry = &rmw.entry[next_entry];
 
-  // construct the old ts
-  struct ts_tuple old_ts;
-  *(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
-  old_ts.m_id = kv_ptr->key.meta.m_id;
+  // construct the new ts
+  //struct ts_tuple new_ts;
+  //*(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
+  //old_ts.m_id = kv_ptr->key.meta.m_id;
 
   glob_entry->opcode = opcode;
   glob_entry->key = *key;
-  glob_entry->old_ts = old_ts;
   glob_entry->new_ts.m_id = m_id;
-  *(uint32_t *)glob_entry->new_ts.version = (*(uint32_t *)old_ts.version) + 1;
-  glob_entry->rmw_id.g_id = get_gid(m_id, t_id);
+  *(uint32_t *)glob_entry->new_ts.version = kv_ptr->key.meta.version + 1;
+  glob_entry->rmw_id.glob_sess_id = glob_sess_id;
   glob_entry->rmw_id.id = l_id;
   glob_entry->state = state;
+  glob_entry->log_no = log_no; // not necessarilly 0 if a remote machine is grabbing here
+  if (ENABLE_ASSERTIONS) {
+    assert(log_no == 0); // TODO see if this is possible
+    assert(glob_sess_id < GLOBAL_SESSION_NUM);
+    assert(*(uint32_t *)glob_entry->new_ts.version % 2 == 0);
+    assert(state == PROPOSED || state == ACCEPTED);
+  }
   return next_entry;
 }
 
 // Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
-static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, struct rmw_entry *entry,
-                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t t_id)
+static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, struct rmw_entry *glob_entry,
+                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t glob_sess_id,
+                                      uint16_t t_id)
 {
-  struct ts_tuple old_ts;
   // pass the old ts
-  *(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
-  old_ts.m_id = kv_ptr->key.meta.m_id;
-  entry->opcode = opcode;
-  entry->old_ts = old_ts;
-  entry->new_ts.m_id = m_id;
-  *(uint32_t *)entry->new_ts.version = (*(uint32_t *)old_ts.version) + 1;
-  entry->rmw_id.g_id = get_gid(m_id, t_id);
-  entry->rmw_id.id = l_id;
-  entry->state = state;
+  glob_entry->opcode = opcode;
+  glob_entry->new_ts.m_id = m_id;
+  *(uint32_t *)glob_entry->new_ts.version =  kv_ptr->key.meta.version + 1;
+  glob_entry->rmw_id.glob_sess_id = glob_sess_id;
+  glob_entry->rmw_id.id = l_id;
+  glob_entry->state = state;
+  if (ENABLE_ASSERTIONS) {
+    assert(glob_sess_id < GLOBAL_SESSION_NUM);
+    assert(*(uint32_t *)glob_entry->new_ts.version % 2 == 0);
+    assert(state == PROPOSED || state == ACCEPTED); // TODO accepted is allowed?
+  }
 }
 
 // Check if the key in the entry matches the key in the KVS
@@ -1159,10 +1202,9 @@ static inline uint8_t propose_snoops_entry(struct cache_op *prop, uint32_t pos, 
   if (entry->state == ACCEPTED) {
     my_assert(compare_ts(&new_ts, &entry->new_ts) == EQUAL,
               "Received a proposal with same TS an already accepted proposal");
-
     if (ENABLE_ASSERTIONS) {
       // check the RMW_ID to make sure it's not a stuck RMW -- TODO it should not be the proposes do NOT help??
-      if (entry->rmw_id.g_id == get_gid(m_id, t_id) &&
+      if (entry->rmw_id.glob_sess_id == get_gid(m_id, t_id) &&
           entry->rmw_id.id == l_id) {
         red_printf("Received a proposal with same RMW id an already accepted proposal \n");
         assert(false);
@@ -1264,15 +1306,15 @@ static inline bool trigger_help(struct rmw_local_entry *p_entry, struct mica_res
   if (p_entry->state == SAME_KEY_RMW &&
      (p_entry->index_to_rmw == new_entry) &&
      (rmw.entry[new_entry].rmw_id.id == p_entry->rmw_id.id) &&
-     (rmw.entry[new_entry].rmw_id.g_id == p_entry->rmw_id.g_id)) {
+     (rmw.entry[new_entry].rmw_id.glob_sess_id == p_entry->rmw_id.glob_sess_id)) {
     p_entry->debug_cntr++;
     if (p_entry->debug_cntr >= M_256) {
-      if (!q_info->send_vector[mid_to_rmid(gid_to_mid(p_entry->rmw_id.g_id))]) //TODO think about this
+      if (!q_info->send_vector[mid_to_rmid(gid_to_mid(p_entry->rmw_id.glob_sess_id))]) //TODO think about this
         return true;
     }
   }
   else {
-    p_entry->rmw_id.g_id = rmw.entry[new_entry].rmw_id.g_id;
+    p_entry->rmw_id.glob_sess_id = rmw.entry[new_entry].rmw_id.glob_sess_id;
     p_entry->rmw_id.id = rmw.entry[new_entry].rmw_id.id;
     p_entry->index_to_rmw = new_entry;
   }
@@ -1284,7 +1326,7 @@ static inline int search_prop_entries_with_l_id(struct prop_info *prop_info, uin
 {
   for (uint16_t i = 0; i < LOCAL_PROP_NUM; i++) {
     if (prop_info->entry[i].state == state &&
-        prop_info->entry[i].l_id == l_id)
+        prop_info->entry[i].rmw_id.id == l_id)
       return i;
   }
   return -1; // i.e. l_id not found!!
@@ -1312,13 +1354,13 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   uint32_t w_ptr = p_ops->w_push_ptr;
   uint64_t message_l_id;
   //printf("Insert a write %u \n", *(uint32_t *)write);
-
-  if (DEBUG_RMW) {
-    yellow_printf("Wrkr %u Inserting an accept, bcast size %u, "
-                    "l_id %lu, fifo push_ptr %u, fifo pull ptr %u\n", t_id,
-                  p_ops->w_fifo->bcast_size,
-                  *(uint64_t *)p_entry->l_id, p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
-  }
+//
+//  if (DEBUG_RMW) {
+//    yellow_printf("Wrkr %u Inserting an accept, bcast size %u, "
+//                    "l_id %lu, fifo push_ptr %u, fifo pull ptr %u\n", t_id,
+//                  p_ops->w_fifo->bcast_size,
+//                  *(uint64_t *)p_entry->l_id, p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
+//  }
 
 
   // Put the accept on a new message because it will not be carrying a write l_id
@@ -1331,8 +1373,8 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   }
   struct accept *acc = (struct accept *) w_mes;
   // TODO this is wrong : pentry does not keep the key as uint8_t
-  memcpy(&acc->old_ts, &p_entry->old_ts, TS_TUPLE_SIZE + TRUE_KEY_SIZE + 1); // ts, key, opcode
-  *(uint16_t *)acc->g_id = p_entry->rmw_id.g_id;
+  memcpy(&acc->old_ts, &p_entry->new_ts, TS_TUPLE_SIZE + TRUE_KEY_SIZE + 1); // ts, key, opcode
+  *(uint16_t *)acc->g_id = p_entry->rmw_id.glob_sess_id;
   *(uint64_t *)acc->t_rmw_id = p_entry->rmw_id.id;
 
 
@@ -1752,16 +1794,20 @@ static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cac
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
   bool fresh_mess = inside_r_ptr == 0;
-  bool mes_is_rmw = r_mes[r_mes_ptr].read[0].opcode == OP_RMW;
-  bool l_ids_match = *(uint64_t *) r_mes[r_mes_ptr].l_id + inside_r_ptr == l_id;
+  //bool mes_is_rmw = r_mes[r_mes_ptr].read[0].opcode == OP_RMW;
+  //bool l_ids_match = *(uint64_t *) r_mes[r_mes_ptr].l_id + inside_r_ptr == l_id;
   // coalesce proposes if
   // the message is already empty OR
   // it's not empty and its an rmw and the l_ids match
-  bool coalesce_prop = fresh_mess || (mes_is_rmw && l_ids_match);
+  //bool coalesce_prop = fresh_mess || (mes_is_rmw && l_ids_match);
+
+
+  // We do not do coalescing for the time being and we overload
+  // coalesce num with the session id
 
 
   // create a new message if the propose cannot be coalesced
-  if (!coalesce_prop) {
+  if (!fresh_mess) {
     MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
     r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
     r_mes_ptr = p_ops->r_fifo->push_ptr;
@@ -1813,13 +1859,15 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
     memcpy(&p_entry->key, &prop->key.bkt, TRUE_KEY_SIZE);
     p_entry->index_to_rmw = resp->rmw_entry;
     p_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
+    p_entry->sess_id = (uint16_t) session_id;
   }
 
   // if the rmw is stuck because the key is being rmwed keep trying who you are waiting for
   if (resp->type == RETRY_RMW_KEY_EXISTS) {
     if (trigger_help(p_entry, resp, q_info))
       my_assert(false, "Help must be triggered");
-    // TODO we need the help here. Take care that if you do a new propose here, the lid may have already be assigned
+    // TODO we need the help here. Take care that if you do a new propose here,
+    // the lid may have already be assigned
   }
 
   // if RMW entry was occupied, put in the next op to try next round
@@ -1828,22 +1876,23 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
     if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved "
                                   "it from position %u to %u \n", t_id, op_i, *old_op_i);
     (*old_op_i)++;
+    if (ENABLE_ASSERTIONS) assert((*old_op_i) <= SESSIONS_PER_THREAD);
     // if the RMW is new, copy the value and change the state
     if (p_entry->state == INVALID_RMW) {
-      memcpy(p_entry->value, prop->value, RMW_VALUE_SIZE);
+      // memcpy(p_entry->value, prop->value, RMW_VALUE_SIZE); // TODO calculate value when accepting
       p_entry->state = SAME_KEY_RMW;
     }
   }
   else if (resp->type == RMW_SUCCESS) { // the RMW has gotten an entry and is to be sent
-    p_entry->l_id = p_ops->prop_info->l_id;
-    p_entry->rmw_id.id = p_entry->l_id; // TODO this gets written twice rectify when building help
-    p_entry->rmw_id.g_id = get_gid((uint8_t) machine_id, t_id);
-    my_assert(rmw.entry[p_entry->index_to_rmw].rmw_id.id == p_entry->l_id,
-              "lids of rmw_entry and prop_entry don't match");
+    p_entry->rmw_id.id = p_ops->prop_info->l_id;
+    p_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) session_id);
+    if (ENABLE_ASSERTIONS) check_global_sess_id((uint8_t) machine_id, t_id,
+                                                (uint16_t) session_id, p_entry->rmw_id.glob_sess_id);
     p_ops->prop_info->l_id++; // increase max lid
     p_entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
-    memcpy(&p_entry->old_ts, (void *)&prop->key.meta.m_id, TS_TUPLE_SIZE);
-    insert_rmw_to_read_fifo(p_ops, prop, p_entry->l_id, 0, t_id);
+    *(uint32_t *)p_entry->new_ts.version = prop->key.meta.version;
+    p_entry->new_ts.m_id = (uint8_t) machine_id;
+    insert_rmw_to_read_fifo(p_ops, prop, p_entry->rmw_id.id , 0, t_id);
     p_entry->state = PROPOSED;
   }
   else my_assert(false, "Wrong resp type in RMW");

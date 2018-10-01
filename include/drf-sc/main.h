@@ -50,6 +50,8 @@
 
 
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
+#define SESSIONS_PER_MACHINE (WORKERS_PER_MACHINE * SESSIONS_PER_THREAD)
+#define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
 
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
@@ -191,7 +193,10 @@
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
 
-
+#define MAX_PROP_COALESCE 1
+#define PROP_MES_HEADER 2 // coalesce_num , m_id
+#define PROP_SIZE 28  // RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
+#define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
 #define KEY_HAS_NEVER_BEEN_RMWED 0
 #define KEY_HAS_BEEN_RMWED 1
 
@@ -394,7 +399,7 @@ struct quorum_info {
 // unique RMW id-- each machine must remember how many
 // RMW each thread has committed, to avoid committing an RMW twice
  struct rmw_id {
-   uint16_t g_id; // global thread id
+   uint16_t glob_sess_id; // global session id
    uint64_t id; // the local rmw id of the source
 
  };
@@ -469,6 +474,25 @@ struct r_message {
   struct read read[MAX_R_COALESCE];
 };
 
+
+
+//
+struct propose {
+  uint8_t t_rmw__id[8];
+  struct ts_tuple ts;
+  uint8_t key[TRUE_KEY_SIZE];
+  uint8_t opcode;
+  uint8_t glob_sess_id[2];
+  uint8_t log_number[4];
+};
+
+struct prop_message {
+  uint8_t coalesce_num;
+  uint8_t m_id;
+  struct propose prop[MAX_PROP_COALESCE];
+};
+
+
 //
 struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
@@ -498,14 +522,6 @@ struct write_fifo {
 };
 
 //
-struct prep_fifo {
-  struct r_message *r_message;
-  uint32_t push_ptr;
-  uint32_t bcast_pull_ptr;
-  uint32_t bcast_size; // number of preps not messages!
-  uint32_t size;
-  uint32_t backward_ptrs[LOCAL_PROP_NUM];
-};
 
 
 // Sent when the timestamps are equal or smaller
@@ -581,29 +597,37 @@ struct rmw_entry {
   struct key key;
   uint8_t state;
   struct rmw_id rmw_id;
-  struct ts_tuple old_ts;
+  //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   uint8_t value[VALUE_SIZE];
+  uint32_t log_no;
   //atomic_flag lock;
+};
+
+struct rmw_help_entry{
+  struct ts_tuple new_ts;
+  uint8_t opcode;
+  uint8_t value[RMW_VALUE_SIZE];
+  struct rmw_id rmw_id;
+  uint32_t log_no;
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
 struct rmw_local_entry {
-  struct ts_tuple old_ts;
+  struct ts_tuple new_ts;
   struct key key;
   uint8_t opcode;
   uint8_t value[RMW_VALUE_SIZE];
   uint8_t state;
-  struct rmw_id rmw_id; // this is implicitly the l_id TODO do we need this for the help?
+  struct rmw_id rmw_id; // this is implicitly the l_id
   uint8_t prop_acks;
   uint8_t accept_acks;
   uint16_t epoch_id;
+  uint16_t sess_id;
   uint32_t debug_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
-  uint64_t l_id;
   cache_meta *ptr_to_kv_pair;
-
-
+  struct rmw_help_entry *help_rmw;
 };
 
 // Local state of pending RMWs - one entry per session

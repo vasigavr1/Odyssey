@@ -511,6 +511,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   // PREP STRUCT
   (*p_ops)->prop_info = (struct prop_info *) malloc(sizeof(struct prop_info));
   memset((*p_ops)->prop_info, 0, sizeof(struct prop_info));
+  for (i = 0; i < LOCAL_PROP_NUM; i++) {
+    (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) malloc(sizeof(struct rmw_help_entry));
+    memset((*p_ops)->prop_info->entry[i].help_rmw, 0, sizeof(struct rmw_help_entry));
+  }
 
   //(*p_ops)->prep_info->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
   //memset((*p_ops)->prep_info->prep_fifo, 0, sizeof(struct prep_fifo));

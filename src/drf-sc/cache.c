@@ -216,9 +216,13 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // if it's the first RMW
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
             struct key *key = (struct key*) (((void*) &op[I]) + sizeof(cache_meta));
+            // sess_id is stored in the first bytes of op
             entry = grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
-                                  (uint8_t) machine_id, rmw_l_id, t_id);
+                                  (uint8_t) machine_id, rmw_l_id, 0,
+                                   get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
+                                   t_id);
             resp[I].type = RMW_SUCCESS;
+            resp[I].log_no = 0;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
           }
           // key has been RMWed before
@@ -229,16 +233,18 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
               activate_RMW_entry(PROPOSED, kv_ptr[I], rmw_entry, op[I].opcode,
-                                 (uint8_t)machine_id, rmw_l_id, t_id);
+                                 (uint8_t)machine_id, rmw_l_id,
+                                 get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
+                                 t_id);
+              resp[I].log_no = rmw_entry->log_no;
               resp[I].type = RMW_SUCCESS;
             }
             else resp[I].type = RETRY_RMW_KEY_EXISTS;
           }
           resp[I].rmw_entry = entry;
           resp[I].kv_pair_ptr = &kv_ptr[I]->key.meta;
-          // We need to put the old timestamp in the op too, both to send it and to store it for later
-          op[I].key.meta.m_id = kv_ptr[I]->key.meta.m_id;
-          op[I].key.meta.version = kv_ptr[I]->key.meta.version - 1;
+          // We need to put the new timestamp in the op too, both to send it and to store it for later
+          op[I].key.meta.version = kv_ptr[I]->key.meta.version + 1;
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else {
@@ -503,6 +509,9 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               uint32_t entry = *(uint32_t *)kv_ptr[I]->value;
               flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
                                           rmw_l_id, t_id);
+              if (flag == RMW_ACK_PROPOSE)
+                activate_RMW_entry(PROPOSED, kv_ptr[I], &rmw.entry[entry], op[I].opcode,
+                                   p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id); // TODO CHECK this
             }
             else my_assert(false, "KVS opcode is wrong!");
           }

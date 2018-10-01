@@ -93,7 +93,22 @@ int main(int argc, char *argv[])
   // RMWs
   static_assert(LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
 	static_assert(sizeof(struct accept) == W_MES_HEADER + sizeof(struct write), "");
-  static_assert(MACHINE_NUM * WORKERS_PER_MACHINE < K_64, "global thread ids are stored in uint16_t");
+  static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
+
+  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
+
+  static_assert(PROP_SIZE == sizeof(struct propose), "");
+  static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
+  static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
+    " buffer allocated for a read message");
+
+  { // Check that prop and read have opcode in the same byte
+    struct prop_message prop;
+    struct r_message r;
+    uint64_t r_dif = ((void *) &(r.read[0].opcode))-((void *)&r);
+    uint64_t prop_dif = ((void *) &(prop.prop[0].opcode))-((void *)&prop);
+    assert(r_dif == prop_dif); // The first opcode of both must be in the same offset.
+  }
 
 
 
