@@ -85,6 +85,7 @@ int main(int argc, char *argv[])
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
 
+  static_assert(VALUE_SIZE > BYTES_OVERRIDEN_IN_KVS_VALUE, "");
   static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
 
 

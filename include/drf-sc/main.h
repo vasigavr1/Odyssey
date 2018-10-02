@@ -189,7 +189,7 @@
 
 // RMWs
 #define BYTES_OVERRIDEN_IN_KVS_VALUE 4
-#define RMW_VALUE_SIZE 8 // rmw cannot be more than 8 bytes
+#define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
 #define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
 
@@ -373,7 +373,7 @@ struct remote_qp {
 #define RMW_SMALLER_TS 2
 #define RMW_ACK_PROPOSE 3 // Send an 1-byte reply
 #define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
-#define RMW_NACK_PROPOSE 5 // Send a TS, because you have already acked a higher Propose
+#define RMW_SEEN_HIGHER_PROP_TS 5 // Send a TS, because you have already acked a higher Propose
 #define NO_OP_ACQ_FLIP_BIT 6 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
 #define RMW_ALREADY_COMMITTED 7
 #define RMW_LOG_TOO_SMALL 8
@@ -604,7 +604,7 @@ struct rmw_entry {
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   uint8_t value[VALUE_SIZE];
-  uint32_t log_no;
+  uint32_t log_no; // keep track of the biggest log_no that has not been committed
   //atomic_flag lock;
 };
 

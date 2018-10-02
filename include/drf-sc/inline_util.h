@@ -1159,7 +1159,7 @@ static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_i
 static inline bool is_log_smaller_find_out_the_entry_if_exists(uint32_t log_no, struct cache_op *kv_ptr,
                                                                uint64_t rmw_l_id,
                                                                uint16_t glob_sess_id, uint16_t t_id,
-                                                               uint32_t *entry)
+                                                               uint32_t *entry, struct rmw_help_entry *rep_entry)
 {
   if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
     (*entry) = *(uint32_t *) kv_ptr->value;
@@ -1168,6 +1168,11 @@ static inline bool is_log_smaller_find_out_the_entry_if_exists(uint32_t log_no, 
       if (DEBUG_RMW)
         yellow_printf("Wkrk %u Log number is too small %/% entry state %u, propose with rmw_lid %u, global_sess_id %u, entry %u\n",
                       t_id, log_no, rmw.entry[*entry].log_no, rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
+      // store the committed value, TS & log_number to the reply
+      rep_entry->new_ts.m_id = kv_ptr->key.meta.m_id;
+      *(uint32_t *)rep_entry->new_ts.version = kv_ptr->key.meta.version;
+      memcpy(rep_entry->value, kv_ptr->value + BYTES_OVERRIDEN_IN_KVS_VALUE, (size_t) RMW_VALUE_SIZE);
+      rep_entry->log_no = rmw.entry[*entry].log_no;
       return true;
     }
     else if (DEBUG_RMW){ // remote log is higher than the locally stored!
@@ -1233,17 +1238,18 @@ static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
 }
 
 // Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
-static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, struct rmw_entry *glob_entry,
+static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struct rmw_entry *glob_entry,
                                       uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t glob_sess_id,
-                                      uint16_t t_id)
+                                      uint32_t log_no, uint16_t t_id)
 {
-  // pass the old ts
+  // pass the new ts!
   glob_entry->opcode = opcode;
   glob_entry->new_ts.m_id = m_id;
-  *(uint32_t *)glob_entry->new_ts.version =  kv_ptr->key.meta.version + 1;
+  *(uint32_t *)glob_entry->new_ts.version = new_version;
   glob_entry->rmw_id.glob_sess_id = glob_sess_id;
   glob_entry->rmw_id.id = l_id;
   glob_entry->state = state;
+  glob_entry->log_no = log_no;
   if (ENABLE_ASSERTIONS) {
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
     assert(*(uint32_t *)glob_entry->new_ts.version % 2 == 0);
@@ -1254,9 +1260,8 @@ static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, st
 
 
 // Look at an RMW entry to answer to a propose message-- kv pair lock is held when calling this
-static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, uint8_t *value,
-                                           struct ts_tuple *rep_ts, uint8_t m_id,
-                                           uint64_t l_id, uint16_t t_id)
+static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, uint8_t m_id,
+                                           uint16_t t_id, struct rmw_help_entry *reply_rmw)
 {
   uint8_t return_val = RMW_ACK_PROPOSE;
   if (ENABLE_ASSERTIONS)  assert(pos < RMW_ENTRIES_NUM);
@@ -1264,31 +1269,29 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key((struct key *) prop->key, pos));
 
-
-  struct ts_tuple new_ts = prop->ts;
-  // the propose message contains the new ts!
-
-
-  // If entry is in Accepted state you typically send back value and ts
+  // If entry is in Accepted state you typically NACK send back value and ts & RMW_id
   if (entry->state == ACCEPTED) {
-    my_assert(compare_ts(&new_ts, &entry->new_ts) == EQUAL,
-              "Received a proposal with same TS an already accepted proposal");
-    if (ENABLE_ASSERTIONS) {
-      // check the RMW_ID to make sure it's not a stuck RMW -- TODO it should not be the proposes do NOT help??
-      if (entry->rmw_id.glob_sess_id == get_gid(m_id, t_id) &&
-          entry->rmw_id.id == l_id) {
-        red_printf("Received a proposal with same RMW id an already accepted proposal \n");
-        assert(false);
-        //return_val = RMW_ACK_PROPOSE;
-        //entry->state = PROPOSED;
-      }
+    my_assert(compare_ts(&prop->ts, &entry->new_ts) == EQUAL,
+              "Received a proposal with same TS an already accepted proposal"); // TODO is this assertion correct?
+    // check the RMW_ID to make sure it's not a stuck RMW -- The proposes may not help but it
+    // maybe that the same machine is retrying
+    if (entry->rmw_id.glob_sess_id == *(uint16_t *) prop->glob_sess_id &&
+        entry->rmw_id.id == *(uint64_t *) prop->t_rmw_id) {
+      red_printf("Wrkr %u Received a proposal with same RMW id an already accepted proposal, "
+                   "rmw_id %u/%u, glob sess %u/%u \n", t_id, *(uint16_t *) prop->glob_sess_id,
+                 entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, entry->rmw_id.id);
+      return_val = RMW_ACK_PROPOSE;
+      entry->state = PROPOSED;
     }
-    memcpy(value, entry->value, VALUE_SIZE);
-    memcpy(rep_ts, &entry->new_ts, TS_TUPLE_SIZE);
-    return_val = RMW_ALREADY_ACCEPTED;
+    else { // need to copy the value, ts and RMW-id here
+      memcpy(reply_rmw->value, entry->value, RMW_VALUE_SIZE);
+      memcpy(&reply_rmw->new_ts, &entry->new_ts, TS_TUPLE_SIZE);
+      reply_rmw->rmw_id = entry->rmw_id;
+      return_val = RMW_ALREADY_ACCEPTED;
+    }
   }
   else if (rmw.entry[pos].state == PROPOSED) {
-    enum ts_compare ts_comp = compare_ts(&new_ts, &entry->new_ts);
+    enum ts_compare ts_comp = compare_ts(&prop->ts, &entry->new_ts);
     switch(ts_comp) {
       case GREATER: // new prepare has higher TS
         return_val = RMW_ACK_PROPOSE;
@@ -1298,8 +1301,8 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
         my_assert(false, "Received a proposal with same TS an already proposed proposal");
         break;
       case SMALLER:
-        return_val = RMW_NACK_PROPOSE;
-        memcpy(rep_ts, &entry->new_ts, TS_TUPLE_SIZE);
+        return_val = RMW_SEEN_HIGHER_PROP_TS;
+        memcpy(&reply_rmw->new_ts, &entry->new_ts, TS_TUPLE_SIZE);
         break;
       default : assert(false);
     }
@@ -1349,7 +1352,7 @@ static inline void fill_rmw_prep_reply(struct r_rep_big *r_rep, struct r_rep_fif
       memcpy(r_rep->value, value, VALUE_SIZE);
       r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
       break;
-    case RMW_NACK_PROPOSE :
+    case RMW_SEEN_HIGHER_PROP_TS :
       if (DEBUG_RMW) green_printf("Worker %u: Prepare TS gets nacked \n", t_id);
       memcpy(&r_rep->ts, &new_ts, TS_TUPLE_SIZE);
       r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
@@ -1599,11 +1602,13 @@ static inline void handle_the_prop_replies(struct pending_ops *p_ops, struct r_r
 
 }
 
-static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, struct propose * prop, uint16_t t_id,
-                                                     uint32_t *entry)
+static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, struct propose *prop,
+                                                     uint8_t m_id, uint16_t t_id,
+                                                     struct rmw_help_entry *reply_rmw, uint32_t *entry)
 {
   uint8_t flag;
   uint64_t rmw_l_id = *(uint64_t *) prop->t_rmw_id;
+  // if there is no entry just ack and create entry
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
     *entry = grab_RMW_entry(PROPOSED, kv_ptr, prop->opcode,
                             (uint8_t) machine_id, *(uint32_t *) prop->ts.version,
@@ -1613,15 +1618,20 @@ static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, st
     if (DEBUG_RMW)
       yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
                     t_id, entry, kv_ptr->opcode);
-    flag = RMW_ACK_PROPOSE
+    flag = RMW_ACK_PROPOSE;
   }
   else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
-    flag = propose_snoops_entry(prop, *entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
-                                rmw_l_id, t_id);
-//    if (flag == RMW_ACK_PROPOSE);// activate_RMW_entry(PROPOSED, kv_ptr[I], &rmw.entry[entry], op[I].opcode,
-//    //                   p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id); // TODO CHECK this
+    // if the log number is higher than expected blindly ack
+    if (*(uint32_t *) prop->log_no > rmw.entry[*entry].log_no)
+      flag = RMW_LOG_TOO_HIGH;
+    else
+    {
+      flag = propose_snoops_entry(prop, *entry, m_id, t_id, reply_rmw);
+    }
+
+
   }
-  else my_assert(false, "KVS opcode is wrong!");
+  //else my_assert(false, "KVS opcode is wrong!");
   return flag;
 
 
@@ -1806,7 +1816,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
   bool is_rmw = (r_rep_flag == RMW_SMALLER_TS || r_rep_flag == RMW_ACK_PROPOSE ||
-                 r_rep_flag == RMW_ALREADY_ACCEPTED || r_rep_flag == RMW_NACK_PROPOSE);
+                 r_rep_flag == RMW_ALREADY_ACCEPTED || r_rep_flag == RMW_SEEN_HIGHER_PROP_TS);
   bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
 
    /* A reply message corresponds to exactly one read message
@@ -1983,7 +1993,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
     p_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) session_id);
     if (ENABLE_ASSERTIONS) check_global_sess_id((uint8_t) machine_id, t_id,
                                                 (uint16_t) session_id, p_entry->rmw_id.glob_sess_id);
-    p_ops->prop_info->l_id++; // increase max lid
+    p_ops->prop_info->l_id++; // increase max lid // TODO start from 1 instead 0 to be able to compare against globally stored ids
     p_entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
     *(uint32_t *)p_entry->new_ts.version = prop->key.meta.version;
     p_entry->new_ts.m_id = (uint8_t) machine_id;
