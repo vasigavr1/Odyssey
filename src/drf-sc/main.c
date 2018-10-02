@@ -19,6 +19,7 @@ const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
 struct rmw_info rmw;
 atomic_uint_fast32_t next_rmw_entry_available;
+atomic_uint_fast64_t glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
 
 
@@ -69,6 +70,7 @@ int main(int argc, char *argv[])
   static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
   static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(sizeof(struct read) == R_SIZE, "");
   static_assert(SESSIONS_PER_THREAD < M_16, "");
   static_assert(MAX_W_COALESCE < 256, "");
   static_assert(MAX_R_COALESCE < 256, "");
@@ -98,6 +100,7 @@ int main(int argc, char *argv[])
   static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
 
   static_assert(PROP_SIZE == sizeof(struct propose), "");
+  static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
   static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
   static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
     " buffer allocated for a read message");
@@ -107,6 +110,9 @@ int main(int argc, char *argv[])
     struct r_message r;
     uint64_t r_dif = ((void *) &(r.read[0].opcode))-((void *)&r);
     uint64_t prop_dif = ((void *) &(prop.prop[0].opcode))-((void *)&prop);
+    assert(r_dif == prop_dif); // The first opcode of both must be in the same offset.
+    r_dif = ((void *) &(r.coalesce_num))-((void *)&r);
+    prop_dif = ((void *) &(prop.coalesce_num))-((void *)&prop);
     assert(r_dif == prop_dif); // The first opcode of both must be in the same offset.
   }
 
@@ -134,6 +140,8 @@ int main(int argc, char *argv[])
 
   print_for_debug = false;
 	next_rmw_entry_available = 0;
+  memset(glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
+
 
 	struct thread_params *param_arr;
 	pthread_t *thread_arr;

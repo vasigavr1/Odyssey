@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 2
+#define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
 #define MEASURE_LATENCY 0
@@ -239,9 +239,9 @@
 // such that the fifo push ptr can never coincide with its pull ptr
 // zeroing its w_num, as such we take care to allow
 // one fewer pending write than slots in the w_ifo
-#define MAX_ALLOWED_W_SIZE (W_FIFO_SIZE - 1)
+#define MAX_ALLOWED_W_SIZE (PENDING_WRITES - 1)
 #define R_FIFO_SIZE (PENDING_READS + LOCAL_PROP_NUM) // Proposes use the read fifo
-#define MAX_ALLOWED_R_SIZE (R_FIFO_SIZE - 1)
+#define MAX_ALLOWED_R_SIZE (PENDING_READS - 1)
 
 #define W_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 1))
 #define R_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 2))
@@ -315,6 +315,8 @@
 
 
 
+
+
 #define IS_READ(X)  ((X) == HOT_READ || (X) == LOCAL_READ || (X) == REMOTE_READ  ? 1 : 0)
 //#define IS_WRITE(X)  ((X) == HOT_WRITE || (X) == LOCAL_WRITE || (X) == REMOTE_WRITE  ? 1 : 0)
 
@@ -373,7 +375,9 @@ struct remote_qp {
 #define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
 #define RMW_NACK_PROPOSE 5 // Send a TS, because you have already acked a higher Propose
 #define NO_OP_ACQ_FLIP_BIT 6 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
-
+#define RMW_ALREADY_COMMITTED 7
+#define RMW_LOG_TOO_SMALL 8
+#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
 // Possible flags when accepting
 #define ACCEPT_ACK 1
 #define NACK_ACCEPT_HIGHER_TS_PROPOSAL 2
@@ -468,9 +472,9 @@ struct read {
 
 //
 struct r_message {
-  uint8_t l_id[8];
   uint8_t coalesce_num;
   uint8_t m_id;
+  uint8_t l_id[8];
   struct read read[MAX_R_COALESCE];
 };
 
@@ -478,12 +482,12 @@ struct r_message {
 
 //
 struct propose {
-  uint8_t t_rmw__id[8];
+  uint8_t t_rmw_id[8];
   struct ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
   uint8_t glob_sess_id[2];
-  uint8_t log_number[4];
+  uint8_t log_no[4];
 };
 
 struct prop_message {
@@ -626,6 +630,7 @@ struct rmw_local_entry {
   uint16_t sess_id;
   uint32_t debug_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
+  uint32_t log_no;
   cache_meta *ptr_to_kv_pair;
   struct rmw_help_entry *help_rmw;
 };
@@ -712,6 +717,8 @@ struct rmw_info {
 
 //typedef _Atomic struct rmw_info atomic_rmw_info;
 extern struct rmw_info rmw;
+
+extern atomic_uint_fast64_t glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
 struct recv_info {
 	uint32_t push_ptr;
@@ -836,6 +843,7 @@ struct multiple_owner_bit {
 // Remote acquires will read those failures and flip the bits after the have
 // increased their epoch id
 extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
+
 
 
 

@@ -1120,13 +1120,92 @@ static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops, struct 
   return false;
 }
 
+
+// Check if the key in the entry matches the key in the KVS
+static inline void check_entry_validity_with_cache_op(struct cache_op *op, uint32_t entry)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
+    struct key *entry_key = &rmw.entry[entry].key;
+    my_assert(true_keys_are_equal(key, entry_key), "Entry does not contain the same key");
+  }
+}
+
+
+// Returns true if the incoming key and the entry key are equal
+static inline bool check_entry_validity_with_key(struct key *incoming_key, uint32_t entry)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct key *entry_key = &rmw.entry[entry].key;
+    return true_keys_are_equal(incoming_key, entry_key);
+  }
+  return true;
+}
+
+// Check the global RMW-id structure, to see if an RMW has already been committed
+static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_id, uint16_t t_id)
+{
+  if (glob_sess_rmw_id[glob_sess_id] >= rmw_l_id) {
+    if (DEBUG_RMW)
+      green_printf("Worker %u: Remote machine %u is trying a propose with global sess_id %u, "
+                     "rmw_id %lu, that has been already committed \n",
+                   t_id, glob_sess_id, rmw_l_id);
+  return true;
+  }
+  else return false;
+}
+
+// Returns true if the received log no is smaller than the committed. Iif the key has an allocated entry it assigns the "entry"
+static inline bool is_log_smaller_find_out_the_entry_if_exists(uint32_t log_no, struct cache_op *kv_ptr,
+                                                               uint64_t rmw_l_id,
+                                                               uint16_t glob_sess_id, uint16_t t_id,
+                                                               uint32_t *entry)
+{
+  if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
+    (*entry) = *(uint32_t *) kv_ptr->value;
+    if (ENABLE_ASSERTIONS) assert(*entry < RMW_ENTRIES_NUM);
+    if (rmw.entry[*entry].log_no > log_no) {
+      if (DEBUG_RMW)
+        yellow_printf("Wkrk %u Log number is too small %/% entry state %u, propose with rmw_lid %u, global_sess_id %u, entry %u\n",
+                      t_id, log_no, rmw.entry[*entry].log_no, rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
+      return true;
+    }
+    else if (DEBUG_RMW){ // remote log is higher than the locally stored!
+      if (rmw.entry[*entry].log_no < log_no)
+        yellow_printf("Wkrk %u Log number is higher than expected %/%, entry state %u, propose with rmw_lid %u, global_sess_id %u, entry %u\n",
+                      t_id, log_no, rmw.entry[*entry].log_no, rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
+    }
+  }
+
+  return false;
+}
+
+// When receiving a propose check that its ts is bigger than the KVS ts
+static inline bool propose_ts_is_not_greater_than_kvs_ts(struct cache_op *kv_ptr, struct propose *prop, uint8_t m_id, uint16_t t_id)
+{
+
+  struct ts_tuple tmp_ts; // cant use the kvs version as we incremented it when locking...
+  *(uint32_t *) tmp_ts.version = kv_ptr->key.meta.version - 1;
+  tmp_ts.m_id = kv_ptr->key.meta.m_id;
+  if (compare_ts(&prop->ts, &tmp_ts) != GREATER) {
+    if (DEBUG_RMW)
+      yellow_printf("Wrkr %u: TS is NOT greater in a received propose: version %u/%u, m_id %u/%u"
+                      " from machine %u with rmw_id % , glob_sess_id %u, \n",
+                    t_id, *(uint32_t *) prop->ts.version, *(uint32_t *) tmp_ts.version, prop->ts.m_id, tmp_ts.m_id,
+                    m_id, *(uint64_t *) prop->t_rmw_id, *(uint16_t *)prop->glob_sess_id);
+    return true;
+  }
+  else return false;
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ RMW------------------------------------------
 //---------------------------------------------------------------------------*/
 
 // the first time a key gets RMWed, it grabs an RMW entry that lasts for life, the entry is protected by the KVS lock
-static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cache_op *kv_ptr,
-                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint32_t log_no,
+static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
+                                      uint8_t opcode, uint8_t m_id, uint32_t new_version,
+                                      uint64_t l_id, uint32_t log_no,
                                       uint16_t glob_sess_id, uint16_t t_id)
 {
   uint32_t next_entry =
@@ -1135,21 +1214,17 @@ static inline uint32_t grab_RMW_entry(struct key *key, uint8_t state, struct cac
   memcpy(kv_ptr->value, &next_entry, BYTES_OVERRIDEN_IN_KVS_VALUE);
   struct rmw_entry *glob_entry = &rmw.entry[next_entry];
 
-  // construct the new ts
-  //struct ts_tuple new_ts;
-  //*(uint32_t *)old_ts.version = kv_ptr->key.meta.version - 1;
-  //old_ts.m_id = kv_ptr->key.meta.m_id;
 
   glob_entry->opcode = opcode;
-  glob_entry->key = *key;
+  glob_entry->key = *((struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
   glob_entry->new_ts.m_id = m_id;
-  *(uint32_t *)glob_entry->new_ts.version = kv_ptr->key.meta.version + 1;
+  *(uint32_t *)glob_entry->new_ts.version = new_version;
   glob_entry->rmw_id.glob_sess_id = glob_sess_id;
   glob_entry->rmw_id.id = l_id;
   glob_entry->state = state;
   glob_entry->log_no = log_no; // not necessarilly 0 if a remote machine is grabbing here
   if (ENABLE_ASSERTIONS) {
-    assert(log_no == 0); // TODO see if this is possible
+    true_keys_are_equal(&glob_entry->key, (struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
     assert(*(uint32_t *)glob_entry->new_ts.version % 2 == 0);
     assert(state == PROPOSED || state == ACCEPTED);
@@ -1176,27 +1251,23 @@ static inline void activate_RMW_entry(uint8_t state, struct cache_op *kv_ptr, st
   }
 }
 
-// Check if the key in the entry matches the key in the KVS
-static inline void check_entry_validity(struct cache_op *op, uint32_t entry)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
-    struct key *entry_key = &rmw.entry[entry].key;
-    my_assert(true_keys_are_equal(key, entry_key), "Entry does not contain the same key");
-  }
-}
+
 
 // Look at an RMW entry to answer to a propose message-- kv pair lock is held when calling this
-static inline uint8_t propose_snoops_entry(struct cache_op *prop, uint32_t pos, uint8_t *value,
+static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, uint8_t *value,
                                            struct ts_tuple *rep_ts, uint8_t m_id,
                                            uint64_t l_id, uint16_t t_id)
 {
   uint8_t return_val = RMW_ACK_PROPOSE;
+  if (ENABLE_ASSERTIONS)  assert(pos < RMW_ENTRIES_NUM);
   struct rmw_entry *entry = &rmw.entry[pos];
-  struct ts_tuple new_ts;
-  // the propose message contains the old ts
-  new_ts.m_id = m_id;
-  *(uint32_t *)new_ts.version = prop->key.meta.version + 2;
+  if (ENABLE_ASSERTIONS)
+    assert(check_entry_validity_with_key((struct key *) prop->key, pos));
+
+
+  struct ts_tuple new_ts = prop->ts;
+  // the propose message contains the new ts!
+
 
   // If entry is in Accepted state you typically send back value and ts
   if (entry->state == ACCEPTED) {
@@ -1528,6 +1599,35 @@ static inline void handle_the_prop_replies(struct pending_ops *p_ops, struct r_r
 
 }
 
+static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, struct propose * prop, uint16_t t_id,
+                                                     uint32_t *entry)
+{
+  uint8_t flag;
+  uint64_t rmw_l_id = *(uint64_t *) prop->t_rmw_id;
+  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
+    *entry = grab_RMW_entry(PROPOSED, kv_ptr, prop->opcode,
+                            (uint8_t) machine_id, *(uint32_t *) prop->ts.version,
+                            rmw_l_id, *(uint32_t *) prop->log_no,
+                            *(uint16_t *)prop->glob_sess_id,t_id);
+    kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
+    if (DEBUG_RMW)
+      yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
+                    t_id, entry, kv_ptr->opcode);
+    flag = RMW_ACK_PROPOSE
+  }
+  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
+    flag = propose_snoops_entry(prop, *entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
+                                rmw_l_id, t_id);
+//    if (flag == RMW_ACK_PROPOSE);// activate_RMW_entry(PROPOSED, kv_ptr[I], &rmw.entry[entry], op[I].opcode,
+//    //                   p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id); // TODO CHECK this
+  }
+  else my_assert(false, "KVS opcode is wrong!");
+  return flag;
+
+
+}
+
+
 
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
@@ -1787,24 +1887,15 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
 
 
 // RMWs hijack the read fifo, to send propose broadcasts to all
-static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cache_op *prop,
-                                               uint64_t l_id,  uint8_t flag, uint16_t t_id)
+static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct rmw_local_entry * p_entry, //struct cache_op *prop,
+                                           /*uint64_t l_id,*/  uint8_t flag, uint16_t t_id)
 {
   struct r_message *r_mes = p_ops->r_fifo->r_message;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
   bool fresh_mess = inside_r_ptr == 0;
-  //bool mes_is_rmw = r_mes[r_mes_ptr].read[0].opcode == OP_RMW;
-  //bool l_ids_match = *(uint64_t *) r_mes[r_mes_ptr].l_id + inside_r_ptr == l_id;
-  // coalesce proposes if
-  // the message is already empty OR
-  // it's not empty and its an rmw and the l_ids match
-  //bool coalesce_prop = fresh_mess || (mes_is_rmw && l_ids_match);
-
-
-  // We do not do coalescing for the time being and we overload
-  // coalesce num with the session id
-
+  //todo coalescing is disabled
+  if (ENABLE_ASSERTIONS) assert(MAX_PROP_COALESCE == 1);
 
   // create a new message if the propose cannot be coalesced
   if (!fresh_mess) {
@@ -1814,25 +1905,29 @@ static inline void insert_rmw_to_read_fifo(struct pending_ops *p_ops, struct cac
     inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
   }
 
+  struct prop_message *p_mes = (struct prop_message *) &r_mes[r_mes_ptr];
   if (DEBUG_RMW)
     green_printf("Worker: %u, inserting an rmw in r_mes_ptr %u and inside ptr %u \n",
                  t_id, r_mes_ptr, inside_r_ptr);
-  memcpy(&r_mes[r_mes_ptr].read[inside_r_ptr].ts, (void *)&prop->key.meta.m_id, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
-  r_mes[r_mes_ptr].read[inside_r_ptr].opcode = prop->opcode;
-  if (inside_r_ptr == 0) {
-    // printf("message_lid %lu, local_rid %lu, p_ops r_size %u \n", message_l_id, p_ops->local_r_id, p_ops->r_size);
-    memcpy(r_mes[r_mes_ptr].l_id, &l_id, 8);
-  }
+  memcpy(&p_mes->prop[inside_r_ptr].ts, (void *)&p_entry->new_ts, TS_TUPLE_SIZE);
+  memcpy(&p_mes->prop[inside_r_ptr].key, (void *)&p_entry->key, TRUE_KEY_SIZE);
+  *(uint64_t*) p_mes->prop[inside_r_ptr].t_rmw_id = p_entry->rmw_id.id;
+  *(uint16_t *) p_mes->prop[inside_r_ptr].glob_sess_id = p_entry->rmw_id.glob_sess_id;
+  p_mes->prop[inside_r_ptr].opcode = p_entry->opcode;
+
+  *(uint32_t *)p_mes->prop[inside_r_ptr].log_no = p_entry->log_no;
+
+
   // Query the conf to see if the machine has lost messages
   on_starting_an_acquire_query_the_conf(t_id); // TODO specify failure semantics of propose
-
-  if (ENABLE_ASSERTIONS) { // make sure that if proposes have done coalescing, they did it correctly
-    uint64_t header_l_id = *(uint64_t *)r_mes[r_mes_ptr].l_id;
-    assert(header_l_id + inside_r_ptr == l_id);
+  if (ENABLE_ASSERTIONS) {
+    assert(p_mes->m_id == (uint8_t) machine_id);
+    // todo assertions?
   }
+
   p_ops->r_fifo->bcast_size++;
-  r_mes[r_mes_ptr].coalesce_num++;
-  if (r_mes[r_mes_ptr].coalesce_num == MAX_R_COALESCE) {
+  p_mes->coalesce_num++;
+  if (p_mes->coalesce_num == MAX_PROP_COALESCE) {
     MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
     r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
   }
@@ -1892,7 +1987,8 @@ static inline void insert_rmw(struct pending_ops *p_ops, uint16_t *old_op_i, uin
     p_entry->epoch_id = (uint16_t) epoch_id; // this MUST happen before the call to insert the RMW to the read fifo
     *(uint32_t *)p_entry->new_ts.version = prop->key.meta.version;
     p_entry->new_ts.m_id = (uint8_t) machine_id;
-    insert_rmw_to_read_fifo(p_ops, prop, p_entry->rmw_id.id , 0, t_id);
+    p_entry->log_no = resp->log_no;
+    insert_rmw_to_read_fifo(p_ops, p_entry , 0, t_id);
     p_entry->state = PROPOSED;
   }
   else my_assert(false, "Wrong resp type in RMW");
@@ -1972,8 +2068,13 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   //cyan_printf("thread %d  adds %d ops\n", g_id, op_i);
   uint16_t tmp_op_i = 0;
   for (uint16_t i = 0; i < op_i; i++) {
-    if (ENABLE_ASSERTIONS)
+    if (ENABLE_ASSERTIONS) {
+      if (ops[i].key.meta.version % 2 != 0) {
+        red_printf("Wrkr %u, Trace to cache: Version not even: u%, opcode %u, resp %u \n",
+                   t_id, ops[i].key.meta.version, ops[i].opcode, resp[i].type);
+      }
       my_assert(ops[i].key.meta.version % 2 == 0, "Trace to cache: Version must be even after cache");
+    }
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
       //green_printf("Cache_miss: bkt %u, server %u, tag %u \n", ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
@@ -2334,11 +2435,16 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_i];
   uint32_t backward_ptr = p_ops->r_fifo->backward_ptrs[r_mes_i];
   uint16_t coalesce_num = r_mes->coalesce_num;
-  send_sgl[br_i].length = R_MES_HEADER + coalesce_num * sizeof(struct read);
+  uint16_t header_size = (uint16_t) (r_mes->read[0].opcode == OP_RMW ? PROP_MES_HEADER : R_MES_HEADER);
+  uint16_t size_of_struct = (uint16_t) (r_mes->read[0].opcode == OP_RMW ? PROP_SIZE : R_SIZE);
+  send_sgl[br_i].length = header_size + coalesce_num * size_of_struct;
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) r_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
-  if (ENABLE_ASSERTIONS) assert(coalesce_num > 0);
+  if (ENABLE_ASSERTIONS) {
+    assert(coalesce_num > 0);
+    assert(send_sgl[br_i].length <= R_MES_SIZE);
+  }
   if (r_mes->read[0].opcode != OP_RMW) {
     for (i = 0; i < coalesce_num; i++) {
       p_ops->r_state[(backward_ptr + i) % PENDING_READS] = SENT;
@@ -2632,15 +2738,16 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
              incoming_rs[index].r_mes.read[0].opcode, index, *(uint64_t *)incoming_rs[index].r_mes.l_id);
     struct r_message *r_mes = (struct r_message*) &incoming_rs[index].r_mes;
     uint8_t r_num = r_mes->coalesce_num;
-
     if (polled_reads + r_num > MAX_INCOMING_R && ENABLE_ASSERTIONS) assert(false);
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
-      if (ENABLE_ASSERTIONS)
-        if(read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE &&
-           read->opcode != CACHE_OP_GET_TS &&
-           read->opcode != OP_RMW && read->opcode != OP_ACQUIRE_FLIP_BIT)
+      if (ENABLE_ASSERTIONS) {
+        assert(MAX_PROP_COALESCE == 1); // this function won't work otherwise
+        if (read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE &&
+            read->opcode != CACHE_OP_GET_TS &&
+            read->opcode != OP_RMW && read->opcode != OP_ACQUIRE_FLIP_BIT)
           red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, i, r_num);
+      }
       //printf("version %u \n", *(uint32_t*) read->ts.version);
       if (read->opcode == OP_ACQUIRE)
         read->opcode = take_ownership_of_a_conf_bit(t_id, (* (uint64_t *)r_mes->l_id) + i,

@@ -215,10 +215,10 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           optik_lock(&kv_ptr[I]->key.meta);
           // if it's the first RMW
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-            struct key *key = (struct key*) (((void*) &op[I]) + sizeof(cache_meta));
             // sess_id is stored in the first bytes of op
-            entry = grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
-                                  (uint8_t) machine_id, rmw_l_id, 0,
+            entry = grab_RMW_entry(PROPOSED, kv_ptr[I], op[I].opcode,
+                                  (uint8_t) machine_id, kv_ptr[I]->key.meta.version + 1,
+                                   rmw_l_id, 0,
                                    get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
                                    t_id);
             resp[I].type = RMW_SUCCESS;
@@ -228,7 +228,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // key has been RMWed before
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
-            check_entry_validity(&op[I], entry); // this is wrapped into ENABLE_ASSERTIONS
+            check_entry_validity_with_cache_op(&op[I], entry); // this is wrapped into ENABLE_ASSERTIONS
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
@@ -485,45 +485,51 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
+          struct propose *prop =(struct propose *) (((void *)op) - 5); // the propose starts at an offset of 5 bytes
           if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW on op %u\n", t_id, I);
           uint8_t flag = RMW_ACK_PROPOSE;
           uint8_t tmp_value[VALUE_SIZE];
           struct ts_tuple rep_ts;
-          uint64_t rmw_l_id = (*(uint64_t*) p_ops->ptrs_to_r_headers[0]->l_id) + I;
-          optik_lock(&kv_ptr[I]->key.meta);
-          struct ts_tuple tmp_ts; // cant use the kvs version as we incremented it when locking...
-          *(uint32_t *)tmp_ts.version = kv_ptr[I]->key.meta.version - 1;
-          tmp_ts.m_id = kv_ptr[I]->key.meta.m_id;
-          if (compare_ts(&tmp_ts, (struct ts_tuple *)&op->key.meta.m_id) != GREATER) {
-            // if no Entry exists
-            if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-              struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
-              uint32_t entry = grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
-                                     (uint8_t) machine_id, rmw_l_id, t_id);
-              kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
-              if (DEBUG_RMW)
-                yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
-                               t_id, entry, kv_ptr[I]->opcode);
+          uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
+          uint16_t glob_sess_id = *(uint16_t*) prop->glob_sess_id;
+          uint32_t log_no = *(uint32_t*) prop->log_no;
+          uint32_t entry;
+          //1. check if it has been committed
+          if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id))
+            flag = RMW_ALREADY_COMMITTED;
+          else {
+            optik_lock(&kv_ptr[I]->key.meta);
+            // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
+            if (is_log_smaller_find_out_the_entry_if_exists(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry))
+                flag = RMW_LOG_TOO_SMALL;
+            else {
+              // 3. Check that the TS is higher than the KVS TS, while the log is bigger than or equal than the stored log
+              if (propose_ts_is_not_greater_than_kvs_ts(kv_ptr[I], prop, p_ops->ptrs_to_r_headers[I]->m_id, t_id))
+                flag = RMW_SMALLER_TS;
+              else {
+                  // 4.
+                flag = handle_remote_propose_in_cache(kv_ptr[I], prop, t_id, &entry);
+                // if no Entry exists
+//                if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
+//                  struct key *key = (struct key *) (((void *) op) + sizeof(cache_meta));
+//                  entry = 0;//grab_RMW_entry(key, PROPOSED, kv_ptr[I], op[I].opcode,
+//                  //           (uint8_t) machine_id, rmw_l_id, t_id);
+//                  kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
+//                  if (DEBUG_RMW)
+//                    yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
+//                                  t_id, entry, kv_ptr[I]->opcode);
+//                } else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
+                  //uint32_t entry = *(uint32_t *) kv_ptr[I]->value;
+//                  flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
+//                                              rmw_l_id, t_id);
+//                  if (flag ==
+//                      RMW_ACK_PROPOSE);// activate_RMW_entry(PROPOSED, kv_ptr[I], &rmw.entry[entry], op[I].opcode,
+//                  //                   p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id); // TODO CHECK this
+//                } else my_assert(false, "KVS opcode is wrong!");
+              }
             }
-            else if(kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
-              uint32_t entry = *(uint32_t *)kv_ptr[I]->value;
-              flag = propose_snoops_entry(op, entry, tmp_value, &rep_ts, p_ops->ptrs_to_r_headers[I]->m_id,
-                                          rmw_l_id, t_id);
-              if (flag == RMW_ACK_PROPOSE)
-                activate_RMW_entry(PROPOSED, kv_ptr[I], &rmw.entry[entry], op[I].opcode,
-                                   p_ops->ptrs_to_r_headers[I]->m_id, rmw_l_id, t_id); // TODO CHECK this
-            }
-            else my_assert(false, "KVS opcode is wrong!");
+            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           }
-          else { // handle the case where the KVS ts is bigger than the incoming Prepare
-            if (DEBUG_RMW) {
-              yellow_printf("Stale Prepare, prepare version %u, prepare m_id %u, kvs version %u, kvs m_id %u \n",
-                            op->key.meta.version, op->key.meta.m_id,
-                            kv_ptr[I]->key.meta.version, kv_ptr[I]->key.meta.m_id);
-            }
-            flag = RMW_SMALLER_TS;
-          }
-          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
 
 //          bool false_positive = (config_vector[p_ops->ptrs_to_r_headers[I]->m_id] != UP_STABLE);
 //          if (false_positive) cas_a_state(&config_vector[p_ops->ptrs_to_r_headers[I]->m_id], DOWN_STABLE, DOWN_TRANSIENT, t_id);
