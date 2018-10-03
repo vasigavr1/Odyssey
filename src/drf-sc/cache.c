@@ -473,7 +473,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, tmp_value, READ, op->opcode);
+                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, (void*) tmp_value, READ, op->opcode);
 
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
@@ -486,15 +486,16 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           uint32_t log_no = *(uint32_t*) prop->log_no;
           uint8_t prop_m_id = p_ops->ptrs_to_r_headers[I]->m_id;
           uint32_t entry;
+          optik_lock(&kv_ptr[I]->key.meta);
           //1. check if it has been committed
           if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id))
             flag = RMW_ALREADY_COMMITTED;
           else {
-            optik_lock(&kv_ptr[I]->key.meta);
             // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
             // If it's smaller also fill the reply_rmw with a log no, TS & value
-            if (is_log_smaller_find_out_the_entry_if_exists(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry, &reply_rmw))
-                flag = RMW_LOG_TOO_SMALL;
+            if (is_log_smaller_find_out_the_entry_if_exists(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry,
+                                                            &reply_rmw))
+              flag = RMW_LOG_TOO_SMALL;
             else {
               // 3. Check that the TS is higher than the KVS TS, while the log is bigger than or equal than the stored log
               if (propose_ts_is_not_greater_than_kvs_ts(kv_ptr[I], prop, p_ops->ptrs_to_r_headers[I]->m_id, t_id))
@@ -510,13 +511,11 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                                      prop_m_id, rmw_l_id, glob_sess_id, log_no, t_id);
               }
             }
-            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           }
-
+          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           // TODO this needs to work with the rmw_help_structure now
-          insert_r_rep(p_ops, NULL, (struct ts_tuple *)&op->key.meta.m_id,
-                       *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, &reply_rmw, flag, op->opcode);
+          insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
+                       (void*) &reply_rmw, flag, op->opcode);
 
         }
         else if (op->opcode == CACHE_OP_GET_TS) {
@@ -537,7 +536,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, READ_TS, op->opcode);
 
         }
-        else { // cache miss should never happen
+        else {
           //red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
           //           op->opcode, I, reads[(pull_ptr + I) % max_op_size]->m_id,
           //           reads[(pull_ptr + I) % max_op_size]->val_len,
@@ -553,7 +552,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
     if (zero_ops) {
 //      printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
       op->opcode = 5;
-    }
+    } // TODO is this needed?
   }
 }
 
