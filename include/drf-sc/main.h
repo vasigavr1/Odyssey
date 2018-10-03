@@ -216,6 +216,12 @@
 #define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
 
 
+// ACCEPTS
+#define MAX_ACC_COALESCE 1
+#define ACCEPT_MES_HEADER 2
+#define ACCEPT_SIZE (29 + RMW_VALUE_SIZE) // key 8 rmw-id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
+#define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
+
 #define RMW_WAIT_COUNTER M_256
 
 // RMW entry states && prepare entries
@@ -396,9 +402,8 @@ struct remote_qp {
 //#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
 // Possible flags when accepting
 #define ACCEPT_ACK 1
-#define NACK_ACCEPT_HIGHER_TS_PROPOSAL 2
-#define NACK_ACCEPT_HIGHER_TS_ACCEPTANCE 3
-#define NACK_ACCEPT_LOWER_TS_ACCEPTANCE 4
+#define NACK_ACCEPT_SEEN_HIGHER_TS 2
+
 
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
@@ -457,20 +462,28 @@ struct write {
 };
 
 struct w_message {
-  uint8_t l_id[8];
   uint8_t m_id;
   uint8_t w_num;
+  uint8_t l_id[8];
   struct write write[MAX_W_COALESCE];
 };
 
+
 struct accept {
-	uint8_t g_id[2]; // this is useful when helping
 	uint8_t t_rmw_id[8];
 	struct ts_tuple old_ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
-	uint8_t m_id; // which machine sends the accept
-	uint8_t value[VALUE_SIZE];
+  uint8_t val_len;
+	uint8_t value[RMW_VALUE_SIZE];
+  uint8_t glob_sess_id[2]; // this is useful when helping
+  uint8_t log_no[4];
+};
+
+struct accept_message {
+  uint8_t m_id;
+  uint8_t w_num;
+  struct accept acc[MAX_ACC_COALESCE];
 };
 
 
@@ -640,7 +653,7 @@ struct rmw_entry {
   struct rmw_id last_committed_rmw_id;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
-  uint8_t value[VALUE_SIZE];
+  uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;
   //atomic_flag lock;
@@ -659,8 +672,8 @@ struct rmw_local_entry {
   struct ts_tuple new_ts;
   struct key key;
   uint8_t opcode;
-  uint8_t value[RMW_VALUE_SIZE];
   uint8_t state;
+  uint8_t value[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
   uint8_t prop_acks;
   uint8_t accept_acks;

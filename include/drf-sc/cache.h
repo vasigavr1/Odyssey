@@ -26,6 +26,7 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
+#define ACCEPT_OP 103
 #define OP_RMW 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release

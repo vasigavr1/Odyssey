@@ -95,11 +95,12 @@ int main(int argc, char *argv[])
 
   // RMWs
   static_assert(LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
-	static_assert(sizeof(struct accept) == W_MES_HEADER + sizeof(struct write), "");
+
   static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
 
-  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
 
+  // PROPOSES
+  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
   static_assert(PROP_SIZE == sizeof(struct propose), "");
   static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
   static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
@@ -109,6 +110,13 @@ int main(int argc, char *argv[])
   static_assert(sizeof(struct prop_rep_last_committed) == PROP_REP_SIZE, "");
   static_assert(sizeof(struct prop_rep_message) == PROP_REP_MESSAGE_SIZE, "");
   static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
+
+  // ACCEPTS
+  static_assert(MAX_ACC_COALESCE == 1, "");
+  static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
+  static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
+  static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
+
 
   { // Check that prop and read have opcode in the same byte
     struct prop_message prop;
@@ -122,7 +130,7 @@ int main(int argc, char *argv[])
   }
 
 
-
+  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, "");
   static_assert(sizeof(cache_meta) == 8, "");
   static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
 
