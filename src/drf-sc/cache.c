@@ -487,35 +487,27 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           uint8_t prop_m_id = p_ops->ptrs_to_r_headers[I]->m_id;
           uint32_t entry;
           optik_lock(&kv_ptr[I]->key.meta);
-          //1. check if it has been committed
-          if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id))
-            flag = RMW_ALREADY_COMMITTED;
-          else {
-            // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
-            // If it's smaller also fill the reply_rmw with a log no, TS & value
-            if (is_log_smaller_find_out_the_entry_if_exists(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry,
-                                                            &reply_rmw))
-              flag = RMW_LOG_TOO_SMALL;
-            else {
-              // 3. Check that the TS is higher than the KVS TS, while the log is bigger than or equal than the stored log
-              if (propose_ts_is_not_greater_than_kvs_ts(kv_ptr[I], prop, p_ops->ptrs_to_r_headers[I]->m_id, t_id))
-                flag = RMW_SMALLER_TS;
-              else {
-                // 4. If the kv-pair has not been RMWed before grab an entry and ack
-                // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
-                // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
-                flag = handle_remote_propose_in_cache(kv_ptr[I], prop, prop_m_id, t_id, &reply_rmw, &entry);
-                // if the propose is going to be accepted record its information in the global entry
-                if (flag == RMW_ACK_PROPOSE)
-                  activate_RMW_entry(PROPOSED, *(uint32_t *) prop->ts.version, &rmw.entry[entry], prop->opcode,
-                                     prop_m_id, rmw_l_id, glob_sess_id, log_no, t_id);
-              }
+          // 1. check if it has been committed
+          // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
+          // Either way fill the reply_rmw fully, but have a specialized flag!
+          if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry,
+                                                          &flag, &reply_rmw)) {
+            // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
+            if (!propose_ts_is_not_greater_than_kvs_ts(kv_ptr[I], prop, prop_m_id, t_id, &flag, &reply_rmw)) {
+              // 4. If the kv-pair has not been RMWed before grab an entry and ack
+              // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
+              // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
+              flag = handle_remote_propose_in_cache(kv_ptr[I], prop, prop_m_id, t_id, &reply_rmw, &entry);
+              // if the propose is going to be accepted record its information in the global entry
+              if (flag == RMW_ACK_PROPOSE)
+                activate_RMW_entry(PROPOSED, *(uint32_t *) prop->ts.version, &rmw.entry[entry], prop->opcode,
+                                   prop_m_id, rmw_l_id, glob_sess_id, log_no, t_id);
             }
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           // TODO this needs to work with the rmw_help_structure now
           insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
-                       (void*) &reply_rmw, flag, op->opcode);
+                       (void*) &reply_rmw, flag, prop->opcode);
 
         }
         else if (op->opcode == CACHE_OP_GET_TS) {

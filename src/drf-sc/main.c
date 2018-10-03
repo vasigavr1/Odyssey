@@ -106,10 +106,9 @@ int main(int argc, char *argv[])
   static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
     " buffer allocated for a read message");
 
-  static_assert(sizeof(struct prop_rep_log_val_ts) == sizeof(struct r_rep_big), "");
-  static_assert(sizeof(struct prop_rep_id_val_ts) == PROP_SIZE, "");
-  static_assert(sizeof(struct prop_rep_message) == PROP_MESSAGE_SIZE, "");
-  static_assert(PROP_MESSAGE_SIZE <= R_REP_SEND_SIZE);
+  static_assert(sizeof(struct prop_rep_last_committed) == PROP_REP_SIZE, "");
+  static_assert(sizeof(struct prop_rep_message) == PROP_REP_MESSAGE_SIZE, "");
+  static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
 
   { // Check that prop and read have opcode in the same byte
     struct prop_message prop;

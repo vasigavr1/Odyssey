@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 33
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -193,6 +193,8 @@
 #define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
 #define KEY_HAS_NEVER_BEEN_RMWED 0
 #define KEY_HAS_BEEN_RMWED 1
+#define LOG_NO_SIZE 4
+#define RMW_ID_SIZE 10
 
 
 
@@ -207,8 +209,12 @@
 // Propose replies
 #define MAX_PROP_REP_COALESCE (MAX_PROP_COALESCE)
 #define PROP_REP_MES_HEADER 3 // coalesce_num , m_id, opcode
-#define PROP_REP_SIZE (24 + RMW_VALUE)  //l_id- 8, RMW_id- 10, ts 5, RMW value, opcode 1
+#define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_MESSAGE_SIZE (PROP_REP_MES_HEADER + (MAX_PROP_REP_COALESCE * PROP_REP_SIZE))
+#define PROP_REP_SMALL_SIZE 9 // lid and opcode
+#define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
+#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
+
 
 #define RMW_WAIT_COUNTER M_256
 
@@ -380,14 +386,14 @@ struct remote_qp {
 // Possible flag values when inserting a read reply
 #define READ 0
 #define READ_TS 1
-#define RMW_SMALLER_TS 2 //
-#define RMW_ACK_PROPOSE 3 // Send an 1-byte reply
-#define RMW_ALREADY_ACCEPTED 4 // Send byte plus value
-#define RMW_SEEN_HIGHER_PROP_TS 5 // Send a TS, because you have already acked a higher Propose
-#define NO_OP_ACQ_FLIP_BIT 6 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
+#define NO_OP_ACQ_FLIP_BIT 2 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
+#define RMW_TS_SMALLER_THAN_KVS 3 //
+#define RMW_ACK_PROPOSE 4 // Send an 1-byte reply
+#define RMW_ALREADY_ACCEPTED 5 // Send byte plus value
+#define RMW_SEEN_HIGHER_PROP_TS 6 // Send a TS, because you have already acked a higher Propose
 #define RMW_ALREADY_COMMITTED 7
 #define RMW_LOG_TOO_SMALL 8
-#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
+//#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
 // Possible flags when accepting
 #define ACCEPT_ACK 1
 #define NACK_ACCEPT_HIGHER_TS_PROPOSAL 2
@@ -569,34 +575,25 @@ struct r_rep_message_ud_req {
   struct r_rep_message r_rep_mes;
 };
 
-// Reply to a propose with log no, value and ts
-// if their log number was outdated
-struct prop_rep_id_val_ts {
+
+// Reply with the last committed RMW if the
+// proposed had a low log number or has already been committed
+struct prop_rep_last_committed {
   uint8_t l_id[8]; // the l_id of the propose
   uint8_t opcode;
   struct ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
-  uint8_t rmw_id[8]; //accepted rmw -id
-  uint8_t glob_sess_id[2]; //accepted sess id
-};
-
-
-// Reply when the log was smaller than expected
-struct prop_rep_log_val_ts {
-  uint8_t l_id[8]; // the l_id of the propose
-  uint8_t opcode;
-  struct ts_tuple ts;
-  uint8_t value[RMW_VALUE_SIZE];
-  uint8_t log_no[4];
+  uint8_t rmw_id[8]; //accepted  OR last committed
+  uint8_t glob_sess_id[2]; //accepted  OR last committed
+  uint8_t log_no[4]; // last committed only
 };
 
 //
 struct prop_rep_message {
   uint8_t coalesce_num;
   uint8_t m_id;
-//  uint8_t credits;
   uint8_t opcode;
-  struct r_rep_big prop_rep_id_val_ts[MAX_PROP_REP_COALESCE];
+  struct prop_rep_last_committed prop_rep[MAX_PROP_REP_COALESCE];
 };
 
 struct r_rep_fifo {
@@ -645,11 +642,12 @@ struct rmw_entry {
   struct ts_tuple new_ts;
   uint8_t value[VALUE_SIZE];
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
+  uint32_t last_committed_log_no;
   //atomic_flag lock;
 };
 
 struct rmw_help_entry{
-  struct ts_tuple new_ts;
+  struct ts_tuple ts;
   uint8_t opcode;
   uint8_t value[RMW_VALUE_SIZE];
   struct rmw_id rmw_id;
@@ -679,8 +677,7 @@ struct rmw_local_entry {
 // Accessed with session id!
 struct prop_info {
   struct rmw_local_entry entry[LOCAL_PROP_NUM];
-  uint64_t l_id; // highest l_id as of yet
-
+  uint64_t l_id; // highest l_id as of yet -- Starts from 1
 };
 
 struct pending_out_of_epoch_writes {

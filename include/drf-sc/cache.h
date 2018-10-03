@@ -75,14 +75,17 @@
 #define TS_EQUAL 29
 #define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
 #define TS_GREATER 31
-#define PROP_ACK 32
-#define PROP_NACK 33 // will receive that TS
-#define RMW_ACCEPTED 34 // will receive both TS and Value
-#define RMW_TS_STALE 35 // will receive both TS and Value
+#define PROP_ACK 32 // 1 byte reply
+#define SEEN_HIGHER_PROP 33 // send that TS
+#define RMW_ACCEPTED 34 // send value, rmw-id, TS
+#define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
+#define RMW_ID_COMMITTED 36 // send the entire committed rmw
+#define LOG_TOO_SMALL 37 // send the entire committed rmw
+
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
 // previously considered to have failed
-#define FALSE_POSITIVE_OFFSET 10
+#define FALSE_POSITIVE_OFFSET 20
 
 
 #define KEY_HIT 220
