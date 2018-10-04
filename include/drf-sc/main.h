@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 33
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -471,7 +471,7 @@ struct w_message {
 
 struct accept {
 	uint8_t t_rmw_id[8];
-	struct ts_tuple old_ts;
+	struct ts_tuple new_ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
   uint8_t val_len;
@@ -482,7 +482,7 @@ struct accept {
 
 struct accept_message {
   uint8_t m_id;
-  uint8_t w_num;
+  uint8_t acc_num;
   struct accept acc[MAX_ACC_COALESCE];
 };
 

@@ -158,9 +158,13 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             if (ENABLE_STAT_COUNTING && op[I].opcode == CACHE_OP_GET) {
               t_stats[t_id].quorum_reads++;
             }
+            memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE);
           }
-          else resp[I].type = CACHE_LOCAL_GET_SUCCESS; //stored value can be read locally or has been forwarded
-          memcpy((void *)&op[I].key.meta.m_id, (void *)&prev_meta.m_id, TS_TUPLE_SIZE); // TODO is this needed for local accesses?
+          else { //stored value can be read locally or has been forwarded
+            resp[I].type = CACHE_LOCAL_GET_SUCCESS;
+            // this is needed to trick the version check in batch_from_trace_to_cache()
+            if (ENABLE_ASSERTIONS) op[I].key.meta.version = 0;
+          }
 				}
           // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
         else if (op[I].opcode == CACHE_OP_PUT) {

@@ -449,8 +449,9 @@ static inline void debug_and_count_stats_when_broadcasting_writes
     if (!is_accept) {
       uint64_t lid_to_send = *(uint64_t *) p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
       if (lid_to_send != (*expected_l_id_to_send)) {
-        red_printf("Wrkr %u, expected l_id %lu lid_to send %u\n",
-                   t_id, (*expected_l_id_to_send), lid_to_send);
+        red_printf("Wrkr %u, expected l_id %lu lid_to send %u, opcode %u \n",
+                   t_id, (*expected_l_id_to_send), lid_to_send,
+                   p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode );
         assert(false);
       }
       (*expected_l_id_to_send) = lid_to_send + coalesce_num;
@@ -484,13 +485,14 @@ static inline void debug_checks_when_inserting_a_write
    struct pending_ops *p_ops, const uint32_t w_ptr, const uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    // In a fresh message check that the lid is consistent with the previous emssage
+    // In a fresh message check that the lid is consistent with the previous message
     if (inside_w_ptr == 0) {
       if (message_l_id > MAX_W_COALESCE) {
         uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
+        bool prev_mes_is_accept = w_mes[prev_w_mes_ptr].write[0].opcode == ACCEPT_OP;
         uint64_t prev_l_id = *(uint64_t *) w_mes[prev_w_mes_ptr].l_id;
         uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
-        if (message_l_id != prev_l_id + prev_coalesce) {
+        if (!prev_mes_is_accept && message_l_id != prev_l_id + prev_coalesce) {
           red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
                      t_id, message_l_id, prev_l_id, prev_coalesce);
         }
@@ -692,6 +694,84 @@ static inline void check_global_sess_id(uint8_t machine_id, uint16_t t_id,
   assert(glob_ses_id_to_m_id(glob_sess_id) == machine_id);
   assert(glob_ses_id_to_t_id(glob_sess_id) == t_id);
   assert(glob_ses_id_to_sess_id(glob_sess_id) == session_id);
+}
+
+
+// Do some preliminary checks for the write message,
+// the while loop is there to wait for the entire message to be written (currently not useful)
+static inline void check_the_polled_write_message(volatile struct w_message *w_mes,
+                                                  uint32_t index, uint32_t polled_writes, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    uint32_t debug_cntr = 0;
+    if (w_mes->w_num == 0) {
+      red_printf("Wrkr %u received a write with w_num %u, op %u from machine %u with lid %lu \n",
+                 t_id, w_mes->w_num, w_mes->write[0].opcode, w_mes->m_id, *(uint64_t *) w_mes->l_id);
+      assert(false);
+    }
+    while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
+      if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
+      if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
+      if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
+      if (w_mes->write[w_mes->w_num - 1].opcode == ACCEPT_OP) return;
+      if (ENABLE_ASSERTIONS) {
+        assert(false);
+        debug_cntr++;
+        if (debug_cntr == B_4_) {
+          red_printf("Wrkr %d stuck waiting for a write to come index %u coalesce id %u\n",
+                     t_id, index, w_mes->w_num - 1);
+          print_wrkr_stats(t_id);
+          debug_cntr = 0;
+        }
+      }
+    }
+    if (polled_writes + w_mes->w_num > MAX_INCOMING_W) {
+      assert(false);
+    }
+  }
+}
+
+static inline void check_a_polled_write(struct write* write, uint16_t w_i, uint16_t w_num, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
+        write->opcode != OP_ACQUIRE && //write->opcode != OP_ACQUIRE_FLIP_BIT &&
+        write->opcode != OP_RELEASE_BIT_VECTOR)
+      red_printf("Wrkr %u Receiving write : Opcode %u, i %u/%u \n", t_id, write->opcode, w_i, w_num);
+    if ((*(uint32_t *) write->version) % 2 != 0) {
+      red_printf("Wrkr %u :Odd version %u, m_id %u \n", t_id, *(uint32_t *) write->version, write->m_id);
+    }
+  }
+}
+
+
+static inline void print_polled_write_message_info(struct w_message *w_mes, uint32_t index, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (DEBUG_WRITES && w_mes->write[0].opcode != ACCEPT_OP)
+      printf("Worker %u sees a write Opcode %d at offset %d, l_id %lu  \n",
+             t_id, w_mes->write[0].opcode, index, *(uint64_t *) w_mes->l_id);
+    else if (DEBUG_RMW && w_mes->write[0].opcode == ACCEPT_OP) {
+      struct accept_message *acc_mes = (struct accept_message *) w_mes;
+      printf("Worker %u sees an Accept: opcode %d at offset %d, l_id %lu, "
+               "globe_ses_id %u, log_no %u, coalesce_num %u \n",
+             t_id, acc_mes->acc[0].opcode, index, *(uint64_t *) acc_mes->acc[0].t_rmw_id,
+             *(uint16_t *) acc_mes->acc[0].glob_sess_id, *(uint32_t *) acc_mes->acc[0].log_no,
+             acc_mes->acc_num);
+    }
+  }
+}
+
+
+static inline void count_stats_on_receiving_w_mes_reset_w_num(struct w_message *w_mes,
+                                                              uint8_t w_num, uint16_t t_id)
+{
+  if (ENABLE_STAT_COUNTING) {
+    if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_writes_received[w_mes->m_id] += w_num;
+    t_stats[t_id].received_writes += w_num;
+    t_stats[t_id].received_writes_mes_num++;
+  }
+  if (ENABLE_ASSERTIONS) w_mes->w_num = 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1439,7 +1519,7 @@ static inline void fill_rmw_prep_reply(struct prop_rep_last_committed  *prop_rep
 {
   switch (flag) {
     case RMW_ACK_PROPOSE :
-      if (DEBUG_RMW) green_printf("Worker %u: Propose gets Ackedl \n", t_id);
+      if (DEBUG_RMW) green_printf("Worker %u: Remote propose gets Acked \n", t_id);
       prop_rep->opcode = PROP_ACK;
       break;
     case RMW_TS_SMALLER_THAN_KVS : // ts was stale, send TS and Value
@@ -1542,11 +1622,11 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
     w_mes[w_mes_ptr].w_num = 0;
     inside_w_ptr = 0;
   }
-  struct accept_message *acc_mes = (struct accept_message *) w_mes;
+  struct accept_message *acc_mes = (struct accept_message *) &w_mes[w_mes_ptr];
   struct accept *acc = &acc_mes->acc[inside_w_ptr];
   *(uint64_t *) acc->t_rmw_id = local_entry->rmw_id.id;
   *(uint16_t *) acc->glob_sess_id = local_entry->rmw_id.glob_sess_id;
-  acc->old_ts = local_entry->new_ts;
+  acc->new_ts = local_entry->new_ts;
   memcpy(acc->key, &local_entry->key, TRUE_KEY_SIZE);
   acc->opcode = ACCEPT_OP;
   memcpy(acc->value, local_entry->value, (size_t) RMW_VALUE_SIZE);
@@ -1554,6 +1634,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
 
   p_ops->w_fifo->bcast_size++;
   w_mes[w_mes_ptr].w_num++;
+  if (ENABLE_ASSERTIONS) assert(w_mes[w_mes_ptr].w_num == 1);
   if (w_mes[w_mes_ptr].w_num == MAX_W_COALESCE) {
     MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
     if (ENABLE_ASSERTIONS) assert(p_ops->w_fifo->push_ptr != p_ops->w_fifo->bcast_pull_ptr);
@@ -1828,7 +1909,16 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
   uint32_t w_ptr = p_ops->w_push_ptr;
   uint64_t message_l_id;
+
+  bool last_mes_is_accept = inside_w_ptr > 0 && w_mes[w_mes_ptr].write[0].opcode == ACCEPT_OP;
+  if (ENABLE_RMWS && last_mes_is_accept) { // Do not coalesce a write with an accept
+    MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+    w_mes_ptr = p_ops->w_fifo->push_ptr;
+    w_mes[w_mes_ptr].w_num = 0;
+    inside_w_ptr = 0;
+  }
   //printf("Insert a write %u \n", *(uint32_t *)write);
+
 
   if (DEBUG_READS && source == FROM_READ) {
     yellow_printf("Wrkr %u Inserting a write as a second round of read/write w_size %u/%d, bcast size %u, "
@@ -1839,9 +1929,9 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
                   *(uint64_t *)w_mes->l_id, p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
   }
 
+
   write_bookkeeping_in_insertion_based_on_source(p_ops, write, source, incoming_pull_ptr,
                                                  &inside_w_ptr, &w_mes_ptr, w_mes,  r_info, t_id);
-
   my_assert(inside_w_ptr < MAX_W_COALESCE, "After bookeeping: Inside pointer must not point to the last message");
   if (inside_w_ptr == 0) {
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
@@ -1864,7 +1954,10 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   else if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE)
     p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
 
-  if (ENABLE_ASSERTIONS) if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
+  if (ENABLE_ASSERTIONS) {
+    if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
+    assert(w_mes[w_mes_ptr].write[0].opcode != ACCEPT_OP);
+  }
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
@@ -2164,7 +2257,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   for (uint16_t i = 0; i < op_i; i++) {
     if (ENABLE_ASSERTIONS) {
       if (ops[i].key.meta.version % 2 != 0) {
-        red_printf("Wrkr %u, Trace to cache: Version not even: u%, opcode %u, resp %u \n",
+        red_printf("Wrkr %u, Trace to cache: Version not even: %u, opcode %u, resp %u \n",
                    t_id, ops[i].key.meta.version, ops[i].opcode, resp[i].type);
       }
       my_assert(ops[i].key.meta.version % 2 == 0, "Trace to cache: Version must be even after cache");
@@ -2498,7 +2591,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     br_i++;
     uint8_t coalesce_num = p_ops->w_fifo->w_message[bcast_pull_ptr].w_num;
     debug_and_count_stats_when_broadcasting_writes(p_ops, bcast_pull_ptr, coalesce_num,
-                                   t_id, expected_next_l_id, br_i, outstanding_writes);
+                                                   t_id, expected_next_l_id, br_i, outstanding_writes);
     p_ops->w_fifo->bcast_size -= coalesce_num;
     // This message has been sent, do not add other writes to it!
     // this is tricky because releases leave half-filled messages, make sure this is the last message to bcast
@@ -2682,32 +2775,7 @@ static inline void ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
   }
 }
 
-// Wait until the entire write is there
-static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
-                                             uint16_t t_id, uint32_t index)
-{
-  uint32_t debug_cntr = 0;
-  if (w_mes->w_num == 0) {
-    red_printf("Wrkr %u received a write with w_num %u, op %u from machine %u with lid %lu \n",
-               t_id, w_mes->w_num, w_mes->write[0].opcode, w_mes->m_id, *(uint64_t *) w_mes->l_id);
-    assert(false);
-  }
-  while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
-    if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
-    if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
-    if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
-    if (ENABLE_ASSERTIONS) {
-      assert(false);
-      debug_cntr++;
-      if (debug_cntr == B_4_) {
-        red_printf("Wrkr %d stuck waiting for a write to come index %u coalesce id %u\n",
-                   t_id, index, w_mes->w_num - 1);
-        print_wrkr_stats(t_id);
-        debug_cntr = 0;
-      }
-    }
-  }
-}
+
 
 //Handle the configuration bit_vec vector on receiving a release
 static inline void handle_configuration_on_receiving_rel(struct write *write, uint16_t t_id)
@@ -2740,7 +2808,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   uint32_t polled_messages = 0, polled_writes = 0;
   int completed_messages =  ibv_poll_cq(w_recv_cq, W_BUF_SLOTS, w_recv_wc);
   if (DEBUG_RECEIVES) {
-    w_recv_info->posted_recvs-=completed_messages;
+    w_recv_info->posted_recvs -= completed_messages;
     if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
       red_printf("Wrkr %u some remote machine has created credits out of thin air \n", t_id);
   }
@@ -2748,42 +2816,21 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   uint32_t index = *pull_ptr;
   // Start polling
   while (polled_messages < completed_messages) {
-    if (ENABLE_ASSERTIONS) {
-      //assert(incoming_ws[index].w_mes.w_num > 0);
-      wait_for_the_entire_write(&incoming_ws[index].w_mes, t_id, index);
-    }
-    if (DEBUG_WRITES)
-      printf("Worker sees a write Opcode %d at offset %d, l_id %lu  \n",
-             incoming_ws[index].w_mes.write[0].opcode, index, *(uint64_t *)incoming_ws[index].w_mes.l_id);
+    check_the_polled_write_message(&incoming_ws[index].w_mes, index, polled_writes, t_id);
     struct w_message *w_mes = (struct w_message*) &incoming_ws[index].w_mes;
+    print_polled_write_message_info(w_mes, index, t_id);
     uint8_t w_num = w_mes->w_num;
-    // Back-pressure
-    if (ENABLE_ASSERTIONS && polled_writes + w_num > MAX_INCOMING_W) {
-      assert(false);
-      break;
-    }
+    bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
+
     for (uint16_t i = 0; i < w_num; i++) {
       struct write *write = &w_mes->write[i];
-      if (ENABLE_ASSERTIONS) {
-        if(write->opcode != CACHE_OP_PUT && write->opcode != OP_RELEASE &&
-           write->opcode != OP_ACQUIRE && //write->opcode != OP_ACQUIRE_FLIP_BIT &&
-           write->opcode != OP_RELEASE_BIT_VECTOR)
-          red_printf("Receiving write : Opcode %u, i %u/%u \n", write->opcode, i, w_num);
-        if ((*(uint32_t *)write->version) % 2 != 0) {
-          red_printf("Odd version %u, m_id %u \n", *(uint32_t *)write->version, write->m_id);
-        }
-      }
+      check_a_polled_write(write, i, w_num, t_id);
       if (!EMULATE_ABD) handle_configuration_on_receiving_rel(write, t_id);
       p_ops->ptrs_to_w_ops[polled_writes] = (struct write *)(((void *) write) - 3); // align with cache_op
       polled_writes++;
     }
-    ack_bookkeeping(&acks[w_mes->m_id], w_num, *(uint64_t *)w_mes->l_id, w_mes->m_id, t_id);
-    if (ENABLE_STAT_COUNTING) {
-      if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_writes_received[w_mes->m_id] += w_num;
-      t_stats[t_id].received_writes += w_num;
-      t_stats[t_id].received_writes_mes_num++;
-    }
-    if (ENABLE_ASSERTIONS) incoming_ws[index].w_mes.w_num = 0;
+    if (!is_accept) ack_bookkeeping(&acks[w_mes->m_id], w_num, *(uint64_t *)w_mes->l_id, w_mes->m_id, t_id);
+    count_stats_on_receiving_w_mes_reset_w_num(w_mes, w_num, t_id);
     MOD_ADD(index, W_BUF_SLOTS);
     polled_messages++;
   }
