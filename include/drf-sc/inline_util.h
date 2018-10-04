@@ -444,14 +444,17 @@ static inline void debug_and_count_stats_when_broadcasting_writes
    uint8_t coalesce_num, uint16_t t_id, uint64_t* expected_l_id_to_send,
    uint16_t br_i, uint32_t *outstanding_writes)
 {
+  bool is_accept = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == ACCEPT_OP;
   if (ENABLE_ASSERTIONS) {
-    uint64_t lid_to_send = *(uint64_t *)p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
-    if (lid_to_send != (*expected_l_id_to_send)) {
-      red_printf("Wrkr %u, expected l_id %lu lid_to send %u\n",
-                 t_id, (*expected_l_id_to_send), lid_to_send);
-      assert(false);
+    if (!is_accept) {
+      uint64_t lid_to_send = *(uint64_t *) p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
+      if (lid_to_send != (*expected_l_id_to_send)) {
+        red_printf("Wrkr %u, expected l_id %lu lid_to send %u\n",
+                   t_id, (*expected_l_id_to_send), lid_to_send);
+        assert(false);
+      }
+      (*expected_l_id_to_send) = lid_to_send + coalesce_num;
     }
-    (*expected_l_id_to_send) = lid_to_send + coalesce_num;
     if (coalesce_num == 0) {
       red_printf("Wrkr %u coalesce_num is %u, bcast_size %u, w_size %u, push_ptr %u, pull_ptr %u"
                    " mes fifo push_ptr %u, mes fifo pull ptr %u l_id %lu"
@@ -467,7 +470,7 @@ static inline void debug_and_count_stats_when_broadcasting_writes
     assert(p_ops->w_fifo->bcast_size >= coalesce_num);
     (*outstanding_writes) += coalesce_num;
   }
-  if (ENABLE_STAT_COUNTING) {
+  if (ENABLE_STAT_COUNTING && !is_accept) {
     t_stats[t_id].writes_sent += coalesce_num;
     t_stats[t_id].writes_sent_mes_num++;
   }
@@ -510,6 +513,23 @@ static inline void debug_checks_when_inserting_a_write
     assert(p_ops->w_state[w_ptr] == INVALID);
   }
 
+}
+
+// When forging a write (which the accept hijack)
+static inline void checks_when_forging_an_accept(struct accept_message *acc_mes, struct ibv_sge *send_sgl,
+                                                 uint16_t br_i, uint8_t coalesce_num, uint16_t t_id)
+{
+  assert(coalesce_num <= MAX_ACC_COALESCE);
+  assert(coalesce_num > 0);
+  for (uint8_t  i = 0; i < coalesce_num; i++) {
+    if (DEBUG_RMW)
+      printf("Worker: %u, Accept %d, val-len %u, message w_size %d\n", t_id, i, acc_mes->acc[i].val_len,
+             send_sgl[br_i].length);
+    if (ENABLE_ASSERTIONS) {
+      assert(acc_mes->acc[i].val_len == VALUE_SIZE >> SHIFT_BITS);
+      assert(acc_mes->acc[i].opcode == ACCEPT_OP);
+    }
+  }
 }
 
 
@@ -1802,7 +1822,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
   //  else if (source == RELEASE_SECOND) r_info = (struct read_info *) write;
-
+  // TODO DO not coalesce with an accept...
   struct w_message *w_mes = p_ops->w_fifo->w_message;
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
@@ -2380,13 +2400,18 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_i];
   uint32_t backward_ptr = p_ops->w_fifo->backward_ptrs[w_mes_i];
   uint8_t coalesce_num = w_mes->w_num;
-  send_sgl[br_i].length = W_MES_HEADER + coalesce_num * sizeof(struct write);
+  bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
+  uint16_t header_size = (uint16_t) (is_accept ? ACCEPT_MES_HEADER : W_MES_HEADER);
+  uint16_t size_of_struct = (uint16_t) (is_accept ? ACCEPT_SIZE : W_SIZE);
+  send_sgl[br_i].length = header_size + coalesce_num * size_of_struct;
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) w_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
 
-  if (ENABLE_ASSERTIONS)
-    checks_when_forging_a_write(w_mes, send_sgl, br_i, coalesce_num, t_id);
+  if (ENABLE_ASSERTIONS) {
+    if (is_accept) checks_when_forging_an_accept((struct accept_message *) w_mes, send_sgl, br_i,coalesce_num, t_id);
+    else checks_when_forging_a_write(w_mes, send_sgl, br_i, coalesce_num, t_id);
+  }
 
   // Check if the release needs to send the vector bit_vec to get quoromized
   if (unlikely (!EMULATE_ABD && w_mes->write[0].opcode == OP_RELEASE &&
@@ -2399,10 +2424,16 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   }
 
   // Set the w_state for each write
-  set_w_state_for_each_write(p_ops, w_mes, backward_ptr, coalesce_num, t_id);
+  if (!is_accept)
+    set_w_state_for_each_write(p_ops, w_mes, backward_ptr, coalesce_num, t_id);
 
-  if (DEBUG_WRITES)
+  if (DEBUG_WRITES && !is_accept)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u, with credits: %d, lid: %u  \n",
+                 t_id, w_mes->write[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
+                 credits[vc][(machine_id + 1) % MACHINE_NUM], *(uint64_t*)w_mes->l_id);
+
+  if (DEBUG_RMW && is_accept)
+    green_printf("Wrkr %d : I BROADCAST an accept message %d of %u accepts with mes_size %u, with credits: %d, lid: %u  \n",
                  t_id, w_mes->write[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], *(uint64_t*)w_mes->l_id);
 

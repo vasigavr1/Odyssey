@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
   static_assert(VALUE_SIZE > BYTES_OVERRIDEN_IN_KVS_VALUE, "");
   static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
 
-
+  static_assert(sizeof(struct write) == W_SIZE, "");
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
 
