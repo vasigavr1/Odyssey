@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 3
+#define WORKERS_PER_MACHINE 33
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -221,6 +221,16 @@
 #define ACCEPT_MES_HEADER 2
 #define ACCEPT_SIZE (29 + RMW_VALUE_SIZE) // key 8 rmw-id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
 #define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
+
+// ACCEPT REPLIES
+#define MAX_ACC_REP_COALESCE (MAX_ACC_COALESCE)
+#define ACC_REP_MES_HEADER 3 // coalesce_num , m_id, opcode
+#define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define ACC_REP_MESSAGE_SIZE (ACC_REP_MES_HEADER + (MAX_ACC_REP_COALESCE * ACC_REP_SIZE))
+#define ACC_REP_SMALL_SIZE 9 // lid and opcode
+#define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
+#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
+
 
 #define RMW_WAIT_COUNTER M_256
 
@@ -399,6 +409,8 @@ struct remote_qp {
 #define RMW_SEEN_HIGHER_PROP_TS 6 // Send a TS, because you have already acked a higher Propose
 #define RMW_ALREADY_COMMITTED 7
 #define RMW_LOG_TOO_SMALL 8
+#define RMW_ACK_ACCEPT 9
+#define RMW_ACCEPTED_WITH_HIGHER_TS 10
 //#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
 // Possible flags when accepting
 #define ACCEPT_ACK 1
@@ -471,7 +483,7 @@ struct w_message {
 
 struct accept {
 	uint8_t t_rmw_id[8];
-	struct ts_tuple new_ts;
+	struct ts_tuple ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
   uint8_t val_len;
@@ -590,7 +602,7 @@ struct r_rep_message_ud_req {
 
 
 // Reply with the last committed RMW if the
-// proposed had a low log number or has already been committed
+// proposal had a low log number or has already been committed
 struct prop_rep_last_committed {
   uint8_t l_id[8]; // the l_id of the propose
   uint8_t opcode;
@@ -609,6 +621,28 @@ struct prop_rep_message {
   struct prop_rep_last_committed prop_rep[MAX_PROP_REP_COALESCE];
 };
 
+// The largest possible accept reply: Reply with the last committed RMW if the
+// accept had a low log number or has already been committed
+struct acc_rep_last_committed {
+  uint8_t l_id[8]; // the l_id of the original accept
+  uint8_t opcode;
+  struct ts_tuple ts;
+  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t rmw_id[8]; //accepted  OR last committed
+  uint8_t glob_sess_id[2]; //accepted  OR last committed
+  uint8_t log_no[4]; // last committed only
+};
+
+//
+struct acc_rep_message {
+  uint8_t coalesce_num;
+  uint8_t m_id;
+  uint8_t opcode;
+  struct acc_rep_last_committed acc_rep[MAX_ACC_REP_COALESCE];
+};
+
+
+
 struct r_rep_fifo {
   struct r_rep_message *r_rep_message;
   uint8_t *rem_m_id;
@@ -619,7 +653,6 @@ struct r_rep_fifo {
   //uint32_t bcast_pull_ptr;
   uint32_t total_size; // number of r_reps not messages!
   uint32_t mes_size; // number of messages
-
 };
 
 

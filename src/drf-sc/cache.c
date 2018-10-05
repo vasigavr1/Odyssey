@@ -260,10 +260,9 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 		}
 
 		if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-//			resp[I].val_len = 0;
-//			resp[I].val_ptr = NULL;
-//      red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
-//                 op[I].key.bkt, kv_ptr[I]->key.bkt ,op[I].key.server, kv_ptr[I]->key.server, op[I].key.tag, kv_ptr[I]->key.tag);
+      //red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
+      //          op[I].key.bkt, kv_ptr[I]->key.bkt ,op[I].key.server,
+      //          kv_ptr[I]->key.server, op[I].key.tag, kv_ptr[I]->key.tag);
 			resp[I].type = CACHE_MISS;
 		}
 	}
@@ -274,6 +273,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 // YOU have to give a pointer to the beggining of the array of the pointers or else you will not
 // be able to wrap around to your array
 inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write **writes,
+                                   struct pending_ops *p_ops,
                                    uint32_t pull_ptr,  uint32_t max_op_size, bool zero_ops)
 {
   int I, j;	/* I is batch index */
@@ -334,44 +334,82 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
   }
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(I = 0; I < op_num; I++) {
-    struct cache_op *op = (struct cache_op*) writes[(pull_ptr + I) % max_op_size];
-    if (unlikely (op->opcode == OP_RELEASE_BIT_VECTOR )) continue;
-    if(kv_ptr[I] != NULL) {
+    struct cache_op *op = (struct cache_op *) writes[(pull_ptr + I) % max_op_size];
+    if (unlikely (op->opcode == OP_RELEASE_BIT_VECTOR)) continue;
+    if (kv_ptr[I] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
       long long *key_ptr_log = (long long *) kv_ptr[I];
       long long *key_ptr_req = (long long *) op;
-      if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+      if (key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[I] = 1;
-        if (ENABLE_ASSERTIONS) {
-          if (op->opcode != CACHE_OP_PUT && op->opcode != OP_RELEASE && op->opcode != OP_ACQUIRE) {
-            red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
-                         "m_id %u, val_len %u, version %u , \n",
-                       t_id, op->opcode, I, op->key.meta.m_id,
-                       op->val_len, op->key.meta.version);
-            assert(0);
+        if (op->opcode == CACHE_OP_PUT || op->opcode == OP_RELEASE ||
+            op->opcode == OP_ACQUIRE) {
+          //red_printf("op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
+          if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr[I]->val_len);
+          optik_lock(&kv_ptr[I]->key.meta);
+          if (optik_is_greater_version(kv_ptr[I]->key.meta, op->key.meta)) {
+            memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
+            optik_unlock(&kv_ptr[I]->key.meta, op->key.meta.m_id, op->key.meta.version);
+          } else {
+            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+            t_stats[t_id].failed_rem_writes++;
           }
         }
-        //red_printf("op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
-        if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr[I]->val_len);
-        optik_lock(&kv_ptr[I]->key.meta);
-        if (optik_is_greater_version(kv_ptr[I]->key.meta, op->key.meta)) {
-          memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-          optik_unlock(&kv_ptr[I]->key.meta, op->key.meta.m_id, op->key.meta.version);
-        }
-        else {
+        else if (op->opcode == ACCEPT_OP) {
+          struct accept *acc =(struct accept *) (((void *)op) - 5); // the accept starts at an offset of 5 bytes
+          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u\n", t_id, I);
+          uint8_t flag;
+          // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
+          struct rmw_help_entry reply_rmw;
+          uint64_t rmw_l_id = *(uint64_t*) acc->t_rmw_id;
+          uint16_t glob_sess_id = *(uint16_t*) acc->glob_sess_id;
+          uint32_t log_no = *(uint32_t*) acc->log_no;
+          // TODO Finding the sender machine id here is a hack that will not work with coalescing
+          static_assert(MAX_ACC_COALESCE == 1, " ");
+          struct accept_message *acc_mes = (((void *)op) - 5 - ACCEPT_MES_HEADER);
+          if (ENABLE_ASSERTIONS) check_accept_mes(acc_mes);
+          uint8_t prop_m_id = acc_mes->m_id;
+          uint32_t entry;
+          optik_lock(&kv_ptr[I]->key.meta);
+          // 1. check if it has been committed
+          // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
+          // Either way fill the reply_rmw fully, but have a specialized flag!
+          if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr[I], rmw_l_id, glob_sess_id,
+                                                   t_id, &entry, &flag, &reply_rmw)) {
+            // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
+            if (!accept_ts_is_not_greater_than_kvs_ts(kv_ptr[I], acc, prop_m_id, t_id, &flag, &reply_rmw)) {
+              // 4. If the kv-pair has not been RMWed before grab an entry and ack
+              // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
+              // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
+              flag = handle_remote_accept_in_cache(kv_ptr[I], acc, prop_m_id, t_id, &reply_rmw, &entry);
+              // if the accepted is going to be acked record its information in the global entry
+              if (flag == RMW_ACK_ACCEPT)
+                activate_RMW_entry(ACCEPTED, *(uint32_t *) acc->ts.version, &rmw.entry[entry], acc->opcode,
+                                   acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
+            }
+          }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          t_stats[t_id].failed_rem_writes++;
+          // TODO this needs to work with the rmw_help_structure now
+          insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
+                       (void*) &reply_rmw, flag, acc->opcode);
+        }
+        else if (ENABLE_ASSERTIONS) {
+          red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
+                       "m_id %u, val_len %u, version %u , \n",
+                     t_id, op->opcode, I, op->key.meta.m_id,
+                     op->val_len, op->key.meta.version);
+          assert(0);
         }
       }
-    }
-    if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-    }
-    if (zero_ops) {
-//      printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
-      op->opcode = 5;
+      if (key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
+        if (ENABLE_ASSERTIONS) assert(false);
+      }
+      if (zero_ops) {
+        //printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
+        op->opcode = 5;
+      }
     }
   }
-
 }
 
 // The worker send here the incoming reads, the reads check the incoming ts if it is  bigger/equal to the local
@@ -482,7 +520,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
         }
         else if (ENABLE_RMWS && op->opcode == OP_RMW) {
           struct propose *prop =(struct propose *) (((void *)op) - 5); // the propose starts at an offset of 5 bytes
-          if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW on op %u\n", t_id, I);
+          if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW propose on op %u\n", t_id, I);
           uint8_t flag;
           struct rmw_help_entry reply_rmw; // on replying to the propose we may need to send on or more of TS, VALUE, RMW-id, log-no
           uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
@@ -502,17 +540,15 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
               // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
               flag = handle_remote_propose_in_cache(kv_ptr[I], prop, prop_m_id, t_id, &reply_rmw, &entry);
-              // if the propose is going to be accepted record its information in the global entry
+              // if the propose is going to be acked record its information in the global entry
               if (flag == RMW_ACK_PROPOSE)
                 activate_RMW_entry(PROPOSED, *(uint32_t *) prop->ts.version, &rmw.entry[entry], prop->opcode,
-                                   prop_m_id, rmw_l_id, glob_sess_id, log_no, t_id);
+                                   prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
             }
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          // TODO this needs to work with the rmw_help_structure now
           insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, prop->opcode);
-
         }
         else if (op->opcode == CACHE_OP_GET_TS) {
           uint32_t debug_cntr = 0;

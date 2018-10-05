@@ -113,9 +113,20 @@ int main(int argc, char *argv[])
 
   // ACCEPTS
   static_assert(MAX_ACC_COALESCE == 1, "");
+  static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
   static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
   static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
+
+  // ACCEPT REPLIES MAP TO PROPOSE REPLIES
+  static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
+  static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
+  static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
+  static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
+  static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
+  static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
+
+
 
 
   { // Check that prop and read have opcode in the same byte

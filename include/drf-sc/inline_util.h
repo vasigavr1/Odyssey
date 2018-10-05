@@ -774,6 +774,13 @@ static inline void count_stats_on_receiving_w_mes_reset_w_num(struct w_message *
   if (ENABLE_ASSERTIONS) w_mes->w_num = 0;
 }
 
+static inline void check_accept_mes(struct accept_message *acc_mes)
+{
+  assert(acc_mes->acc_num > 0 && acc_mes->acc_num <= MAX_ACC_COALESCE);
+  assert(acc_mes->m_id < MACHINE_NUM);
+  assert(acc_mes->acc[0].opcode == ACCEPT_OP);
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -1124,6 +1131,49 @@ static inline void write_bookkeeping_in_insertion_based_on_source
 
 }
 
+// fill a read reply when insterting a read reply
+static inline void fill_read_reply( struct r_rep_big *r_rep,struct r_rep_fifo * r_rep_fifo,
+                                    struct ts_tuple *local_ts, struct ts_tuple *remote_ts,
+                                    void *value, uint8_t r_rep_flag, uint16_t t_id) {
+  enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
+  if (machine_id == 0 && R_TO_W_DEBUG) {
+    if (ts_comp == EQUAL)
+      green_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
+                   *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
+    else
+      red_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
+                 *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
+  }
+  switch (ts_comp) {
+    case SMALLER: // local is smaller than remote
+      //if (DEBUG_TS) printf("Read TS is smaller \n");
+      r_rep->opcode = TS_SMALLER;
+      break;
+    case EQUAL:
+      //if (DEBUG_TS) /printf("Read TS are equal \n");
+      r_rep->opcode = TS_EQUAL;
+      break;
+    case GREATER: // local is greater than remote
+      memcpy(&r_rep->ts, local_ts, TS_TUPLE_SIZE);
+      if (r_rep_flag == READ_TS) {
+        //This does not need the value, as it is going to do a write eventually
+        r_rep->opcode = TS_GREATER_TS_ONLY;
+        r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
+      } else {
+        if (DEBUG_TS) printf("Read TS is greater \n");
+        r_rep->opcode = TS_GREATER;
+        memcpy(r_rep->value, value, VALUE_SIZE);
+        r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
+      }
+      break;
+    default:
+      if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
+
+
+
 // When forging a write
 static inline void add_failure_to_release(struct pending_ops *p_ops,
                                           struct w_message *w_mes, uint32_t backward_ptr,
@@ -1281,7 +1331,7 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, struct c
       fill_the_rep = true;
     else if (rmw.entry[*entry].log_no > log_no) {
       if (DEBUG_RMW)
-        yellow_printf("Wkrk %u Log number is too small %/% entry state %u, propose with rmw_lid %u,"
+        yellow_printf("Wkrk %u Log number is too small %/% entry state %u, propose/accept with rmw_lid %u,"
                         " global_sess_id %u, entry %u\n", t_id, log_no, rmw.entry[*entry].log_no,
                       rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
       *flag = RMW_LOG_TOO_SMALL;
@@ -1289,7 +1339,7 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, struct c
     }
     else if (DEBUG_RMW) { // remote log is higher than the locally stored!
       if (rmw.entry[*entry].log_no < log_no)
-        yellow_printf("Wkrk %u Log number is higher than expected %/%, entry state %u, propose with rmw_lid %u, global_sess_id %u, entry %u\n",
+        yellow_printf("Wkrk %u Log number is higher than expected %/%, entry state %u, propose/accept with rmw_lid %u, global_sess_id %u, entry %u\n",
                       t_id, log_no, rmw.entry[*entry].log_no, rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
     }
     // If either the log is too smaller or the rmw_id has been committed,
@@ -1323,6 +1373,29 @@ static inline bool propose_ts_is_not_greater_than_kvs_ts(struct cache_op *kv_ptr
   }
   else return false;
 }
+
+// When receiving an accept check that its ts is bigger than the KVS ts
+static inline bool accept_ts_is_not_greater_than_kvs_ts(struct cache_op *kv_ptr, struct accept *acc,
+                                                         uint8_t m_id, uint16_t t_id, uint8_t *flag,
+                                                         struct rmw_help_entry *rep_entry)
+{
+  struct ts_tuple tmp_ts; // cant use the kvs version as we incremented it when locking.
+  *(uint32_t *) tmp_ts.version = kv_ptr->key.meta.version - 1;
+  tmp_ts.m_id = kv_ptr->key.meta.m_id;
+  if (compare_ts(&acc->ts, &tmp_ts) != GREATER) {
+    if (DEBUG_RMW)
+      yellow_printf("Wrkr %u: TS is NOT greater in a received accept: version %u/%u, m_id %u/%u"
+                      " from machine %u with rmw_id % , glob_sess_id %u, \n",
+                    t_id, *(uint32_t *) acc->ts.version, *(uint32_t *) tmp_ts.version, acc->ts.m_id, tmp_ts.m_id,
+                    m_id, *(uint64_t *) acc->t_rmw_id, *(uint16_t *)acc->glob_sess_id);
+    *flag = RMW_TS_SMALLER_THAN_KVS;
+    rep_entry->ts = tmp_ts;
+    return true;
+  }
+  else return false;
+}
+
+
 
 // used when filling a propose reply
 static inline void copy_entry_on_prop_reply_depending_on_opcode(struct prop_rep_last_committed  *prop_rep,
@@ -1379,9 +1452,10 @@ static inline void copy_entry_on_prop_reply_depending_on_opcode(struct prop_rep_
 //------------------------------ RMW------------------------------------------
 //---------------------------------------------------------------------------*/
 
-// the first time a key gets RMWed, it grabs an RMW entry that lasts for life, the entry is protected by the KVS lock
+// the first time a key gets RMWed, it grabs an RMW entry that lasts for life,
+// the entry is protected by the KVS lock
 static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
-                                      uint8_t opcode, uint8_t m_id, uint32_t new_version,
+                                      uint8_t opcode, uint8_t new_ts_m_id, uint32_t new_version,
                                       uint64_t l_id, uint32_t log_no,
                                       uint16_t glob_sess_id, uint16_t t_id)
 {
@@ -1394,12 +1468,12 @@ static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
 
   glob_entry->opcode = opcode;
   glob_entry->key = *((struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
-  glob_entry->new_ts.m_id = m_id;
+  glob_entry->new_ts.m_id = new_ts_m_id;
   *(uint32_t *)glob_entry->new_ts.version = new_version;
   glob_entry->rmw_id.glob_sess_id = glob_sess_id;
   glob_entry->rmw_id.id = l_id;
   glob_entry->state = state;
-  glob_entry->log_no = log_no; // not necessarilly 0 if a remote machine is grabbing here
+  glob_entry->log_no = log_no; // not necessarily 0 if a remote machine is grabbing here
   if (ENABLE_ASSERTIONS) {
     true_keys_are_equal(&glob_entry->key, (struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
@@ -1411,12 +1485,12 @@ static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
 
 // Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
 static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struct rmw_entry *glob_entry,
-                                      uint8_t opcode, uint8_t m_id, uint64_t l_id, uint16_t glob_sess_id,
+                                      uint8_t opcode, uint8_t new_ts_m_id, uint64_t l_id, uint16_t glob_sess_id,
                                       uint32_t log_no, uint16_t t_id)
 {
   // pass the new ts!
   glob_entry->opcode = opcode;
-  glob_entry->new_ts.m_id = m_id;
+  glob_entry->new_ts.m_id = new_ts_m_id;
   *(uint32_t *)glob_entry->new_ts.version = new_version;
   glob_entry->rmw_id.glob_sess_id = glob_sess_id;
   glob_entry->rmw_id.id = l_id;
@@ -1424,7 +1498,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
   glob_entry->log_no = log_no;
   if (ENABLE_ASSERTIONS) {
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
-    assert(*(uint32_t *)glob_entry->new_ts.version % 2 == 0);
+    assert(*(uint32_t *) glob_entry->new_ts.version % 2 == 0);
     assert(state == PROPOSED || state == ACCEPTED); // TODO accepted is allowed?
   }
 }
@@ -1435,8 +1509,11 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
 static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, uint8_t m_id,
                                            uint16_t t_id, struct rmw_help_entry *reply_rmw)
 {
-  uint8_t return_val = RMW_ACK_PROPOSE;
-  if (ENABLE_ASSERTIONS)  assert(pos < RMW_ENTRIES_NUM);
+  uint8_t return_flag = RMW_ACK_PROPOSE;
+  if (ENABLE_ASSERTIONS)  {
+    assert(pos < RMW_ENTRIES_NUM);
+    assert(prop->opcode == OP_RMW);
+  }
   struct rmw_entry *entry = &rmw.entry[pos];
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key((struct key *) prop->key, pos));
@@ -1452,35 +1529,78 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
       red_printf("Wrkr %u Received a proposal with same RMW id an already accepted proposal, "
                    "rmw_id %u/%u, glob sess %u/%u \n", t_id, *(uint16_t *) prop->glob_sess_id,
                  entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, entry->rmw_id.id);
-      return_val = RMW_ACK_PROPOSE;
-      entry->state = PROPOSED;
+      return_flag = RMW_ACK_PROPOSE;
     }
     else { // need to copy the value, ts and RMW-id here
       memcpy(reply_rmw->value, entry->value, (size_t) RMW_VALUE_SIZE);
       memcpy(&reply_rmw->ts, &entry->new_ts, TS_TUPLE_SIZE);
       reply_rmw->rmw_id = entry->rmw_id;
-      return_val = RMW_ALREADY_ACCEPTED;
+      return_flag = RMW_ALREADY_ACCEPTED;
     }
   }
   else if (rmw.entry[pos].state == PROPOSED) {
     enum ts_compare ts_comp = compare_ts(&prop->ts, &entry->new_ts);
     switch(ts_comp) {
       case GREATER: // new prepare has higher TS
-        return_val = RMW_ACK_PROPOSE;
+        return_flag = RMW_ACK_PROPOSE;
         break;
       case EQUAL:
-        return_val = RMW_ACK_PROPOSE;
+        return_flag = RMW_ACK_PROPOSE;
         my_assert(false, "Received a proposal with same TS an already proposed proposal");
         break;
       case SMALLER:
-        return_val = RMW_SEEN_HIGHER_PROP_TS;
+        return_flag = RMW_SEEN_HIGHER_PROP_TS;
         memcpy(&reply_rmw->ts, &entry->new_ts, TS_TUPLE_SIZE);
         break;
       default : assert(false);
     }
   }
-  return return_val;
+  return return_flag;
 }
+
+
+// Look at an RMW entry to answer to a propose message-- kv pair lock is held when calling this
+static inline uint8_t accept_snoops_entry(struct accept *acc, uint32_t pos, uint8_t sender_m_id,
+                                           uint16_t t_id, struct rmw_help_entry *reply_rmw)
+{
+  uint8_t return_flag = RMW_ACK_PROPOSE;
+  if (ENABLE_ASSERTIONS)  {
+    assert(pos < RMW_ENTRIES_NUM);
+    assert(acc->opcode == ACCEPT_OP);
+  }
+  struct rmw_entry *glob_entry = &rmw.entry[pos];
+  if (ENABLE_ASSERTIONS)
+    assert(check_entry_validity_with_key((struct key *) acc->key, pos));
+  if (glob_entry->state != INVALID_RMW) {
+    // Higher Ts  = Success,  Lower Ts  = Failure
+    enum ts_compare ts_comp = compare_ts(&acc->ts, &glob_entry->new_ts);
+    // Higher Ts  = Success
+    if (ts_comp == EQUAL || ts_comp == GREATER) {
+      return_flag = RMW_ACK_ACCEPT;
+    } else if (ts_comp == SMALLER) {
+      if (glob_entry->state == PROPOSED) {
+        memcpy(&reply_rmw->ts, &glob_entry->new_ts, TS_TUPLE_SIZE);
+        return_flag = RMW_SEEN_HIGHER_PROP_TS;
+      } else if (glob_entry->state == ACCEPTED) {
+        memcpy(reply_rmw->value, glob_entry->value, (size_t) RMW_VALUE_SIZE);
+        memcpy(&reply_rmw->ts, &glob_entry->new_ts, TS_TUPLE_SIZE);
+        reply_rmw->rmw_id = glob_entry->rmw_id;
+        return_flag = RMW_ACCEPTED_WITH_HIGHER_TS;
+      }
+
+    } else if (ENABLE_ASSERTIONS) assert(false);
+  }
+
+  if (DEBUG_RMW)
+      yellow_printf("Wrkr %u: %s Accept with rmw_id %u, glob_sess_id %u, log_no: %u, ts.version: %u, ts_m_id %u,"
+                        "locally stored state: %u, locally stored ts: version %u, m_id %u \n",
+                    t_id, return_flag == RMW_ACK_ACCEPT ? "Acks" : "Nacks",
+                    *(uint64_t *) acc->t_rmw_id, *(uint16_t *) acc->glob_sess_id, *(uint32_t *) acc->log_no,
+                      *(uint32_t *) acc->ts.version, acc->ts.m_id, glob_entry->state, glob_entry->new_ts.version,
+                      glob_entry->new_ts.m_id);
+  return return_flag;
+}
+
 
 // Try to increment the local rmw counter, if it returns false it means it is maxed out
 //static inline bool incr_local_rmw_counter()
@@ -1511,11 +1631,11 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
 //         version % 2 == 0;
 //}
 
-// Fill the prepare Reply
-static inline void fill_rmw_prep_reply(struct prop_rep_last_committed  *prop_rep,
-                                       struct r_rep_fifo *r_rep_fifo,
-                                       uint8_t flag, struct rmw_help_entry *rep_entry,
-                                       uint16_t t_id)
+// Fill the propose Reply
+static inline void fill_rmw_propose_reply(struct prop_rep_last_committed *prop_rep,
+                                          struct r_rep_fifo *r_rep_fifo,
+                                          uint8_t flag, struct rmw_help_entry *rep_entry,
+                                          uint16_t t_id)
 {
   switch (flag) {
     case RMW_ACK_PROPOSE :
@@ -1546,6 +1666,43 @@ static inline void fill_rmw_prep_reply(struct prop_rep_last_committed  *prop_rep
   }
   copy_entry_on_prop_reply_depending_on_opcode (prop_rep, r_rep_fifo, rep_entry, t_id);
 }
+
+// Fill the accept Reply
+static inline void fill_rmw_accept_reply(struct acc_rep_last_committed *acc_rep,
+                                          struct r_rep_fifo *r_rep_fifo,
+                                          uint8_t flag, struct rmw_help_entry *rep_entry,
+                                          uint16_t t_id)
+{
+  switch (flag) {
+    case RMW_ACK_PROPOSE :
+      if (DEBUG_RMW) green_printf("Worker %u: Remote propose gets Acked \n", t_id);
+      acc_rep->opcode = PROP_ACK;
+      break;
+    case RMW_TS_SMALLER_THAN_KVS : // ts was stale, send TS and Value
+      if (DEBUG_RMW) green_printf("Worker %u: Prepare TS is stale \n", t_id);
+      acc_rep->opcode = RMW_TS_STALE;
+      break;
+    case RMW_SEEN_HIGHER_PROP_TS :
+      if (DEBUG_RMW) green_printf("Worker %u: Prepare TS gets nacked \n", t_id);
+      acc_rep->opcode = SEEN_HIGHER_PROP;
+      break;
+    case RMW_ALREADY_ACCEPTED :
+      if (DEBUG_RMW) green_printf("Worker %u: A bigger Ts has bee accepted \n", t_id);
+      acc_rep->opcode = RMW_ACCEPTED;
+      break;
+    case RMW_ALREADY_COMMITTED :
+      if (DEBUG_RMW) green_printf("Worker %u: RMW Already committed! \n", t_id);
+      acc_rep->opcode = RMW_ID_COMMITTED;
+    case RMW_LOG_TOO_SMALL:
+      if (DEBUG_RMW) green_printf("Worker %u: Log is too small! \n", t_id);
+      acc_rep->opcode = LOG_TOO_SMALL;
+      break;
+    default:
+      if (ENABLE_ASSERTIONS) assert(false);
+  }
+  //copy_entry_on_prop_reply_depending_on_opcode (acc_rep, r_rep_fifo, rep_entry, t_id);
+}
+
 
 // Check if help needs to be triggered
 static inline bool trigger_help(struct rmw_local_entry *p_entry, struct mica_resp *resp, struct quorum_info *q_info)
@@ -1626,7 +1783,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   struct accept *acc = &acc_mes->acc[inside_w_ptr];
   *(uint64_t *) acc->t_rmw_id = local_entry->rmw_id.id;
   *(uint16_t *) acc->glob_sess_id = local_entry->rmw_id.glob_sess_id;
-  acc->new_ts = local_entry->new_ts;
+  acc->ts = local_entry->new_ts;
   memcpy(acc->key, &local_entry->key, TRUE_KEY_SIZE);
   acc->opcode = ACCEPT_OP;
   memcpy(acc->value, local_entry->value, (size_t) RMW_VALUE_SIZE);
@@ -1769,7 +1926,7 @@ static inline void handle_the_prop_replies(struct pending_ops *p_ops, struct pro
 
 //Handle a remote propose whose log number and TS are big enough
 static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, struct propose *prop,
-                                                     uint8_t m_id, uint16_t t_id,
+                                                     uint8_t sender_m_id, uint16_t t_id,
                                                      struct rmw_help_entry *reply_rmw, uint32_t *entry)
 {
   uint8_t flag  = RMW_ACK_PROPOSE;
@@ -1777,12 +1934,12 @@ static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, st
   // if there is no entry just ack and create entry
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
     *entry = grab_RMW_entry(PROPOSED, kv_ptr, prop->opcode,
-                            (uint8_t) machine_id, *(uint32_t *) prop->ts.version,
+                            prop->ts.m_id, *(uint32_t *) prop->ts.version,
                             rmw_l_id, *(uint32_t *) prop->log_no,
-                            *(uint16_t *)prop->glob_sess_id,t_id);
+                            *(uint16_t *)prop->glob_sess_id, t_id);
     kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
     if (DEBUG_RMW)
-      yellow_printf("Worker %u got entry %u for a remote RMW, new opcode %u \n",
+      yellow_printf("Worker %u got entry %u for a remote propose RMW, new opcode %u \n",
                     t_id, *entry, kv_ptr->opcode);
     flag = RMW_ACK_PROPOSE;
   }
@@ -1791,9 +1948,37 @@ static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, st
     if (*(uint32_t *) prop->log_no > rmw.entry[*entry].log_no)
       flag = RMW_ACK_PROPOSE;//RMW_LOG_TOO_HIGH;
     else
-    {
-      flag = propose_snoops_entry(prop, *entry, m_id, t_id, reply_rmw);
-    }
+      flag = propose_snoops_entry(prop, *entry, sender_m_id, t_id, reply_rmw);
+  }
+  else my_assert(false, "KVS opcode is wrong!");
+  return flag;
+}
+
+//Handle a remote accept whose log number and TS are big enough
+static inline uint8_t handle_remote_accept_in_cache(struct cache_op *kv_ptr, struct accept *acc,
+                                                     uint8_t sender_m_id, uint16_t t_id,
+                                                     struct rmw_help_entry *reply_rmw, uint32_t *entry)
+{
+  uint8_t flag  = RMW_ACK_ACCEPT;
+  uint64_t rmw_l_id = *(uint64_t *) acc->t_rmw_id;
+  // if there is no entry just ack and create entry
+  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
+    *entry = grab_RMW_entry(ACCEPTED, kv_ptr, acc->opcode,
+                            acc->ts.m_id, *(uint32_t *) acc->ts.version,
+                            rmw_l_id, *(uint32_t *) acc->log_no,
+                            *(uint16_t *)acc->glob_sess_id, t_id);
+    kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
+    if (DEBUG_RMW)
+      yellow_printf("Worker %u got entry %u for a remote accept RMW, new opcode %u \n",
+                    t_id, *entry, kv_ptr->opcode);
+    flag = RMW_ACK_ACCEPT;
+  }
+  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
+    // if the log number is higher than expected blindly ack
+    if (*(uint32_t *) acc->log_no > rmw.entry[*entry].log_no)
+      flag = RMW_ACK_ACCEPT;
+    else
+      flag = accept_snoops_entry(acc, *entry, sender_m_id, t_id, reply_rmw);
   }
   else my_assert(false, "KVS opcode is wrong!");
   return flag;
@@ -1988,22 +2173,22 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
                                 uint8_t read_opcode) {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
-  bool is_rmw = (read_opcode == OP_RMW);
+  bool is_propose = read_opcode == OP_RMW, is_accept = read_opcode == ACCEPT_OP;
+  bool is_rmw = (is_propose || is_accept);
   bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
 
-   /* A reply message corresponds to exactly one read message
-    * to avoid reasoning about l_ids, credits and so on */
+  /* A reply message corresponds to exactly one read message
+  * to avoid reasoning about l_ids, credits and so on */
 
-  // If the r_rep has a different recipient or different l_id then create a new message
-  // Because the criterion to advance the push ptr is on creating a new message,
-  // the pull ptr has to start from 1 (because we start by incrementing the push pointer).
-  // Update: because rmw proposes have different lids, that can coincidentally match with read lids
-  // the criterion is extended:
-  // create a new on an rmw & create a new on a read if the current is not a read
+  /* If the r_rep has a different recipient or different l_id then create a new message
+   * Because the criterion to advance the push ptr is on creating a new message,
+   * the pull ptr has to start from 1 (because we start by incrementing the push pointer).
+   * Update: because rmw proposes have different lids, that can coincidentally match with read lids
+   * the criterion is extended:
+   * create a new on an rmw & create a new on a read if the current is not a read*/
   if ((rem_m_id != r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr])   ||
      (l_id != *(uint64_t *)r_rep_mes[r_rep_fifo->push_ptr].l_id) ||
-     (is_rmw) ||
-    ((!is_rmw) && (!current_message_is_r_rep))) {
+     (is_rmw) || ((!is_rmw) && (!current_message_is_r_rep))) {
     if (ENABLE_ASSERTIONS) assert(MAX_PROP_REP_COALESCE == 1); // TODO this will need multiple changes to support prop coalesicng
     MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE); // Keep this here: push ptr is used calling the function below
     set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, &r_rep_mes[r_rep_fifo->push_ptr], is_rmw);
@@ -2017,46 +2202,20 @@ static inline void insert_r_rep(struct pending_ops *p_ops, struct ts_tuple *loca
     r_rep->opcode = TS_EQUAL;
   }
   else if (!is_rmw) {
-    enum ts_compare ts_comp = compare_ts(local_ts, remote_ts);
-    if (machine_id == 0 && R_TO_W_DEBUG) {
-     if (ts_comp == EQUAL)
-       green_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
-                    *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
-     else
-       red_printf("L/R:  m_id: %u/%u version %u/%u \n", local_ts->m_id, remote_ts->m_id,
-                  *(uint32_t *) local_ts->version, *(uint32_t *) remote_ts->version);
-    }
-    switch (ts_comp) {
-     case SMALLER: // local is smaller than remote
-       //if (DEBUG_TS) printf("Read TS is smaller \n");
-       r_rep->opcode = TS_SMALLER;
-       break;
-     case EQUAL:
-       //if (DEBUG_TS) /printf("Read TS are equal \n");
-       r_rep->opcode = TS_EQUAL;
-       break;
-     case GREATER: // local is greater than remote
-       memcpy(&r_rep->ts, local_ts, TS_TUPLE_SIZE);
-       if (r_rep_flag == READ_TS) {
-         //This does not need the value, as it is going to do a write eventually
-         r_rep->opcode = TS_GREATER_TS_ONLY;
-         r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_ONLY_TS_SIZE - R_REP_SMALL_SIZE);
-       } else {
-         if (DEBUG_TS) printf("Read TS is greater \n");
-         r_rep->opcode = TS_GREATER;
-         memcpy(r_rep->value, value, VALUE_SIZE);
-         r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (R_REP_SIZE - R_REP_SMALL_SIZE);
-       }
-       break;
-     default:
-       assert(false);
-    }
+    fill_read_reply(r_rep, r_rep_fifo, local_ts, remote_ts, value, r_rep_flag, t_id);
   }
-  else { // response to an RMW
+  else if (is_propose) { // response to an RMW propose
     struct prop_rep_last_committed *prop_rep = (((void *)r_rep) - 8);
-    fill_rmw_prep_reply(prop_rep, r_rep_fifo, r_rep_flag,
-                        (struct rmw_help_entry *) value, t_id);
+    fill_rmw_propose_reply(prop_rep, r_rep_fifo, r_rep_flag,
+                           (struct rmw_help_entry *) value, t_id);
   }
+  else if (is_accept) {
+    struct acc_rep_last_committed *acc_rep = (((void *)r_rep) - 8);
+    // TODO STOPPED HERE !
+    fill_rmw_accept_reply(acc_rep, r_rep_fifo, r_rep_flag,
+                           (struct rmw_help_entry *) value, t_id);
+  }
+  else if (ENABLE_ASSERTIONS) assert(false);
 
   if (read_opcode == OP_ACQUIRE_FP) {
     if (ENABLE_ASSERTIONS) assert(r_rep_flag != NO_OP_ACQ_FLIP_BIT);
@@ -2838,7 +2997,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
   if (polled_writes > 0) {
     if (DEBUG_WRITES) yellow_printf("Worker %u is going with %u writes to the cache \n", t_id, polled_writes);
-    cache_batch_op_updates((uint32_t) polled_writes, 0, p_ops->ptrs_to_w_ops, 0, MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
+    cache_batch_op_updates((uint32_t) polled_writes, 0, p_ops->ptrs_to_w_ops, p_ops, 0, MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
     if (DEBUG_WRITES) yellow_printf("Worker %u propagated %u writes to the cache \n", t_id, polled_writes);
   }
 }

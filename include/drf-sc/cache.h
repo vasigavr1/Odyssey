@@ -168,7 +168,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op,
                           struct mica_resp *resp, struct pending_ops *);
 /* The leader sends the writes to be committed with this function*/
-void cache_batch_op_updates(uint32_t , uint16_t , struct write**, uint32_t,  uint32_t, bool);
+void cache_batch_op_updates(uint32_t , uint16_t , struct write**, struct pending_ops*, uint32_t,  uint32_t, bool);
 // The worker send here the incoming reads, the reads check the incoming ts if it is  bigger/equal to the local
 // the just ack it, otherwise they send the value back
 void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
