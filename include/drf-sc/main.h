@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 33
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 22
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -417,6 +417,9 @@ struct remote_qp {
 // Possible flags when accepting locally
 #define ACCEPT_ACK 1
 #define NACK_ACCEPT_SEEN_HIGHER_TS 2
+#define NACK_ACCEPT_LOG_OUT_OF_DATE 3
+#define COMMIT_ACK 4
+#define NACK_COMMIT_ALREADY_COMMITTED 5
 
 
 
@@ -803,7 +806,7 @@ struct rmw_info {
 //typedef _Atomic struct rmw_info atomic_rmw_info;
 extern struct rmw_info rmw;
 
-extern atomic_uint_fast64_t glob_sess_rmw_id[GLOBAL_SESSION_NUM];
+extern atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
 struct recv_info {
 	uint32_t push_ptr;

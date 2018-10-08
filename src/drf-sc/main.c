@@ -19,7 +19,7 @@ const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
 struct rmw_info rmw;
 atomic_uint_fast32_t next_rmw_entry_available;
-atomic_uint_fast64_t glob_sess_rmw_id[GLOBAL_SESSION_NUM];
+atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
 
 
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
 
   print_for_debug = false;
 	next_rmw_entry_available = 0;
-  memset(glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
+  memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
 
 
 	struct thread_params *param_arr;
