@@ -107,8 +107,8 @@ int main(int argc, char *argv[])
   static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
     " buffer allocated for a read message");
 
-  static_assert(sizeof(struct prop_rep_last_committed) == PROP_REP_SIZE, "");
-  static_assert(sizeof(struct prop_rep_message) == PROP_REP_MESSAGE_SIZE, "");
+  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
+  static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MESSAGE_SIZE, "");
   static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
 
   // ACCEPTS

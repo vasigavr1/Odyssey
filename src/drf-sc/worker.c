@@ -87,16 +87,16 @@ void *worker(void *arg)
 
   struct recv_info *w_recv_info, *ack_recv_info, *r_recv_info, *r_rep_recv_info;
   init_recv_info(&w_recv_info, w_buf_push_ptr, W_BUF_SLOTS,
-                 (uint32_t)W_RECV_SIZE, MAX_RECV_W_WRS, w_recv_wr, cb->dgram_qp[W_QP_ID],
+                 (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS, w_recv_wr, cb->dgram_qp[W_QP_ID],
                  w_recv_sgl, (void*) w_buffer);
   init_recv_info(&ack_recv_info, ack_buf_push_ptr, ACK_BUF_SLOTS,
-                 (uint32_t)ACK_RECV_SIZE, 0, ack_recv_wr, cb->dgram_qp[ACK_QP_ID], ack_recv_sgl,
+                 (uint32_t) ACK_RECV_SIZE, 0, ack_recv_wr, cb->dgram_qp[ACK_QP_ID], ack_recv_sgl,
                  (void*) ack_buffer);
   init_recv_info(&r_recv_info, r_buf_push_ptr, R_BUF_SLOTS,
-                 (uint32_t)R_RECV_SIZE, 0, r_recv_wr, cb->dgram_qp[R_QP_ID], r_recv_sgl,
+                 (uint32_t) R_RECV_SIZE, 0, r_recv_wr, cb->dgram_qp[R_QP_ID], r_recv_sgl,
                  (void*) r_buffer);
   init_recv_info(&r_rep_recv_info, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
-                 (uint32_t)R_REP_RECV_SIZE, 0, r_rep_recv_wr, cb->dgram_qp[R_REP_QP_ID], r_rep_recv_sgl,
+                 (uint32_t) R_REP_RECV_SIZE, 0, r_rep_recv_wr, cb->dgram_qp[R_REP_QP_ID], r_rep_recv_sgl,
                  (void*) r_rep_buffer);
 
   struct ack_message acks[MACHINE_NUM] = {0};
@@ -192,13 +192,13 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
       poll_for_reads(r_buffer, &r_buf_pull_ptr, p_ops, cb->dgram_recv_cq[R_QP_ID],
-                    r_recv_wc, r_rep_recv_info, acks, t_id, waiting_dbg_counter);
+                    r_recv_wc, t_id, waiting_dbg_counter);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ SEND READ REPLIES--------------------------
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      send_r_reps(p_ops, cb, r_rep_send_wr, r_rep_send_sgl, r_recv_info, &r_rep_tx, t_id);
+      send_r_reps(p_ops, cb, r_rep_send_wr, r_rep_send_sgl, r_recv_info, w_recv_info, &r_rep_tx, t_id);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR READ REPLIES--------------------------
@@ -248,7 +248,7 @@ void *worker(void *arg)
     //if (WRITE_RATIO > 0)
     broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
-                     ack_recv_info, t_id, &outstanding_writes, &debug_lids);
+                     ack_recv_info, r_rep_recv_info, t_id, &outstanding_writes, &debug_lids);
 	}
 	return NULL;
 }

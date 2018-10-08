@@ -159,11 +159,12 @@
 #define R_REP_SMALL_SIZE (1)
 #define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * R_REP_SIZE))
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
-#define MAX_RECV_R_REP_WRS (REM_MACH_NUM * R_CREDITS)
+#define R_REP_SLOTS_FOR_ACCEPTS (REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
+#define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
 #define MAX_R_REP_WRS (R_CREDITS * REM_MACH_NUM * (CEILING(MAX_R_COALESCE, MAX_R_REP_COALESCE)))
 
 #define R_REP_ENABLE_INLINING ((R_REP_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
-#define R_REP_FIFO_SIZE (MAX_INCOMING_R)
+#define R_REP_FIFO_SIZE (MAX_INCOMING_R + R_REP_SLOTS_FOR_ACCEPTS)
 //#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE) // not correct
 
 // Writes
@@ -250,7 +251,7 @@
 #define R_BUF_SLOTS (REM_MACH_NUM * R_CREDITS)
 #define R_BUF_SIZE (R_RECV_SIZE * R_BUF_SLOTS)
 
-#define R_REP_BUF_SLOTS (REM_MACH_NUM * R_CREDITS)
+#define R_REP_BUF_SLOTS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
 #define R_REP_BUF_SIZE (R_REP_RECV_SIZE * R_REP_BUF_SLOTS)
 
 #define W_BUF_SLOTS (REM_MACH_NUM * W_CREDITS)
@@ -403,16 +404,17 @@ struct remote_qp {
 #define READ 0
 #define READ_TS 1
 #define NO_OP_ACQ_FLIP_BIT 2 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
-#define RMW_TS_SMALLER_THAN_KVS 3 //
-#define RMW_ACK_PROPOSE 4 // Send an 1-byte reply
-#define RMW_ALREADY_ACCEPTED 5 // Send byte plus value
-#define RMW_SEEN_HIGHER_PROP_TS 6 // Send a TS, because you have already acked a higher Propose
-#define RMW_ALREADY_COMMITTED 7
-#define RMW_LOG_TOO_SMALL 8
-#define RMW_ACK_ACCEPT 9
-#define RMW_ACCEPTED_WITH_HIGHER_TS 10
+#define RMW_TS_SMALLER_THAN_KVS 3 //accepts and proposes
+#define RMW_ACK_PROPOSE 4 // only proposes: Send an 1-byte reply
+#define RMW_ALREADY_ACCEPTED 5 // only proposes: Send value, ts rmw-id
+#define RMW_SEEN_HIGHER_PROP_TS 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
+#define RMW_ALREADY_COMMITTED 7 //accepts and proposes
+#define RMW_LOG_TOO_SMALL 8 // accepts and proposes
+#define RMW_ACK_ACCEPT 9 // only accepts
+#define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
 //#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
-// Possible flags when accepting
+
+// Possible flags when accepting locally
 #define ACCEPT_ACK 1
 #define NACK_ACCEPT_SEEN_HIGHER_TS 2
 
@@ -600,10 +602,10 @@ struct r_rep_message_ud_req {
   struct r_rep_message r_rep_mes;
 };
 
-
+// Reply for both accepts and proposes
 // Reply with the last committed RMW if the
-// proposal had a low log number or has already been committed
-struct prop_rep_last_committed {
+// proposal/accept had a low log number or has already been committed
+struct rmw_rep_last_committed {
   uint8_t l_id[8]; // the l_id of the propose
   uint8_t opcode;
   struct ts_tuple ts;
@@ -614,32 +616,32 @@ struct prop_rep_last_committed {
 };
 
 //
-struct prop_rep_message {
+struct rmw_rep_message {
   uint8_t coalesce_num;
   uint8_t m_id;
   uint8_t opcode;
-  struct prop_rep_last_committed prop_rep[MAX_PROP_REP_COALESCE];
+  struct rmw_rep_last_committed rmw_rep[MAX_PROP_REP_COALESCE];
 };
 
-// The largest possible accept reply: Reply with the last committed RMW if the
-// accept had a low log number or has already been committed
-struct acc_rep_last_committed {
-  uint8_t l_id[8]; // the l_id of the original accept
-  uint8_t opcode;
-  struct ts_tuple ts;
-  uint8_t value[RMW_VALUE_SIZE];
-  uint8_t rmw_id[8]; //accepted  OR last committed
-  uint8_t glob_sess_id[2]; //accepted  OR last committed
-  uint8_t log_no[4]; // last committed only
-};
-
+//// The largest possible accept reply: Reply with the last committed RMW if the
+//// accept had a low log number or has already been committed
+//struct acc_rep_last_committed {
+//  uint8_t l_id[8]; // the l_id of the original accept
+//  uint8_t opcode;
+//  struct ts_tuple ts;
+//  uint8_t value[RMW_VALUE_SIZE];
+//  uint8_t rmw_id[8]; //accepted  OR last committed
+//  uint8_t glob_sess_id[2]; //accepted  OR last committed
+//  uint8_t log_no[4]; // last committed only
+//};
 //
-struct acc_rep_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  uint8_t opcode;
-  struct acc_rep_last_committed acc_rep[MAX_ACC_REP_COALESCE];
-};
+////
+//struct acc_rep_message {
+//  uint8_t coalesce_num;
+//  uint8_t m_id;
+//  uint8_t opcode;
+//  struct acc_rep_last_committed acc_rep[MAX_ACC_REP_COALESCE];
+//};
 
 
 

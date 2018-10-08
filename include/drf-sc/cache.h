@@ -27,7 +27,7 @@
 
 //Cache Opcode
 #define ACCEPT_OP 103
-#define OP_RMW 104
+#define PROPOSE_OP 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // The sender sends this opcode to flip a bit it owns after an acquire detected a failure
@@ -70,18 +70,22 @@
 #define CACHE_PUT_FAIL 137
 
 // READ_REPLIES
-#define PROP_REPLY 26 // an r_rep message can be a reply to a read or a prop
+#define INVALID_OPCODE 5 // meaningless opcode to help with debugging
+// an r_rep message can be a reply to a read or a prop or an accept
+#define ACCEPT_REPLY 25
+#define PROP_REPLY 26
 #define READ_REPLY 27
 #define TS_SMALLER 28
 #define TS_EQUAL 29
 #define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
 #define TS_GREATER 31
-#define PROP_ACK 32 // 1 byte reply
+#define RMW_ACK 32 // 1 byte reply
 #define SEEN_HIGHER_PROP 33 // send that TS
 #define RMW_ACCEPTED 34 // send value, rmw-id, TS
 #define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
 #define RMW_ID_COMMITTED 36 // send the entire committed rmw
 #define LOG_TOO_SMALL 37 // send the entire committed rmw
+
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was

@@ -188,7 +188,7 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     if (is_rmw) {
       printf("Worker %u, command %u is an RMW \n", t_id, i);
       rmws++;
-      (*cmds)[i].opcode = OP_RMW;
+      (*cmds)[i].opcode = PROPOSE_OP;
     }
     else if (is_update) {
       if (is_sc && ENABLE_RELEASES) {

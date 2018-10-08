@@ -213,7 +213,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           MOD_ADD(r_push_ptr, PENDING_READS);
           resp[I].type = CACHE_GET_TS_SUCCESS;
         }
-        else if (ENABLE_RMWS && op[I].opcode == OP_RMW) {
+        else if (ENABLE_RMWS && op[I].opcode == PROPOSE_OP) {
           if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, I);
           uint32_t entry = 0;
           optik_lock(&kv_ptr[I]->key.meta);
@@ -518,7 +518,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, (void*) tmp_value, READ, op->opcode);
 
         }
-        else if (ENABLE_RMWS && op->opcode == OP_RMW) {
+        else if (ENABLE_RMWS && op->opcode == PROPOSE_OP) {
           struct propose *prop =(struct propose *) (((void *)op) - 5); // the propose starts at an offset of 5 bytes
           if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW propose on op %u\n", t_id, I);
           uint8_t flag;
