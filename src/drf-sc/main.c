@@ -165,6 +165,7 @@ int main(int argc, char *argv[])
   print_for_debug = false;
 	next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
+  memset(&rmw, 0, sizeof(struct rmw_info));
 
 
 	struct thread_params *param_arr;

@@ -159,9 +159,10 @@
 #define R_REP_SMALL_SIZE (1)
 #define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * R_REP_SIZE))
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
-#define R_REP_SLOTS_FOR_ACCEPTS (REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
+#define R_REP_SLOTS_FOR_ACCEPTS (2 * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
 #define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
-#define MAX_R_REP_WRS (R_CREDITS * REM_MACH_NUM * (CEILING(MAX_R_COALESCE, MAX_R_REP_COALESCE)))
+#define R_REP_WRS_WITHOUT_ACCEPTS (R_CREDITS * REM_MACH_NUM * (CEILING(MAX_R_COALESCE, MAX_R_REP_COALESCE)))
+#define MAX_R_REP_WRS (R_REP_WRS_WITHOUT_ACCEPTS + R_REP_SLOTS_FOR_ACCEPTS)
 
 #define R_REP_ENABLE_INLINING ((R_REP_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 #define R_REP_FIFO_SIZE (MAX_INCOMING_R + R_REP_SLOTS_FOR_ACCEPTS)
@@ -235,11 +236,12 @@
 
 #define RMW_WAIT_COUNTER M_256
 
-// RMW entry states && prepare entries
+// RMW entry states for local and global entries
 #define INVALID_RMW 0
 #define PROPOSED 1 // has seen a propose || has been proposed
 #define ACCEPTED 2 // has acked an acccept || has fired accepts
 #define SAME_KEY_RMW 3  // there is already an entry for the key
+#define MUST_BCAST_COMMITS 4 // locally committed-> must broadcast commits
 
 #define VC_NUM 2
 #define R_VC 0
@@ -418,8 +420,8 @@ struct remote_qp {
 #define ACCEPT_ACK 1
 #define NACK_ACCEPT_SEEN_HIGHER_TS 2
 #define NACK_ACCEPT_LOG_OUT_OF_DATE 3
-#define COMMIT_ACK 4
-#define NACK_COMMIT_ALREADY_COMMITTED 5
+#define BROADCAST_COMMITS 4
+#define DO_NOT_BROAD_CAST_COMMITS 5
 
 
 
@@ -711,10 +713,13 @@ struct rmw_local_entry {
   struct key key;
   uint8_t opcode;
   uint8_t state;
-  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t value_to_write[RMW_VALUE_SIZE];
+  uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
   uint8_t prop_acks;
   uint8_t accept_acks;
+  uint8_t prop_replies;
+  uint8_t accept_replies;
   uint16_t epoch_id;
   uint16_t sess_id;
   uint32_t debug_cntr;

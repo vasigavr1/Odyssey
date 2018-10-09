@@ -220,27 +220,29 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // if it's the first RMW
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
             // sess_id is stored in the first bytes of op
+            uint32_t new_log_no = 1;
             entry = grab_RMW_entry(PROPOSED, kv_ptr[I], op[I].opcode,
                                   (uint8_t) machine_id, kv_ptr[I]->key.meta.version + 1,
-                                   rmw_l_id, 0,
+                                   rmw_l_id, new_log_no,
                                    get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
                                    t_id);
             resp[I].type = RMW_SUCCESS;
-            resp[I].log_no = 0;
+            resp[I].log_no = new_log_no;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
           }
           // key has been RMWed before
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
-            check_entry_validity_with_cache_op(&op[I], entry); // this is wrapped into ENABLE_ASSERTIONS
+            check_entry_validity_with_cache_op(&op[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
               activate_RMW_entry(PROPOSED, kv_ptr[I]->key.meta.version + 1, rmw_entry, op[I].opcode,
                                  (uint8_t)machine_id, rmw_l_id,
                                  get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
-                                 rmw_entry->log_no, t_id);
+                                 rmw_entry->last_committed_log_no + 1, t_id);
               resp[I].log_no = rmw_entry->log_no;
+              if (ENABLE_ASSERTIONS) assert(resp[I].log_no == rmw_entry->last_committed_log_no + 1);
               resp[I].type = RMW_SUCCESS;
             }
             else resp[I].type = RETRY_RMW_KEY_EXISTS;
