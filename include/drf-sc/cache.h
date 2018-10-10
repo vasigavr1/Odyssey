@@ -26,6 +26,7 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
+#define COMMIT_OP 102
 #define ACCEPT_OP 103
 #define PROPOSE_OP 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector

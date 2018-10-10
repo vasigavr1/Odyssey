@@ -234,6 +234,13 @@
 #define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
 
 
+// COMMITS
+#define MAX_COM_COALESCE 1
+#define COMMIT_MES_HEADER 10
+#define COMMIT_SIZE (29 + RMW_VALUE_SIZE)
+#define COMMIT_MESSAGE_SIZE (COMMIT_MES_HEADER + (MAX_COM_COALESCE * COMMIT_SIZE))
+
+
 #define RMW_WAIT_COUNTER M_256
 
 // RMW entry states for local and global entries
@@ -242,6 +249,7 @@
 #define ACCEPTED 2 // has acked an acccept || has fired accepts
 #define SAME_KEY_RMW 3  // there is already an entry for the key
 #define MUST_BCAST_COMMITS 4 // locally committed-> must broadcast commits
+#define COMMITTED 5 //
 
 #define VC_NUM 2
 #define R_VC 0
@@ -387,12 +395,13 @@ struct remote_qp {
 #define VALID 1
 #define SENT 2
 #define READY 3
-#define SENT_PUT 4
+#define SENT_PUT 4 // typical writes
 #define SENT_RELEASE 5 // Release or second round of acquire!!
 #define SENT_BIT_VECTOR 6
-#define READY_PUT 7
-#define READY_RELEASE 8 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 9
+#define SENT_COMMIT 7 // For commits
+#define READY_PUT 8
+#define READY_RELEASE 9 // Release or second round of acquire!!
+#define READY_BIT_VECTOR 10
 
 // Possible write sources
 #define FROM_TRACE 0
@@ -401,6 +410,7 @@ struct remote_qp {
 #define RELEASE_THIRD 3 // for the third round of a release
 #define FOR_ACCEPT 4
 #define FROM_ACQUIRE 5
+#define FROM_COMMIT 6
 
 // Possible flag values when inserting a read reply
 #define READ 0
@@ -415,6 +425,9 @@ struct remote_qp {
 #define RMW_ACK_ACCEPT 9 // only accepts
 #define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
 //#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
+
+//flags when receiving a commit
+
 
 // Possible flags when accepting locally
 #define ACCEPT_ACK 1
@@ -509,6 +522,24 @@ struct accept_message {
 struct w_message_ud_req {
   uint8_t unused[GRH_SIZE];
   struct w_message w_mes;
+};
+
+struct commit {
+  struct ts_tuple ts;
+  uint8_t key[TRUE_KEY_SIZE];
+  uint8_t opcode;
+  uint8_t val_len;
+  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t t_rmw_id[8]; //rmw lid to be committed
+  uint8_t glob_sess_id[2];
+  uint8_t log_no[4];
+};
+
+struct commit_message {
+  uint8_t m_id;
+  uint8_t com_num;
+  uint8_t l_id[8]; // local id of the write -- to facilitate the ack
+  struct commit com[MAX_ACC_COALESCE];
 };
 
 //
@@ -794,18 +825,6 @@ struct session_dbg {
 // acks to the commits mean that the RMW has happened
 struct rmw_info {
   struct rmw_entry entry[RMW_ENTRIES_NUM];
-//  uint16_t empty_fifo[RMW_ENTRIES_NUM];
-//  uint16_t ef_push_ptr; // empty fifo push ptr
-//  uint16_t ef_pull_ptr;
-//  uint16_t ef_size; // how many empty slots are there
-
-//  atomic_flag ef_lock;
-//  atomic_uint_fast16_t local_rmw_num;
-//  atomic_flag local_rmw_lock;
-
-//  uint32_t size;
-//  uint8_t lock;
-//  uint64_t version; // allow for lock free reads of the struct
 };
 
 //typedef _Atomic struct rmw_info atomic_rmw_info;
