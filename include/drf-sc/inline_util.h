@@ -988,6 +988,65 @@ static inline void check_entry_validity_with_cache_op(struct cache_op *op, uint3
   }
 }
 
+// Returns true if the incoming key and the entry key are equal
+static inline bool check_entry_validity_with_key(struct key *incoming_key, uint32_t entry)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct key *entry_key = &rmw.entry[entry].key;
+    return true_keys_are_equal(incoming_key, entry_key);
+  }
+  return true;
+}
+
+// When polling an ack message
+static inline void check_ack_message_count_stats(struct pending_ops* p_ops, struct ack_message* ack,
+                                                 uint32_t index, uint16_t ack_num, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(ack_num > 0);
+    assert(ack->opcode == CACHE_OP_ACK);
+    //      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
+    assert(ack->m_id < MACHINE_NUM);
+    uint64_t l_id = *(uint64_t *) (ack->local_id);
+    uint64_t pull_lid = p_ops->local_w_id;
+    assert(l_id + ack_num <= pull_lid + p_ops->w_size);
+    if ((l_id + ack_num < pull_lid) && (!USE_QUORUM)) {
+      red_printf("l_id %u, ack_num %u, pull_lid %u \n", l_id, ack_num, pull_lid);
+      assert(false);
+    }
+    if (DEBUG_ACKS)
+      yellow_printf(
+        "Wrkr %d  polled ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from machine %u \n",
+        t_id, ack->opcode, ack_num, l_id, pull_lid, index, ack->m_id);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    if (ENABLE_ASSERTIONS) {
+      t_stats[t_id].per_worker_acks_received[ack->m_id] += ack_num;
+      t_stats[t_id].per_worker_acks_mes_received[ack->m_id]++;
+    }
+    t_stats[t_id].received_acks += ack_num;
+    t_stats[t_id].received_acks_mes_num++;
+  }
+}
+
+
+// When polling acks: more precisely when inspecting each l_id acked
+static inline void  check_ack_and_print(struct pending_ops* p_ops, uint16_t ack_i, uint32_t ack_ptr,
+                                        uint16_t  ack_num, uint64_t l_id, uint64_t pull_lid, uint16_t t_id) {
+  if (ENABLE_ASSERTIONS) {
+    if (DEBUG_WRITES && (ack_ptr == p_ops->w_push_ptr)) {
+      uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
+      red_printf("Worker %u: Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
+                 t_id, origin_ack_ptr, (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,
+                 ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
+
+    }
+    assert(p_ops->acks_seen[ack_ptr] < REM_MACH_NUM);
+  }
+}
+
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -1057,11 +1116,13 @@ static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const ui
   }
   atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
 
-  if (DEBUG_BIT_VECS && owned_a_failure)
+  if (DEBUG_BIT_VECS && owned_a_failure) {
+    uint32_t ses_i = (conf_bit_vec[acq_m_id].sess_num[t_id] +SESSIONS_PER_THREAD - 1) % SESSIONS_PER_THREAD;
     green_printf("Wrkr %u acquire from machine %u got ownership of its failure, "
-                   "bit %u  owned t_id %u, owned local_r_id %u \n",
+                   "bit %u  owned t_id %u, owned local_r_id %u/%u \n",
                  t_id, acq_m_id, conf_bit_vec[acq_m_id].bit,
-                 t_id, local_r_id);
+                 t_id, local_r_id, conf_bit_vec[acq_m_id].owners[t_id][ses_i]);
+  }
   return  OP_ACQUIRE_FP;
 }
 
@@ -1075,12 +1136,15 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
                   t_id, acq_m_id, local_r_id);
   // First change the state  of the owned bits
   bool bit_gets_flipped = false;
-  if (conf_bit_vec[acq_m_id].bit != DOWN_TRANSIENT_OWNED) return;
+  if (conf_bit_vec[acq_m_id].bit != DOWN_TRANSIENT_OWNED) {
+    return;
+  }
   // Grab the lock
   while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
   if (conf_bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {
     uint32_t max_sess = conf_bit_vec[acq_m_id].sess_num[t_id];
-    for (uint32_t ses_i = 0; ses_i < max_sess; ses_i++) {
+    for (uint32_t ses_i = 0; ses_i <= max_sess; ses_i++) {
+      //cyan_printf("checking %u/%u \n", conf_bit_vec[acq_m_id].owners[t_id][ses_i], local_r_id);
       if (conf_bit_vec[acq_m_id].owners[t_id][ses_i] == local_r_id) {
         conf_bit_vec[acq_m_id].bit = UP_STABLE;
         bit_gets_flipped = true;
@@ -1508,16 +1572,6 @@ static inline void fill_reply_entry_with_committed_RMW (struct cache_op *kv_ptr,
   rep_entry->rmw_id = rmw.entry[entry].last_committed_rmw_id;
 }
 
-// Returns true if the incoming key and the entry key are equal
-static inline bool check_entry_validity_with_key(struct key *incoming_key, uint32_t entry)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct key *entry_key = &rmw.entry[entry].key;
-    return true_keys_are_equal(incoming_key, entry_key);
-  }
-  return true;
-}
-
 // Check the global RMW-id structure, to see if an RMW has already been committed
 static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_id, uint16_t t_id, uint8_t *flag)
 {
@@ -1546,7 +1600,7 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, struct c
     if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id, flag))
       fill_the_rep = true;
     else if (rmw.entry[*entry].last_committed_log_no >= log_no) {
-      if (DEBUG_RMW)
+      //if (DEBUG_RMW)
         yellow_printf("Wkrk %u Log number is too small %u/%u entry state %u, propose/accept with rmw_lid %u,"
                         " global_sess_id %u, entry %u\n", t_id, log_no, rmw.entry[*entry].last_committed_log_no,
                       rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
@@ -1789,6 +1843,8 @@ static inline uint32_t grab_RMW_entry(uint8_t state, struct cache_op *kv_ptr,
     }
   }
   glob_entry->key = *((struct key *) (((void *) kv_ptr) + sizeof(cache_meta)));
+  //cyan_printf("Global Rmw entry %u/%u got key: ", next_entry, *(uint32_t *) kv_ptr->value);
+  //print_true_key(&glob_entry->key);
   glob_entry->log_no = log_no; // not necessarily 1 if a remote machine is grabbing here
   if (ENABLE_ASSERTIONS) {
     true_keys_are_equal(&glob_entry->key, (struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
@@ -1828,32 +1884,30 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
     assert(pos < RMW_ENTRIES_NUM);
     assert(prop->opcode == PROPOSE_OP);
   }
-  struct rmw_entry *entry = &rmw.entry[pos];
+  struct rmw_entry *glob_entry = &rmw.entry[pos];
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key((struct key *) prop->key, pos));
 
   // If entry is in Accepted state you typically NACK send back value and ts & RMW_id
-  if (entry->state == ACCEPTED) {
-    my_assert(compare_ts(&prop->ts, &entry->new_ts) == EQUAL,
-              "Received a proposal with same TS an already accepted proposal"); // TODO is this assertion correct?
-    // check the RMW_ID to make sure it's not a stuck RMW -- The proposes may not help but it
-    // maybe that the same machine is retrying
-    if (entry->rmw_id.glob_sess_id == *(uint16_t *) prop->glob_sess_id &&
-        entry->rmw_id.id == *(uint64_t *) prop->t_rmw_id) {
-      red_printf("Wrkr %u Received a proposal with same RMW id an already accepted proposal, "
-                   "rmw_id %u/%u, glob sess %u/%u \n", t_id, *(uint16_t *) prop->glob_sess_id,
-                 entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, entry->rmw_id.id);
+  if (glob_entry->state == ACCEPTED) {
+    // This is very likely: it typically means i have polled the accept before polling the propose
+    // which can happen, because accepts are fired after a quorum of acks
+    if (glob_entry->rmw_id.glob_sess_id == *(uint16_t *) prop->glob_sess_id &&
+        glob_entry->rmw_id.id == *(uint64_t *) prop->t_rmw_id) {
+      //red_printf("Wrkr %u Received a proposal with same RMW id as an already accepted proposal, "
+       //            "glob sess %u/%u, rmw_id %u/%u,  \n", t_id, *(uint16_t *) prop->glob_sess_id,
+       //          glob_entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, glob_entry->rmw_id.id);
       return_flag = RMW_ACK_PROPOSE;
     }
     else { // need to copy the value, ts and RMW-id here
-      memcpy(reply_rmw->value, entry->value, (size_t) RMW_VALUE_SIZE);
-      memcpy(&reply_rmw->ts, &entry->new_ts, TS_TUPLE_SIZE);
-      reply_rmw->rmw_id = entry->rmw_id;
+      memcpy(reply_rmw->value, glob_entry->value, (size_t) RMW_VALUE_SIZE);
+      memcpy(&reply_rmw->ts, &glob_entry->new_ts, TS_TUPLE_SIZE);
+      reply_rmw->rmw_id = glob_entry->rmw_id;
       return_flag = RMW_ALREADY_ACCEPTED;
     }
   }
   else if (rmw.entry[pos].state == PROPOSED) {
-    enum ts_compare ts_comp = compare_ts(&prop->ts, &entry->new_ts);
+    enum ts_compare ts_comp = compare_ts(&prop->ts, &glob_entry->new_ts);
     switch(ts_comp) {
       case GREATER: // new prepare has higher TS
         return_flag = RMW_ACK_PROPOSE;
@@ -1864,7 +1918,7 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
         break;
       case SMALLER:
         return_flag = RMW_SEEN_HIGHER_PROP_TS;
-        memcpy(&reply_rmw->ts, &entry->new_ts, TS_TUPLE_SIZE);
+        memcpy(&reply_rmw->ts, &glob_entry->new_ts, TS_TUPLE_SIZE);
         break;
       default : assert(false);
     }
@@ -2352,7 +2406,8 @@ static inline void handle_rmw_rep_replies(struct pending_ops *p_ops, struct r_re
   r_rep_mes->opcode = INVALID_OPCODE;
 }
 
-
+// Chek if the commit must be applied to the KVS and
+// transition the global entry to INVALID_RMW if it has been waiting for this commit
 static inline bool handle_remote_commit(struct rmw_entry* rmw_entry, uint32_t log_no,
                                         uint64_t t_rmw_id, uint16_t glob_sess_id,
                                         struct commit* com, uint16_t t_id)
@@ -3889,24 +3944,51 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
   }
 }
 
-// Spin until you know the entire message is there
-static inline void wait_for_the_entire_ack(volatile struct ack_message *ack,
-                                           uint16_t t_id, uint32_t index)
+// Release performs two writes when the first round must carry the send vector
+static inline void commit_first_round_of_release_and_spawn_the_second (struct pending_ops *p_ops,
+                                                                       uint16_t t_id)
 {
-  uint32_t debug_cntr = 0;
-  while (ack->ack_num  == 0) {
-    assert(false);
-    if (ENABLE_ASSERTIONS) {
-      debug_cntr++;
-      if (debug_cntr > M_128) {
-        red_printf("Wrkr %d stuck waiting for an ack to come index %u ack_num %u\n",
-                   t_id, index, ack->ack_num);
-        print_wrkr_stats(t_id);
-        debug_cntr = 0;
+  uint32_t w_pull_ptr = p_ops->w_pull_ptr;
+  uint32_t w_size = p_ops->w_size;
+  // take care to handle the case where the w_size == PENDING_WRITES
+  p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
+  p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
+  p_ops->local_w_id++;
+  MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
+  p_ops->w_size--;
+  if (ENABLE_ASSERTIONS && w_size == MAX_ALLOWED_W_SIZE) {
+    red_printf("Wrkr %u p_ops is full sized -- it still works w_size %u, "
+                 "Send failure state %u \n", t_id, w_size, send_bit_vector.state);
+    bool found = false;
+    for (uint8_t i = 0; i < MACHINE_NUM; i++) {
+      if (send_bit_vector.bit_vec[i].bit != UP_STABLE) {
+        yellow_printf("Bit %i = %u, owner t_id = %u, owner release = %u \n",
+                      i, send_bit_vector.bit_vec[i].bit, send_bit_vector.bit_vec[i].owner_t_id,
+                      send_bit_vector.bit_vec[i].owner_local_wr_id);
+        found = true;
       }
     }
+    if (!found && (send_bit_vector.state != UP_STABLE)) assert(false);
+  }
+  struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
+  if (ENABLE_ASSERTIONS) assert (rel != NULL);
+  // because we overwrite the value,
+  memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
+  struct cache_op op;
+  memcpy((void *) &op, &p_ops->w_session_id[w_pull_ptr], SESSION_BYTES);
+  memcpy((void *) &op.key.meta.m_id, rel, W_SIZE);
+  if (DEBUG_SESSIONS)
+    //cyan_printf("Wrkr: %u Inserting the write for the second round of the "
+    //            "release opcode %u that carried a bit vector: session %u\n",
+    //            t_id, op.opcode, p_ops->w_session_id[w_pull_ptr]);
+  insert_write(p_ops, &op, RELEASE_THIRD, w_pull_ptr, t_id); // the push pointer is not needed because the session id is inside the op
+  if (ENABLE_ASSERTIONS) {
+    p_ops->ptrs_to_local_w[w_pull_ptr] =  NULL;
+    memset(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], 0, SEND_CONF_VEC_SIZE);
   }
 }
+
+
 
 // Remove writes that have seen all acks
 static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags *latency_info,
@@ -3919,53 +4001,20 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
     //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
     //               g_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
-    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE) { // Release or second round of acquire!!
+    if (p_ops->w_state[p_ops->w_pull_ptr] == READY_RELEASE || // Release or second round of acquire!!
+        p_ops->w_state[p_ops->w_pull_ptr] == READY_COMMIT ) {
       p_ops->session_has_pending_op[p_ops->w_session_id[p_ops->w_pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
+      if (DEBUG_RMW && p_ops->w_state[p_ops->w_pull_ptr] == READY_COMMIT) {
+        yellow_printf("Worker %u freeing session %u after committing its RMW \n",
+                      t_id, p_ops->w_session_id[p_ops->w_pull_ptr]);
+      }
     }
-
     // This case is tricky because in order to remove the release we must add another release
     // but if the queue was full that would deadlock, therefore we must remove the write before inserting
     // the second round of the release
     if (unlikely(p_ops->w_state[p_ops->w_pull_ptr] == READY_BIT_VECTOR && (!EMULATE_ABD))) {
-      uint32_t w_pull_ptr = p_ops->w_pull_ptr;
-      uint32_t w_size = p_ops->w_size;
-      // take care to handle the case where the w_size == PENDING_WRITES
-      p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
-      p_ops->acks_seen[p_ops->w_pull_ptr] = 0;
-      p_ops->local_w_id++;
-      MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
-      p_ops->w_size--;
-      if (ENABLE_ASSERTIONS && w_size == MAX_ALLOWED_W_SIZE) {
-          red_printf("Wrkr %u p_ops is full sized -- it still works w_size %u, "
-                       "Send failure state %u \n", t_id, w_size, send_bit_vector.state);
-        bool found = false;
-          for (uint8_t i = 0; i < MACHINE_NUM; i++) {
-            if (send_bit_vector.bit_vec[i].bit != UP_STABLE) {
-              yellow_printf("Bit %i = %u, owner t_id = %u, owner release = %u \n",
-                            i, send_bit_vector.bit_vec[i].bit, send_bit_vector.bit_vec[i].owner_t_id,
-                            send_bit_vector.bit_vec[i].owner_local_wr_id);
-              found = true;
-            }
-        }
-        if (!found && (send_bit_vector.state != UP_STABLE)) assert(false);
-      }
-      struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
-      if (ENABLE_ASSERTIONS) assert (rel != NULL);
-
-      // because we overwrite the value,
-      memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
-      struct cache_op op;
-      memcpy((void *) &op, &p_ops->w_session_id[w_pull_ptr], SESSION_BYTES);
-      memcpy((void *) &op.key.meta.m_id, rel, W_SIZE);
-      //if (DEBUG_SESSIONS)
-      //  cyan_printf("Wrkr: %u Inserting the write for the second round of the release opcode %u that carried a bit vector: session %u\n",
-       //             t_id, op.opcode, p_ops->w_session_id[w_pull_ptr]);
-      insert_write(p_ops, &op, RELEASE_THIRD, w_pull_ptr, t_id); // the push pointer is not needed because the session id is inside the op
-      if (ENABLE_ASSERTIONS) {
-        p_ops->ptrs_to_local_w[w_pull_ptr] =  NULL;
-        memset(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], 0, SEND_CONF_VEC_SIZE);
-      }
+      commit_first_round_of_release_and_spawn_the_second (p_ops, t_id);
     }
     else {
       p_ops->w_state[p_ops->w_pull_ptr] = INVALID;
@@ -3975,7 +4024,6 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       p_ops->w_size--;
     }
   }
-
   if (ENABLE_ASSERTIONS) {
     if(p_ops->w_state[p_ops->w_pull_ptr] >= READY_PUT) {
       red_printf("W state = %u at ptr  %u, size: %u \n",
@@ -3989,7 +4037,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       red_printf("W state = %u at ptr  %u, size: %u \n",
                  p_ops->w_state[p_ops->w_pull_ptr], p_ops->w_pull_ptr, p_ops->w_size);
       //assert(false);
-    };
+    }
   }
 }
 
@@ -4010,42 +4058,21 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
   while (polled_messages < completed_messages) {
     struct ack_message *ack = &incoming_acks[index].ack;
     uint16_t ack_num = ack->ack_num;
-    if (ENABLE_ASSERTIONS) {
-      assert(incoming_acks[index].ack.opcode == CACHE_OP_ACK);
-      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
-      assert(ack->m_id < MACHINE_NUM);
-    }
+    check_ack_message_count_stats(p_ops, ack, index, ack_num, t_id);
+
     MOD_ADD(index, ACK_BUF_SLOTS);
     polled_messages++;
-
     uint64_t l_id = *(uint64_t *) (ack->local_id);
     uint64_t pull_lid = p_ops->local_w_id; // l_id at the pull pointer
     uint32_t ack_ptr; // a pointer in the FIFO, from where ack should be added
-    if (DEBUG_ACKS)
-      yellow_printf("Wrkr %d  polled ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from machine %u \n",
-                    t_id, ack->opcode, ack_num, l_id, pull_lid, index, ack->m_id);
-    if (ENABLE_STAT_COUNTING) {
-      if (ENABLE_ASSERTIONS) {
-        t_stats[t_id].per_worker_acks_received[ack->m_id] += ack_num;
-        t_stats[t_id].per_worker_acks_mes_received[ack->m_id]++;
-      }
-      t_stats[t_id].received_acks += ack_num;
-      t_stats[t_id].received_acks_mes_num++;
-    }
     credits[W_VC][ack->m_id] += ack->credits;
     // if the pending write FIFO is empty it means the acks are for committed messages.
     if (p_ops->w_size == 0 ) {
-      if (!USE_QUORUM) assert(false);
-      ack->opcode = 5;
+      if (ENABLE_ASSERTIONS) assert(USE_QUORUM);
+      ack->opcode = INVALID_OPCODE;
       ack->ack_num = 0; continue;
     }
-    if (ENABLE_ASSERTIONS) {
-      assert(l_id + ack_num <= pull_lid + p_ops->w_size);
-      if ((l_id + ack_num < pull_lid) && (!USE_QUORUM)) {
-        red_printf("l_id %u, ack_num %u, pull_lid %u \n", l_id, ack_num, pull_lid);
-        exit(0);
-      }
-    }
+
     if (pull_lid >= l_id) {
       if ((pull_lid - l_id) >= ack_num) {ack->opcode = 5;
         ack->ack_num = 0; continue;}//memset((void*)ack, 0, ACK_SIZE); continue;}
@@ -4059,14 +4086,8 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
     }
     // Apply the acks that refer to stored writes
     for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {
-      if (ENABLE_ASSERTIONS && DEBUG_WRITES && (ack_ptr == p_ops->w_push_ptr)) {
-        uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
-        red_printf("Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
-                   origin_ack_ptr,  (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,
-                   ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
-      }
+      check_ack_and_print(p_ops, ack_i, ack_ptr, ack_num, l_id, pull_lid, t_id);
       p_ops->acks_seen[ack_ptr]++;
-      if (ENABLE_ASSERTIONS) assert(p_ops->acks_seen[ack_ptr] <= REM_MACH_NUM);
       if (p_ops->acks_seen[ack_ptr] == REMOTE_QUORUM) {
         if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
         //printf("Wrkr %d valid ack %u/%u, write at ptr %d is ready \n",
@@ -4074,9 +4095,9 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
         if (unlikely(p_ops->w_state[ack_ptr] == SENT_BIT_VECTOR)) {
           p_ops->w_state[ack_ptr] = READY_BIT_VECTOR;
           raise_send_bit_iff_owned(t_id, l_id + ack_i);
-//          convert_transient_to_stable_send_conf_vec(t_id);
         }
         else if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
+        else if (p_ops->w_state[ack_ptr] == SENT_COMMIT) p_ops->w_state[ack_ptr] = READY_COMMIT;
         else {
           p_ops->w_state[ack_ptr] = READY_RELEASE;
           if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
@@ -4088,8 +4109,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
       MOD_ADD(ack_ptr, PENDING_WRITES);
     }
     if (ENABLE_ASSERTIONS) assert(credits[W_VC][ack->m_id] <= W_CREDITS);
-    //memset((void*)ack, 0, ACK_SIZE); // need to delete all the g_ids
-    ack->opcode = 5;
+    ack->opcode = INVALID_OPCODE;
     ack->ack_num = 0;
   } // while
 

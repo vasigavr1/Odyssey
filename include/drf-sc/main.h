@@ -22,7 +22,7 @@
 #define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 22
+#define SESSIONS_PER_THREAD 1
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -322,10 +322,10 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 0
-#define DEBUG_RMW 1
+#define DEBUG_BIT_VECS 1
+#define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
-#define DEBUG_SESSIONS 0
+#define DEBUG_SESSIONS 1
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -402,6 +402,7 @@ struct remote_qp {
 #define READY_PUT 8
 #define READY_RELEASE 9 // Release or second round of acquire!!
 #define READY_BIT_VECTOR 10
+#define READY_COMMIT 11
 
 // Possible write sources
 #define FROM_TRACE 0

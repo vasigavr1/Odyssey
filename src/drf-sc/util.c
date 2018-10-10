@@ -175,7 +175,11 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
   clock_gettime(CLOCK_MONOTONIC, &time);
   uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
-  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0;
+  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0,
+          keys_that_get_rmwed[MACHINE_NUM * WORKERS_PER_MACHINE];
+  for (i = 0; i < MACHINE_NUM * WORKERS_PER_MACHINE; i++)
+    keys_that_get_rmwed[i] = i;
+
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
     (*cmds)[i].opcode = 0;
@@ -214,15 +218,21 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
 
 
     //--- KEY ID----------
-    uint32 key_id = (uint32) rand() % CACHE_NUM_KEYS;
+    uint32 key_id;
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
     if (is_rmw) {
       key_id = (uint32_t) i;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
-    else if (ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS && key_id == (uint32_t) machine_id * WORKERS_PER_MACHINE + t_id) {
-      key_id = (uint32_t) i + 1;
+    else {
+      bool found = false;
+      do {
+        key_id = (uint32) rand() % CACHE_NUM_KEYS;
+        found = false;
+        for (uint32_t j = 0; j < MACHINE_NUM * WORKERS_PER_MACHINE; j++)
+          if (key_id == keys_that_get_rmwed[j]) found = true;
+      } while (found);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);

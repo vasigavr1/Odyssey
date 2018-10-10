@@ -233,7 +233,18 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // key has been RMWed before
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
-            check_entry_validity_with_cache_op(&op[I], entry);
+            struct key *op_key = (struct key *) (((void *) &op[I]) + sizeof(cache_meta));
+            struct key *kv_key = (struct key *) (((void *) kv_ptr[I]) + sizeof(cache_meta));
+            if(!(true_keys_are_equal(&rmw.entry[entry].key, kv_key) &&
+                 (true_keys_are_equal(&rmw.entry[entry].key, op_key)) &&
+                 (true_keys_are_equal(kv_key, op_key)))) {
+              print_true_key(&rmw.entry[entry].key);
+              print_true_key(kv_key);
+              print_true_key(op_key);
+              printf("entry %u/%u \n", entry, *(uint32_t *) kv_ptr[I]->value);
+              assert(false);
+            }
+            check_entry_validity_with_cache_op(kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
@@ -245,7 +256,13 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               if (ENABLE_ASSERTIONS) assert(resp[I].log_no == rmw_entry->last_committed_log_no + 1);
               resp[I].type = RMW_SUCCESS;
             }
-            else resp[I].type = RETRY_RMW_KEY_EXISTS;
+            else {
+              if (SESSIONS_PER_THREAD == 1) {
+                // this should happen only because of contention
+                red_printf("Session has been freed but the rmw _entry is not invalid state: %u\n", rmw_entry->state);
+              }
+              resp[I].type = RETRY_RMW_KEY_EXISTS;
+            }
           }
           resp[I].rmw_entry = entry;
           resp[I].kv_pair_ptr = &kv_ptr[I]->key.meta;
@@ -365,6 +382,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           struct rmw_help_entry reply_rmw;
           uint64_t rmw_l_id = *(uint64_t*) acc->t_rmw_id;
           uint16_t glob_sess_id = *(uint16_t*) acc->glob_sess_id;
+          //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = *(uint32_t*) acc->log_no;
           // TODO Finding the sender machine id here is a hack that will not work with coalescing
           static_assert(MAX_ACC_COALESCE == 1, " ");
@@ -399,33 +417,49 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           struct commit *com =(struct commit *) (((void *)op) + 3); // the commit starts at an offset of 3 bytes
           if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW commit on op %u\n", t_id, I);
           //uint8_t flag;
-          bool overwrite_kv = false;
+          bool overwrite_kv;
           uint64_t rmw_l_id = *(uint64_t*) com->t_rmw_id;
           uint16_t glob_sess_id = *(uint16_t*) com->glob_sess_id;
           uint32_t log_no = *(uint32_t*) com->log_no;
           uint32_t entry;
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-            entry = grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
-                                   rmw_l_id, log_no, glob_sess_id, t_id);
+            grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
+                           rmw_l_id, log_no, glob_sess_id, t_id);
             if (ENABLE_ASSERTIONS) assert(kv_ptr[I]->key.meta.version == 1);
             overwrite_kv = true;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
           }
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED){
             entry = *(uint32_t *) kv_ptr[I]->value;
-            check_entry_validity_with_cache_op(&op[I], entry);
+            struct key *com_key = (struct key *) com->key;
+            struct key *kv_key = (struct key *) (((void *) kv_ptr[I]) + sizeof(cache_meta));
+            if(!(true_keys_are_equal(&rmw.entry[entry].key, kv_key) &&
+                (true_keys_are_equal(&rmw.entry[entry].key, com_key)) &&
+                 (true_keys_are_equal(kv_key, com_key)))) {
+              print_true_key(&rmw.entry[entry].key);
+              print_true_key(kv_key);
+              print_true_key(com_key);
+              assert(false);
+            }
+            check_entry_validity_with_cache_op(kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             overwrite_kv = handle_remote_commit(rmw_entry, log_no, rmw_l_id, glob_sess_id, com, t_id);
           }
           else if (ENABLE_ASSERTIONS) assert(false);
+          // The commit must be applied to the KVS
           if (overwrite_kv) {
             kv_ptr[I]->key.meta.m_id = com->ts.m_id;
             kv_ptr[I]->key.meta.version = (* (uint32_t *)com->ts.version) + 1; // the unlock function will decrement 1
             memcpy(&kv_ptr[I]->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
           }
-
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+
+          uint64_t tmp_rmw_id;
+          do {
+            tmp_rmw_id = committed_glob_sess_rmw_id[glob_sess_id];
+            if (rmw_l_id <= tmp_rmw_id) break;
+          } while (atomic_compare_exchange_strong(&committed_glob_sess_rmw_id[glob_sess_id], &tmp_rmw_id, rmw_l_id));
 
         }
         else if (ENABLE_ASSERTIONS) {
@@ -560,6 +594,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           struct rmw_help_entry reply_rmw; // on replying to the propose we may need to send on or more of TS, VALUE, RMW-id, log-no
           uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
           uint16_t glob_sess_id = *(uint16_t*) prop->glob_sess_id;
+          //cyan_printf("Received propose with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = *(uint32_t*) prop->log_no;
           uint8_t prop_m_id = p_ops->ptrs_to_r_headers[I]->m_id;
           uint32_t entry;
