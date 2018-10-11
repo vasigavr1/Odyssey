@@ -79,7 +79,7 @@ void *worker(void *arg)
   struct ibv_recv_wr ack_recv_wr[MAX_RECV_ACK_WRS];
 
 
- 	uint16_t credits[VC_NUM][MACHINE_NUM], op_i = 0;
+ 	uint16_t credits[VC_NUM][MACHINE_NUM];
   uint64_t r_br_tx = 0, w_br_tx = 0, r_rep_tx = 0, ack_tx = 0;
 
 
@@ -115,7 +115,7 @@ void *worker(void *arg)
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
 
   struct cache_op *ops = (struct cache_op *) malloc(MAX_OP_BATCH * sizeof(struct cache_op));
-  struct mica_resp *resp = (struct mica_resp *) malloc(MAX_OP_BATCH * sizeof(struct mica_resp));
+  struct cache_resp *resp = (struct cache_resp *) malloc(MAX_OP_BATCH * sizeof(struct cache_resp));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl, w_recv_wr, w_recv_sgl,
                    r_recv_wr, r_recv_sgl,t_id, cb, w_mr, r_mr);
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl, ack_recv_wr, ack_recv_sgl,
@@ -235,8 +235,8 @@ void *worker(void *arg)
 
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
-		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, &op_i, trace, ops,
-                                           p_ops, resp, q_info, &latency_info,
+		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
+                                           p_ops, resp, &latency_info,
                                            ses_dbg);
 
     /* ---------------------------------------------------------------------------

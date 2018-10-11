@@ -15,26 +15,27 @@
 #define PHYSICAL_CORES_PER_SOCKET 10
 #define LOGICAL_CORES_PER_SOCKET 20
 #define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
-#define WORKER_HYPERTHREADING 0 // shcedule two threads on the same core
+#define WORKER_HYPERTHREADING 0 // schedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 33
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 1
+#define SESSIONS_PER_THREAD 2
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define ENABLE_LIN 0
-#define R_CREDITS 1
-#define MAX_R_COALESCE 40
-#define W_CREDITS 2
-#define MAX_W_COALESCE 10
+#define R_CREDITS 6
+#define MAX_R_COALESCE 15
+#define W_CREDITS 6
+#define MAX_W_COALESCE 8
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+#define RMW_BACK_OFF_TIMEOUT M_16
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -44,7 +45,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -322,7 +323,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 1
+#define DEBUG_BIT_VECS 0
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1
@@ -400,9 +401,10 @@ struct remote_qp {
 #define SENT_BIT_VECTOR 6
 #define SENT_COMMIT 7 // For commits
 #define READY_PUT 8
-#define READY_RELEASE 9 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 10
-#define READY_COMMIT 11
+#define READY_COMMIT 9
+#define READY_RELEASE 10 // Release or second round of acquire!!
+#define READY_BIT_VECTOR 11
+
 
 // Possible write sources
 #define FROM_TRACE 0
@@ -425,7 +427,7 @@ struct remote_qp {
 #define RMW_LOG_TOO_SMALL 8 // accepts and proposes
 #define RMW_ACK_ACCEPT 9 // only accepts
 #define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
-//#define RMW_LOG_TOO_HIGH 9 // this means the propose will be acked
+//#define RMW_LOG_TOO_HIGH 11 // this means the propose will be acked
 
 //flags when receiving a commit
 
@@ -461,6 +463,16 @@ struct quorum_info {
    uint64_t id; // the local rmw id of the source
 
  };
+
+struct cache_resp {
+  uint8_t type;
+  uint8_t glob_entry_state;
+  uint32_t rmw_entry; // index into global rmw entries
+  uint32_t log_no; // the log_number of an RMW
+  cache_meta *kv_pair_ptr;
+  struct rmw_id glob_entry_rmw_id;
+
+};
 
 // format of a Timestamp tuple (Lamport clock)
 struct ts_tuple {
@@ -660,27 +672,6 @@ struct rmw_rep_message {
   struct rmw_rep_last_committed rmw_rep[MAX_PROP_REP_COALESCE];
 };
 
-//// The largest possible accept reply: Reply with the last committed RMW if the
-//// accept had a low log number or has already been committed
-//struct acc_rep_last_committed {
-//  uint8_t l_id[8]; // the l_id of the original accept
-//  uint8_t opcode;
-//  struct ts_tuple ts;
-//  uint8_t value[RMW_VALUE_SIZE];
-//  uint8_t rmw_id[8]; //accepted  OR last committed
-//  uint8_t glob_sess_id[2]; //accepted  OR last committed
-//  uint8_t log_no[4]; // last committed only
-//};
-//
-////
-//struct acc_rep_message {
-//  uint8_t coalesce_num;
-//  uint8_t m_id;
-//  uint8_t opcode;
-//  struct acc_rep_last_committed acc_rep[MAX_ACC_REP_COALESCE];
-//};
-
-
 
 struct r_rep_fifo {
   struct r_rep_message *r_rep_message;
@@ -737,6 +728,9 @@ struct rmw_help_entry{
   uint8_t value[RMW_VALUE_SIZE];
   struct rmw_id rmw_id;
   uint32_t log_no;
+  // RMW that has not grabbed a global entry uses this to
+  // implement back-of by polling on the global entry
+  uint8_t state;
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
@@ -745,6 +739,7 @@ struct rmw_local_entry {
   struct key key;
   uint8_t opcode;
   uint8_t state;
+  bool helping;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
@@ -754,7 +749,7 @@ struct rmw_local_entry {
   uint8_t accept_replies;
   uint16_t epoch_id;
   uint16_t sess_id;
-  uint32_t debug_cntr;
+  uint32_t back_off_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
   cache_meta *ptr_to_kv_pair;

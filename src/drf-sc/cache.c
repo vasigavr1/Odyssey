@@ -43,13 +43,13 @@ void cache_init(int cache_id, int num_threads) {
 
 
 /* ---------------------------------------------------------------------------
------------------------------- ABD--------------------------------
+------------------------------ DRF-SC--------------------------------
 ---------------------------------------------------------------------------*
 
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op, struct mica_resp *resp,
+inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op, struct cache_resp *resp,
                                  struct pending_ops *p_ops)
 {
 	int I, j;	/* I is batch index */
@@ -233,18 +233,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           // key has been RMWed before
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
-            struct key *op_key = (struct key *) (((void *) &op[I]) + sizeof(cache_meta));
-            struct key *kv_key = (struct key *) (((void *) kv_ptr[I]) + sizeof(cache_meta));
-            if(!(true_keys_are_equal(&rmw.entry[entry].key, kv_key) &&
-                 (true_keys_are_equal(&rmw.entry[entry].key, op_key)) &&
-                 (true_keys_are_equal(kv_key, op_key)))) {
-              print_true_key(&rmw.entry[entry].key);
-              print_true_key(kv_key);
-              print_true_key(op_key);
-              printf("entry %u/%u \n", entry, *(uint32_t *) kv_ptr[I]->value);
-              assert(false);
-            }
-            check_entry_validity_with_cache_op(kv_ptr[I], entry);
+            check_keys_with_two_cache_ops(&op[I], kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
@@ -259,8 +248,11 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             else {
               if (SESSIONS_PER_THREAD == 1) {
                 // this should happen only because of contention
-                red_printf("Session has been freed but the rmw _entry is not invalid state: %u\n", rmw_entry->state);
+                red_printf("Session has been freed but the rmw _entry is not in invalid state: %u\n", rmw_entry->state);
               }
+              // This is the state the RMW will wait on
+              resp[I].glob_entry_state = rmw_entry->state;
+              resp[I].glob_entry_rmw_id = rmw_entry->rmw_id;
               resp[I].type = RETRY_RMW_KEY_EXISTS;
             }
           }
@@ -432,17 +424,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           }
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED){
             entry = *(uint32_t *) kv_ptr[I]->value;
-            struct key *com_key = (struct key *) com->key;
-            struct key *kv_key = (struct key *) (((void *) kv_ptr[I]) + sizeof(cache_meta));
-            if(!(true_keys_are_equal(&rmw.entry[entry].key, kv_key) &&
-                (true_keys_are_equal(&rmw.entry[entry].key, com_key)) &&
-                 (true_keys_are_equal(kv_key, com_key)))) {
-              print_true_key(&rmw.entry[entry].key);
-              print_true_key(kv_key);
-              print_true_key(com_key);
-              assert(false);
-            }
-            check_entry_validity_with_cache_op(kv_ptr[I], entry);
+            check_keys_with_one_cache_op((struct key *) com->key, kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             overwrite_kv = handle_remote_commit(rmw_entry, log_no, rmw_l_id, glob_sess_id, com, t_id);
           }
