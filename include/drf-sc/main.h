@@ -475,9 +475,14 @@ struct cache_resp {
 };
 
 // format of a Timestamp tuple (Lamport clock)
-struct ts_tuple {
+struct network_ts_tuple {
   uint8_t m_id;
   uint8_t version[4];
+};
+
+struct ts_tuple {
+  uint8_t m_id;
+  uint32_t version;
 };
 
 // The format of an ack message
@@ -516,7 +521,7 @@ struct w_message {
 
 struct accept {
 	uint8_t t_rmw_id[8];
-	struct ts_tuple ts;
+	struct network_ts_tuple ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
   uint8_t val_len;
@@ -538,7 +543,7 @@ struct w_message_ud_req {
 };
 
 struct commit {
-  struct ts_tuple ts;
+  struct network_ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
   uint8_t val_len;
@@ -557,7 +562,7 @@ struct commit_message {
 
 //
 struct read {
-  struct ts_tuple ts;
+  struct network_ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
 };
@@ -575,7 +580,7 @@ struct r_message {
 //
 struct propose {
   uint8_t t_rmw_id[8];
-  struct ts_tuple ts;
+  struct network_ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
   uint8_t glob_sess_id[2];
@@ -630,7 +635,7 @@ struct r_rep_small {
 struct r_rep_big {
   uint8_t opcode;
   //uint8_t ts[TS_TUPLE_SIZE];
-  struct ts_tuple ts;
+  struct network_ts_tuple ts;
   uint8_t value[VALUE_SIZE];
 
 };
@@ -657,7 +662,7 @@ struct r_rep_message_ud_req {
 struct rmw_rep_last_committed {
   uint8_t l_id[8]; // the l_id of the propose
   uint8_t opcode;
-  struct ts_tuple ts;
+  struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
   uint8_t rmw_id[8]; //accepted  OR last committed
   uint8_t glob_sess_id[2]; //accepted  OR last committed
@@ -692,7 +697,7 @@ struct read_info {
   uint8_t times_seen_ts;
   bool seen_larger_ts;
 	uint8_t opcode;
-  struct ts_tuple ts_to_read;
+  struct network_ts_tuple ts_to_read;
   uint8_t key[TRUE_KEY_SIZE];
 	// the value read locally, a greater value received or
 	// in case of a 2-round write, the value to be written

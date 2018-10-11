@@ -561,10 +561,11 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
 							}
 						}
             prev_meta = kv_ptr[I]->key.meta;
-            if (compare_ts((struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id) == GREATER)
+            if (compare_netw_ts((struct network_ts_tuple *) &prev_meta.m_id,
+                                (struct network_ts_tuple *) &op->key.meta.m_id) == GREATER)
               memcpy(tmp_value, kv_ptr[I]->value, VALUE_SIZE);
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
-          insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
+          insert_r_rep(p_ops, (struct network_ts_tuple *)&prev_meta.m_id, (struct network_ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, (void*) tmp_value, READ, op->opcode);
 
@@ -615,7 +616,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             }
             prev_meta = kv_ptr[I]->key.meta;
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
-          insert_r_rep(p_ops, (struct ts_tuple *)&prev_meta.m_id, (struct ts_tuple *)&op->key.meta.m_id,
+          insert_r_rep(p_ops, (struct network_ts_tuple *)&prev_meta.m_id, (struct network_ts_tuple *)&op->key.meta.m_id,
                        *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, READ_TS, op->opcode);
 
