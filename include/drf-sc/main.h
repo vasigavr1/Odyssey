@@ -738,6 +738,16 @@ struct rmw_help_entry{
   uint8_t state;
 };
 
+struct prop_rep_info {
+  uint8_t prop_acks;
+  uint8_t prop_replies;
+  bool seen_higher_prop;
+  bool higher_ts_accepted;
+  bool ts_stale;
+  bool rmw_id_commited;
+  bool log_too_small;
+};
+
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
 struct rmw_local_entry {
   struct ts_tuple new_ts;
@@ -748,10 +758,11 @@ struct rmw_local_entry {
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
-  uint8_t prop_acks;
+
   uint8_t accept_acks;
-  uint8_t prop_replies;
+
   uint8_t accept_replies;
+  struct prop_rep_info p_reps;
   uint16_t epoch_id;
   uint16_t sess_id;
   uint32_t back_off_cntr;

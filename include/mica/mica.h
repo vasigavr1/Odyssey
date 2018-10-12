@@ -50,13 +50,13 @@
 
 
 struct mica_resp {
-	uint8_t type;
+	//uint8_t type;
 	//uint8_t val_len;
 	//uint16_t unused[3];	/* Make val_ptr 8-byte aligned */
 	//uint8_t *val_ptr;
-	uint32_t rmw_entry; // index into global rmw entries
-  uint32_t log_no; // the log_number of an RMW
-	cache_meta *kv_pair_ptr;
+	//uint32_t rmw_entry; // index into global rmw entries
+  //uint32_t log_no; // the log_number of an RMW
+	//cache_meta *kv_pair_ptr;
 };
 
 struct remote_meta {

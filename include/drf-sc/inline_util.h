@@ -1938,16 +1938,13 @@ static inline void fill_loc_rmw_entry_on_grabbing_global(struct pending_ops* p_o
                                                          uint32_t version, uint8_t state,
                                                          uint16_t sess_i, uint16_t t_id)
 {
-  loc_entry->rmw_id.id = p_ops->prop_info->l_id;
-  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) sess_i);
   if (ENABLE_ASSERTIONS) {
     check_global_sess_id((uint8_t) machine_id, t_id,
                          (uint16_t) sess_i, loc_entry->rmw_id.glob_sess_id);
     assert(version % 2 == 0);
-    assert(version == 0);
+    assert(version > 0);
   }
   loc_entry->state = state;
-  p_ops->prop_info->l_id++;
   loc_entry->epoch_id = (uint16_t) epoch_id;
   loc_entry->new_ts.version = version;
   loc_entry->new_ts.m_id = (uint8_t) machine_id;
@@ -1961,7 +1958,25 @@ static inline bool glob_state_has_not_changed(struct rmw_entry* glob_entry,
          rmw_ids_are_equal(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id);
 }
 
-
+// Initialize a local  RMW entry on the first time it gets allocated
+static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p_ops,
+                                  struct cache_op *prop, uint16_t session_id,
+                                  uint16_t t_id, struct rmw_local_entry* loc_entry)
+{
+  loc_entry->opcode = PROPOSE_OP;
+  memcpy(&loc_entry->key, &prop->key.bkt, TRUE_KEY_SIZE);
+  memset(&loc_entry->p_reps, 0, sizeof(struct prop_rep_info));
+  loc_entry->index_to_rmw = resp->rmw_entry;
+  loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
+  loc_entry->sess_id = (uint16_t) session_id;
+  loc_entry->accept_acks = 0;
+  loc_entry->accept_replies = 0;
+  loc_entry->back_off_cntr = 0;
+  loc_entry->helping = false;
+  // Give it an RMW-id as soon as it has a local entry, because the RMW must happen eventually
+  loc_entry->rmw_id.id = p_ops->prop_info->l_id;
+  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) session_id);
+}
 
 
 /* ---------------------------------------------------------------------------
@@ -2032,10 +2047,10 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
 
 
 // When inspecting an RMW that failed to grab a global entry in the past
-static inline bool attempt_to_grab_global_entry(struct pending_ops *p_ops,
-                                                struct rmw_entry *glob_entry,
-                                                struct rmw_local_entry *loc_entry,
-                                                uint16_t sess_i, uint16_t t_id)
+static inline bool attempt_to_grab_global_entry_after_waiting(struct pending_ops *p_ops,
+                                                              struct rmw_entry *glob_entry,
+                                                              struct rmw_local_entry *loc_entry,
+                                                              uint16_t sess_i, uint16_t t_id)
 {
   bool global_entry_was_grabbed = false;
   struct cache_op *kv_pair = (struct cache_op *) loc_entry->ptr_to_kv_pair;
@@ -2043,13 +2058,22 @@ static inline bool attempt_to_grab_global_entry(struct pending_ops *p_ops,
   if (glob_entry->state == INVALID_RMW) {
     loc_entry->log_no = glob_entry->last_committed_log_no + 1;
     activate_RMW_entry(PROPOSED, kv_pair->key.meta.version + 1, glob_entry, loc_entry->opcode,
-                       (uint8_t) machine_id, p_ops->prop_info->l_id,
-                       get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) sess_i),
+                       (uint8_t) machine_id, loc_entry->rmw_id.id,
+                       loc_entry->rmw_id.glob_sess_id,
                        loc_entry->log_no, t_id);
     global_entry_was_grabbed = true;
+    if (DEBUG_RMW)
+      yellow_printf("Wrkr %u, after waiting for %u cycles,session %u grabbed entry %u \n",
+                    t_id, loc_entry->back_off_cntr, loc_entry->sess_id, loc_entry->index_to_rmw);
   }
   else if (!loc_entry->help_rmw->state == glob_entry->state &&
         rmw_ids_are_equal(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id)) {
+    if (DEBUG_RMW)
+      yellow_printf("Wrkr %u, session %u changed who is waiting for in entry %u: waited for %u cycles for "
+                      "rmw_id % glob_sess_id %u, state %u,  now waiting on rmw_id % glob_sess_id %u, state %u\n",
+                    t_id, loc_entry->sess_id, loc_entry->index_to_rmw, loc_entry->back_off_cntr,
+                    loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
+                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
     loc_entry->help_rmw->state = glob_entry->state;
     assign_second_rmw_id_to_first(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id);
     loc_entry->back_off_cntr = 0;
@@ -2295,7 +2319,10 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   optik_lock(loc_entry->ptr_to_kv_pair);
   if (rmw_ids_are_equal(&loc_entry->rmw_id, &glob_entry->rmw_id) &&
       glob_entry->state != INVALID_RMW) {
-    if (ENABLE_ASSERTIONS) assert(glob_entry->log_no == loc_entry->log_no);
+    if (ENABLE_ASSERTIONS) {
+      assert(glob_entry->log_no == loc_entry->log_no);
+      assert(glob_entry->state == PROPOSED);
+    }
     //state would be typically proposed, but may also be accepted if someone has helped
     if (DEBUG_RMW)
       green_printf("Wrkr %u got rmw id %u, glob sess %u accepted locally \n",
@@ -2313,7 +2340,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   }
   else { // the entry stores a different rmw_id and thus our proposal has been won by another
     // Some other RMW has won the RMW we are trying to get accepted
-    // If the other RMW has been comittted then the last_committed_log_no will be bigger/equal than the current log no
+    // If the other RMW has been committed then the last_committed_log_no will be bigger/equal than the current log no
     if (glob_entry->last_committed_log_no >= loc_entry->log_no)
       return_flag = NACK_ACCEPT_LOG_OUT_OF_DATE;
       //Otherwise the RMW that won is still in progress
@@ -2333,6 +2360,9 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
                    "global entry rmw id %u, glob sess %u, state %u \n",
                    t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
+
+
+
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   }
   return return_flag;
@@ -2406,8 +2436,10 @@ static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct 
       break;
     case NACK_ACCEPT_LOG_OUT_OF_DATE:
     case NACK_ACCEPT_SEEN_HIGHER_TS:
+      loc_entry->state = SAME_KEY_RMW;
+      memset(&loc_entry->p_reps, 0, sizeof(struct prop_rep_info));
       //todo wait for a fixed amount for the global entry to go empty
-      assert(false);
+      //assert(false);
       break;
     default: if (ENABLE_ASSERTIONS) assert(false);
   }
@@ -2480,12 +2512,12 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
                                         const uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) (loc_entry->state == PROPOSED);
-  loc_entry->prop_replies++;
+  loc_entry->p_reps.prop_replies++;
   if (prop_rep->opcode == RMW_ACK)
-    loc_entry->prop_acks++;
+    loc_entry->p_reps.prop_acks++;
     //
   else if (prop_rep->opcode == SEEN_HIGHER_PROP) {
-    // TODO: an easy solution is to add a cache_op and delete this entry
+    // TODO:
     assert(false);
   }
   else if (prop_rep->opcode == RMW_ACCEPTED) {
@@ -2596,7 +2628,7 @@ static inline bool handle_remote_commit(struct rmw_entry* rmw_entry, uint32_t lo
   return overwrite_kv;
 }
 
-
+// Insert a helping accept in the write fifo after waiting on it
 static inline void attempt_to_help_an_accepted_value(struct pending_ops* p_ops,
                                                      struct rmw_local_entry* loc_entry,
                                                      struct rmw_entry* glob_entry, uint16_t t_id)
@@ -2608,11 +2640,13 @@ static inline void attempt_to_help_an_accepted_value(struct pending_ops* p_ops,
   if ((glob_entry->state == ACCEPTED &&
        rmw_ids_are_equal(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id))) {
     loc_entry->helping = true;
-    // Need only to stash te opcode & the state as RMW-id, log, TS, value are unknown
+    // Need only to stash RMW-id, opcode & the state as log, TS, value are unknown
     loc_entry->help_rmw->opcode = loc_entry->opcode;
     loc_entry->help_rmw->state = loc_entry->state;
+    swap_rmw_ids(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
+    if (ENABLE_ASSERTIONS) assert(rmw_ids_are_equal(&loc_entry->rmw_id, &glob_entry->rmw_id));
+    // Load the RMW to be helped (rmw-id is already there from swapping)
     loc_entry->new_ts = glob_entry->new_ts;
-    assign_second_rmw_id_to_first(&loc_entry->rmw_id, &glob_entry->rmw_id);
     loc_entry->log_no = glob_entry->log_no;
     memcpy(loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
     help = true;
@@ -2620,11 +2654,18 @@ static inline void attempt_to_help_an_accepted_value(struct pending_ops* p_ops,
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   loc_entry->back_off_cntr = 0;
   if (help) {
+    if (DEBUG_RMW)
+      cyan_printf("Wrkr %u, session %u helps RMW id % glob_sess %u with version %u, m_id %u, "
+                  "stashed rmw_id % global_sess id, state % \n",
+                  t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id,
+                  loc_entry->new_ts.version, loc_entry->new_ts.m_id, loc_entry->help_rmw->rmw_id.id,
+                  loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
     loc_entry->state = ACCEPTED;
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, t_id);
   }
 }
 
+// After backing off waiting on a PROPOSED global entrym try to steal it
 static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *p_ops,
                                                             struct rmw_local_entry *loc_entry,
                                                             struct rmw_entry *glob_entry,
@@ -2638,20 +2679,30 @@ static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *
     new_version = glob_entry->state == INVALID_RMW ?
                   kv_pair->key.meta.version + 1 : glob_entry->new_ts.version + 2;
     activate_RMW_entry(PROPOSED, new_version, glob_entry, loc_entry->opcode,
-                       (uint8_t) machine_id, p_ops->prop_info->l_id,
-                       get_glob_sess_id((uint8_t) machine_id, t_id, sess_i),
+                       (uint8_t) machine_id, loc_entry->rmw_id.id,
+                       loc_entry->rmw_id.glob_sess_id,
                        loc_entry->log_no, t_id);
     global_entry_was_grabbed = true;
   } else if (!loc_entry->help_rmw->state == glob_entry->state &&
              rmw_ids_are_equal(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id)) {
+    if (DEBUG_RMW)
+      yellow_printf("Wrkr %u, session %u on attempting to steal the propose, changed who is "
+                      "waiting for in entry %u: waited for %u cycles for "
+                      "rmw_id % glob_sess_id %u, state %u,  now waiting on rmw_id % glob_sess_id %u, state %u\n",
+                    t_id, loc_entry->sess_id, loc_entry->index_to_rmw, loc_entry->back_off_cntr,
+                    loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
+                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
     loc_entry->help_rmw->state = glob_entry->state;
     assign_second_rmw_id_to_first(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id);
-    loc_entry->back_off_cntr = 0;
   }
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
-  if (global_entry_was_grabbed)
+  loc_entry->back_off_cntr = 0;
+  if (global_entry_was_grabbed) {
+    if (DEBUG_RMW)
+      cyan_printf("Wrkr %u: session %u steals the global entry %u to do its propose \n", t_id, loc_entry->sess_id);
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, new_version,
                                           PROPOSED, sess_i, t_id);
+  }
 }
 
 // After having helped another RMW, bring your own RMW back into the local entry
@@ -2659,17 +2710,21 @@ static inline void reinstate_loc_entry_from_stashed(struct rmw_local_entry* loc_
 {
   loc_entry->state = loc_entry->help_rmw->state;
   loc_entry->opcode = loc_entry->help_rmw->opcode;
-  loc_entry->prop_acks = 0;
+  assign_second_rmw_id_to_first(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
   loc_entry->accept_acks = 0;
-  loc_entry->prop_replies = 0;
   loc_entry->accept_replies = 0;
   loc_entry->back_off_cntr = 0;
   loc_entry->helping = false;
+  memset(&loc_entry->p_reps, 0, sizeof(struct prop_rep_info));
 
-  if (ENABLE_RMWS) yellow_printf("Wrkr %u, reinstates its RMW after helping \n", t_id);
+  if (ENABLE_RMWS) yellow_printf("Wrkr %u, sess %u reinstates its RMW id%u glob_sess-id %u after helping \n",
+                                 loc_entry->sess_id, loc_entry->rmw_id.id,
+                                 loc_entry->rmw_id.glob_sess_id, t_id);
 
 
 }
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
@@ -2961,17 +3016,9 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
   if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
   struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[session_id];
   if (ENABLE_ASSERTIONS) assert(loc_entry->state == INVALID_RMW);
-  loc_entry->opcode = PROPOSE_OP;
-  memcpy(&loc_entry->key, &prop->key.bkt, TRUE_KEY_SIZE);
-  loc_entry->index_to_rmw = resp->rmw_entry;
-  loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
-  loc_entry->sess_id = (uint16_t) session_id;
-  loc_entry->prop_acks = 0;
-  loc_entry->accept_acks = 0;
-  loc_entry->prop_replies = 0;
-  loc_entry->accept_replies = 0;
-  loc_entry->back_off_cntr = 0;
-  loc_entry->helping = false;
+
+  init_loc_entry(resp, p_ops, prop, (uint16_t) session_id, t_id, loc_entry);
+  p_ops->prop_info->l_id++;
   // if the global RMW entry was occupied, put in the next op to try next round
   if (resp->type == RETRY_RMW_KEY_EXISTS) {
     //if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved "
@@ -4327,7 +4374,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     struct rmw_local_entry* loc_entry = &p_ops->prop_info->entry[sess_i];
     if (loc_entry->state == INVALID_RMW) continue;
 
-    // if it has been accepted check if it can be committed
+    /* =============== ACCEPTED ======================== */
     if (loc_entry->state == ACCEPTED) {
       // Quorum of prop acks gathered: send an accept
       if (loc_entry->accept_acks >= REMOTE_QUORUM) {
@@ -4349,23 +4396,25 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
       }
     }
 
+    /* =============== SAME_KEY_RMW ======================== */
     if (loc_entry->state == SAME_KEY_RMW) {
-      // TODO INSERT DEBUG CODE AND PRINTS IN THOSE
       struct rmw_entry* glob_entry = &rmw.entry[loc_entry->index_to_rmw];
       // If this fails to grab a global entry it will try to update
       // the (rmw_id + state) that is being waited on.
       // If it updates it will zero the back-off counter
-      if (!attempt_to_grab_global_entry(p_ops, glob_entry, loc_entry,
-                                        sess_i, t_id)) {
-
+      if (!attempt_to_grab_global_entry_after_waiting(p_ops, glob_entry, loc_entry,
+                                                      sess_i, t_id)) {
         loc_entry->back_off_cntr++;
         if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
+          // This is failure-related help/stealing it should not be that we are being held up by the local machine
+          if (ENABLE_ASSERTIONS)
+            assert(glob_ses_id_to_m_id(loc_entry->help_rmw->rmw_id.glob_sess_id) != (uint8_t) machine_id);
           // if have accepted a value help it
           if (loc_entry->help_rmw->state == ACCEPTED)
-            attempt_to_help_an_accepted_value(p_ops, loc_entry, glob_entry, t_id);
+            attempt_to_help_an_accepted_value(p_ops, loc_entry, glob_entry, t_id); // zeroes the back-off counter
             // if have received a proposal, send your own proposal
           else if (loc_entry->help_rmw->state == PROPOSED) {
-            attempt_to_steal_a_proposed_global_entry(p_ops, loc_entry, glob_entry, sess_i, t_id);
+            attempt_to_steal_a_proposed_global_entry(p_ops, loc_entry, glob_entry, sess_i, t_id); // zeroes the back-off counter
           }
         }
       }
@@ -4373,10 +4422,10 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
         insert_prop_to_read_fifo(p_ops, loc_entry, 0, t_id);
     }
 
-    // if it has been proposed check if it has gathered acks
+    /* =============== PROPOSED ======================== */
     if (loc_entry->state == PROPOSED) {
       // Quorum of prop acks gathered: send an accept
-      if (loc_entry->prop_acks >= REMOTE_QUORUM)
+      if (loc_entry->p_reps.prop_acks >= REMOTE_QUORUM)
         act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
       continue;
     }

@@ -246,7 +246,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               resp[I].type = RMW_SUCCESS;
             }
             else {
-              if (SESSIONS_PER_THREAD == 1) {
+              if (ENABLE_ASSERTIONS && SESSIONS_PER_THREAD == 1) {
                 // this should happen only because of contention
                 red_printf("Session has been freed but the rmw _entry is not in invalid state: %u\n", rmw_entry->state);
               }
@@ -256,11 +256,12 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               resp[I].type = RETRY_RMW_KEY_EXISTS;
             }
           }
-          resp[I].rmw_entry = entry;
           resp[I].kv_pair_ptr = &kv_ptr[I]->key.meta;
           // We need to put the new timestamp in the op too, both to send it and to store it for later
           op[I].key.meta.version = kv_ptr[I]->key.meta.version + 1;
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+          resp[I].rmw_entry = entry;
+          rmw_l_id++;
         }
         else {
         red_printf("Wrkr %u: cache_batch_op_trace wrong opcode in cache: %d, req %d \n",
