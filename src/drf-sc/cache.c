@@ -437,12 +437,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
             memcpy(&kv_ptr[I]->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-
-          uint64_t tmp_rmw_id;
-          do {
-            tmp_rmw_id = committed_glob_sess_rmw_id[glob_sess_id];
-            if (rmw_l_id <= tmp_rmw_id) break;
-          } while (atomic_compare_exchange_strong(&committed_glob_sess_rmw_id[glob_sess_id], &tmp_rmw_id, rmw_l_id));
+          register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
 
         }
         else if (ENABLE_ASSERTIONS) {

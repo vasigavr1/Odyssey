@@ -525,6 +525,9 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
     (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) malloc(sizeof(struct rmw_help_entry));
     memset((*p_ops)->prop_info->entry[i].help_rmw, 0, sizeof(struct rmw_help_entry));
+
+    (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) malloc(sizeof(struct rmw_local_entry));
+    memset((*p_ops)->prop_info->entry[i].help_loc_entry, 0, sizeof(struct rmw_local_entry));
   }
 
   //(*p_ops)->prep_info->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
