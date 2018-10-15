@@ -249,8 +249,10 @@
 #define PROPOSED 1 // has seen a propose || has been proposed
 #define ACCEPTED 2 // has acked an acccept || has fired accepts
 #define SAME_KEY_RMW 3  // there is already an entry for the key
-#define MUST_BCAST_COMMITS 4 // locally committed-> must broadcast commits
-#define COMMITTED 5 //
+#define RETRY_WITH_BIGGER_TS 4
+#define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
+#define COMMITTED 6 //
+#define TS_STALE_ON_REMOTE_KVS 7
 
 #define VC_NUM 2
 #define R_VC 0
@@ -438,7 +440,12 @@ struct remote_qp {
 #define NACK_ACCEPT_LOG_OUT_OF_DATE 3
 #define BROADCAST_COMMITS 4
 #define DO_NOT_BROAD_CAST_COMMITS 5
+#define ABORT_HELP 6
 
+// Possible Helping flags
+#define NOT_HELPING 0
+#define HELPING_NEED_STASHING 1 // the RMW meta data need to be stashed in the help entry
+#define HELPING_NO_STASHING 2 // The RMW metadata need not been stashed because the help_loc_entry is in use
 
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
@@ -746,6 +753,8 @@ struct prop_rep_info {
   uint8_t already_accepted;
   uint8_t ts_stale;
   uint8_t seen_higher_prop;
+  struct ts_tuple kvs_higher_ts;
+  struct ts_tuple seen_higher_prop_ts;
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
@@ -754,7 +763,8 @@ struct rmw_local_entry {
   struct key key;
   uint8_t opcode;
   uint8_t state;
-  bool helping;
+  uint8_t  helping_flag;
+
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
