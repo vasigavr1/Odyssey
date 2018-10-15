@@ -177,9 +177,10 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
   srand ((uint)seed);
   uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0,
           keys_that_get_rmwed[MACHINE_NUM * WORKERS_PER_MACHINE];
-  for (i = 0; i < MACHINE_NUM * WORKERS_PER_MACHINE; i++)
-    keys_that_get_rmwed[i] = i;
-
+  if (ENABLE_RMWS) {
+    for (i = 0; i < MACHINE_NUM * WORKERS_PER_MACHINE; i++)
+      keys_that_get_rmwed[i] = i;
+  }
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
     (*cmds)[i].opcode = 0;
@@ -187,10 +188,20 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     //Before reading the request decide if it's gone be r_rep or write
     uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
     uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    bool is_rmw = (t_id == 0) && ENABLE_NO_CONFLICT_RMW && ENABLE_RMWS &&
-      (i == (machine_id * WORKERS_PER_MACHINE + t_id));
+    bool is_rmw = false;
+    if (ENABLE_RMWS) {
+      if (ALL_RMWS_SINGLE_KEY)  {
+        is_rmw = true;
+      }
+      if (ENABLE_NO_CONFLICT_RMW) {
+        is_rmw = (t_id == 0) && (i == (machine_id * WORKERS_PER_MACHINE + t_id));
+      }
+      else if (ENABLE_SINGLE_KEY_RMW) {
+        is_rmw = i == (REM_MACH_NUM * WORKERS_PER_MACHINE);
+      }
+    }
     if (is_rmw) {
-      printf("Worker %u, command %u is an RMW \n", t_id, i);
+      if (!ALL_RMWS_SINGLE_KEY) printf("Worker %u, command %u is an RMW \n", t_id, i);
       rmws++;
       (*cmds)[i].opcode = PROPOSE_OP;
     }
@@ -222,7 +233,9 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
     if (is_rmw) {
-      key_id = (uint32_t) i;
+      if (ALL_RMWS_SINGLE_KEY)
+        key_id = 0;
+      else  key_id = (uint32_t) i;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     else {

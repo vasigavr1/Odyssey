@@ -169,149 +169,149 @@ void mica_insert_one(struct mica_kv *kv,
  * fields. For failed GETs and all PUTs, @val_len should be 0 so that HERD can
  * send a 0-byte response. In these cases, the value of @val_ptr doesn't matter.
  */
-void mica_batch_op(struct mica_kv *kv,
-	int n, struct mica_op **op, struct mica_resp *resp)
-{
-	int I, j;	/* I is batch index */
-	static uint64_t misses = 0; //TODO this is only for debugging
-#if MICA_DEBUG == 1
-	assert(kv != NULL);
-	assert(op != NULL);
-	assert(n > 0 && n <= MICA_MAX_BATCH_SIZE);
-	assert(resp != NULL);
-#endif
+//void mica_batch_op(struct mica_kv *kv,
+//	int n, struct mica_op **op, struct mica_resp *resp)
+//{
+//	int I, j;	/* I is batch index */
+//	static uint64_t misses = 0; //TODO this is only for debugging
+//#if MICA_DEBUG == 1
+//	assert(kv != NULL);
+//	assert(op != NULL);
+//	assert(n > 0 && n <= MICA_MAX_BATCH_SIZE);
+//	assert(resp != NULL);
+//#endif
+//
+//#if MICA_DEBUG == 2
+//	for(I = 0; I < n; I++) {
+//		mica_print_op(op[I]);
+//	}
+//#endif
+//
+//	unsigned int bkt[MICA_MAX_BATCH_SIZE];
+//	struct mica_bkt *bkt_ptr[MICA_MAX_BATCH_SIZE];
+//	unsigned int tag[MICA_MAX_BATCH_SIZE];
+//	int key_in_store[MICA_MAX_BATCH_SIZE];	/* Is this key in the datastore? */
+//	struct mica_op *kv_ptr[MICA_MAX_BATCH_SIZE];	/* Ptr to KV item in log */
+//
+//	/*
+//	 * We first lookup the key in the datastore. The first two @I loops work
+//	 * for both GETs and PUTs.
+//	 */
+//	for(I = 0; I < n; I++) {
+//		bkt[I] = op[I]->key.bkt & kv->bkt_mask;
+//		bkt_ptr[I] = &kv->ht_index[bkt[I]];
+//		__builtin_prefetch(bkt_ptr[I], 0, 0);
+//		tag[I] = op[I]->key.tag;
+//
+//		key_in_store[I] = 0;
+//		kv_ptr[I] = NULL;
+//	}
+//
+//	for(I = 0; I < n; I++) {
+//		for(j = 0; j < 8; j++) {
+//			if(bkt_ptr[I]->slots[j].in_use == 1 &&
+//					bkt_ptr[I]->slots[j].tag == tag[I]) {
+//				uint64_t log_offset = bkt_ptr[I]->slots[j].offset &
+//					kv->log_mask;
+//
+//				/*
+//				 * We can interpret the log entry as mica_op, even though it
+//				 * may not contain the full MICA_MAX_VALUE value.
+//				 */
+//				kv_ptr[I] = (struct mica_op *) &kv->ht_log[log_offset];
+//
+//				/* Small values (1--64 bytes) can span 2 cache lines */
+//				__builtin_prefetch(kv_ptr[I], 0, 0);
+//				__builtin_prefetch((uint8_t *) kv_ptr[I] + 64, 0, 0);
+//
+//				/* Detect if the head has wrapped around for this index entry */
+//				if(kv->log_head - bkt_ptr[I]->slots[j].offset >= kv->log_cap) {
+//					kv_ptr[I] = NULL;	/* If so, we mark it "not found" */
+//				}
+//
+//				break;
+//			}
+//		}
+//	}
+//
+//	for(I = 0; I < n; I++) {
+//		if(kv_ptr[I] != NULL) {
+//			/* We had a tag match earlier. Now compare log entry. */
+//			long long *key_ptr_log = (long long *) kv_ptr[I];
+//			long long *key_ptr_req = (long long *) op[I];
+//
+//			//if(key_ptr_log[0] == key_ptr_req[0] &&  // I think this checks for the __unused part of the key
+//			   //key_ptr_log[1] == key_ptr_req[1]) {
+//			if(key_ptr_log[1] == key_ptr_req[1]) {
+//                //TODO respond (or do other actions) according to the state in __unused/key_ptr_log[0]
+//
+//				key_in_store[I] = 1;
+//
+//				if(op[I]->opcode == MICA_OP_GET) {
+//					kv->num_get_op++;
+//
+//					resp[I].type = MICA_RESP_GET_SUCCESS;
+////					resp[I].val_len = kv_ptr[I]->val_len;
+//					// printf("length %d\n", resp[I].val_len);
+////					resp[I].val_ptr = kv_ptr[I]->value;
+//				} else if(op[I]->opcode == MICA_OP_PUT){
+//					kv->num_put_op++;
+//					/* Update the value in the log */
+//					if (op[I]->val_len != kv_ptr[I]->val_len) {
+//						printf("Length we give %d and in in mica :%d, opcode %d\n", op[I]->val_len, kv_ptr[I]->val_len, op[I]->opcode);
+//						assert(0);
+//					}
+//					memcpy(kv_ptr[I]->value, op[I]->value, kv_ptr[I]->val_len);
+//
+//					resp[I].type = MICA_RESP_PUT_SUCCESS;
+////					resp[I].val_len = 0;
+////					resp[I].val_ptr = NULL;
+//				} else {
+//					printf("Wrong opcode %d \n", op[I]->opcode);
+//					assert(0);
+//				}
+//			}
+//		}
+//
+//		if(key_in_store[I] == 0) {
+//			/* We get here if either tag or log key match failed */
+//			if(op[I]->opcode == MICA_OP_GET) {
+//				kv->num_get_fail++;
+//
+//				resp[I].type = MICA_RESP_GET_FAIL;
+////				resp[I].val_len = 0;
+////				resp[I].val_ptr = NULL;
+//			} else {
+//				/*
+//				 * If datastore lookup failed for PUT, it's an INSERT. INSERTs
+//				 * currently happen on a slow non-batched path.
+//				 */
+//				mica_insert_one(kv, op[I], &resp[I]);
+//
+//				resp[I].type = MICA_RESP_PUT_SUCCESS;
+////				resp[I].val_len = 0;
+////				resp[I].val_ptr = NULL;
+//			}
+//		}
+//	}
+//}
 
-#if MICA_DEBUG == 2
-	for(I = 0; I < n; I++) {
-		mica_print_op(op[I]);
-	}
-#endif
 
-	unsigned int bkt[MICA_MAX_BATCH_SIZE];
-	struct mica_bkt *bkt_ptr[MICA_MAX_BATCH_SIZE];
-	unsigned int tag[MICA_MAX_BATCH_SIZE];
-	int key_in_store[MICA_MAX_BATCH_SIZE];	/* Is this key in the datastore? */
-	struct mica_op *kv_ptr[MICA_MAX_BATCH_SIZE];	/* Ptr to KV item in log */
-
-	/*
-	 * We first lookup the key in the datastore. The first two @I loops work
-	 * for both GETs and PUTs.
-	 */
-	for(I = 0; I < n; I++) {
-		bkt[I] = op[I]->key.bkt & kv->bkt_mask;
-		bkt_ptr[I] = &kv->ht_index[bkt[I]];
-		__builtin_prefetch(bkt_ptr[I], 0, 0);
-		tag[I] = op[I]->key.tag;
-
-		key_in_store[I] = 0;
-		kv_ptr[I] = NULL;
-	}
-
-	for(I = 0; I < n; I++) {
-		for(j = 0; j < 8; j++) {
-			if(bkt_ptr[I]->slots[j].in_use == 1 &&
-					bkt_ptr[I]->slots[j].tag == tag[I]) {
-				uint64_t log_offset = bkt_ptr[I]->slots[j].offset &
-					kv->log_mask;
-
-				/*
-				 * We can interpret the log entry as mica_op, even though it
-				 * may not contain the full MICA_MAX_VALUE value.
-				 */
-				kv_ptr[I] = (struct mica_op *) &kv->ht_log[log_offset];
-
-				/* Small values (1--64 bytes) can span 2 cache lines */
-				__builtin_prefetch(kv_ptr[I], 0, 0);
-				__builtin_prefetch((uint8_t *) kv_ptr[I] + 64, 0, 0);
-
-				/* Detect if the head has wrapped around for this index entry */
-				if(kv->log_head - bkt_ptr[I]->slots[j].offset >= kv->log_cap) {
-					kv_ptr[I] = NULL;	/* If so, we mark it "not found" */
-				}
-
-				break;
-			}
-		}
-	}
-
-	for(I = 0; I < n; I++) {
-		if(kv_ptr[I] != NULL) {
-			/* We had a tag match earlier. Now compare log entry. */
-			long long *key_ptr_log = (long long *) kv_ptr[I];
-			long long *key_ptr_req = (long long *) op[I];
-
-			//if(key_ptr_log[0] == key_ptr_req[0] &&  // I think this checks for the __unused part of the key
-			   //key_ptr_log[1] == key_ptr_req[1]) {
-			if(key_ptr_log[1] == key_ptr_req[1]) {
-                //TODO respond (or do other actions) according to the state in __unused/key_ptr_log[0]
-
-				key_in_store[I] = 1;
-
-				if(op[I]->opcode == MICA_OP_GET) {
-					kv->num_get_op++;
-
-					resp[I].type = MICA_RESP_GET_SUCCESS;
-//					resp[I].val_len = kv_ptr[I]->val_len;
-					// printf("length %d\n", resp[I].val_len);
-//					resp[I].val_ptr = kv_ptr[I]->value;
-				} else if(op[I]->opcode == MICA_OP_PUT){
-					kv->num_put_op++;
-					/* Update the value in the log */
-					if (op[I]->val_len != kv_ptr[I]->val_len) {
-						printf("Length we give %d and in in mica :%d, opcode %d\n", op[I]->val_len, kv_ptr[I]->val_len, op[I]->opcode);
-						assert(0);
-					}
-					memcpy(kv_ptr[I]->value, op[I]->value, kv_ptr[I]->val_len);
-
-					resp[I].type = MICA_RESP_PUT_SUCCESS;
-//					resp[I].val_len = 0;
-//					resp[I].val_ptr = NULL;
-				} else {
-					printf("Wrong opcode %d \n", op[I]->opcode);
-					assert(0);
-				}
-			}
-		}
-
-		if(key_in_store[I] == 0) {
-			/* We get here if either tag or log key match failed */
-			if(op[I]->opcode == MICA_OP_GET) {
-				kv->num_get_fail++;
-
-				resp[I].type = MICA_RESP_GET_FAIL;
-//				resp[I].val_len = 0;
-//				resp[I].val_ptr = NULL;
-			} else {
-				/*
-				 * If datastore lookup failed for PUT, it's an INSERT. INSERTs
-				 * currently happen on a slow non-batched path.
-				 */
-				mica_insert_one(kv, op[I], &resp[I]);
-
-				resp[I].type = MICA_RESP_PUT_SUCCESS;
-//				resp[I].val_len = 0;
-//				resp[I].val_ptr = NULL;
-			}
-		}
-	}
-}
-
-
-void mica_print_bucket(struct mica_kv *kv, int bkt_idx)
-{
-	assert(kv != NULL);
-	assert(bkt_idx > 0 && bkt_idx < kv->num_bkts);
-
-	int i;
-	struct mica_bkt *bkt = &kv->ht_index[bkt_idx];
-	printf("mica: Bucket %d:\n", bkt_idx);
-	for(i = 0; i < 8; i++) {
-		printf("\tSlot %d: in_use = %u, offset = {%lu, %u} tag = %u\n",
-			i, bkt->slots[i].in_use, (uint64_t) bkt->slots[i].offset,
-			(uint32_t ) (bkt->slots[i].offset & kv->log_mask),
-			bkt->slots[i].tag);
-	}
-}
+//void mica_print_bucket(struct mica_kv *kv, int bkt_idx)
+//{
+//	assert(kv != NULL);
+//	assert(bkt_idx > 0 && bkt_idx < kv->num_bkts);
+//
+//	int i;
+//	struct mica_bkt *bkt = &kv->ht_index[bkt_idx];
+//	printf("mica: Bucket %d:\n", bkt_idx);
+//	for(i = 0; i < 8; i++) {
+//		printf("\tSlot %d: in_use = %u, offset = {%lu, %u} tag = %u\n",
+//			i, bkt->slots[i].in_use, (uint64_t) bkt->slots[i].offset,
+//			(uint32_t ) (bkt->slots[i].offset & kv->log_mask),
+//			bkt->slots[i].tag);
+//	}
+//}
 
 void mica_print_op(struct mica_op *op)
 {
@@ -359,39 +359,39 @@ uint128* mica_gen_keys(int n)
  *  - The bytes of the value inserted are all equal to the least significant
  *    byte of the key.
  */
-void mica_populate_fixed_len(struct mica_kv *kv, int n, int val_len)
-{
-	assert(kv != NULL);
-	assert(n > 0);
-	assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
-
-	/* This is needed for the eviction message below to make sense */
-	assert(kv->num_insert_op == 0 && kv->num_index_evictions == 0);
-
-	int i;
-	struct mica_op op;
-	unsigned long long *op_key = (unsigned long long *) &op.key;
-	struct mica_resp resp;
-
-	/* Generate the keys to insert */
-	uint128 *key_arr = mica_gen_keys(n);
-
-	for(i = 0; i < n; i++) {
-		op_key[0] = key_arr[i].first;
-		op_key[1] = key_arr[i].second;
-		op.opcode = MICA_OP_PUT;
-
-		op.val_len = val_len >> SHIFT_BITS;
-		// printf("length %d\n", op.val_len);
-		uint8_t val = (uint8_t) (op_key[1] & 0xff);
-		memset(op.value, val, val_len);
-
-		mica_insert_one(kv, &op, &resp);
-	}
-
-	assert(kv->num_insert_op == n);
-	// printf("mica: Populated instance %d with %d keys, length = %d. "
-	// 	"Index eviction fraction = %.4f.\n",
-	// 	kv->instance_id, n, val_len,
-	// 	(double) kv->num_index_evictions / kv->num_insert_op);
-}
+//void mica_populate_fixed_len(struct mica_kv *kv, int n, int val_len)
+//{
+//	assert(kv != NULL);
+//	assert(n > 0);
+//	assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
+//
+//	/* This is needed for the eviction message below to make sense */
+//	assert(kv->num_insert_op == 0 && kv->num_index_evictions == 0);
+//
+//	int i;
+//	struct mica_op op;
+//	unsigned long long *op_key = (unsigned long long *) &op.key;
+//	struct mica_resp resp;
+//
+//	/* Generate the keys to insert */
+//	uint128 *key_arr = mica_gen_keys(n);
+//
+//	for(i = 0; i < n; i++) {
+//		op_key[0] = key_arr[i].first;
+//		op_key[1] = key_arr[i].second;
+//		op.opcode = MICA_OP_PUT;
+//
+//		op.val_len = val_len >> SHIFT_BITS;
+//		// printf("length %d\n", op.val_len);
+//		uint8_t val = (uint8_t) (op_key[1] & 0xff);
+//		memset(op.value, val, val_len);
+//
+//		mica_insert_one(kv, &op, &resp);
+//	}
+//
+//	assert(kv->num_insert_op == n);
+//	// printf("mica: Populated instance %d with %d keys, length = %d. "
+//	// 	"Index eviction fraction = %.4f.\n",
+//	// 	kv->instance_id, n, val_len,
+//	// 	(double) kv->num_index_evictions / kv->num_insert_op);
+//}

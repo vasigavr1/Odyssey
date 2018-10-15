@@ -246,10 +246,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               resp[I].type = RMW_SUCCESS;
             }
             else {
-              if (ENABLE_ASSERTIONS && SESSIONS_PER_THREAD == 1) {
-                // this should happen only because of contention
-                red_printf("Session has been freed but the rmw _entry is not in invalid state: %u\n", rmw_entry->state);
-              }
               // This is the state the RMW will wait on
               resp[I].glob_entry_state = rmw_entry->state;
               resp[I].glob_entry_rmw_id = rmw_entry->rmw_id;

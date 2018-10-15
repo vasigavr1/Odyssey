@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 33
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 2
+#define SESSIONS_PER_THREAD 1
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -115,7 +115,9 @@
 #define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
 
-#define ENABLE_NO_CONFLICT_RMW 1
+#define ENABLE_NO_CONFLICT_RMW 0
+#define ENABLE_SINGLE_KEY_RMW 0
+#define ALL_RMWS_SINGLE_KEY 1
 #define SHOW_STATS_LATENCY_STYLE 0
 
 
@@ -248,7 +250,7 @@
 #define INVALID_RMW 0
 #define PROPOSED 1 // has seen a propose || has been proposed
 #define ACCEPTED 2 // has acked an acccept || has fired accepts
-#define SAME_KEY_RMW 3  // there is already an entry for the key
+#define NEEDS_GLOBAL 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
 #define COMMITTED 6 //
@@ -326,7 +328,7 @@
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
 #define DEBUG_BIT_VECS 0
-#define DEBUG_RMW 0
+#define DEBUG_RMW 1
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1
 #define PUT_A_MACHINE_TO_SLEEP 1

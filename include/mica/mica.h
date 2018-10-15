@@ -125,15 +125,15 @@ void mica_insert_one(struct mica_kv *kv,
 					 struct mica_op *op, struct mica_resp *res);
 
 /* Batched operation. PUTs can resolve to UPDATE or INSERT */
-void mica_batch_op(struct mica_kv *kv,
-				   int n, struct mica_op **op, struct mica_resp *resp);
+//void mica_batch_op(struct mica_kv *kv,
+//				   int n, struct mica_op **op, struct mica_resp *resp);
 
 /* Helpers */
 uint128* mica_gen_keys(int n);
-void mica_populate_fixed_len(struct mica_kv *kv, int n, int val_len);
-
-/* Debug functions */
-void mica_print_bucket(struct mica_kv *kv, int bkt_idx);
+//void mica_populate_fixed_len(struct mica_kv *kv, int n, int val_len);
+//
+///* Debug functions */
+//void mica_print_bucket(struct mica_kv *kv, int bkt_idx);
 void mica_print_op(struct mica_op *op);
 
 #endif
