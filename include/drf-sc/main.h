@@ -67,10 +67,6 @@
 #define DUMP_STATS_2_FILE 0
 
 
-
-
-
-
 /*-------------------------------------------------
 	-----------------TRACE-----------------
 --------------------------------------------------*/
@@ -208,7 +204,7 @@
 #define MAX_PROP_COALESCE 1
 
 #define PROP_MES_HEADER 2 // coalesce_num , m_id
-#define PROP_SIZE 28  // RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
+#define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
 #define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
 
 // Propose replies
@@ -223,8 +219,8 @@
 
 // ACCEPTS
 #define MAX_ACC_COALESCE 1
-#define ACCEPT_MES_HEADER 2
-#define ACCEPT_SIZE (29 + RMW_VALUE_SIZE) // key 8 rmw-id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
+#define ACCEPT_MES_HEADER 2 // m_id , coalesce num,
+#define ACCEPT_SIZE (37 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
 #define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
 
 // ACCEPT REPLIES
@@ -253,8 +249,10 @@
 #define NEEDS_GLOBAL 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
-#define COMMITTED 6 //
-#define TS_STALE_ON_REMOTE_KVS 7
+#define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
+#define COMMITTED 7 //
+#define TS_STALE_ON_REMOTE_KVS 8
+
 
 #define VC_NUM 2
 #define R_VC 0
@@ -328,7 +326,7 @@
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
 #define DEBUG_BIT_VECS 0
-#define DEBUG_RMW 1
+#define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1
 #define PUT_A_MACHINE_TO_SLEEP 1
@@ -431,7 +429,8 @@ struct remote_qp {
 #define RMW_LOG_TOO_SMALL 8 // accepts and proposes
 #define RMW_ACK_ACCEPT 9 // only accepts
 #define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
-//#define RMW_LOG_TOO_HIGH 11 // this means the propose will be acked
+#define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
+//#define RMW_LOG_TOO_HIGH 12 // this means the propose will be acked
 
 //flags when receiving a commit
 
@@ -446,8 +445,8 @@ struct remote_qp {
 
 // Possible Helping flags
 #define NOT_HELPING 0
-#define HELPING_NEED_STASHING 1 // the RMW meta data need to be stashed in the help entry
-#define HELPING_NO_STASHING 2 // The RMW metadata need not been stashed because the help_loc_entry is in use
+#define HELPING_NEED_STASHING 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
+#define HELPING_NO_STASHING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
@@ -529,12 +528,13 @@ struct w_message {
 
 
 struct accept {
-	uint8_t t_rmw_id[8];
+  uint8_t l_id[8];
 	struct network_ts_tuple ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
+  uint8_t t_rmw_id[8];
   uint8_t glob_sess_id[2]; // this is useful when helping
   uint8_t log_no[4];
 };
@@ -588,10 +588,11 @@ struct r_message {
 
 //
 struct propose {
-  uint8_t t_rmw_id[8];
+  uint8_t l_id[8];
   struct network_ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
+  uint8_t t_rmw_id[8];
   uint8_t glob_sess_id[2];
   uint8_t log_no[4];
 };
@@ -669,7 +670,7 @@ struct r_rep_message_ud_req {
 // Reply with the last committed RMW if the
 // proposal/accept had a low log number or has already been committed
 struct rmw_rep_last_committed {
-  uint8_t l_id[8]; // the l_id of the propose
+  uint8_t l_id[8]; // the l_id of the rmw local_entry
   uint8_t opcode;
   struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
@@ -716,8 +717,8 @@ struct read_info {
   // when a data out-of-epoch write is inserted in a write message,
   // there is a chance we may need to change its version, so we need to
   // remember where it is stored in the w_fifo -- NOT NEEDED
-//  uint32_t w_mes_ptr;
-//  uint8_t inside_w_ptr;
+  //  uint32_t w_mes_ptr;
+  //  uint8_t inside_w_ptr;
 };
 
 // the first time a key gets RMWed, it grabs an RMW entry
@@ -747,9 +748,9 @@ struct rmw_help_entry{
   uint8_t state;
 };
 
-struct prop_rep_info {
-  uint8_t prop_replies;
-  uint8_t prop_acks;
+struct rmw_rep_info {
+  uint8_t tot_replies;
+  uint8_t acks;
   uint8_t rmw_id_commited;
   uint8_t log_too_small;
   uint8_t already_accepted;
@@ -765,19 +766,20 @@ struct rmw_local_entry {
   struct key key;
   uint8_t opcode;
   uint8_t state;
-  uint8_t  helping_flag;
+  uint8_t helping_flag;
 
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
-  uint8_t accept_acks;
-  uint8_t accept_replies;
-  struct prop_rep_info p_reps;
+  //uint8_t accept_acks;
+  //uint8_t accept_replies;
+  struct rmw_rep_info rmw_reps;
   uint16_t epoch_id;
   uint16_t sess_id;
   uint32_t back_off_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
+  uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases
   cache_meta *ptr_to_kv_pair;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
@@ -978,11 +980,6 @@ struct multiple_owner_bit {
 // Remote acquires will read those failures and flip the bits after the have
 // increased their epoch id
 extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
-
-
-
-
-
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern atomic_char qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];

@@ -365,7 +365,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
         }
         else if (op->opcode == ACCEPT_OP) {
           struct accept *acc =(struct accept *) (((void *)op) - 5); // the accept starts at an offset of 5 bytes
-          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u\n", t_id, I);
+
           uint8_t flag;
           // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
           struct rmw_help_entry reply_rmw;
@@ -373,12 +373,17 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           uint16_t glob_sess_id = *(uint16_t*) acc->glob_sess_id;
           //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = *(uint32_t*) acc->log_no;
+          uint64_t l_id = *(uint64_t *) acc->l_id;
           // TODO Finding the sender machine id here is a hack that will not work with coalescing
           static_assert(MAX_ACC_COALESCE == 1, " ");
-          struct accept_message *acc_mes = (((void *)op) - 5 - ACCEPT_MES_HEADER);
+          struct accept_message *acc_mes = (((void *)op) -5 - ACCEPT_MES_HEADER);
+
           if (ENABLE_ASSERTIONS) check_accept_mes(acc_mes);
           uint8_t prop_m_id = acc_mes->m_id;
           uint32_t entry;
+          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u from m_id %u "
+                                        "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
+                                      t_id, I, prop_m_id, l_id, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)acc->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
           // 1. check if it has been committed
           // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
@@ -399,18 +404,20 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           // TODO this needs to work with the rmw_help_structure now
-          insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
+          insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, acc->opcode);
         }
         else if (op->opcode == COMMIT_OP) {
           struct commit *com =(struct commit *) (((void *)op) + 3); // the commit starts at an offset of 3 bytes
-          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW commit on op %u\n", t_id, I);
           //uint8_t flag;
           bool overwrite_kv;
           uint64_t rmw_l_id = *(uint64_t*) com->t_rmw_id;
           uint16_t glob_sess_id = *(uint16_t*) com->glob_sess_id;
           uint32_t log_no = *(uint32_t*) com->log_no;
           uint32_t entry;
+          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW commit on op %u, "
+                                      "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
+                                      t_id, I, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)com->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
             grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
@@ -568,6 +575,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           uint8_t flag;
           struct rmw_help_entry reply_rmw; // on replying to the propose we may need to send on or more of TS, VALUE, RMW-id, log-no
           uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
+          uint64_t l_id = *(uint64_t*) prop->l_id;
           uint16_t glob_sess_id = *(uint16_t*) prop->glob_sess_id;
           //cyan_printf("Received propose with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = *(uint32_t*) prop->log_no;
@@ -592,7 +600,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             }
           }
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          insert_r_rep(p_ops, NULL, NULL, rmw_l_id, t_id, prop_m_id, (uint16_t) I,
+          insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, prop->opcode);
         }
         else if (op->opcode == CACHE_OP_GET_TS) {
