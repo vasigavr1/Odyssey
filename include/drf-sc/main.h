@@ -22,7 +22,7 @@
 #define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 1
+#define SESSIONS_PER_THREAD 10
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -35,7 +35,7 @@
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define RMW_BACK_OFF_TIMEOUT M_16
+#define RMW_BACK_OFF_TIMEOUT M_1
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -158,7 +158,7 @@
 #define R_REP_SMALL_SIZE (1)
 #define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * R_REP_SIZE))
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
-#define R_REP_SLOTS_FOR_ACCEPTS (2 * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
+#define R_REP_SLOTS_FOR_ACCEPTS (W_CREDITS * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
 #define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
 #define R_REP_WRS_WITHOUT_ACCEPTS (R_CREDITS * REM_MACH_NUM * (CEILING(MAX_R_COALESCE, MAX_R_REP_COALESCE)))
 #define MAX_R_REP_WRS (R_REP_WRS_WITHOUT_ACCEPTS + R_REP_SLOTS_FOR_ACCEPTS)
@@ -325,7 +325,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 0
+#define DEBUG_BIT_VECS 1
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1
