@@ -39,6 +39,11 @@ struct stats {
 	double writes_sent[WORKERS_PER_MACHINE];
 	double reads_sent[WORKERS_PER_MACHINE];
 	double acks_sent[WORKERS_PER_MACHINE];
+	double proposes_sent[WORKERS_PER_MACHINE];
+	double rmws_completed[WORKERS_PER_MACHINE];
+	double accepts_sent[WORKERS_PER_MACHINE];
+	double commits_sent[WORKERS_PER_MACHINE];
+
 	double r_reps_sent[WORKERS_PER_MACHINE];
 	double received_writes[WORKERS_PER_MACHINE];
 	double received_reads[WORKERS_PER_MACHINE];

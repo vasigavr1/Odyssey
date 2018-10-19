@@ -34,7 +34,7 @@ void *print_stats(void* no_arg) {
       printf("---------------------------------------\n");
       exit(0);
     }
-    seconds *= MILLION; // compute only MIOPS
+    //seconds *= 1000;// MILLION; // compute only MIOPS
     for (i = 0; i < num_threads; i++) {
 
       all_clients_cache_hits += curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread;
@@ -50,6 +50,12 @@ void *print_stats(void* no_arg) {
         all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO) / (1000 * seconds);
       else
         all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
+
+      all_stats.rmws_completed[i] = (curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed) / (seconds);
+      all_stats.proposes_sent[i] = (curr_c_stats[i].proposes_sent - prev_c_stats[i].proposes_sent) / (seconds);
+      all_stats.accepts_sent[i] = (curr_c_stats[i].accepts_sent - prev_c_stats[i].accepts_sent) / (seconds);
+      all_stats.commits_sent[i] = (curr_c_stats[i].commits_sent - prev_c_stats[i].commits_sent) / (seconds);
+
       all_stats.quorum_reads_per_thread[i] = (curr_c_stats[i].quorum_reads - prev_c_stats[i].quorum_reads) / (seconds);
 
       all_stats.writes_sent[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) / (seconds);
@@ -92,11 +98,16 @@ void *print_stats(void* no_arg) {
 
     for (i = 0; i < num_threads; i++) {
       cyan_printf("T%d: ", i);
-      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s", i,
+      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s, "
+                    "RMWS: %.2f/s, P/S %.2f/s, A/S %.2f/s, C/S %.2f/s ",
                     all_stats.cache_hits_per_thread[i],
                     all_stats.reads_sent[i],
                     all_stats.writes_sent[i],
-                    all_stats.quorum_reads_per_thread[i]);
+                    all_stats.quorum_reads_per_thread[i],
+                    all_stats.rmws_completed[i],
+                    all_stats.proposes_sent[i],
+                    all_stats.accepts_sent[i],
+                    all_stats.commits_sent[i]);
       yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
                     all_stats.ack_batch_size[i],
                     all_stats.write_batch_size[i],

@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 15
 #define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 10
+#define SESSIONS_PER_THREAD 1
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -329,6 +329,7 @@
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1
+#define DEBUG_LOG 0
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
@@ -925,6 +926,12 @@ struct thread_stats { // 2 cache lines
   uint64_t quorum_reads;
   uint64_t rectified_keys;
   uint64_t q_reads_with_low_epoch;
+
+  uint64_t proposes_sent; // number of broadcast
+  uint64_t accepts_sent; // number of broadcast
+  uint64_t commits_sent;
+  uint64_t rmws_completed;
+
 
 
   uint64_t stalled_ack;
