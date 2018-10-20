@@ -234,6 +234,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
             check_keys_with_two_cache_ops(&op[I], kv_ptr[I], entry);
+            check_log_nos_of_glob_entry(&rmw.entry[entry], "cache_batch_op_trace", t_id);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             if (rmw_entry->state == INVALID_RMW) {
               // remember that key is locked and thus this entry is also locked
@@ -402,6 +403,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
                                    acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
             }
           }
+          check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           // TODO this needs to work with the rmw_help_structure now
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
@@ -439,6 +441,11 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
             kv_ptr[I]->key.meta.version = (* (uint32_t *)com->ts.version) + 1; // the unlock function will decrement 1
             memcpy(&kv_ptr[I]->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
           }
+          struct rmw_entry* glob_entry = &rmw.entry[entry];
+          check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
+          if (ENABLE_ASSERTIONS) { if (glob_entry->state != INVALID_RMW)
+              assert(glob_entry->rmw_id.id != rmw_l_id || glob_entry->rmw_id.glob_sess_id != glob_sess_id);}
+
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
 
@@ -582,11 +589,12 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           uint8_t prop_m_id = p_ops->ptrs_to_r_headers[I]->m_id;
           uint32_t entry;
           optik_lock(&kv_ptr[I]->key.meta);
+          //check_for_same_ts_as_already_proposed(kv_ptr[I], prop, t_id);
           // 1. check if it has been committed
           // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
           // Either way fill the reply_rmw fully, but have a specialized flag!
           if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr[I], rmw_l_id, glob_sess_id, t_id, &entry,
-                                                          &flag, &reply_rmw)) {
+                                                   &flag, &reply_rmw)) {
             // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
             if (!propose_ts_is_not_greater_than_kvs_ts(kv_ptr[I], prop, prop_m_id, t_id, &flag, &reply_rmw)) {
               // 4. If the kv-pair has not been RMWed before grab an entry and ack
@@ -599,6 +607,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                                    prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
             }
           }
+          check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received propose", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, prop->opcode);

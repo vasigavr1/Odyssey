@@ -1305,6 +1305,55 @@ static inline void check_state_with_disallowed_flags(int num_of_flags, ...)
   }
 }
 
+// When going to ack an accept/propose because the log it refers to is higher than what we are working on
+static inline void check_that_log_is_too_high(struct rmw_entry *glob_entry, uint32_t log_no) {
+  if (ENABLE_ASSERTIONS) {
+    assert(log_no > glob_entry->last_committed_log_no);
+    if (log_no == glob_entry->last_committed_log_no + 1) {
+      if (glob_entry->state != INVALID_RMW) {
+        red_printf("Checking_that_log_is to high: log_no %u/%u, glob committed last_log %u, state %u \n",
+                   log_no, glob_entry->log_no, glob_entry->last_committed_log_no, glob_entry->state);
+        assert(false);
+      }
+    } else if (glob_entry->state != INVALID_RMW)
+      assert(glob_entry->last_committed_log_no + 1);
+  }
+}
+
+//
+static inline void check_log_nos_of_glob_entry(struct rmw_entry *glob_entry, char* message, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (glob_entry->last_committed_log_no == glob_entry->log_no &&
+        glob_entry->state != INVALID_RMW) {
+      red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
+                 t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
+      assert(false);
+    }
+  }
+}
+
+//
+static inline void check_for_same_ts_as_already_proposed(struct cache_op *kv_ptr, struct propose *prop, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
+      struct rmw_entry *glob_entry = &rmw.entry[*(uint32_t *) kv_ptr->value];
+      if (glob_entry->state == PROPOSED) {
+        if (compare_netw_ts_with_ts(&prop->ts, &glob_entry->new_ts) == EQUAL) {
+          red_printf("Wrkr %u Received a proposal with same TS as an already acked proposal, "
+                       " prop log/glob log %u/%u, glob sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
+                     t_id, *(uint32_t *) prop->log_no, glob_entry->log_no, *(uint16_t *) prop->glob_sess_id,
+                     glob_entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, glob_entry->rmw_id.id,
+                     *(uint32_t *) prop->ts.version, glob_entry->new_ts.version, prop->ts.m_id, glob_entry->new_ts.m_id);
+          assert(false);
+        }
+      }
+    }
+
+  }
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -1853,24 +1902,27 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, struct c
 {
   if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
     (*entry) = *(uint32_t *) kv_ptr->value;
+    struct rmw_entry *glob_entry = &rmw.entry[*entry];
+    check_log_nos_of_glob_entry(glob_entry, "is_log_smaller_or_has_rmw_committed", t_id);
     if (ENABLE_ASSERTIONS) assert(*entry < RMW_ENTRIES_NUM);
     bool fill_the_rep = false;
     if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id, flag))
       fill_the_rep = true;
-    else if (rmw.entry[*entry].last_committed_log_no >= log_no) {
+    else if (glob_entry->last_committed_log_no >= log_no ||
+             glob_entry->log_no > log_no) {
       if (DEBUG_RMW)
         yellow_printf("Wkrk %u Log number is too small %u/%u entry state %u, propose/accept with rmw_lid %u,"
-                        " global_sess_id %u, entry %u\n", t_id, log_no, rmw.entry[*entry].last_committed_log_no,
-                      rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
+                        " global_sess_id %u, entry %u\n", t_id, log_no, glob_entry->last_committed_log_no,
+                      glob_entry->state, rmw_l_id, glob_sess_id, *entry);
       *flag = RMW_LOG_TOO_SMALL;
       fill_the_rep = true;
     }
     else if (DEBUG_RMW) { // remote log is higher than the locally stored!
-      if (rmw.entry[*entry].log_no < log_no )
+      if (glob_entry->log_no < log_no )
         yellow_printf("Wkrk %u Log number is higher than expected %u/%u, entry state %u, "
                         "propose/accept with rmw_lid %u, global_sess_id %u, entry %u\n",
-                      t_id, log_no, rmw.entry[*entry].log_no,
-                      rmw.entry[*entry].state, rmw_l_id, glob_sess_id, *entry);
+                      t_id, log_no, glob_entry->log_no,
+                      glob_entry->state, rmw_l_id, glob_sess_id, *entry);
     }
     // If either the log is too smaller or the rmw_id has been committed,
     // store the committed value, TS & log_number to the reply
@@ -2311,6 +2363,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
     assert(glob_entry->new_ts.version % 2 == 0);
     assert(state == PROPOSED || state == ACCEPTED); // TODO accepted is allowed?
+    assert(glob_entry->last_committed_log_no < glob_entry->log_no);
   }
 }
 
@@ -2349,6 +2402,7 @@ static inline bool attempt_to_grab_global_entry_after_waiting(struct pending_ops
     assign_second_rmw_id_to_first(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id);
     loc_entry->back_off_cntr = 0;
   }
+  check_log_nos_of_glob_entry(glob_entry, "attempt_to_grab_global_entry_after_waiting", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   if (global_entry_was_grabbed) {
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, version,
@@ -2363,11 +2417,14 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
                                            uint16_t t_id, struct rmw_help_entry *reply_rmw)
 {
   uint8_t return_flag = RMW_ACK_PROPOSE;
+  struct rmw_entry *glob_entry = &rmw.entry[pos];
   if (ENABLE_ASSERTIONS)  {
     assert(pos < RMW_ENTRIES_NUM);
     assert(prop->opcode == PROPOSE_OP);
+    assert(*(uint32_t *) prop->log_no > glob_entry->last_committed_log_no);
+    assert(*(uint32_t *) prop->log_no == glob_entry->log_no);
   }
-  struct rmw_entry *glob_entry = &rmw.entry[pos];
+
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key((struct key *) prop->key, pos));
 
@@ -2397,6 +2454,11 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
         break;
       case EQUAL:
         return_flag = RMW_ACK_PROPOSE;
+        red_printf("Wrkr %u Received a proposal with same TS as an already acked proposal, "
+                     " prop log/glob log %u/%u, glob sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
+                   t_id, *(uint32_t *) prop->log_no, glob_entry->log_no, *(uint16_t *) prop->glob_sess_id,
+                  glob_entry->rmw_id.glob_sess_id, *(uint64_t *) prop->t_rmw_id, glob_entry->rmw_id.id,
+                   *(uint32_t *) prop->ts.version, glob_entry->new_ts.version, prop->ts.m_id, glob_entry->new_ts.m_id);
         my_assert(false, "Received a proposal with same TS an already proposed proposal");
         break;
       case SMALLER:
@@ -2415,13 +2477,15 @@ static inline uint8_t accept_snoops_entry(struct accept *acc, uint32_t pos, uint
                                            uint16_t t_id, struct rmw_help_entry *reply_rmw)
 {
   uint8_t return_flag = RMW_ACK_PROPOSE;
+  struct rmw_entry *glob_entry = &rmw.entry[pos];
   if (ENABLE_ASSERTIONS)  {
     assert(pos < RMW_ENTRIES_NUM);
     assert(acc->opcode == ACCEPT_OP);
-  }
-  struct rmw_entry *glob_entry = &rmw.entry[pos];
-  if (ENABLE_ASSERTIONS)
+    assert(*(uint32_t *) acc->log_no > glob_entry->last_committed_log_no);
+    assert(*(uint32_t *) acc->log_no == glob_entry->log_no);
     assert(check_entry_validity_with_key((struct key *) acc->key, pos));
+  }
+
   if (glob_entry->state != INVALID_RMW) {
     // Higher Ts  = Success,  Lower Ts  = Failure
     enum ts_compare ts_comp = compare_netw_ts_with_ts(&acc->ts, &glob_entry->new_ts);
@@ -2580,6 +2644,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
       glob_entry->state != INVALID_RMW) {
     if (ENABLE_ASSERTIONS) {
       assert(glob_entry->log_no == loc_entry->log_no);
+      assert(glob_entry->last_committed_log_no < loc_entry->log_no);
       //if (glob_entry->state != PROPOSED){
         //red_printf("Wrkr %u attempting to accept locally, but the rmw is "
         //             "already accepted (from help) glob state %u \n", t_id, glob_entry->state);
@@ -2596,6 +2661,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
     if (RMW_VALUE_SIZE >= 8)
      *(uint64_t *) glob_entry->value = loc_entry->rmw_id.id;
     memcpy(loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
+    check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept and succeed", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
     //loc_entry->accept_acks = 0; // the quorum-check always considers a local ack so we do not need to increment this
     return_flag = ACCEPT_ACK;
@@ -2624,13 +2690,13 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
 
 
-
+    check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept and fail", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   }
   return return_flag;
 }
 
-// After gathering a quorum of proposal acks, check if you can accept locally
+// After gathering a quorum of proposal resps, one of them was a lower TS accept, try and help it
 static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
                                                    uint16_t t_id)
 {
@@ -2640,10 +2706,16 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
   help_loc_entry->new_ts = loc_entry->new_ts;
   my_assert(true_keys_are_equal(&help_loc_entry->key, &glob_entry->key),
             "Local entry does not contain the same key as global entry");
-  // we need to change the global rmw structure, which means we need to lock the kv-pair.
+  my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
+            " the help entry and the regular have not hthe same log nos");
+
   optik_lock(loc_entry->ptr_to_kv_pair);
-  bool glob_entry_has_seen_a_higher_ts = glob_entry->state != INVALID_RMW &&
-    compare_ts(&glob_entry->new_ts, &help_loc_entry->new_ts) == GREATER;
+
+  // the global entry has seen a higher ts if
+  // (it's state is not invalid and its TS is higher) or  (it has committed the log)
+  bool glob_entry_has_seen_a_higher_ts = (glob_entry->state != INVALID_RMW &&
+    compare_ts(&glob_entry->new_ts, &help_loc_entry->new_ts) == GREATER) ||
+    glob_entry->last_committed_log_no >= help_loc_entry->log_no;
 
   if (help_loc_entry->log_no == glob_entry->log_no && !(glob_entry_has_seen_a_higher_ts)) {
     if (ENABLE_ASSERTIONS) {
@@ -2667,7 +2739,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     assign_second_rmw_id_to_first(&glob_entry->rmw_id, &help_loc_entry->rmw_id);
     glob_entry->new_ts = help_loc_entry->new_ts;
     memcpy(glob_entry->value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-
+    check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept_to_help and succeed", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
     //loc_entry->accept_acks = 0; // the quorum-check always considers a local ack so we do not need to increment this
     return_flag = ACCEPT_ACK;
@@ -2683,7 +2755,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
 
 
-
+    check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept_to_help and fail", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   }
   return return_flag;
@@ -2735,6 +2807,7 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
   else {
     // if the log has moved on then the RMW has been helped,
     // it has been committed in the other machines so there is no need to broadcast commits
+    check_log_nos_of_glob_entry(glob_entry, "attempt_local_commit", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
     //if (ENABLE_ASSERTIONS) red_printf("Wrkr %u tried to commit locally, but its RMW had already been committed \n", t_id);
 
@@ -2747,6 +2820,10 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
   // finally advance the global structure of session ids -- a compare & swap is not necessary,
   // because we are certain this session has not done more RMWs
   committed_glob_sess_rmw_id[loc_entry_to_commit->rmw_id.glob_sess_id] = loc_entry_to_commit->rmw_id.id;
+  if (ENABLE_ASSERTIONS) { if (glob_entry->state != INVALID_RMW)
+      assert(!rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry_to_commit->rmw_id));}
+  //check_that_glob_state_is_not_on_commited_rmw(glob_entry, loc_entry_to_commit->rmw_id);
+
   if (DEBUG_LOG)
     green_printf("Log %u: RMW_id %u glob_sess %u, loc entry state %u, local commit\n",
                  loc_entry_to_commit->log_no, loc_entry_to_commit->rmw_id.id,
@@ -2787,8 +2864,11 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
       glob_entry->state = INVALID_RMW;
     }
   }
+  check_log_nos_of_glob_entry(glob_entry, "attempt_local_commit_from_rep", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
+  if (ENABLE_ASSERTIONS) { if (glob_entry->state != INVALID_RMW)
+      assert(glob_entry->rmw_id.id != new_rmw_id || glob_entry->rmw_id.glob_sess_id != new_glob_sess_id);}
   if (DEBUG_LOG)
     green_printf("Log %u: RMW_id %u glob_sess %u ,loc entry state %u from reply \n",
                  new_log_no, new_rmw_id, new_glob_sess_id, loc_entry->state);
@@ -2837,8 +2917,10 @@ static inline uint8_t handle_remote_propose_in_cache(struct cache_op *kv_ptr, st
   }
   else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
     // if the log number is higher than expected blindly ack
-    if (*(uint32_t *) prop->log_no > rmw.entry[*entry].log_no)
-      flag = RMW_ACK_PROPOSE;//RMW_LOG_TOO_HIGH;
+    if (*(uint32_t *) prop->log_no > rmw.entry[*entry].log_no) {
+      check_that_log_is_too_high(&rmw.entry[*entry], *(uint32_t *) prop->log_no);
+      flag = RMW_ACK_PROPOSE;
+    }
     else
       flag = propose_snoops_entry(prop, *entry, sender_m_id, t_id, reply_rmw);
   }
@@ -2867,8 +2949,10 @@ static inline uint8_t handle_remote_accept_in_cache(struct cache_op *kv_ptr, str
   }
   else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) { // Entry already exists
     // if the log number is higher than expected blindly ack
-    if (*(uint32_t *) acc->log_no > rmw.entry[*entry].log_no)
+    if (*(uint32_t *) acc->log_no > rmw.entry[*entry].log_no) {
+      check_that_log_is_too_high(&rmw.entry[*entry], *(uint32_t *) acc->log_no);
       flag = RMW_ACK_ACCEPT;
+    }
     else
       flag = accept_snoops_entry(acc, *entry, sender_m_id, t_id, reply_rmw);
   }
@@ -3051,7 +3135,7 @@ static inline void handle_rmw_rep_replies(struct pending_ops *p_ops, struct r_re
 
 // Check if the commit must be applied to the KVS and
 // transition the global entry to INVALID_RMW if it has been waiting for this commit
-static inline bool handle_remote_commit(struct rmw_entry* rmw_entry, uint32_t log_no,
+static inline bool handle_remote_commit(struct rmw_entry* glob_entry, uint32_t log_no,
                                         uint64_t t_rmw_id, uint16_t glob_sess_id,
                                         struct commit* com, uint16_t t_id)
 {
@@ -3059,29 +3143,35 @@ static inline bool handle_remote_commit(struct rmw_entry* rmw_entry, uint32_t lo
   // the function is called with the lock in hand
 
   // First check if that log no (or a higher) has been committed
-  if (rmw_entry->last_committed_log_no < log_no) {
+  if (glob_entry->last_committed_log_no < log_no) {
     overwrite_kv = true;
-    rmw_entry->last_committed_log_no = log_no;
-    rmw_entry->last_committed_rmw_id.id = t_rmw_id;
-    rmw_entry->last_committed_rmw_id.glob_sess_id = glob_sess_id;
+    glob_entry->last_committed_log_no = log_no;
+    glob_entry->last_committed_rmw_id.id = t_rmw_id;
+    glob_entry->last_committed_rmw_id.glob_sess_id = glob_sess_id;
     if (DEBUG_LOG)
       green_printf("Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
                    log_no, t_rmw_id, glob_sess_id);
   }
 
   // now check if the entry was waiting for this message to get cleared
-  if (rmw_entry->state != INVALID_RMW && rmw_entry->log_no <= log_no) {
+  if (glob_entry->state != INVALID_RMW && glob_entry->log_no <= log_no) {
     //yellow_printf("Wrkr %u, when handling a remote commit: state %u, log_no %u/%u,"
      //               " rmw_id: %u/%u, glob_sess_id: %u/%u, version: %u/%u, m_id: %u/%u\n",
-     //             t_id, rmw_entry->state, rmw_entry->log_no, log_no, rmw_entry->rmw_id.id, t_rmw_id,
-      //            rmw_entry->rmw_id.glob_sess_id, glob_sess_id, rmw_entry->new_ts.version,
-      //            *(uint32_t*)com->ts.version, rmw_entry->new_ts.m_id, com->ts.m_id);
+     //             t_id, glob_entry->state, glob_entry->log_no, log_no, glob_entry->rmw_id.id, t_rmw_id,
+      //            glob_entry->rmw_id.glob_sess_id, glob_sess_id, glob_entry->new_ts.version,
+      //            *(uint32_t*)com->ts.version, glob_entry->new_ts.m_id, com->ts.m_id);
     if (ENABLE_ASSERTIONS) {
-      if (compare_netw_ts_with_ts(&com->ts, &rmw_entry->new_ts) != EQUAL) {
+      if (compare_netw_ts_with_ts(&com->ts, &glob_entry->new_ts) != EQUAL) {
        //assert(false);
       }
     }
-    rmw_entry->state = INVALID_RMW;
+    glob_entry->state = INVALID_RMW;
+  }
+  else if (glob_entry->log_no > log_no && glob_entry->state != INVALID_RMW) {
+    if (glob_entry->rmw_id.id == t_rmw_id && glob_entry->rmw_id.glob_sess_id == glob_sess_id)
+      red_printf("Wrkr %u, committed rmw_id %u and glob ses id %u on log no %u, but the global entry is working on "
+                   "log %u, state %u rmw_id %u glob sess id %u \n", t_id, t_rmw_id, glob_sess_id, log_no,
+                  glob_entry->log_no, glob_entry->state, glob_entry->rmw_id.id,  glob_entry->rmw_id.glob_sess_id);
   }
   return overwrite_kv;
 }
@@ -3109,16 +3199,20 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
     memcpy(loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
     help = true;
   }
+  check_log_nos_of_glob_entry(glob_entry, "attempt_to_help_a_locally_accepted_value", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
 
   loc_entry->back_off_cntr = 0;
   if (help) {
     //if (DEBUG_RMW)
-      cyan_printf("Wrkr %u, session %u helps RMW id %u glob_sess_id %u with version %u, m_id %u, "
-                  "stashed rmw_id %u,N global_sess id %u, state %u \n",
+      cyan_printf("Wrkr %u, session %u helps RMW id %u glob_sess_id %u with version %u, m_id %u,"
+                  " glob log/help log %u/%u glob committed log %u , biggest committed rmw_id %u for glob sess %u"
+                  " stashed rmw_id: %u, global_sess id %u, state %u \n",
                   t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id,
-                  loc_entry->new_ts.version, loc_entry->new_ts.m_id, loc_entry->help_rmw->rmw_id.id,
-                  loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
+                  loc_entry->new_ts.version, loc_entry->new_ts.m_id,
+                  glob_entry->log_no, loc_entry->log_no, glob_entry->last_committed_log_no,
+                  committed_glob_sess_rmw_id[glob_entry->rmw_id.glob_sess_id], glob_entry->rmw_id.glob_sess_id,
+                  loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
     loc_entry->state = ACCEPTED;
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, t_id);
@@ -3159,6 +3253,7 @@ static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *
     assign_second_rmw_id_to_first(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id);
   }
   else if (ENABLE_ASSERTIONS) assert(false);
+  check_log_nos_of_glob_entry(glob_entry, "attempt_to_steal_a_proposed_global_entry", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   loc_entry->back_off_cntr = 0;
   if (global_entry_was_grabbed) {
@@ -3227,13 +3322,14 @@ static inline void take_global_entry_with_higher_TS(struct pending_ops *p_ops,
                     t_id, loc_entry->sess_id, loc_entry->index_to_rmw,
                     glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
   }
-
+  check_log_nos_of_glob_entry(glob_entry, "take_global_entry_with_higher_TS", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
 
 
   if (global_entry_was_grabbed) {
     if (DEBUG_RMW)
-      cyan_printf("Wrkr %u: session %u gets/regains the global entry %u to do its propose \n", t_id, loc_entry->sess_id);
+      cyan_printf("Wrkr %u: session %u gets/regains the global entry log %u to do its propose \n",
+                  t_id, loc_entry->sess_id, glob_entry->log_no);
     loc_entry->state = PROPOSED;
   }
   else loc_entry->state = NEEDS_GLOBAL;
@@ -3312,6 +3408,7 @@ static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_
     kv_pair->key.meta.version = loc_entry->rmw_reps.kvs_higher_ts.version + 1;
     kv_pair->key.meta.m_id = loc_entry->rmw_reps.kvs_higher_ts.m_id;
   }
+  check_log_nos_of_glob_entry(glob_entry, "update_KVS_on_receiving_a_TS_stale_rep", t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
 }
 
@@ -3395,6 +3492,13 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
     if (loc_entry->rmw_reps.rmw_id_commited + loc_entry->rmw_reps.log_too_small +
         loc_entry->rmw_reps.ts_stale + loc_entry->rmw_reps.already_accepted +
         loc_entry->rmw_reps.seen_higher_prop > 0) {
+      if (loc_entry->rmw_reps.rmw_id_commited > 10) {
+        printf("Wrkr %u Help failed reinstate the previous RMW: "
+                 "rmw_id  committed %u, log too small %u, ts_stale %u, already accepted %u, higher prop %u \n",
+               t_id, loc_entry->rmw_reps.rmw_id_commited,loc_entry->rmw_reps.log_too_small,
+                     loc_entry->rmw_reps.ts_stale, loc_entry->rmw_reps.already_accepted,
+                     loc_entry->rmw_reps.seen_higher_prop);
+      }
       reinstate_loc_entry_after_helping(loc_entry, t_id);
       return;
     }
@@ -4435,11 +4539,11 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
              incoming_rs[index].r_mes.read[0].opcode, index, *(uint64_t *)incoming_rs[index].r_mes.l_id);
     else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
       struct prop_message *prop_mes = (struct prop_message *) r_mes;
-      printf("Worker %u sees a Propose: opcode %d at offset %d, rmw_id %lu, "
-               "glob_sess_id %u, log_no %u, coalesce_num %u \n",
-             t_id, prop_mes->prop[0].opcode, index, *(uint64_t *) prop_mes->prop[0].t_rmw_id,
-             *(uint16_t *) prop_mes->prop[0].glob_sess_id, *(uint32_t *) prop_mes->prop[0].log_no,
-             prop_mes->coalesce_num);
+      cyan_printf("Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
+                  "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
+                  t_id, prop_mes->m_id, prop_mes->prop[0].opcode, index, *(uint64_t *) prop_mes->prop[0].t_rmw_id,
+                  *(uint16_t *) prop_mes->prop[0].glob_sess_id, *(uint32_t *) prop_mes->prop[0].log_no,
+                  prop_mes->coalesce_num, *(uint32_t *) prop_mes->prop[0].ts.version);
     }
 
     uint8_t r_num = r_mes->coalesce_num;
@@ -5140,8 +5244,8 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
                                                       sess_i, t_id)) {
         loc_entry->back_off_cntr++;
         if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
-          red_printf("Wrkr %u waiting for an rmw, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
-                     t_id, loc_entry->back_off_cntr, loc_entry->help_rmw->rmw_id.id,
+          red_printf("Wrkr %u  sess %u waiting for an rmw, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
+                     t_id, sess_i, loc_entry->back_off_cntr, loc_entry->help_rmw->rmw_id.id,
                      loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
           // This is failure-related help/stealing it should not be that we are being held up by the local machine
           // However we may wait on a "local" glob sess id, because it is being helped
