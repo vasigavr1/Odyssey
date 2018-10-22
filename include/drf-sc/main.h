@@ -443,6 +443,7 @@ struct remote_qp {
 #define BROADCAST_COMMITS 4
 #define DO_NOT_BROAD_CAST_COMMITS 5
 #define ABORT_HELP 6
+#define NACK_ALREADY_COMMITTED 7
 
 // Possible Helping flags
 #define NOT_HELPING 0

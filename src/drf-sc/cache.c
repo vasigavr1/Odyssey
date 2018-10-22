@@ -443,8 +443,11 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           }
           struct rmw_entry* glob_entry = &rmw.entry[entry];
           check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
-          if (ENABLE_ASSERTIONS) { if (glob_entry->state != INVALID_RMW)
-              assert(glob_entry->rmw_id.id != rmw_l_id || glob_entry->rmw_id.glob_sess_id != glob_sess_id);}
+          if (ENABLE_ASSERTIONS) {
+            if (glob_entry->state != INVALID_RMW)
+              assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
+          }
+                //glob_entry->rmw_id.id != rmw_l_id || glob_entry->rmw_id.glob_sess_id != glob_sess_id);}
 
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);

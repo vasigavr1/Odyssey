@@ -127,7 +127,7 @@
 
 int is_roce;
 int machine_id, num_threads;
-char *remote_IP, *local_IP;
+char *remote_IP, *local_IP, *dev_name;
 
 
 struct key {

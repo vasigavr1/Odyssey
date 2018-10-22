@@ -101,6 +101,8 @@ hrd_resolve_port_index(struct hrd_ctrl_blk *cb, int port_index)
 	int dev_i;
 
 	for(dev_i = 0; dev_i < num_devices; dev_i++) {
+		if (strcmp(dev_list[dev_i]->name, dev_name) != 0) continue;
+		//printf("%d/%d: Device name: %s \n", dev_i, num_devices, dev_list[dev_i]->name);
 		struct ibv_context *ctx = ibv_open_device(dev_list[dev_i]);
 		CPE(!ctx, "HRD: Couldn't open device", 0);
 
@@ -133,12 +135,13 @@ hrd_resolve_port_index(struct hrd_ctrl_blk *cb, int port_index)
 					port_i, dev_i,
 					ibv_port_state_str((ibv_port_state) port_attr.phys_state));
 #endif
+        printf("Device %s is has no available ports \n", dev_list[dev_i]->name);
 				continue;
 			}
 
 			if(ports_to_discover == 0) {
-				// printf("HRD: port index %d resolved to device %d, port %d\n",
-				// 	port_index, dev_i, port_i);
+				// printf("HRD: port index %d resolved to device %s, port %d\n",
+				// 	port_index, dev_list[dev_i]->name, port_i);
 
 				/* Fill the device ID and device-local port ID */
 				cb->device_id = dev_i;

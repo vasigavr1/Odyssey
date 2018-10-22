@@ -76,4 +76,5 @@ sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
 	--local-ip $localIP \
 	--remote-ips $remoteIPs \
 	--machine-id $machine_id \
+    --device_name "mlx5_0" \
 	2>&1
