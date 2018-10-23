@@ -116,7 +116,7 @@ void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struc
 int parse_trace(char* path, struct trace_command **cmds, int g_id);
 
 
-void trace_init(void **cmds, int g_id);
+void trace_init(void **cmds, uint16_t t_id);
 void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
 // Connect with Workers and Clients
 void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);

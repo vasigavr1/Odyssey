@@ -186,22 +186,21 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     (*cmds)[i].opcode = 0;
 
     //Before reading the request decide if it's gone be r_rep or write
-    uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    uint8_t is_sc = (rand() % 1000 < SC_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    bool is_rmw = false;
+    bool is_rmw = false, is_update = false,is_sc = false;
     if (ENABLE_RMWS) {
-      if (ALL_RMWS_SINGLE_KEY)  {
-        is_rmw = true;
-      }
-      if (ENABLE_NO_CONFLICT_RMW) {
-        is_rmw = (t_id == 0) && (i == (machine_id * WORKERS_PER_MACHINE + t_id));
-      }
-      else if (ENABLE_SINGLE_KEY_RMW) {
-        is_rmw = i == (REM_MACH_NUM * WORKERS_PER_MACHINE);
-      }
+      if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
+      else
+        is_rmw = (rand() % 1000 < RMW_RATIO) ? true : false;
+
     }
+    if (!is_rmw) {
+      is_update = (rand() % 1000 < WRITE_RATIO) ? true : false;
+      is_sc = (rand() % 1000 < SC_RATIO) ? true : false;
+    }
+
     if (is_rmw) {
-      if (!ALL_RMWS_SINGLE_KEY) printf("Worker %u, command %u is an RMW \n", t_id, i);
+      //if (!ALL_RMWS_SINGLE_KEY && !RMW_ONE_KEY_PER_THREAD)
+        //printf("Worker %u, command %u is an RMW \n", t_id, i);
       rmws++;
       (*cmds)[i].opcode = PROPOSE_OP;
     }
@@ -233,9 +232,15 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
     if (is_rmw) {
-      if (ALL_RMWS_SINGLE_KEY)
+      if (ALL_RMWS_SINGLE_KEY || ENABLE_ALL_CONFLICT_RMW)
         key_id = 0;
+      else if (RMW_ONE_KEY_PER_THREAD)
+        key_id = (uint32_t) t_id;
+      else if (ENABLE_NO_CONFLICT_RMW)
+        key_id =(uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
       else  key_id = (uint32_t) i;
+
+      //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     else {
@@ -265,14 +270,14 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
 }
 
 // Initiialize the trace
-void trace_init(void **cmds, int g_id) {
+void trace_init(void **cmds, uint16_t t_id) {
     //create the trace path path
     if (FEED_FROM_TRACE == 1) {
         char local_client_id[3];
         char machine_num[4];
         //get / creat path for the trace
-        if (WORKERS_PER_MACHINE <= 23) sprintf(local_client_id, "%d", (g_id % WORKERS_PER_MACHINE));
-        else  sprintf(local_client_id, "%d", (g_id % 23));// the traces are for 8 clients
+        if (WORKERS_PER_MACHINE <= 23) sprintf(local_client_id, "%d", (t_id % WORKERS_PER_MACHINE));
+        else  sprintf(local_client_id, "%d", (t_id % 23));// the traces are for 8 clients
         // sprintf(local_client_id, "%d", (l_id % 4));
         sprintf(machine_num, "%d", machine_id);
         char path[2048];
@@ -289,10 +294,10 @@ void trace_init(void **cmds, int g_id) {
                  machine_num, "_c_", local_client_id, "_a_", SKEW_EXPONENT_A, ".txt");
         //initialize the command array from the trace file
         // printf("Thread: %d attempts to r_rep the trace: %s\n", l_id, path);
-        parse_trace(path, (struct trace_command **)cmds, g_id % WORKERS_PER_MACHINE);
+        parse_trace(path, (struct trace_command **)cmds, t_id % WORKERS_PER_MACHINE);
         //printf("Trace r_rep by client: %d\n", l_id);
     }else {
-      manufacture_trace((struct trace_command_uni **)cmds, g_id);
+      manufacture_trace((struct trace_command_uni **)cmds, t_id);
     }
 
 }

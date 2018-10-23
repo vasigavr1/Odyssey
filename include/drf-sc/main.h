@@ -32,7 +32,7 @@
 #define MAX_R_COALESCE 15
 #define W_CREDITS 6
 #define MAX_W_COALESCE 8
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1
@@ -45,6 +45,7 @@
 #define SC_RATIO_ 250// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
+#define RMW_RATIO 1000 // this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
@@ -111,9 +112,11 @@
 #define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
 
-#define ENABLE_NO_CONFLICT_RMW 0
+#define ENABLE_NO_CONFLICT_RMW 1 // each thread rmws a different key
+#define ENABLE_ALL_CONFLICT_RMW 0 // all threads do rmws to one key (0)
 #define ENABLE_SINGLE_KEY_RMW 0
-#define ALL_RMWS_SINGLE_KEY 1
+#define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
+#define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 0
 
 
@@ -325,7 +328,7 @@
 #define DEBUG_SS_BATCH 0
 #define R_TO_W_DEBUG 0
 #define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 1
+#define DEBUG_BIT_VECS 0
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 1

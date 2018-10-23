@@ -34,7 +34,7 @@ void *print_stats(void* no_arg) {
       printf("---------------------------------------\n");
       exit(0);
     }
-    //seconds *= 1000;// MILLION; // compute only MIOPS
+    seconds *= MILLION;//1000; // compute only MIOPS
     for (i = 0; i < num_threads; i++) {
 
       all_clients_cache_hits += curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread;
