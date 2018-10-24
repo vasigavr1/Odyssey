@@ -79,7 +79,6 @@ int main(int argc, char *argv[])
   static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
   static_assert(SESSIONS_PER_THREAD > 0, "");
   //static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
-  static_assert(ENABLE_LIN == 0, "Lin is not implemented");
   static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
 	static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");

@@ -19,20 +19,19 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 33
+#define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 3
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 1
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define ENABLE_LIN 0
 #define R_CREDITS 6
-#define MAX_R_COALESCE 15
+#define MAX_R_COALESCE 12
 #define W_CREDITS 6
-#define MAX_W_COALESCE 8
-#define ENABLE_ASSERTIONS 0
+#define MAX_W_COALESCE 12
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1
@@ -46,7 +45,7 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 1000 // this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 
 
@@ -112,12 +111,15 @@
 #define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
 
-#define ENABLE_NO_CONFLICT_RMW 1 // each thread rmws a different key
+// RMW TRACE
+#define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
 #define ENABLE_ALL_CONFLICT_RMW 0 // all threads do rmws to one key (0)
 #define ENABLE_SINGLE_KEY_RMW 0
 #define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
-#define SHOW_STATS_LATENCY_STYLE 0
+//#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
+#define SHOW_STATS_LATENCY_STYLE 1
+#define NUM_OF_RMW_KEYS 1000
 
 
 
@@ -193,8 +195,8 @@
 // RMWs
 #define BYTES_OVERRIDEN_IN_KVS_VALUE 4
 #define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
-#define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
-#define RMW_ENTRIES_NUM (RMW_ENTRIES_PER_MACHINE * MACHINE_NUM)
+//#define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
+#define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
 #define KEY_HAS_NEVER_BEEN_RMWED 0
 #define KEY_HAS_BEEN_RMWED 1
 #define LOG_NO_SIZE 4
@@ -331,9 +333,9 @@
 #define DEBUG_BIT_VECS 0
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
-#define DEBUG_SESSIONS 1
+#define DEBUG_SESSIONS 0
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 

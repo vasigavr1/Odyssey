@@ -99,9 +99,18 @@ hrd_resolve_port_index(struct hrd_ctrl_blk *cb, int port_index)
 
 	int ports_to_discover = port_index;
 	int dev_i;
+  bool device_given_found = false;
+  for(dev_i = 0; dev_i < num_devices; dev_i++) {
+    if (strcmp(dev_list[dev_i]->name, dev_name) == 0)
+      device_given_found = true;
+  }
+  if (!device_given_found) {
+    red_printf("DEVICE NAME GIVEN NOT FOUND (%s)\n", dev_name);
+  }
 
 	for(dev_i = 0; dev_i < num_devices; dev_i++) {
 		if (strcmp(dev_list[dev_i]->name, dev_name) != 0) continue;
+
 		//printf("%d/%d: Device name: %s \n", dev_i, num_devices, dev_list[dev_i]->name);
 		struct ibv_context *ctx = ibv_open_device(dev_list[dev_i]);
 		CPE(!ctx, "HRD: Couldn't open device", 0);

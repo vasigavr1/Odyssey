@@ -9,7 +9,7 @@ void *print_stats(void* no_arg) {
   long long all_clients_cache_hits = 0;
   double total_throughput = 0;
 
-  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 15 : 20;
+  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 10;
   struct thread_stats *curr_c_stats, *prev_c_stats;
   curr_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
   prev_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
@@ -46,9 +46,9 @@ void *print_stats(void* no_arg) {
       all_stats.stalled_ack[i] = (curr_c_stats[i].stalled_ack - prev_c_stats[i].stalled_ack) / seconds;
       all_stats.stalled_r_rep[i] =
         (curr_c_stats[i].stalled_r_rep - prev_c_stats[i].stalled_r_rep) / seconds;
-      if (WRITE_RATIO < 1000 && ENABLE_LIN)
-        all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO) / (1000 * seconds);
-      else
+     // if (WRITE_RATIO < 1000 && ENABLE_LIN)
+     //   all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO) / (1000 * seconds);
+     // else
         all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
 
       all_stats.rmws_completed[i] = (curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed) / (seconds);

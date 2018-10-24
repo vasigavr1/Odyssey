@@ -190,30 +190,28 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR READS--------------------------
 		---------------------------------------------------------------------------*/
-    if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      poll_for_reads(r_buffer, &r_buf_pull_ptr, p_ops, cb->dgram_recv_cq[R_QP_ID],
+    poll_for_reads(r_buffer, &r_buf_pull_ptr, p_ops, cb->dgram_recv_cq[R_QP_ID],
                     r_recv_wc, t_id, waiting_dbg_counter);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ SEND READ REPLIES--------------------------
 		---------------------------------------------------------------------------*/
-    if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      send_r_reps(p_ops, cb, r_rep_send_wr, r_rep_send_sgl, r_recv_info, w_recv_info, &r_rep_tx, t_id);
+
+    send_r_reps(p_ops, cb, r_rep_send_wr, r_rep_send_sgl, r_recv_info, w_recv_info, &r_rep_tx, t_id);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR READ REPLIES--------------------------
 		---------------------------------------------------------------------------*/
-    if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      poll_for_read_replies(r_rep_buffer, &r_rep_buf_pull_ptr, p_ops, credits,
-                            cb->dgram_recv_cq[R_REP_QP_ID], r_rep_recv_wc,
-                            r_rep_recv_info, t_id, &outstanding_reads, waiting_dbg_counter);
+
+    poll_for_read_replies(r_rep_buffer, &r_rep_buf_pull_ptr, p_ops, credits,
+                          cb->dgram_recv_cq[R_REP_QP_ID], r_rep_recv_wc,
+                          r_rep_recv_info, t_id, &outstanding_reads, waiting_dbg_counter);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ COMMIT READS----------------------------------
 		---------------------------------------------------------------------------*/
     // Either commit a read or convert it into a write
-    if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      commit_reads(p_ops, &latency_info, t_id);
+    commit_reads(p_ops, &latency_info, t_id);
 
     /* ---------------------------------------------------------------------------
 		------------------------------ INSPECT RMWS----------------------------------
@@ -225,7 +223,7 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
-   // if (WRITE_RATIO > 0)
+    // if (WRITE_RATIO > 0)
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
               ack_recv_wc,  ack_recv_info, &latency_info, t_id, waiting_dbg_counter, &outstanding_writes);
 
@@ -243,10 +241,9 @@ void *worker(void *arg)
 		------------------------------BROADCAST READS--------------------------
 		---------------------------------------------------------------------------*/
     // Perform the r_rep broadcasts
-    if (WRITE_RATIO < 1000 || ENABLE_LIN)
-      broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt,
-                      r_send_sgl, r_send_wr, w_send_wr,
-                      &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
+    broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt,
+                    r_send_sgl, r_send_wr, w_send_wr,
+                    &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST WRITES--------------------------

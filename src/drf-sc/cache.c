@@ -226,6 +226,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
                                    rmw_l_id, new_log_no,
                                    get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
                                    t_id);
+            if (ENABLE_ASSERTIONS) assert(entry == *(uint32_t *)kv_ptr[I]->value);
             resp[I].type = RMW_SUCCESS;
             resp[I].log_no = new_log_no;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
@@ -241,7 +242,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
               activate_RMW_entry(PROPOSED, kv_ptr[I]->key.meta.version + 1, rmw_entry, op[I].opcode,
                                  (uint8_t)machine_id, rmw_l_id,
                                  get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) &op[I])),
-                                 rmw_entry->last_committed_log_no + 1, t_id);
+                                 rmw_entry->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
               resp[I].log_no = rmw_entry->log_no;
               if (ENABLE_ASSERTIONS) assert(resp[I].log_no == rmw_entry->last_committed_log_no + 1);
               resp[I].type = RMW_SUCCESS;
@@ -400,7 +401,8 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
               // if the accepted is going to be acked record its information in the global entry
               if (flag == RMW_ACK_ACCEPT)
                 activate_RMW_entry(ACCEPTED, *(uint32_t *) acc->ts.version, &rmw.entry[entry], acc->opcode,
-                                   acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
+                                   acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                                   ENABLE_ASSERTIONS ? "received accept" : NULL);
             }
           }
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
@@ -422,13 +424,16 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
                                       t_id, I, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)com->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-            grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
-                           rmw_l_id, log_no, glob_sess_id, t_id);
-            if (ENABLE_ASSERTIONS) assert(kv_ptr[I]->key.meta.version == 1);
+            entry = grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
+                                   rmw_l_id, log_no, glob_sess_id, t_id);
+            if (ENABLE_ASSERTIONS) {
+              assert(kv_ptr[I]->key.meta.version == 1);
+              assert(entry == *(uint32_t *)kv_ptr[I]->value);
+            }
             overwrite_kv = true;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
           }
-          else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED){
+          else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
             check_keys_with_one_cache_op((struct key *) com->key, kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
@@ -607,7 +612,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               // if the propose is going to be acked record its information in the global entry
               if (flag == RMW_ACK_PROPOSE)
                 activate_RMW_entry(PROPOSED, *(uint32_t *) prop->ts.version, &rmw.entry[entry], prop->opcode,
-                                   prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id);
+                                   prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                                   ENABLE_ASSERTIONS ? "received propose" : NULL);
             }
           }
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received propose", t_id);

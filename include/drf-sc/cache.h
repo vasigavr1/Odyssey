@@ -120,7 +120,7 @@ struct cache_op {
 	struct cache_key key;	/* This must be the 1st field and 16B aligned */
 	uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
 	uint8_t val_len;
-	uint8_t value[MICA_MAX_VALUE]; // if it's an RMW the first 8 bytes point to the entry
+	uint8_t value[MICA_MAX_VALUE]; // if it's an RMW the first 4 bytes point to the entry
 };
 
 

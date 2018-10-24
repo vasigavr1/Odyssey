@@ -176,9 +176,9 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
   uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
   uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0,
-          keys_that_get_rmwed[MACHINE_NUM * WORKERS_PER_MACHINE];
+          keys_that_get_rmwed[NUM_OF_RMW_KEYS];
   if (ENABLE_RMWS) {
-    for (i = 0; i < MACHINE_NUM * WORKERS_PER_MACHINE; i++)
+    for (i = 0; i < NUM_OF_RMW_KEYS; i++)
       keys_that_get_rmwed[i] = i;
   }
   //parse file line by line and insert trace to cmd.
@@ -230,15 +230,15 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
     //--- KEY ID----------
     uint32 key_id;
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
-    uint128 key_hash = CityHash128((char *) &(key_id), 4);
+    uint128 key_hash;// = CityHash128((char *) &(key_id), 4);
     if (is_rmw) {
       if (ALL_RMWS_SINGLE_KEY || ENABLE_ALL_CONFLICT_RMW)
         key_id = 0;
       else if (RMW_ONE_KEY_PER_THREAD)
         key_id = (uint32_t) t_id;
       else if (ENABLE_NO_CONFLICT_RMW)
-        key_id =(uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
-      else  key_id = (uint32_t) i;
+        key_id = (uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
+      else key_id = (uint32_t) (rand() % NUM_OF_RMW_KEYS);
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
@@ -248,13 +248,12 @@ void manufacture_trace(struct trace_command_uni **cmds, int t_id)
       do {
         key_id = (uint32) rand() % CACHE_NUM_KEYS;
         found = false;
-        for (uint32_t j = 0; j < MACHINE_NUM * WORKERS_PER_MACHINE; j++)
+        for (uint32_t j = 0; j < NUM_OF_RMW_KEYS; j++)
           if (key_id == keys_that_get_rmwed[j]) found = true;
       } while (found);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
-
   }
 
   if (t_id  == 0) printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
@@ -312,7 +311,7 @@ void dump_stats_2_file(struct stats* st){
     char* path = "../../results/scattered-results";
 
     sprintf(filename, "%s/%s-%s_s_%d_v_%d_m_%d_w_%d_r_%d-%d.csv", path,
-            ENABLE_LIN == 1 ? "LIN" : "SC",
+            EMULATE_ABD == 1 ? "DRF-" : "REAL-",
             "ABD",
             SESSIONS_PER_THREAD,
             USE_BIG_OBJECTS == 1 ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE): BASE_VALUE_SIZE,
