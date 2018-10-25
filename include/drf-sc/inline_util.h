@@ -1333,11 +1333,19 @@ static inline void check_that_log_is_too_high(struct rmw_entry *glob_entry, uint
 static inline void check_log_nos_of_glob_entry(struct rmw_entry *glob_entry, char* message, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    if (glob_entry->last_committed_log_no == glob_entry->log_no &&
-        glob_entry->state != INVALID_RMW) {
-      red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
-                 t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
-      assert(false);
+    if (glob_entry->state == INVALID_RMW) {
+     // if (glob_entry->last_committed_log_no < glob_entry->log_no) {
+       // red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
+       //            t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
+        //assert(false);
+      //}
+    }
+    else {
+      if (glob_entry->last_committed_log_no >= glob_entry->log_no) {
+        red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
+                   t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
+        assert(false);
+      }
     }
   }
 }
@@ -2864,6 +2872,10 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
     // if the log has moved on then the RMW has been helped,
     // it has been committed in the other machines so there is no need to broadcast commits
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_commit", t_id);
+    if (ENABLE_ASSERTIONS) {
+      if (glob_entry->state != INVALID_RMW)
+        assert(!rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry_to_commit->rmw_id));
+    }
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
     //if (ENABLE_ASSERTIONS) red_printf("Wrkr %u tried to commit locally, but its RMW had already been committed \n", t_id);
   }
@@ -2876,10 +2888,7 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
   register_committed_global_sess_id (loc_entry_to_commit->rmw_id.glob_sess_id,
                                      loc_entry_to_commit->rmw_id.id, t_id);
 
-  if (ENABLE_ASSERTIONS) {
-    if (glob_entry->state != INVALID_RMW)
-      assert(!rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry_to_commit->rmw_id));
-  }
+
   //check_that_glob_state_is_not_on_commited_rmw(glob_entry, loc_entry_to_commit->rmw_id);
 
   if (DEBUG_LOG)
@@ -2937,13 +2946,13 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
                  glob_entry->state, glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id);
     }
   }
-
-  optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
-  register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
   if (ENABLE_ASSERTIONS) {
     if (glob_entry->state != INVALID_RMW)
       assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, new_rmw_id, new_glob_sess_id));
   }
+  optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
+  register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
+
   if (DEBUG_LOG)
     green_printf("Log %u: RMW_id %u glob_sess %u, loc entry state %u from reply \n",
                  new_log_no, new_rmw_id, new_glob_sess_id, loc_entry->state);
@@ -3248,6 +3257,7 @@ static inline bool handle_remote_commit(struct rmw_entry* glob_entry, uint32_t l
        //assert(false);
       }
     }
+    //glob_entry->log_no = glob_entry->last_committed_log_no;
     glob_entry->state = INVALID_RMW;
   }
   else if (glob_entry->log_no > log_no && glob_entry->state != INVALID_RMW) {
