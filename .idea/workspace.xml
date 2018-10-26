@@ -12,9 +12,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
       <change beforePath="$PROJECT_DIR$/include/drf-sc/inline_util.h" afterPath="$PROJECT_DIR$/include/drf-sc/inline_util.h" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/drf-sc" afterPath="$PROJECT_DIR$/src/drf-sc/drf-sc" />
     </list>
     <ignored path="$PROJECT_DIR$/cmake-build-debug/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -94,21 +92,21 @@
           <file leaf-file-name="inline_util.h" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/include/drf-sc/inline_util.h">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="563">
-                  <caret line="1340" column="8" lean-forward="false" selection-start-line="1340" selection-start-column="8" selection-end-line="1340" selection-end-column="8" />
+                <state relative-caret-position="473">
+                  <caret line="1335" column="27" lean-forward="false" selection-start-line="1335" selection-start-column="27" selection-end-line="1335" selection-end-column="27" />
                   <folding>
                     <element signature="e#7819#8053#0" expanded="false" />
-                    <element signature="e#57679#58840#0" expanded="false" />
-                    <element signature="e#63848#64269#0" expanded="false" />
-                    <element signature="e#64271#64773#0" expanded="false" />
-                    <element signature="e#105129#107031#0" expanded="true" />
-                    <element signature="e#121916#125867#0" expanded="true" />
-                    <element signature="e#133582#137170#0" expanded="true" />
-                    <element signature="e#149775#152198#0" expanded="true" />
-                    <element signature="e#181510#181625#0" expanded="false" />
-                    <element signature="e#181629#182102#0" expanded="false" />
-                    <element signature="e#190498#190732#0" expanded="false" />
-                    <element signature="e#235017#235443#0" expanded="false" />
+                    <element signature="e#57361#58522#0" expanded="false" />
+                    <element signature="e#63530#63951#0" expanded="false" />
+                    <element signature="e#63953#64455#0" expanded="false" />
+                    <element signature="e#104811#106713#0" expanded="true" />
+                    <element signature="e#121598#125549#0" expanded="true" />
+                    <element signature="e#133264#136852#0" expanded="true" />
+                    <element signature="e#149457#151880#0" expanded="true" />
+                    <element signature="e#181192#181307#0" expanded="false" />
+                    <element signature="e#181311#181784#0" expanded="false" />
+                    <element signature="e#190180#190414#0" expanded="false" />
+                    <element signature="e#234699#235125#0" expanded="false" />
                   </folding>
                 </state>
               </provider>
@@ -403,12 +401,12 @@
       <workItem from="1536310888197" duration="69094000" />
       <workItem from="1536853462326" duration="100070000" />
       <workItem from="1537547135036" duration="1657000" />
-      <workItem from="1537779306476" duration="340564000" />
+      <workItem from="1537779306476" duration="341163000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="786292000" />
+    <option name="totallyTimeSpent" value="786891000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="0" y="-28" width="1920" height="1228" extended-state="6" />
@@ -483,12 +481,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/inline_util.h</url>
-          <line>2687</line>
+          <line>2680</line>
           <option name="timeStamp" value="114" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/inline_util.h</url>
-          <line>4291</line>
+          <line>4284</line>
           <option name="timeStamp" value="118" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
@@ -498,7 +496,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/inline_util.h</url>
-          <line>2833</line>
+          <line>2826</line>
           <option name="timeStamp" value="123" />
         </line-breakpoint>
       </breakpoints>
@@ -915,21 +913,21 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/include/drf-sc/inline_util.h">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="563">
-          <caret line="1340" column="8" lean-forward="false" selection-start-line="1340" selection-start-column="8" selection-end-line="1340" selection-end-column="8" />
+        <state relative-caret-position="473">
+          <caret line="1335" column="27" lean-forward="false" selection-start-line="1335" selection-start-column="27" selection-end-line="1335" selection-end-column="27" />
           <folding>
             <element signature="e#7819#8053#0" expanded="false" />
-            <element signature="e#57679#58840#0" expanded="false" />
-            <element signature="e#63848#64269#0" expanded="false" />
-            <element signature="e#64271#64773#0" expanded="false" />
-            <element signature="e#105129#107031#0" expanded="true" />
-            <element signature="e#121916#125867#0" expanded="true" />
-            <element signature="e#133582#137170#0" expanded="true" />
-            <element signature="e#149775#152198#0" expanded="true" />
-            <element signature="e#181510#181625#0" expanded="false" />
-            <element signature="e#181629#182102#0" expanded="false" />
-            <element signature="e#190498#190732#0" expanded="false" />
-            <element signature="e#235017#235443#0" expanded="false" />
+            <element signature="e#57361#58522#0" expanded="false" />
+            <element signature="e#63530#63951#0" expanded="false" />
+            <element signature="e#63953#64455#0" expanded="false" />
+            <element signature="e#104811#106713#0" expanded="true" />
+            <element signature="e#121598#125549#0" expanded="true" />
+            <element signature="e#133264#136852#0" expanded="true" />
+            <element signature="e#149457#151880#0" expanded="true" />
+            <element signature="e#181192#181307#0" expanded="false" />
+            <element signature="e#181311#181784#0" expanded="false" />
+            <element signature="e#190180#190414#0" expanded="false" />
+            <element signature="e#234699#235125#0" expanded="false" />
           </folding>
         </state>
       </provider>

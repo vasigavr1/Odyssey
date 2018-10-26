@@ -1333,14 +1333,7 @@ static inline void check_that_log_is_too_high(struct rmw_entry *glob_entry, uint
 static inline void check_log_nos_of_glob_entry(struct rmw_entry *glob_entry, char* message, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    if (glob_entry->state == INVALID_RMW) {
-     // if (glob_entry->last_committed_log_no < glob_entry->log_no) {
-       // red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
-       //            t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
-        //assert(false);
-      //}
-    }
-    else {
+    if (glob_entry->state != INVALID_RMW) {
       if (glob_entry->last_committed_log_no >= glob_entry->log_no) {
         red_printf("Wrkr %u t_id, Glob_entry state %u, com log/log %u/%u : %s \n",
                    t_id, glob_entry->state, glob_entry->last_committed_log_no, glob_entry->log_no, message);
