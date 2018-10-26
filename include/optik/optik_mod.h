@@ -204,10 +204,21 @@ static inline int
 optik_lock(cache_meta* ol)
 {
     cache_meta ol_old;
+    //const uint32_t max_debug = 100000;
+    //uint32_t debug_cntr = 0;
     do
     {
+       // debug_cntr++;
+       // if(debug_cntr %  max_debug == 0) {
+        //    printf("lock is being hogged times %d \n", debug_cntr / max_debug);
+       // }
+
         while (1)
         {
+            //debug_cntr++;
+            //if(debug_cntr %  max_debug == 0) {
+            //    printf("lock is being hogged times %d \n", debug_cntr / max_debug);
+            //}
             ol_old = *ol;
             if (!optik_is_locked(ol_old))
             {

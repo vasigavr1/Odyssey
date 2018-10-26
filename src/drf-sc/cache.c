@@ -367,7 +367,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
         }
         else if (op->opcode == ACCEPT_OP) {
           struct accept *acc =(struct accept *) (((void *)op) - 5); // the accept starts at an offset of 5 bytes
-
+          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)acc->ts.version > 0);
           uint8_t flag;
           // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
           struct rmw_help_entry reply_rmw;
@@ -407,12 +407,12 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           }
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          // TODO this needs to work with the rmw_help_structure now
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, acc->opcode);
         }
         else if (op->opcode == COMMIT_OP) {
           struct commit *com =(struct commit *) (((void *)op) + 3); // the commit starts at an offset of 3 bytes
+          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)com->ts.version > 0);
           //uint8_t flag;
           bool overwrite_kv;
           uint64_t rmw_l_id = *(uint64_t*) com->t_rmw_id;
@@ -453,10 +453,8 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
               assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
           }
                 //glob_entry->rmw_id.id != rmw_l_id || glob_entry->rmw_id.glob_sess_id != glob_sess_id);}
-
-          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
-
+          optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else if (ENABLE_ASSERTIONS) {
           red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
@@ -587,6 +585,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
         else if (ENABLE_RMWS && op->opcode == PROPOSE_OP) {
           struct propose *prop =(struct propose *) (((void *)op) - 5); // the propose starts at an offset of 5 bytes
           if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW propose on op %u\n", t_id, I);
+          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)prop->ts.version > 0);
           uint8_t flag;
           struct rmw_help_entry reply_rmw; // on replying to the propose we may need to send on or more of TS, VALUE, RMW-id, log-no
           uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
