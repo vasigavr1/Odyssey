@@ -146,7 +146,7 @@ void print_latency_stats(void){
             "MIXED", //
     };
   sprintf(filename, "%s/latency_%s_w_%d%s_%s.csv", path,
-            EMULATE_ABD == 1 ? "SC-ABD" : "DRF-SC",
+            EMULATE_ABD == 1 ? "ABD" : "DRF-SC",
             WRITE_RATIO / 10, "%",
             workload[MEASURE_READ_LATENCY]);
 

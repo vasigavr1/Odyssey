@@ -20,20 +20,20 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 3
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
-#define MEASURE_LATENCY 0
+#define MACHINE_NUM 5
+#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 5
+#define MEASURE_LATENCY 1
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 6
+#define R_CREDITS 7
 #define MAX_R_COALESCE 12
-#define W_CREDITS 6
+#define W_CREDITS 3
 #define MAX_W_COALESCE 12
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+#define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
@@ -47,6 +47,7 @@
 #define RMW_RATIO 1000 // this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
+#define FEED_FROM_TRACE 0 // used to enable skew++
 
 
 
@@ -62,16 +63,16 @@
 
 
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 0
+#define EXIT_ON_PRINT 1
 #define PRINT_NUM 4
 #define DUMP_STATS_2_FILE 0
-
+#define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
 --------------------------------------------------*/
 
-#define SKEW_EXPONENT_A 99 // representation divided by 100 (i.e. 99 means a = 0.99)
+#define SKEW_EXPONENT_A 90 // representation divided by 100 (i.e. 99 means a = 0.99)
 #define DISABLE_CACHE 0
 #define LOAD_BALANCE 1 // Use a uniform access pattern
 
@@ -100,9 +101,6 @@
  * -----------------------------ABD------------------------------------------------
  * --------------------------------------------------------------------------------
  * --------------------------------------------------------------------------------*/
-
-
-
 
 // ABD EMULATION
 #define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
@@ -205,7 +203,8 @@
 
 
 // Proposes
-#define LOCAL_PROP_NUM (SESSIONS_PER_THREAD)
+#define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
+#define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
 #define MAX_PROP_COALESCE 1
 
 #define PROP_MES_HEADER 2 // coalesce_num , m_id
@@ -356,35 +355,11 @@
 //Defines for parsing the trace
 #define _200_K 200000
 #define MAX_TRACE_SIZE _200_K
-#define FEED_FROM_TRACE 0
 #define TRACE_SIZE K_128
 #define NOP 0
-#define HOT_WRITE 1
-#define HOT_READ 2
-#define REMOTE_WRITE 3
-#define REMOTE_READ 4
-#define LOCAL_WRITE 5
-#define LOCAL_READ 6
-
-
-
-
-
-#define IS_READ(X)  ((X) == HOT_READ || (X) == LOCAL_READ || (X) == REMOTE_READ  ? 1 : 0)
-//#define IS_WRITE(X)  ((X) == HOT_WRITE || (X) == LOCAL_WRITE || (X) == REMOTE_WRITE  ? 1 : 0)
-
-
 
 struct trace_command {
-	uint8_t  opcode;
-	uint8_t  home_machine_id;
-//	uint8_t  home_worker_id;
-	uint32_t key_id;
-	uint128 key_hash;
-};
-
-struct trace_command_uni {
-  uint8_t  opcode;
+  uint8_t opcode;
   uint8_t key_hash[8];
 };
 

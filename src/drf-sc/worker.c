@@ -128,7 +128,7 @@ void *worker(void *arg)
 
 
 	// TRACE
-	struct trace_command_uni *trace;
+	struct trace_command *trace;
 	trace_init((void **)&trace, t_id);
 
 	/* ---------------------------------------------------------------------------

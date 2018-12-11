@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
 
 
   // RMWs
-  static_assert(LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
+  static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
 
   static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
 

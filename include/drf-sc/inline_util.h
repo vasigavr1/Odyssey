@@ -4137,7 +4137,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
 
 // Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
 static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id,
-                                                 struct trace_command_uni *trace, struct cache_op *ops,
+                                                 struct trace_command *trace, struct cache_op *ops,
                                                  struct pending_ops *p_ops, struct cache_resp *resp,
                                                  struct latency_flags *latency_info,
                                                  struct session_dbg *ses_dbg)
@@ -4165,7 +4165,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     if (ENABLE_ASSERTIONS) {
       assert(trace[trace_iter].opcode != NOP);
       assert(p_ops->session_has_pending_op[working_session] == false);
-      if (p_ops->prop_info->entry[working_session].state != INVALID_RMW) {
+      if (ENABLE_RMWS && p_ops->prop_info->entry[working_session].state != INVALID_RMW) {
         cyan_printf("wrk %u  Session %u has loc_entry state %u \n", t_id,
                     working_session, p_ops->prop_info->entry[working_session].state );
       }
