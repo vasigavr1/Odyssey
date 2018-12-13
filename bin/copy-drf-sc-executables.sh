@@ -11,8 +11,8 @@ HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" )
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly")
 LOCAL_HOST=`hostname`
 EXECUTABLES=("drf-sc" "run-drf-sc.sh")
-HOME_FOLDER="/home/user/drf-sc/src/drf-sc"
-DEST_FOLDER="/home/user/drf-sc-exec/src/drf-sc"
+HOME_FOLDER="/home/s1687259/drf-sc/src/drf-sc"
+DEST_FOLDER="/home/s1687259/drf-sc-exec/src/drf-sc"
 
 cd $HOME_FOLDER
 make

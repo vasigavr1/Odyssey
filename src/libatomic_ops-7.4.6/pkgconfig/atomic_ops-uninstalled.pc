@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+top_builddir=/home/s1687259/drf-sc/src/libatomic_ops-7.4.6
+top_srcdir=/home/s1687259/drf-sc/src/libatomic_ops-7.4.6
+
+Name: The atomic_ops library (uninstalled)
+Description: Atomic memory update operations
+Version: 7.4.6
+Libs: ${top_builddir}/src/libatomic_ops.la
+Cflags: -I${top_builddir}/src -I${top_srcdir}/src

@@ -213,7 +213,7 @@ static inline uint16_t glob_ses_id_to_sess_id(uint16_t glob_sess_id)
 static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
 {
   return atomic_compare_exchange_strong(state, (atomic_uint_fast8_t *) &old_state,
-                                        (atomic_uint_fast16_t) new_state);
+                                        (atomic_uint_fast8_t) new_state);
 }
 
 static inline bool rmw_ids_are_equal(struct rmw_id *id1, struct rmw_id *id2)
@@ -2939,6 +2939,10 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
                      "glob entry stats: state %u, rmw_id &u, glob sess_id %u, log no %u  \n",
                    t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry_to_commit->log_no,
                    glob_entry->state, glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->log_no);
+    if (VERIFY_PAXOS & glob_ses_id_to_t_id(glob_entry->rmw_id.glob_sess_id) == t_id) {
+
+      fprintf(rmw_verify_fp[t_id], "%u %u %u \n", glob_entry->key.bkt, 0, glob_entry->last_committed_log_no);
+    }
   }
   // Broadcast commits if the entry's log has not been advanced: there is no evidence the RMW was helped
   // Also clear the global entry in that case
@@ -2980,11 +2984,6 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
                  "global entry rmw id %u, glob sess %u, state %u \n",
                  t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id,
                  glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
-  // finally advance the global structure of session ids
-
-
-
-  //check_that_glob_state_is_not_on_commited_rmw(glob_entry, loc_entry_to_commit->rmw_id);
 
   if (DEBUG_LOG)
     green_printf("Log %u: RMW_id %u glob_sess %u, loc entry state %u, local commit\n",

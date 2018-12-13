@@ -125,9 +125,8 @@
 #define TEST_NZ(x) do { if ( (x)) die("error: " #x " failed (returned non-zero)." ); } while (0)
 #define TEST_Z(x)  do { if (!(x)) die("error: " #x " failed (returned zero/null)."); } while (0)
 
-int is_roce;
-int machine_id, num_threads;
-char *remote_IP, *local_IP, *dev_name;
+extern int is_roce, machine_id, num_threads;
+extern char *remote_IP, *local_IP, *dev_name;
 
 
 struct key {

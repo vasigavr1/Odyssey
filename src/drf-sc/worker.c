@@ -150,6 +150,7 @@ void *worker(void *arg)
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
+  //fprintf(stderr, "Worker %d  reached the loop \n", t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------START LOOP--------------------------------

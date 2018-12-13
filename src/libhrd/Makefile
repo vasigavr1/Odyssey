@@ -1,6 +1,6 @@
-LD      := gcc-6
+LD      := gcc
 LDFLAGS := -O3 -std=gnu11 -flto -libverbs -lrt -lpthread -lmemcached -lnuma -lrdmacm
-CC = gcc-6
+CC = gcc
 CFLAGS = -O3   -I../../include/libhrd
 
 APPS    := main

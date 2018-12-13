@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 
 #houston-sanantonio-austin-indianapolis-philly-atlanta-chicago-detroit-baltimore
-allIPs=(192.168.5.18 192.168.5.17 192.168.5.19 192.168.5.16 192.168.5.15 192.168.5.11 192.168.5.13 )
+allIPs=(192.168.5.18 #houston
+        192.168.5.17 #sanantonio
+        192.168.5.19 #austin
+        192.168.5.16 #indianapolis
+        192.168.5.15 #philly
+        192.168.5.11
+        192.168.5.13 )
 localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
 
 tmp=$((${#localIP}-1))

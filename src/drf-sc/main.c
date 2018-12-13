@@ -20,6 +20,7 @@ const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64,
 struct rmw_info rmw;
 atomic_uint_fast32_t next_rmw_entry_available;
 atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
+FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 
 
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
   print_for_debug = false;
 	next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
-  memset(&rmw, 0, sizeof(struct rmw_info));
+
 
 
 	struct thread_params *param_arr;
@@ -216,6 +217,12 @@ int main(int argc, char *argv[])
 	assert(machine_id < MACHINE_NUM && machine_id >=0);
   assert(!(is_roce == 1 && ENABLE_MULTICAST));
 	num_threads =  WORKERS_PER_MACHINE;
+  //memset(&rmw, 0, sizeof(struct rmw_info));
+  //char fp_name[20];
+  //sprintf(fp_name, "machine%d.out", machine_id);
+  //rmw_verify_fp = fopen(fp_name, "w+");
+  //assert(fprintf(rmw_verify_fp, "aek") > 0);
+  //fclose(rmw_verify_fp);
 
 	param_arr = malloc(num_threads * sizeof(struct thread_params));
 	thread_arr = malloc((WORKERS_PER_MACHINE + 1) * sizeof(pthread_t));
@@ -243,6 +250,13 @@ int main(int argc, char *argv[])
   char node_purpose[15];
   sprintf(node_purpose, "Worker");
 	for(i = 0; i < num_threads; i++) {
+    // PAXOS VERIFIER
+    if (VERIFY_PAXOS) {
+      char fp_name[40];
+      sprintf(fp_name, "../PaxosVerifier/thread%d.out", GET_GLOBAL_T_ID(machine_id, i));
+      rmw_verify_fp[i] = fopen(fp_name, "w+");
+    }
+    //--
 		param_arr[i].id = i;
 		int core = pin_thread(i);
 		yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[i].id, core);

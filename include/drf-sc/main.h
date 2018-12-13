@@ -19,11 +19,11 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 5
+#define WORKERS_PER_MACHINE 1
+#define MACHINE_NUM 3
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 5
-#define MEASURE_LATENCY 1
+#define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
@@ -118,6 +118,7 @@
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
 #define NUM_OF_RMW_KEYS 1000
+#define VERIFY_PAXOS 1
 
 
 
@@ -978,7 +979,7 @@ extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;
 extern atomic_uint_fast32_t next_rmw_entry_available;
-
+extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 
 struct thread_params {

@@ -1,5 +1,8 @@
-#include <zconf.h>
+//#include <zconf.h>
 #include "hrd.h"
+
+int is_roce, machine_id, num_threads;
+char *remote_IP, *local_IP, *dev_name;
 
 /* Every thread creates a TCP connection to the registry only once. */
 __thread memcached_st *memc = NULL;

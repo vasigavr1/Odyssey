@@ -3,7 +3,7 @@
 * Adapted from https://github.com/efficient/rdma_bench
 */
 
-#include <cache.h>
+#include "cache.h"
 #include "hrd.h"
 #include "mica.h"
 
