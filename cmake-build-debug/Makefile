@@ -123,6 +123,33 @@ drf-sc/fast:
 	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/build
 .PHONY : drf-sc/fast
 
+src/PaxosVerifier/PaxosVerifier.o: src/PaxosVerifier/PaxosVerifier.cpp.o
+
+.PHONY : src/PaxosVerifier/PaxosVerifier.o
+
+# target to build an object file
+src/PaxosVerifier/PaxosVerifier.cpp.o:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.o
+.PHONY : src/PaxosVerifier/PaxosVerifier.cpp.o
+
+src/PaxosVerifier/PaxosVerifier.i: src/PaxosVerifier/PaxosVerifier.cpp.i
+
+.PHONY : src/PaxosVerifier/PaxosVerifier.i
+
+# target to preprocess a source file
+src/PaxosVerifier/PaxosVerifier.cpp.i:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.i
+.PHONY : src/PaxosVerifier/PaxosVerifier.cpp.i
+
+src/PaxosVerifier/PaxosVerifier.s: src/PaxosVerifier/PaxosVerifier.cpp.s
+
+.PHONY : src/PaxosVerifier/PaxosVerifier.s
+
+# target to generate assembly for a file
+src/PaxosVerifier/PaxosVerifier.cpp.s:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.s
+.PHONY : src/PaxosVerifier/PaxosVerifier.cpp.s
+
 src/drf-sc/cache.o: src/drf-sc/cache.c.o
 
 .PHONY : src/drf-sc/cache.o
@@ -402,6 +429,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
 	@echo "... drf-sc"
+	@echo "... src/PaxosVerifier/PaxosVerifier.o"
+	@echo "... src/PaxosVerifier/PaxosVerifier.i"
+	@echo "... src/PaxosVerifier/PaxosVerifier.s"
 	@echo "... src/drf-sc/cache.o"
 	@echo "... src/drf-sc/cache.i"
 	@echo "... src/drf-sc/cache.s"

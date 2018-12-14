@@ -1,6 +1,7 @@
 # The set of languages for which implicit dependencies are needed:
 set(CMAKE_DEPENDS_LANGUAGES
   "C"
+  "CXX"
   )
 # The set of files for implicit dependencies of each language:
 set(CMAKE_DEPENDS_CHECK_C
@@ -19,6 +20,18 @@ set(CMAKE_C_COMPILER_ID "GNU")
 
 # The include file search paths:
 set(CMAKE_C_TARGET_INCLUDE_PATH
+  "../include/libhrd"
+  "../include/drf-sc"
+  "../include/optik"
+  "../include/mica"
+  )
+set(CMAKE_DEPENDS_CHECK_CXX
+  "/home/vasilis/Documents/houston/drf-sc/src/PaxosVerifier/PaxosVerifier.cpp" "/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.o"
+  )
+set(CMAKE_CXX_COMPILER_ID "GNU")
+
+# The include file search paths:
+set(CMAKE_CXX_TARGET_INCLUDE_PATH
   "../include/libhrd"
   "../include/drf-sc"
   "../include/optik"

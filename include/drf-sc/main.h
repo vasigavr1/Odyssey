@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 5
 #define MACHINE_NUM 3
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 5
@@ -31,7 +31,7 @@
 #define MAX_R_COALESCE 12
 #define W_CREDITS 3
 #define MAX_W_COALESCE 12
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1

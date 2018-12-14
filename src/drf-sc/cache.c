@@ -437,7 +437,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
             entry = *(uint32_t *) kv_ptr[I]->value;
             check_keys_with_one_cache_op((struct key *) com->key, kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
-            overwrite_kv = handle_remote_commit(rmw_entry, log_no, rmw_l_id, glob_sess_id, com, t_id);
+            overwrite_kv = handle_remote_commit(p_ops, rmw_entry, log_no, rmw_l_id, glob_sess_id, com, t_id);
           }
           else if (ENABLE_ASSERTIONS) assert(false);
           // The commit must be applied to the KVS
@@ -922,7 +922,8 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 		op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
 		uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
 		memset(op.value, val, (uint32_t) val_len);
-//    green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
+    //if (i < NUM_OF_RMW_KEYS)
+     // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
 		mica_insert_one(kv, (struct mica_op *) &op, &resp);
 	}
 

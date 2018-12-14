@@ -137,6 +137,9 @@
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/include/optik/utils.h">
 			<Option target="drf-sc"/>
 		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/PaxosVerifier/PaxosVerifier.cpp">
+			<Option target="drf-sc"/>
+		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/cache.c">
 			<Option target="drf-sc"/>
 		</Unit>

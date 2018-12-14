@@ -9,11 +9,12 @@ file(REMOVE_RECURSE
   "CMakeFiles/drf-sc.dir/src/mica/city.c.o"
   "CMakeFiles/drf-sc.dir/src/mica/mica.c.o"
   "CMakeFiles/drf-sc.dir/src/mica/test.c.o"
+  "CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.o"
   "drf-sc.pdb"
   "drf-sc"
 )
 
 # Per-language clean rules from dependency scanning.
-foreach(lang C)
+foreach(lang C CXX)
   include(CMakeFiles/drf-sc.dir/cmake_clean_${lang}.cmake OPTIONAL)
 endforeach()

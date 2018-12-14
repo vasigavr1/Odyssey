@@ -6,15 +6,21 @@
 #include <stdlib.h>
 #include <cstdarg>
 #include <cassert>
+#include <map>
+#include <stdint.h>
+#include <string>
 
 using namespace std;
 
 const uint word_entries = 3;
-const bool print_read_words = true;
+const bool print_read_words = false;
 const uint keys_num = 1000;
 const uint max_log_no = 10000;
-const bool print_array = true;
+const bool print_array = false;
 const bool do_verbose_print = true;
+
+map<uint64_t, uint> key_map;
+uint64_t index_to_key[keys_num] = {0};
 
 void my_assert(bool cond, const char *format, ...) {
   if (!cond) {
@@ -89,15 +95,20 @@ void PerKeyArray::insert_entry(TextEntry &new_entry)
 {
   uint new_log_no = new_entry.log_no;
   assert(new_entry.key == key);
-  if (new_entry.log_no > size) {
+  if (new_entry.log_no >= size) {
     // extend the vector
+    //cout << "Extending log number for key " << new_entry.key
+    //     << ": New log " << new_log_no << " vec size: " << size
+    //     << " biggest log no: " << biggest_log_no << endl;
+    vec.resize(size + max_log_no);
+    size = size + max_log_no;
   }
   assert(size >= new_log_no);
 
   // error, entry is taken
   if (vec[new_log_no].valid)
     my_assert(false, "For Key %u log %u is already taken, with val %u, "
-      "new val: % \n", key, new_log_no, vec[new_log_no].val, new_entry.val);
+      "new val: %u , key bkt %u \n", key, new_log_no, vec[new_log_no].val, new_entry.val, index_to_key[key]);
 
   if (new_log_no > biggest_log_no) biggest_log_no = new_log_no;
   valid = true; // the key has been seen
@@ -119,6 +130,7 @@ class AllKeysArray {
     AllKeysArray();
     void insert_entry(TextEntry &new_entry);
     void printAllKeys(bool verbose) const;
+    void check_for_holes_in_logs() const;
 };
 
 AllKeysArray::AllKeysArray(): size(keys_num), biggest_key_used(0)
@@ -156,14 +168,35 @@ void AllKeysArray::printAllKeys(bool verbose) const {
   }
 }
 
+void AllKeysArray::check_for_holes_in_logs() const {
+
+  for (uint key_i = 0; key_i < biggest_key_used; key_i++) {
+    //cout << "Key: " << key_i;
+    if (!vec.at(key_i).is_valid())
+      cout << "Key: " << key_i << " bucket :" << index_to_key[key_i] <<" was not found " << endl;
+    else {
+      if (vec.at(key_i).biggest_log_no < max_log_no)
+        cout << " Key: " << key_i << "has biggest log_no: " << vec.at(key_i).biggest_log_no << endl;
+      for (uint log_i = 1; log_i <= vec.at(key_i).biggest_log_no; log_i++) {
+        if (!vec.at(key_i).get_entry(log_i).valid) {
+          cout << " Key: " << key_i  << " bucket :" << index_to_key[key_i] << " log gap in log: " << log_i << " biggest log no: " << vec.at(key_i).biggest_log_no << endl;
+        }
+      }
+
+    }
+  }
+}
+
 
 int main()
 {
   uint32_t thread_i = 0;
   AllKeysArray all_keys;
+
+  uint32_t keys_encountered = 0;
   while (true) {
     char file_name[50];
-    sprintf(file_name, "thread%u.out", thread_i);
+    sprintf(file_name, "logs/thread%u.out", thread_i);
     ifstream file(file_name);
     if (file) cout << "Working on file: " << file_name << endl;
     else break;
@@ -171,18 +204,45 @@ int main()
     string word;
     uint word_i = 0;
     TextEntry entry;
-    // TODO AN std:map to translate the keys 
+    // TODO AN std:map to translate the keys
+    uint32_t lines_no = 0;
     while (file >> word) {
-      int word_val = stoi(word);
+      uint64_t word_val = stoul(word);
       uint word_index = word_i % word_entries;
-      entry.set_entry(word_index, (uint) word_val);
+
+      if (word_index == 0) {
+        if (key_map.find(word_val) == key_map.end()) { // key not found
+          key_map.insert(make_pair(word_val, keys_encountered));
+          index_to_key[keys_encountered] = word_val;
+          if (keys_encountered >= 1000) {
+            printf("Encountered %u keys, key bkt %lu in line %u: I consider this an error "
+                     "and move to the next file\n", keys_encountered, word_val, lines_no);
+            break;
+          }
+          word_val = keys_encountered;
+          keys_encountered++;
+          assert(key_map.size() == keys_encountered);
+
+        }
+        else {
+          uint32_t key_index = key_map[word_val];
+          assert(index_to_key[key_index] == word_val);
+          word_val = key_index;
+        }
+      }
+
+      entry.set_entry(word_index, (uint32_t) word_val);
       if (word_index == word_entries - 1) { // last word in sentence
+        lines_no++;
         all_keys.insert_entry(entry);
       }
       word_i++;
     }
   }
-  all_keys.printAllKeys(true);
+  if (print_array)
+    all_keys.printAllKeys(do_verbose_print);
+
+  all_keys.check_for_holes_in_logs();
   cout << "Done up to thread " << thread_i << std::endl;
   return 0;
 }

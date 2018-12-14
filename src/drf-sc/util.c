@@ -247,6 +247,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
+      
     }
     else {
       bool found = false;

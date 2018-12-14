@@ -42,7 +42,9 @@ set(SOURCE_FILES
         include/optik/atomic_ops_if.h
         include/optik/ssalloc.h
         include/optik/measurements.h
-        /usr/include/infiniband/verbs.h)
+        /usr/include/infiniband/verbs.h
+        #Paxos Verifier
+        src/PaxosVerifier/PaxosVerifier.cpp)
 
 
 

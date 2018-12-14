@@ -209,6 +209,11 @@ static inline uint16_t glob_ses_id_to_sess_id(uint16_t glob_sess_id)
   return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) % SESSIONS_PER_THREAD);
 }
 
+static inline bool is_global_ses_id_local(uint16_t glob_sess_id, uint16_t t_id)
+{
+  return glob_ses_id_to_t_id(glob_sess_id) == t_id &&
+         glob_ses_id_to_m_id(glob_sess_id) == machine_id;
+}
 // Generic CAS
 static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
 {
@@ -1400,6 +1405,14 @@ static inline void check_for_same_ts_as_already_proposed(struct cache_op *kv_ptr
   }
 }
 
+static inline void verify_paxos(struct rmw_id *committed_rmw_id, struct key *commited_key,
+                                uint32_t committed_log_no, uint16_t t_id)
+{
+  if (VERIFY_PAXOS && is_global_ses_id_local(committed_rmw_id->glob_sess_id, t_id)){
+    fprintf(rmw_verify_fp[t_id], "%u %u %u \n", commited_key->bkt, 0, committed_log_no);
+  }
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -2306,12 +2319,16 @@ static inline void advance_loc_entry_l_id(struct pending_ops *p_ops, struct rmw_
   p_ops->prop_info->l_id++;
 }
 
-static inline void free_session(struct pending_ops *p_ops, uint16_t sess_id)
+static inline void free_session(struct pending_ops *p_ops, uint16_t sess_id, uint16_t t_id)
 {
+  struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[sess_id];
   if (ENABLE_ASSERTIONS) {
     assert(sess_id < SESSIONS_PER_THREAD);
-    assert(p_ops->prop_info->entry[sess_id].state == INVALID_RMW);
+    assert(loc_entry->state == INVALID_RMW);
   }
+  if (VERIFY_PAXOS)
+    verify_paxos(&loc_entry->rmw_id, &loc_entry->key,
+                 loc_entry->log_no, t_id);
   p_ops->session_has_pending_op[sess_id] = false;
   p_ops->all_sessions_stalled = false;
 }
@@ -2323,7 +2340,7 @@ static inline bool if_already_committed_free_session_invalidate_entry(struct pen
   if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
     //red_printf("Wrkr %u Freeing session %u \n", t_id, loc_entry->sess_id);
     loc_entry->state = INVALID_RMW;
-    free_session(p_ops, loc_entry->sess_id);
+    free_session(p_ops, loc_entry->sess_id, t_id);
     return true;
   }
   return false;
@@ -2939,10 +2956,8 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
                      "glob entry stats: state %u, rmw_id &u, glob sess_id %u, log no %u  \n",
                    t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry_to_commit->log_no,
                    glob_entry->state, glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->log_no);
-    if (VERIFY_PAXOS & glob_ses_id_to_t_id(glob_entry->rmw_id.glob_sess_id) == t_id) {
-
-      fprintf(rmw_verify_fp[t_id], "%u %u %u \n", glob_entry->key.bkt, 0, glob_entry->last_committed_log_no);
-    }
+    //verify_paxos(&glob_entry->last_committed_rmw_id, &glob_entry->key,
+     //            glob_entry->last_committed_log_no, t_id);
   }
   // Broadcast commits if the entry's log has not been advanced: there is no evidence the RMW was helped
   // Also clear the global entry in that case
@@ -2964,7 +2979,6 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
     }
     glob_entry->state = INVALID_RMW;
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
-
   }
   else {
     // if the log has moved on then the RMW has been helped,
@@ -3025,6 +3039,8 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
       glob_entry->log_no = new_log_no;
       glob_entry->state = INVALID_RMW;
     }
+    //verify_paxos(&glob_entry->last_committed_rmw_id, &glob_entry->key,
+    //             glob_entry->last_committed_log_no, t_id);
   }
   check_log_nos_of_glob_entry(glob_entry, "attempt_local_commit_from_rep", t_id);
 
@@ -3076,7 +3092,7 @@ static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct 
   else if (local_state == NACK_ALREADY_COMMITTED) {
     // TODO read the (loc_entry->value_to_read)
     loc_entry->state = INVALID_RMW;
-    free_session(p_ops, loc_entry->sess_id);
+    free_session(p_ops, loc_entry->sess_id, t_id);
   }
   else loc_entry->state = NEEDS_GLOBAL;
 }
@@ -3325,12 +3341,29 @@ static inline void handle_rmw_rep_replies(struct pending_ops *p_ops, struct r_re
 
 // Check if the commit must be applied to the KVS and
 // transition the global entry to INVALID_RMW if it has been waiting for this commit
-static inline bool handle_remote_commit(struct rmw_entry* glob_entry, uint32_t log_no,
+static inline bool handle_remote_commit(struct pending_ops *p_ops,
+                                        struct rmw_entry* glob_entry, uint32_t log_no,
                                         uint64_t t_rmw_id, uint16_t glob_sess_id,
                                         struct commit* com, uint16_t t_id)
 {
-  bool overwrite_kv = false;
   // the function is called with the lock in hand
+  bool overwrite_kv = false;
+
+  // Trying to account for holes in the logs
+//  if (glob_entry->last_committed_log_no >= log_no &&
+//      is_global_ses_id_local(glob_sess_id, t_id)) {
+//    uint32_t sess_id = glob_ses_id_to_sess_id(glob_sess_id);
+//    struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[sess_id];
+//    if (loc_entry->state != INVALID_RMW &&
+//      loc_entry->rmw_id.id == t_rmw_id &&
+//      loc_entry->rmw_id.glob_sess_id == glob_sess_id &&
+//      loc_entry->state < MUST_BCAST_COMMITS) {
+//      //green_printf("Someone is sending commits for my rmw \n");
+//      //green_printf("%u %u %u %u \n", glob_entry->key.bkt, 0, log_no, loc_entry->state);
+//      assert(loc_entry->key.bkt == glob_entry->key.bkt);
+//    }
+//
+//  }
 
   // First check if that log no (or a higher) has been committed
   if (glob_entry->last_committed_log_no < log_no) {
@@ -3341,6 +3374,8 @@ static inline bool handle_remote_commit(struct rmw_entry* glob_entry, uint32_t l
     if (DEBUG_LOG)
       green_printf("Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
                    log_no, t_rmw_id, glob_sess_id);
+    //verify_paxos(&glob_entry->last_committed_rmw_id, &glob_entry->key,
+    //             glob_entry->last_committed_log_no, t_id);
   }
 
   // now check if the entry was waiting for this message to get cleared
@@ -3702,7 +3737,7 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     else {
       //free the session here as well
       loc_entry->state = INVALID_RMW;
-      free_session(p_ops, loc_entry->sess_id);
+      free_session(p_ops, loc_entry->sess_id, t_id);
     }
     check_state_with_allowed_flags(3, (int) loc_entry->state, INVALID_RMW, MUST_BCAST_COMMITS_FROM_HELP);
   }
@@ -3795,7 +3830,7 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
       loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
     else {
       loc_entry->state = INVALID_RMW;
-      free_session(p_ops, loc_entry->sess_id);
+      free_session(p_ops, loc_entry->sess_id, t_id);
     }
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);
     check_state_with_allowed_flags(3, (int) loc_entry->state,
@@ -5398,7 +5433,10 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       p_ops->session_has_pending_op[sess_id] = false;
       p_ops->all_sessions_stalled = false;
       if (w_state == READY_COMMIT) {
+        struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[sess_id];
         p_ops->prop_info->entry[sess_id].state = INVALID_RMW;
+        verify_paxos(&loc_entry->rmw_id, &loc_entry->key,
+                     loc_entry->log_no, t_id);
         if (ENABLE_ASSERTIONS ) assert(p_ops->prop_info->entry[sess_id].state == INVALID_RMW);
         if (DEBUG_RMW)
           yellow_printf("Worker %u freeing session %u after committing its RMW \n",
