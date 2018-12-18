@@ -411,48 +411,53 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
                        (void*) &reply_rmw, flag, acc->opcode);
         }
         else if (op->opcode == COMMIT_OP) {
-          struct commit *com =(struct commit *) (((void *)op) + 3); // the commit starts at an offset of 3 bytes
-          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)com->ts.version > 0);
+          struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
+          if (ENABLE_ASSERTIONS) assert(*(uint32_t *) com->ts.version > 0);
           //uint8_t flag;
           bool overwrite_kv;
-          uint64_t rmw_l_id = *(uint64_t*) com->t_rmw_id;
-          uint16_t glob_sess_id = *(uint16_t*) com->glob_sess_id;
-          uint32_t log_no = *(uint32_t*) com->log_no;
+          uint64_t rmw_l_id = *(uint64_t *) com->t_rmw_id;
+          uint16_t glob_sess_id = *(uint16_t *) com->glob_sess_id;
+          uint32_t log_no = *(uint32_t *) com->log_no;
           uint32_t entry;
-          if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW commit on op %u, "
-                                      "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                                      t_id, I, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)com->ts.version);
+          if (DEBUG_RMW)
+            green_printf("Worker %u is handling a remote RMW commit on op %u, "
+                           "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
+                         t_id, I, rmw_l_id, glob_sess_id, log_no, *(uint32_t *) com->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
             entry = grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
                                    rmw_l_id, log_no, glob_sess_id, t_id);
             if (ENABLE_ASSERTIONS) {
               assert(kv_ptr[I]->key.meta.version == 1);
-              assert(entry == *(uint32_t *)kv_ptr[I]->value);
+              assert(entry == *(uint32_t *) kv_ptr[I]->value);
             }
             overwrite_kv = true;
             kv_ptr[I]->opcode = KEY_HAS_BEEN_RMWED;
-          }
-          else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
+          } else if (kv_ptr[I]->opcode == KEY_HAS_BEEN_RMWED) {
             entry = *(uint32_t *) kv_ptr[I]->value;
             check_keys_with_one_cache_op((struct key *) com->key, kv_ptr[I], entry);
             struct rmw_entry *rmw_entry = &rmw.entry[entry];
             overwrite_kv = handle_remote_commit(p_ops, rmw_entry, log_no, rmw_l_id, glob_sess_id, com, t_id);
-          }
-          else if (ENABLE_ASSERTIONS) assert(false);
+          } else if (ENABLE_ASSERTIONS) assert(false);
           // The commit must be applied to the KVS
           if (overwrite_kv) {
             kv_ptr[I]->key.meta.m_id = com->ts.m_id;
-            kv_ptr[I]->key.meta.version = (* (uint32_t *)com->ts.version) + 1; // the unlock function will decrement 1
+            kv_ptr[I]->key.meta.version = (*(uint32_t *) com->ts.version) + 1; // the unlock function will decrement 1
             memcpy(&kv_ptr[I]->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
           }
-          struct rmw_entry* glob_entry = &rmw.entry[entry];
+          struct rmw_entry *glob_entry = &rmw.entry[entry];
           check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
           if (ENABLE_ASSERTIONS) {
             if (glob_entry->state != INVALID_RMW)
               assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
           }
-                //glob_entry->rmw_id.id != rmw_l_id || glob_entry->rmw_id.glob_sess_id != glob_sess_id);}
+          //if (is_global_ses_id_local(glob_sess_id, t_id) &&
+          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].rmw_id.id == rmw_l_id )//&&
+          //p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].state > INVALID_RMW &&
+          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].state < MUST_BCAST_COMMITS  &&
+          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].log_no == log_no) {
+          //cyan_printf("Received commit for local RMW id: bkt %u log no %u\n", glob_entry->key.bkt, log_no);
+          //}
           register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }

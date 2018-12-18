@@ -15,7 +15,7 @@ using namespace std;
 const uint word_entries = 3;
 const bool print_read_words = false;
 const uint keys_num = 1000;
-const uint max_log_no = 10000;
+const uint max_log_no = 100000;
 const bool print_array = false;
 const bool do_verbose_print = true;
 
@@ -80,18 +80,20 @@ class PerKeyArray {
     uint size;
     uint key;
     bool valid;
+
   public:
      uint biggest_log_no;
     explicit PerKeyArray(uint new_key) : vec(max_log_no), size(max_log_no),
                                          key(new_key), valid(false), biggest_log_no(0) {};
-    void insert_entry(TextEntry &new_entry);
+    bool insert_entry_and_find_duplicates(TextEntry &new_entry);
     const bool is_valid() const {return valid;}
     const ConfArrayEntry& get_entry(uint i) const {return vec.at(i);}
 
 
 };
 
-void PerKeyArray::insert_entry(TextEntry &new_entry)
+// Returns true if it finds a duplicate
+bool PerKeyArray::insert_entry_and_find_duplicates(TextEntry &new_entry)
 {
   uint new_log_no = new_entry.log_no;
   assert(new_entry.key == key);
@@ -103,17 +105,21 @@ void PerKeyArray::insert_entry(TextEntry &new_entry)
     vec.resize(size + max_log_no);
     size = size + max_log_no;
   }
-  assert(size >= new_log_no);
+
+  my_assert(size >= new_log_no, "Log number too big: %u/%u ", new_log_no, size);
 
   // error, entry is taken
-  if (vec[new_log_no].valid)
-    my_assert(false, "For Key %u log %u is already taken, with val %u, "
-      "new val: %u , key bkt %u \n", key, new_log_no, vec[new_log_no].val, new_entry.val, index_to_key[key]);
+  if (vec[new_log_no].valid) {
+    printf("For Key %u log %u is already taken, with val %u, "
+             "new val: %u , key bkt %lu \n", key, new_log_no, vec[new_log_no].val, new_entry.val, index_to_key[key]);
+    return true;
+  }
 
   if (new_log_no > biggest_log_no) biggest_log_no = new_log_no;
   valid = true; // the key has been seen
   vec[new_log_no].valid = true;
   vec[new_log_no].val = new_entry.val;
+  return false;
 }
 
 /*
@@ -126,14 +132,19 @@ class AllKeysArray {
     all_keys_vec vec;
     uint size;
     uint biggest_key_used;
+
   public:
+    uint log_duplicates;
+    uint log_holes;
+    uint malignant_log_holes;
     AllKeysArray();
     void insert_entry(TextEntry &new_entry);
     void printAllKeys(bool verbose) const;
-    void check_for_holes_in_logs() const;
+    void check_for_holes_in_logs() ;
 };
 
-AllKeysArray::AllKeysArray(): size(keys_num), biggest_key_used(0)
+AllKeysArray::AllKeysArray(): size(keys_num), biggest_key_used(0),
+                              log_duplicates(0), log_holes(0), malignant_log_holes(0)
 {
   vec.reserve(keys_num);
   for (uint i = 0; i < keys_num; i++) {
@@ -149,7 +160,7 @@ void AllKeysArray::insert_entry(TextEntry &new_entry)
   }
   assert(size >= new_key);
   if (new_key > biggest_key_used) biggest_key_used = new_key;
-  vec.at(new_key).insert_entry(new_entry);
+  if (vec.at(new_key).insert_entry_and_find_duplicates(new_entry)) log_duplicates++;
 }
 
 void AllKeysArray::printAllKeys(bool verbose) const {
@@ -168,7 +179,7 @@ void AllKeysArray::printAllKeys(bool verbose) const {
   }
 }
 
-void AllKeysArray::check_for_holes_in_logs() const {
+void AllKeysArray::check_for_holes_in_logs() {
 
   for (uint key_i = 0; key_i < biggest_key_used; key_i++) {
     //cout << "Key: " << key_i;
@@ -179,7 +190,11 @@ void AllKeysArray::check_for_holes_in_logs() const {
         cout << " Key: " << key_i << "has biggest log_no: " << vec.at(key_i).biggest_log_no << endl;
       for (uint log_i = 1; log_i <= vec.at(key_i).biggest_log_no; log_i++) {
         if (!vec.at(key_i).get_entry(log_i).valid) {
-          cout << " Key: " << key_i  << " bucket :" << index_to_key[key_i] << " log gap in log: " << log_i << " biggest log no: " << vec.at(key_i).biggest_log_no << endl;
+          log_holes++;
+          if (vec.at(key_i).biggest_log_no - log_i > 20) malignant_log_holes++;
+
+          cout << " Key: " << key_i  << " bucket :" << index_to_key[key_i] << " log gap in log: "
+               << log_i << " biggest log no: " << vec.at(key_i).biggest_log_no << endl;
         }
       }
 
@@ -215,8 +230,9 @@ int main()
           key_map.insert(make_pair(word_val, keys_encountered));
           index_to_key[keys_encountered] = word_val;
           if (keys_encountered >= 1000) {
-            printf("Encountered %u keys, key bkt %lu in line %u: I consider this an error "
-                     "and move to the next file\n", keys_encountered, word_val, lines_no);
+            printf("Encountered %u keys, key bkt %lu in line %u: I consider this a file-related error "
+                     "that has nothing to do with Paxos and move to the next file\n",
+                   keys_encountered, word_val, lines_no);
             break;
           }
           word_val = keys_encountered;
@@ -228,6 +244,13 @@ int main()
           uint32_t key_index = key_map[word_val];
           assert(index_to_key[key_index] == word_val);
           word_val = key_index;
+        }
+      }
+      if (word_index == 2) {// log
+        if (word_val >= 10 * 100000) {
+          printf("Encountered log no %lu in line %u: I consider this a file-related error "
+                   "that has nothing to do with Paxos and move to the next file\n", word_val, lines_no);
+          break;
         }
       }
 
@@ -243,6 +266,9 @@ int main()
     all_keys.printAllKeys(do_verbose_print);
 
   all_keys.check_for_holes_in_logs();
-  cout << "Done up to thread " << thread_i << std::endl;
+  cout << "Done up to thread " << thread_i << endl
+       << "Duplicates found:" << all_keys.log_duplicates << endl
+       <<  "Holes found: " << all_keys.log_holes << endl
+       << "of which malignant are " << all_keys.malignant_log_holes << endl;
   return 0;
 }

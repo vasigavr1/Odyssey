@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 5
+#define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 3
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 5
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -67,6 +67,8 @@
 #define PRINT_NUM 4
 #define DUMP_STATS_2_FILE 0
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
+#define MY_ASSERT(COND, STR, ARGS...) \
+  if (ENABLE_ASSERTIONS) { if (!COND) { fprintf(stderr, STR, ARGS); exit(1); }}
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
@@ -257,6 +259,7 @@
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
 #define TS_STALE_ON_REMOTE_KVS 8
+#define BLOCK_FOR_HELP_COMMIT_ACKS 9 // help committing needs to gather acks
 
 
 #define VC_NUM 2
@@ -387,8 +390,9 @@ struct remote_qp {
 #define SENT_COMMIT 7 // For commits
 #define READY_PUT 8
 #define READY_COMMIT 9
-#define READY_RELEASE 10 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 11
+#define READY_COMMIT_HELPED 10
+#define READY_RELEASE 11 // Release or second round of acquire!!
+#define READY_BIT_VECTOR 12
 
 
 // Possible write sources
@@ -763,6 +767,7 @@ struct rmw_local_entry {
   uint32_t back_off_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
+  uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
   uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases
   cache_meta *ptr_to_kv_pair;
   struct rmw_help_entry *help_rmw;
