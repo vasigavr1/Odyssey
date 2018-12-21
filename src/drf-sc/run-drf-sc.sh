@@ -2,8 +2,8 @@
 
 #houston-sanantonio-austin-indianapolis-philly-atlanta-chicago-detroit-baltimore
 allIPs=(192.168.5.18 #houston
-        192.168.5.17 #sanantonio
         192.168.5.19 #austin
+        192.168.5.17 #sanantonio
         192.168.5.16 #indianapolis
         192.168.5.15 #philly
         192.168.5.11

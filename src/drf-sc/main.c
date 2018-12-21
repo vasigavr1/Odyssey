@@ -112,6 +112,7 @@ int main(int argc, char *argv[])
   static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
 
   // ACCEPTS
+  //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
   static_assert(MAX_ACC_COALESCE == 1, "");
   static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
@@ -217,12 +218,7 @@ int main(int argc, char *argv[])
 	assert(machine_id < MACHINE_NUM && machine_id >=0);
   assert(!(is_roce == 1 && ENABLE_MULTICAST));
 	num_threads =  WORKERS_PER_MACHINE;
-  //memset(&rmw, 0, sizeof(struct rmw_info));
-  //char fp_name[20];
-  //sprintf(fp_name, "machine%d.out", machine_id);
-  //rmw_verify_fp = fopen(fp_name, "w+");
-  //assert(fprintf(rmw_verify_fp, "aek") > 0);
-  //fclose(rmw_verify_fp);
+
 
 	param_arr = malloc(num_threads * sizeof(struct thread_params));
 	thread_arr = malloc((WORKERS_PER_MACHINE + 1) * sizeof(pthread_t));

@@ -371,11 +371,11 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           uint8_t flag;
           // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
           struct rmw_help_entry reply_rmw;
-          uint64_t rmw_l_id = *(uint64_t*) acc->t_rmw_id;
+          uint64_t rmw_l_id = acc->t_rmw_id;
           uint16_t glob_sess_id = *(uint16_t*) acc->glob_sess_id;
           //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = *(uint32_t*) acc->log_no;
-          uint64_t l_id = *(uint64_t *) acc->l_id;
+          uint64_t l_id = acc->l_id;
           // TODO Finding the sender machine id here is a hack that will not work with coalescing
           static_assert(MAX_ACC_COALESCE == 1, " ");
           struct accept_message *acc_mes = (((void *)op) -5 - ACCEPT_MES_HEADER);
@@ -387,6 +387,9 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
                                         "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
                                       t_id, I, prop_m_id, l_id, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)acc->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
+
+
+
           // 1. check if it has been committed
           // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
           // Either way fill the reply_rmw fully, but have a specialized flag!
@@ -405,6 +408,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
                                    ENABLE_ASSERTIONS ? "received accept" : NULL);
             }
           }
+          register_last_committed_rmw_id_by_remote_accept(&rmw.entry[entry], acc , t_id);
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,

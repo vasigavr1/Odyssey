@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 3
+#define MACHINE_NUM 2
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
@@ -227,7 +227,7 @@
 // ACCEPTS
 #define MAX_ACC_COALESCE 1
 #define ACCEPT_MES_HEADER 2 // m_id , coalesce num,
-#define ACCEPT_SIZE (37 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
+#define ACCEPT_SIZE (47 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
 #define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
 
 // ACCEPT REPLIES
@@ -259,7 +259,15 @@
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
 #define TS_STALE_ON_REMOTE_KVS 8
-#define BLOCK_FOR_HELP_COMMIT_ACKS 9 // help committing needs to gather acks
+//#define BLOCK_FOR_HELP_COMMIT_ACKS 9 // help committing needs to gather acks
+
+
+//-----DEPRICATED----
+// Flags to be passed when attempting a local commit
+// --on a helped request, register on gathering accept-reps, but commit on gathering commit-acks
+// --on a non-helped request commit and registering happens on gathering acept-reps
+//#define ACCEPT_REP_QUORUM 0 // only commit the request but dont register it:
+//#define COMMIT_ACK_QUORUM 1
 
 
 #define VC_NUM 2
@@ -390,7 +398,7 @@ struct remote_qp {
 #define SENT_COMMIT 7 // For commits
 #define READY_PUT 8
 #define READY_COMMIT 9
-#define READY_COMMIT_HELPED 10
+//#define READY_COMMIT_HELPED 10
 #define READY_RELEASE 11 // Release or second round of acquire!!
 #define READY_BIT_VECTOR 12
 
@@ -457,8 +465,12 @@ struct quorum_info {
  struct rmw_id {
    uint16_t glob_sess_id; // global session id
    uint64_t id; // the local rmw id of the source
-
  };
+
+struct net_rmw_id {
+  uint16_t glob_sess_id; // global session id
+  uint64_t id __attribute__((__packed__)); // the local rmw id of the source
+};__attribute__((__packed__))
 
 struct cache_resp {
   uint8_t type;
@@ -516,16 +528,17 @@ struct w_message {
 
 
 struct accept {
-  uint8_t l_id[8];
+  uint64_t l_id __attribute__((__packed__));
 	struct network_ts_tuple ts;
 	uint8_t key[TRUE_KEY_SIZE];
 	uint8_t opcode;
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
-  uint8_t t_rmw_id[8];
+  uint64_t t_rmw_id __attribute__((__packed__));
   uint8_t glob_sess_id[2]; // this is useful when helping
   uint8_t log_no[4];
-};
+  struct net_rmw_id last_committed_rmw_id __attribute__((__packed__));
+};__attribute__((__packed__))
 
 struct accept_message {
   uint8_t m_id;
@@ -759,8 +772,7 @@ struct rmw_local_entry {
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
-  //uint8_t accept_acks;
-  //uint8_t accept_replies;
+  struct rmw_id last_committed_rmw_id;
   struct rmw_rep_info rmw_reps;
   uint16_t epoch_id;
   uint16_t sess_id;
