@@ -16,6 +16,7 @@ const uint word_entries = 3;
 const bool print_read_words = false;
 const uint keys_num = 1000;
 const uint max_log_no = 100000;
+const uint malignant_log_gap_threshold = 50;
 const bool print_array = false;
 const bool do_verbose_print = true;
 
@@ -191,10 +192,11 @@ void AllKeysArray::check_for_holes_in_logs() {
       for (uint log_i = 1; log_i <= vec.at(key_i).biggest_log_no; log_i++) {
         if (!vec.at(key_i).get_entry(log_i).valid) {
           log_holes++;
-          if (vec.at(key_i).biggest_log_no - log_i > 20) malignant_log_holes++;
-
-          cout << " Key: " << key_i  << " bucket :" << index_to_key[key_i] << " log gap in log: "
-               << log_i << " biggest log no: " << vec.at(key_i).biggest_log_no << endl;
+          if (vec.at(key_i).biggest_log_no - log_i > malignant_log_gap_threshold) {
+            malignant_log_holes++;
+            cout << " Key: " << key_i << " bucket :" << index_to_key[key_i] << " log gap in log: "
+                 << log_i << " biggest log no: " << vec.at(key_i).biggest_log_no << endl;
+          }
         }
       }
 
@@ -222,7 +224,16 @@ int main()
     // TODO AN std:map to translate the keys
     uint32_t lines_no = 0;
     while (file >> word) {
-      uint64_t word_val = stoul(word);
+      uint64_t word_val;
+      try {
+        word_val = stoul(word);
+      }
+      catch(...) {
+        printf("Stoul() throws an exception in file line %u: I consider this a file-related error "
+                 "that has nothing to do with Paxos and move to the next file\n",
+              lines_no);
+        break;
+      }
       uint word_index = word_i % word_entries;
 
       if (word_index == 0) {
@@ -268,7 +279,7 @@ int main()
   all_keys.check_for_holes_in_logs();
   cout << "Done up to thread " << thread_i << endl
        << "Duplicates found:" << all_keys.log_duplicates << endl
-       <<  "Holes found: " << all_keys.log_holes << endl
+       << "Holes found: " << all_keys.log_holes << endl
        << "of which malignant are " << all_keys.malignant_log_holes << endl;
   return 0;
 }

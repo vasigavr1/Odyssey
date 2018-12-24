@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 2
+#define MACHINE_NUM 3
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0

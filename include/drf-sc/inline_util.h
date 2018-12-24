@@ -2861,12 +2861,13 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   optik_lock(loc_entry->ptr_to_kv_pair);
   if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
-    if (!(glob_entry->last_committed_log_no == loc_entry->log_no &&
-        rmw_ids_are_equal(&glob_entry->last_committed_rmw_id, &loc_entry->rmw_id)))
-      yellow_printf("%u: glob last committed log no %u/%u, rmw_id g/l: %u/%u, glob sess id g/l %u/%u, committed glob session id %u\n",
-                    glob_entry->key.bkt, glob_entry->last_committed_log_no, loc_entry->log_no, glob_entry->last_committed_rmw_id.id,
-                    loc_entry->rmw_id.id, glob_entry->last_committed_rmw_id.glob_sess_id, loc_entry->rmw_id.glob_sess_id,
-                    committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]);
+   // if (!(glob_entry->last_committed_log_no == loc_entry->log_no &&
+  //      rmw_ids_are_equal(&glob_entry->last_committed_rmw_id, &loc_entry->rmw_id)))
+//      yellow_printf("%u: glob last committed log no %u/%u/%u, rmw_id g/l: %u/%u, glob sess id g/l %u/%u, committed glob session id %u\n",
+//                    glob_entry->key.bkt, glob_entry->last_committed_log_no, loc_entry->log_no, loc_entry->accepted_log_no,
+//                    glob_entry->last_committed_rmw_id.id,
+//                    loc_entry->rmw_id.id, glob_entry->last_committed_rmw_id.glob_sess_id, loc_entry->rmw_id.glob_sess_id,
+//                    committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]);
     return NACK_ALREADY_COMMITTED;
   }
 
@@ -3059,29 +3060,24 @@ static inline void commit_helped_or_local_from_loc_entry(struct rmw_entry *glob_
 
 
 // The commitment of the rmw_id is certain here: it has either already been committed or it will be committed here
-// Additionally we will always broadcast commits to be on the safe side -- TODO let's try and fix this
+// Additionally we will always broadcast commits because we need to make sure that
+// a quorum of machines have seen the RMW before, committing the RMW
 static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
                                         uint16_t t_id)
 {
   // use only index_to_rmw and ptr_to_kv_pair from the loc_entry
   struct rmw_local_entry *loc_entry_to_commit =
     loc_entry->helping_flag == HELPING_NO_STASHING ? loc_entry->help_loc_entry : loc_entry;
-  bool commit_rmw = true;     //(loc_entry->helping_flag == NOT_HELPING && flag == ACCEPT_REP_QUORUM) ||
-                              //flag == COMMIT_ACK_QUORUM;
-  bool register_rmw = true;   //flag != COMMIT_ACK_QUORUM;
+
 
   struct rmw_entry *glob_entry = &rmw.entry[loc_entry->index_to_rmw];
   my_assert(true_keys_are_equal(&loc_entry->key, &glob_entry->key),
             "Local entry does not contain the same key as global entry");
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
   optik_lock(loc_entry->ptr_to_kv_pair);
-  if (commit_rmw)
-    commit_helped_or_local_from_loc_entry(glob_entry, loc_entry, loc_entry_to_commit, t_id);
-
-  // Register the id regardless of whether helping or not: The very point of not committing the helped is
-  // to make sure that the helped machine will find out it has been helped before accepting locally in a different log
-  if (register_rmw)
-    register_committed_global_sess_id (loc_entry_to_commit->rmw_id.glob_sess_id,
+  commit_helped_or_local_from_loc_entry(glob_entry, loc_entry, loc_entry_to_commit, t_id);
+  // Register the RMW-id
+  register_committed_global_sess_id (loc_entry_to_commit->rmw_id.glob_sess_id,
                                      loc_entry_to_commit->rmw_id.id, t_id);
   optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   if (DEBUG_RMW)
@@ -3419,12 +3415,12 @@ static inline void handle_accept_reply(struct pending_ops *p_ops, struct rmw_rep
           *(uint16_t*)acc_rep->glob_sess_id == loc_entry->rmw_id.glob_sess_id)) &&
           *(uint32_t*)acc_rep->log_no <= loc_entry->accepted_log_no &&
           loc_entry->helping_flag == NOT_HELPING) {
-        red_printf(
-          "%u: RMW_ID_COMMITTED-Accept: committed log no %u/%u/%u, rmw_id c/l: %u/%u, glob sess id c/l %u/%u, \n",
-          loc_entry->key.bkt, *(uint32_t *) acc_rep->log_no, loc_entry->log_no, loc_entry->accepted_log_no,
-          *(uint64_t *) acc_rep->rmw_id, loc_entry->rmw_id.id, *(uint16_t *) acc_rep->glob_sess_id,
-          loc_entry->rmw_id.glob_sess_id);
-        assert(false);
+//        red_printf(
+//          "%u: RMW_ID_COMMITTED-Accept: committed log no %u/%u/%u, rmw_id c/l: %u/%u, glob sess id c/l %u/%u, \n",
+//          loc_entry->key.bkt, *(uint32_t *) acc_rep->log_no, loc_entry->log_no, loc_entry->accepted_log_no,
+//          *(uint64_t *) acc_rep->rmw_id, loc_entry->rmw_id.id, *(uint16_t *) acc_rep->glob_sess_id,
+//          loc_entry->rmw_id.glob_sess_id);
+        //assert(false);
       }
       // store the reply in the help loc_entry
       store_rmw_rep_to_help_loc_entry(loc_entry, acc_rep, t_id);
