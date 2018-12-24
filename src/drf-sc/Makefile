@@ -1,7 +1,7 @@
 LD      := gcc
 LDFLAGS := -O3 -std=gnu11 -flto  -libverbs -lrt -lpthread -lmemcached -lnuma -lrdmacm -lgsl -lgslcblas
 CC  = gcc
-CFLAGS   = -O3 -std=gnu11  -I../../include/mica -I../../include/libhrd -I../../include/drf-sc -I../../include/optik
+CFLAGS   = -O3 -std=gnu11 -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc -I../../include/optik
 APPS    := drf-sc clean-o
 PROF    := -g -fno-omit-frame-pointer
 

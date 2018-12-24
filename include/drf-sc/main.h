@@ -485,8 +485,8 @@ struct cache_resp {
 // format of a Timestamp tuple (Lamport clock)
 struct network_ts_tuple {
   uint8_t m_id;
-  uint8_t version[4];
-};
+  uint32_t version __attribute__((__packed__));
+}; __attribute__((__packed__))
 
 struct ts_tuple {
   uint8_t m_id;
@@ -495,7 +495,7 @@ struct ts_tuple {
 
 // The format of an ack message
 struct ack_message {
-	uint8_t local_id[8]; // the first local id that is being acked
+	uint64_t local_id __attribute__((__packed__)); // the first local id that is being acked
   uint8_t m_id;
   uint8_t opcode;
   uint16_t credits;
@@ -512,7 +512,7 @@ struct ack_message_ud_req {
 
 struct write {
   uint8_t m_id;
-  uint8_t version[4];
+  uint32_t version __attribute__((__packed__));
   uint8_t key[TRUE_KEY_SIZE];	/* 8B */
   uint8_t opcode;
   uint8_t val_len;
@@ -522,7 +522,7 @@ struct write {
 struct w_message {
   uint8_t m_id;
   uint8_t w_num;
-  uint8_t l_id[8];
+  uint64_t l_id __attribute__((__packed__));
   struct write write[MAX_W_COALESCE];
 };
 
@@ -535,9 +535,9 @@ struct accept {
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
   uint64_t t_rmw_id __attribute__((__packed__));
-  uint8_t glob_sess_id[2]; // this is useful when helping
-  uint8_t log_no[4];
-  struct net_rmw_id last_committed_rmw_id __attribute__((__packed__));
+  uint16_t glob_sess_id __attribute__((__packed__)); // this is useful when helping
+  uint32_t log_no __attribute__((__packed__));
+  struct net_rmw_id last_registered_rmw_id __attribute__((__packed__));
 };__attribute__((__packed__))
 
 struct accept_message {
@@ -558,15 +558,15 @@ struct commit {
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[RMW_VALUE_SIZE];
-  uint8_t t_rmw_id[8]; //rmw lid to be committed
-  uint8_t glob_sess_id[2];
-  uint8_t log_no[4];
+  uint64_t t_rmw_id __attribute__((__packed__)); //rmw lid to be committed
+  uint16_t glob_sess_id __attribute__((__packed__));
+  uint32_t log_no __attribute__((__packed__));
 };
 
 struct commit_message {
   uint8_t m_id;
   uint8_t com_num;
-  uint8_t l_id[8]; // local id of the write -- to facilitate the ack
+  uint64_t l_id __attribute__((__packed__)); // local id of the write -- to facilitate the ack
   struct commit com[MAX_ACC_COALESCE];
 };
 
@@ -581,7 +581,7 @@ struct read {
 struct r_message {
   uint8_t coalesce_num;
   uint8_t m_id;
-  uint8_t l_id[8];
+  uint64_t l_id __attribute__((__packed__));
   struct read read[MAX_R_COALESCE];
 };
 
@@ -589,13 +589,13 @@ struct r_message {
 
 //
 struct propose {
-  uint8_t l_id[8];
+  uint64_t l_id __attribute__((__packed__));
   struct network_ts_tuple ts;
   uint8_t key[TRUE_KEY_SIZE];
   uint8_t opcode;
-  uint8_t t_rmw_id[8];
-  uint8_t glob_sess_id[2];
-  uint8_t log_no[4];
+  uint64_t t_rmw_id __attribute__((__packed__));
+  uint16_t glob_sess_id __attribute__((__packed__));
+  uint32_t log_no __attribute__((__packed__));
 };
 
 struct prop_message {
@@ -657,7 +657,7 @@ struct r_rep_message {
   uint8_t m_id;
 //  uint8_t credits;
   uint8_t opcode;
-  uint8_t l_id[8];
+  uint64_t l_id __attribute__((__packed__));
   struct r_rep_big r_rep[MAX_R_REP_COALESCE];
 };
 
@@ -671,13 +671,13 @@ struct r_rep_message_ud_req {
 // Reply with the last committed RMW if the
 // proposal/accept had a low log number or has already been committed
 struct rmw_rep_last_committed {
-  uint8_t l_id[8]; // the l_id of the rmw local_entry
+  uint64_t l_id __attribute__((__packed__)); // the l_id of the rmw local_entry
   uint8_t opcode;
   struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
-  uint8_t rmw_id[8]; //accepted  OR last committed
-  uint8_t glob_sess_id[2]; //accepted  OR last committed
-  uint8_t log_no[4]; // last committed only
+  uint64_t rmw_id __attribute__((__packed__)); //accepted  OR last committed
+  uint16_t glob_sess_id __attribute__((__packed__)); //accepted  OR last committed
+  uint32_t log_no __attribute__((__packed__)); // last committed only
 };
 
 //
@@ -730,6 +730,7 @@ struct rmw_entry {
   uint8_t state;
   struct rmw_id rmw_id;
   struct rmw_id last_committed_rmw_id;
+  struct rmw_id last_registered_rmw_id;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   uint8_t value[RMW_VALUE_SIZE];
@@ -772,7 +773,7 @@ struct rmw_local_entry {
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct rmw_id rmw_id; // this is implicitly the l_id
-  struct rmw_id last_committed_rmw_id;
+  struct rmw_id last_registered_rmw_id;
   struct rmw_rep_info rmw_reps;
   uint16_t epoch_id;
   uint16_t sess_id;

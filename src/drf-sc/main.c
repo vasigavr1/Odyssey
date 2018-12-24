@@ -62,6 +62,7 @@ int main(int argc, char *argv[])
 //	assert(LEADER_MACHINE < MACHINE_NUM);
 //	assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
 	static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
+  static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
 //  assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
 //  assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
 //  assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect

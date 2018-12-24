@@ -367,14 +367,14 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
         }
         else if (op->opcode == ACCEPT_OP) {
           struct accept *acc =(struct accept *) (((void *)op) - 5); // the accept starts at an offset of 5 bytes
-          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)acc->ts.version > 0);
+          if (ENABLE_ASSERTIONS) assert(acc->ts.version > 0);
           uint8_t flag;
           // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
           struct rmw_help_entry reply_rmw;
           uint64_t rmw_l_id = acc->t_rmw_id;
-          uint16_t glob_sess_id = *(uint16_t*) acc->glob_sess_id;
+          uint16_t glob_sess_id = acc->glob_sess_id;
           //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
-          uint32_t log_no = *(uint32_t*) acc->log_no;
+          uint32_t log_no = acc->log_no;
           uint64_t l_id = acc->l_id;
           // TODO Finding the sender machine id here is a hack that will not work with coalescing
           static_assert(MAX_ACC_COALESCE == 1, " ");
@@ -385,7 +385,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           uint32_t entry;
           if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u from m_id %u "
                                         "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                                      t_id, I, prop_m_id, l_id, rmw_l_id, glob_sess_id, log_no, *(uint32_t *)acc->ts.version);
+                                      t_id, I, prop_m_id, l_id, rmw_l_id, glob_sess_id, log_no, acc->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
 
 
@@ -402,13 +402,16 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
               // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
               flag = handle_remote_accept_in_cache(kv_ptr[I], acc, prop_m_id, t_id, &reply_rmw, &entry);
               // if the accepted is going to be acked record its information in the global entry
-              if (flag == RMW_ACK_ACCEPT)
-                activate_RMW_entry(ACCEPTED, *(uint32_t *) acc->ts.version, &rmw.entry[entry], acc->opcode,
+              if (flag == RMW_ACK_ACCEPT) {
+                activate_RMW_entry(ACCEPTED, acc->ts.version, &rmw.entry[entry], acc->opcode,
                                    acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                                    ENABLE_ASSERTIONS ? "received accept" : NULL);
+                register_last_committed_rmw_id_by_remote_accept(&rmw.entry[entry], acc , t_id);
+                assign_net_rmw_id_to_rmw_id(&rmw.entry[entry].last_registered_rmw_id, &acc->last_registered_rmw_id);
+              }
             }
           }
-          register_last_committed_rmw_id_by_remote_accept(&rmw.entry[entry], acc , t_id);
+
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
@@ -416,17 +419,17 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
         }
         else if (op->opcode == COMMIT_OP) {
           struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
-          if (ENABLE_ASSERTIONS) assert(*(uint32_t *) com->ts.version > 0);
+          if (ENABLE_ASSERTIONS) assert(com->ts.version > 0);
           //uint8_t flag;
           bool overwrite_kv;
-          uint64_t rmw_l_id = *(uint64_t *) com->t_rmw_id;
-          uint16_t glob_sess_id = *(uint16_t *) com->glob_sess_id;
-          uint32_t log_no = *(uint32_t *) com->log_no;
+          uint64_t rmw_l_id = com->t_rmw_id;
+          uint16_t glob_sess_id = com->glob_sess_id;
+          uint32_t log_no = com->log_no;
           uint32_t entry;
           if (DEBUG_RMW)
             green_printf("Worker %u is handling a remote RMW commit on op %u, "
                            "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                         t_id, I, rmw_l_id, glob_sess_id, log_no, *(uint32_t *) com->ts.version);
+                         t_id, I, rmw_l_id, glob_sess_id, log_no, com->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
           if (kv_ptr[I]->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
             entry = grab_RMW_entry(COMMITTED, kv_ptr[I], 0, 0, 0,
@@ -446,7 +449,7 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           // The commit must be applied to the KVS
           if (overwrite_kv) {
             kv_ptr[I]->key.meta.m_id = com->ts.m_id;
-            kv_ptr[I]->key.meta.version = (*(uint32_t *) com->ts.version) + 1; // the unlock function will decrement 1
+            kv_ptr[I]->key.meta.version = (com->ts.version) + 1; // the unlock function will decrement 1
             memcpy(&kv_ptr[I]->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
           }
           struct rmw_entry *glob_entry = &rmw.entry[entry];
@@ -556,7 +559,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + I) % max_op_size];
     if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
       insert_r_rep(p_ops, NULL, NULL,
-                   *(uint64_t *) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
+                   p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                    p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, NO_OP_ACQ_FLIP_BIT, op->opcode);
       continue;
     }
@@ -587,21 +590,21 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               memcpy(tmp_value, kv_ptr[I]->value, VALUE_SIZE);
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct network_ts_tuple *)&prev_meta.m_id, (struct network_ts_tuple *)&op->key.meta.m_id,
-                       *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
+                       p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, (void*) tmp_value, READ, op->opcode);
 
         }
         else if (ENABLE_RMWS && op->opcode == PROPOSE_OP) {
           struct propose *prop =(struct propose *) (((void *)op) - 5); // the propose starts at an offset of 5 bytes
           if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW propose on op %u\n", t_id, I);
-          if (ENABLE_ASSERTIONS) assert(*(uint32_t *)prop->ts.version > 0);
+          if (ENABLE_ASSERTIONS) assert(prop->ts.version > 0);
           uint8_t flag;
           struct rmw_help_entry reply_rmw; // on replying to the propose we may need to send on or more of TS, VALUE, RMW-id, log-no
-          uint64_t rmw_l_id = *(uint64_t*) prop->t_rmw_id;
-          uint64_t l_id = *(uint64_t*) prop->l_id;
-          uint16_t glob_sess_id = *(uint16_t*) prop->glob_sess_id;
+          uint64_t rmw_l_id = prop->t_rmw_id;
+          uint64_t l_id = prop->l_id;
+          uint16_t glob_sess_id = prop->glob_sess_id;
           //cyan_printf("Received propose with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
-          uint32_t log_no = *(uint32_t*) prop->log_no;
+          uint32_t log_no = prop->log_no;
           uint8_t prop_m_id = p_ops->ptrs_to_r_headers[I]->m_id;
           uint32_t entry;
           optik_lock(&kv_ptr[I]->key.meta);
@@ -619,7 +622,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
               flag = handle_remote_propose_in_cache(kv_ptr[I], prop, prop_m_id, t_id, &reply_rmw, &entry);
               // if the propose is going to be acked record its information in the global entry
               if (flag == RMW_ACK_PROPOSE)
-                activate_RMW_entry(PROPOSED, *(uint32_t *) prop->ts.version, &rmw.entry[entry], prop->opcode,
+                activate_RMW_entry(PROPOSED, prop->ts.version, &rmw.entry[entry], prop->opcode,
                                    prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                                    ENABLE_ASSERTIONS ? "received propose" : NULL);
             }
@@ -643,7 +646,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             prev_meta = kv_ptr[I]->key.meta;
           } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[I]->key.meta));
           insert_r_rep(p_ops, (struct network_ts_tuple *)&prev_meta.m_id, (struct network_ts_tuple *)&op->key.meta.m_id,
-                       *(uint64_t*) p_ops->ptrs_to_r_headers[I]->l_id, t_id,
+                       p_ops->ptrs_to_r_headers[I]->l_id, t_id,
                        p_ops->ptrs_to_r_headers[I]->m_id, (uint16_t) I, NULL, READ_TS, op->opcode);
 
         }
@@ -651,7 +654,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           //red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
           //           op->opcode, I, reads[(pull_ptr + I) % max_op_size]->m_id,
           //           reads[(pull_ptr + I) % max_op_size]->val_len,
-          //          *(uint32_t *)reads[(pull_ptr + I) % max_op_size]->version);
+          //          reads[(pull_ptr + I) % max_op_size]->version);
           assert(false);
         }
       }
@@ -741,22 +744,22 @@ inline void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, stru
         cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
         // The write must be performed with the max TS out of the one stored in the KV and read_info
         if (op->opcode == CACHE_OP_PUT) {
-          uint32_t r_info_version = *(uint32_t *) op->ts_to_read.version;
+          uint32_t r_info_version =  op->ts_to_read.version;
           optik_lock(&kv_ptr[I]->key.meta);
           // Change epoch if needed
           if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
             *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
           // find the the max ts and write it in the kvs
           if (!optik_is_greater_version(kv_ptr[I]->key.meta, op_meta))
-            (*(uint32_t *) op->ts_to_read.version) = kv_ptr[I]->key.meta.version + 1;
+            ( op->ts_to_read.version) = kv_ptr[I]->key.meta.version + 1;
           memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-          optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
+          optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
           if (ENABLE_ASSERTIONS) {
             assert(op->ts_to_read.m_id == machine_id);
-            assert(r_info_version <= *(uint32_t *)op->ts_to_read.version);
+            assert(r_info_version <= op->ts_to_read.version);
           }
           // rectifying is not needed!
-          //if (r_info_version < *(uint32_t *)op->ts_to_read.version)
+          //if (r_info_version < op->ts_to_read.version)
            // rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
           // remove the write from the pending out-of-epoch writes
           p_ops->p_ooe_writes->size--;
@@ -769,7 +772,7 @@ inline void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, stru
             if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
               *(uint16_t *) kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
             memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-            optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, *(uint32_t *)op->ts_to_read.version);
+            optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
           }
           else {
             optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
@@ -787,7 +790,7 @@ inline void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, stru
         else {
           red_printf("Wrkr %u: read-first-round wrong opcode in cache: %d, req %d, m_id %u,version %u , \n",
                      t_id, op->opcode, I, writes[(pull_ptr + I) % max_op_size]->ts_to_read.m_id,
-                     *(uint32_t *)writes[(pull_ptr + I) % max_op_size]->ts_to_read.version);
+                     writes[(pull_ptr + I) % max_op_size]->ts_to_read.version);
           assert(0);
         }
       }

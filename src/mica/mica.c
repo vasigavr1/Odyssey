@@ -4,8 +4,6 @@
 */
 
 #include "cache.h"
-#include "hrd.h"
-#include "mica.h"
 
 int is_power_of_2(int x)
 {
