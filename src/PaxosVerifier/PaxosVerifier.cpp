@@ -209,9 +209,13 @@ int main()
 {
   uint32_t thread_i = 0;
   AllKeysArray all_keys;
+  uint64_t total_file_lines_parsed = 0;
+  uint32_t lines_no;
 
   uint32_t keys_encountered = 0;
   while (true) {
+    total_file_lines_parsed += lines_no;
+    lines_no = 0;
     char file_name[50];
     sprintf(file_name, "logs/thread%u.out", thread_i);
     ifstream file(file_name);
@@ -221,8 +225,6 @@ int main()
     string word;
     uint word_i = 0;
     TextEntry entry;
-    // TODO AN std:map to translate the keys
-    uint32_t lines_no = 0;
     while (file >> word) {
       uint64_t word_val;
       try {
@@ -280,6 +282,7 @@ int main()
   cout << "Done up to thread " << thread_i << endl
        << "Duplicates found:" << all_keys.log_duplicates << endl
        << "Holes found: " << all_keys.log_holes << endl
-       << "of which malignant are " << all_keys.malignant_log_holes << endl;
+       << "of which malignant are " << all_keys.malignant_log_holes << endl
+       << "Total file lines parsed: " << total_file_lines_parsed << endl;
   return 0;
 }

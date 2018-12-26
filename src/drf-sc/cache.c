@@ -376,16 +376,19 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
           uint32_t log_no = acc->log_no;
           uint64_t l_id = acc->l_id;
+          MY_ASSERT(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
+                      acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id,
+                    "Wrkr %u Ac registered rmw_id/ rmw_id %lu/%lu \n",t_id, acc->last_registered_rmw_id.id, acc->t_rmw_id);
           // TODO Finding the sender machine id here is a hack that will not work with coalescing
           static_assert(MAX_ACC_COALESCE == 1, " ");
           struct accept_message *acc_mes = (((void *)op) -5 - ACCEPT_MES_HEADER);
 
           if (ENABLE_ASSERTIONS) check_accept_mes(acc_mes);
-          uint8_t prop_m_id = acc_mes->m_id;
+          uint8_t acc_m_id = acc_mes->m_id;
           uint32_t entry;
           if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u from m_id %u "
                                         "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                                      t_id, I, prop_m_id, l_id, rmw_l_id, glob_sess_id, log_no, acc->ts.version);
+                                      t_id, I, acc_m_id, l_id, rmw_l_id, glob_sess_id, log_no, acc->ts.version);
           optik_lock(&kv_ptr[I]->key.meta);
 
 
@@ -396,11 +399,11 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
           if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr[I], rmw_l_id, glob_sess_id,
                                                    t_id, &entry, &flag, &reply_rmw)) {
             // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-            if (!accept_ts_is_not_greater_than_kvs_ts(kv_ptr[I], acc, prop_m_id, t_id, &flag, &reply_rmw)) {
+            if (!accept_ts_is_not_greater_than_kvs_ts(kv_ptr[I], acc, acc_m_id, t_id, &flag, &reply_rmw)) {
               // 4. If the kv-pair has not been RMWed before grab an entry and ack
               // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
               // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
-              flag = handle_remote_accept_in_cache(kv_ptr[I], acc, prop_m_id, t_id, &reply_rmw, &entry);
+              flag = handle_remote_accept_in_cache(kv_ptr[I], acc, acc_m_id, t_id, &reply_rmw, &entry);
               // if the accepted is going to be acked record its information in the global entry
               if (flag == RMW_ACK_ACCEPT) {
                 activate_RMW_entry(ACCEPTED, acc->ts.version, &rmw.entry[entry], acc->opcode,
@@ -411,10 +414,16 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
               }
             }
           }
+          if (ENABLE_ASSERTIONS) rmw.entry[entry].dbg.prop_acc_num++;
+          uint64_t number_of_reqs = rmw.entry[entry].dbg.prop_acc_num;
 
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
+
+          fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
+                    "version %u, m_id: %u, resp: %u \n",
+                  kv_ptr[I]->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, flag);
+          insert_r_rep(p_ops, NULL, NULL, l_id, t_id, acc_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, acc->opcode);
         }
         else if (op->opcode == COMMIT_OP) {
@@ -625,10 +634,17 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                 activate_RMW_entry(PROPOSED, prop->ts.version, &rmw.entry[entry], prop->opcode,
                                    prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                                    ENABLE_ASSERTIONS ? "received propose" : NULL);
+              else if (flag == ACCEPTED_SAME_RMW_ID) assign_netw_ts_to_ts(&rmw.entry[entry].new_ts, &prop->ts);
             }
           }
+          if (ENABLE_ASSERTIONS) rmw.entry[entry].dbg.prop_acc_num++;
+          uint64_t number_of_reqs = rmw.entry[entry].dbg.prop_acc_num;
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received propose", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+
+          fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
+                     "version %u, m_id: %u, resp: %u \n",
+                  kv_ptr[I]->key.bkt, log_no, number_of_reqs, prop_m_id, rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, flag);
           insert_r_rep(p_ops, NULL, NULL, l_id, t_id, prop_m_id, (uint16_t) I,
                        (void*) &reply_rmw, flag, prop->opcode);
         }

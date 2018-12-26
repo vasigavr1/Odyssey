@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 3
+#define MACHINE_NUM 5
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
@@ -65,10 +65,11 @@
 #define ENABLE_CACHE_STATS 0
 #define EXIT_ON_PRINT 1
 #define PRINT_NUM 4
+#define VERIFY_PAXOS 1
 #define DUMP_STATS_2_FILE 0
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
-  if (ENABLE_ASSERTIONS) { if (!COND) { fprintf(stderr, STR, ARGS); exit(1); }}
+  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf(STR, ARGS); assert((COND)); }}
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
@@ -120,7 +121,7 @@
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
 #define NUM_OF_RMW_KEYS 1000
-#define VERIFY_PAXOS 1
+
 
 
 
@@ -134,7 +135,7 @@
 
 
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
-#define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1): REM_MACH_NUM)
+#define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1 ): REM_MACH_NUM)
 #define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 // in the first round of a release the first bytes of the value get overwritten
@@ -722,6 +723,20 @@ struct read_info {
   //  uint8_t inside_w_ptr;
 };
 
+struct dbg_glob_entry {
+  bool machines_acked_accs[MACHINE_NUM];
+  bool machines_acked_props[MACHINE_NUM];
+  struct ts_tuple last_committed_ts;
+  uint32_t last_committed_log_no;
+  struct rmw_id last_committed_rmw_id;
+  struct ts_tuple proposed_ts;
+  uint32_t proposed_log_no;
+  struct rmw_id proposed_rmw_id;
+  uint8_t last_committed_flag;
+  uint64_t prop_acc_num;
+
+};
+
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
 struct rmw_entry {
@@ -731,6 +746,7 @@ struct rmw_entry {
   struct rmw_id rmw_id;
   struct rmw_id last_committed_rmw_id;
   struct rmw_id last_registered_rmw_id;
+  struct dbg_glob_entry dbg;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   uint8_t value[RMW_VALUE_SIZE];
@@ -738,6 +754,13 @@ struct rmw_entry {
   uint32_t last_committed_log_no;
   //atomic_flag lock;
 };
+
+// possible flags explaining how the last committed RMW was committed
+#define LOCAL_RMW 0
+#define LOCAL_RMW_FROM_HELP 1
+#define REMOTE_RMW 2
+#define REMOTE_RMW_FROM_REP 3
+
 
 struct rmw_help_entry{
   struct ts_tuple ts;
@@ -760,6 +783,8 @@ struct rmw_rep_info {
   uint8_t seen_higher_prop;
   struct ts_tuple kvs_higher_ts;
   struct ts_tuple seen_higher_prop_ts;
+  bool machines_acked_accs[MACHINE_NUM]; // for DEBUG
+  bool machines_acked_props[MACHINE_NUM];
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id

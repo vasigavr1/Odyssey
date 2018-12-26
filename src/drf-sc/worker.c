@@ -156,8 +156,6 @@ void *worker(void *arg)
 	------------------------------START LOOP--------------------------------
 	---------------------------------------------------------------------------*/
 	while(true) {
-
-
      if (ENABLE_ASSERTIONS && CHECK_DBG_COUNTERS)
        check_debug_cntrs(credit_debug_cnt, waiting_dbg_counter, p_ops,
                          (void *) cb->dgram_buf, r_buf_pull_ptr,
@@ -166,7 +164,7 @@ void *worker(void *arg)
 
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
-      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > M_16) && (!slept)) {
+      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 100000) && (!slept)) {
       uint seconds = 10;
       if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
       sleep(seconds); slept = true;
