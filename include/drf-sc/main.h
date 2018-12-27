@@ -63,9 +63,10 @@
 
 
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 1
+#define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
-#define VERIFY_PAXOS 1
+#define VERIFY_PAXOS 0
+#define PRINT_LOGS 0
 #define DUMP_STATS_2_FILE 0
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
@@ -749,6 +750,7 @@ struct rmw_entry {
   struct dbg_glob_entry dbg;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
+  struct ts_tuple accepted_ts;
   uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;

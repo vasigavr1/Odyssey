@@ -150,6 +150,10 @@ int main(int argc, char *argv[])
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, "");
   static_assert(sizeof(cache_meta) == 8, "");
   static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
+  static_assert(!(VERIFY_PAXOS && PRINT_LOGS), "only one of those can be set");
+#if VERIFY_PAXOS == 1
+   static_assert(EXIT_ON_PRINT == 1, "");
+#endif
 
 
 	int i, c;
@@ -248,7 +252,7 @@ int main(int argc, char *argv[])
   sprintf(node_purpose, "Worker");
 	for(i = 0; i < num_threads; i++) {
     // PAXOS VERIFIER
-    if (VERIFY_PAXOS) {
+    if (VERIFY_PAXOS || PRINT_LOGS) {
       char fp_name[40];
       sprintf(fp_name, "../PaxosVerifier/thread%d.out", GET_GLOBAL_T_ID(machine_id, i));
       rmw_verify_fp[i] = fopen(fp_name, "w+");

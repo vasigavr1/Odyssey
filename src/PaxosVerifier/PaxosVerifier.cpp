@@ -210,7 +210,7 @@ int main()
   uint32_t thread_i = 0;
   AllKeysArray all_keys;
   uint64_t total_file_lines_parsed = 0;
-  uint32_t lines_no;
+  uint32_t lines_no = 0;
 
   uint32_t keys_encountered = 0;
   while (true) {
