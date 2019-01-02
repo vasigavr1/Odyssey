@@ -31,7 +31,7 @@
 #define MAX_R_COALESCE 12
 #define W_CREDITS 3
 #define MAX_W_COALESCE 12
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1
@@ -264,19 +264,9 @@
 //#define BLOCK_FOR_HELP_COMMIT_ACKS 9 // help committing needs to gather acks
 
 
-//-----DEPRICATED----
-// Flags to be passed when attempting a local commit
-// --on a helped request, register on gathering accept-reps, but commit on gathering commit-acks
-// --on a non-helped request commit and registering happens on gathering acept-reps
-//#define ACCEPT_REP_QUORUM 0 // only commit the request but dont register it:
-//#define COMMIT_ACK_QUORUM 1
-
-
 #define VC_NUM 2
 #define R_VC 0
 #define W_VC 1
-
-
 
 // BUFFER SIZES
 #define R_BUF_SLOTS (REM_MACH_NUM * R_CREDITS)
@@ -349,7 +339,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -647,17 +637,14 @@ struct r_rep_small {
 // Sent when you have a bigger ts_tuple
 struct r_rep_big {
   uint8_t opcode;
-  //uint8_t ts[TS_TUPLE_SIZE];
   struct network_ts_tuple ts;
   uint8_t value[VALUE_SIZE];
-
 };
 
 //
 struct r_rep_message {
   uint8_t coalesce_num;
   uint8_t m_id;
-//  uint8_t credits;
   uint8_t opcode;
   uint64_t l_id __attribute__((__packed__));
   struct r_rep_big r_rep[MAX_R_REP_COALESCE];
@@ -725,8 +712,6 @@ struct read_info {
 };
 
 struct dbg_glob_entry {
-  bool machines_acked_accs[MACHINE_NUM];
-  bool machines_acked_props[MACHINE_NUM];
   struct ts_tuple last_committed_ts;
   uint32_t last_committed_log_no;
   struct rmw_id last_committed_rmw_id;
@@ -735,8 +720,10 @@ struct dbg_glob_entry {
   struct rmw_id proposed_rmw_id;
   uint8_t last_committed_flag;
   uint64_t prop_acc_num;
-
 };
+
+
+#define ENABLE_DEBUG_GLOBAL_ENTRY 1
 
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
@@ -747,7 +734,7 @@ struct rmw_entry {
   struct rmw_id rmw_id;
   struct rmw_id last_committed_rmw_id;
   struct rmw_id last_registered_rmw_id;
-  struct dbg_glob_entry dbg;
+  struct dbg_glob_entry *dbg;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   struct ts_tuple accepted_ts;
@@ -775,6 +762,7 @@ struct rmw_help_entry{
   uint8_t state;
 };
 
+
 struct rmw_rep_info {
   uint8_t tot_replies;
   uint8_t acks;
@@ -785,8 +773,7 @@ struct rmw_rep_info {
   uint8_t seen_higher_prop;
   struct ts_tuple kvs_higher_ts;
   struct ts_tuple seen_higher_prop_ts;
-  bool machines_acked_accs[MACHINE_NUM]; // for DEBUG
-  bool machines_acked_props[MACHINE_NUM];
+
 };
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
@@ -968,8 +955,7 @@ struct thread_stats { // 2 cache lines
 	//long long unused[3]; // padding to avoid false sharing
 };
 
-#define STABLE_STATE 0
-#define TRANSIENT_STATE 1
+
 #define UP_STABLE 0
 #define DOWN_STABLE 1
 #define DOWN_TRANSIENT_OWNED 2
@@ -1035,11 +1021,8 @@ typedef enum {
   NO_REQ,
   RELEASE,
   ACQUIRE,
-  HOT_WRITE_REQ_BEFORE_SAVING_KEY,
-  HOT_WRITE_REQ,
-  HOT_READ_REQ,
-  LOCAL_REQ,
-  REMOTE_REQ
+  WRITE_REQ,
+  READ_REQ,
 } req_type;
 
 

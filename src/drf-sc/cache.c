@@ -411,12 +411,14 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
               }
             }
           }
-          if (ENABLE_ASSERTIONS) rmw.entry[entry].dbg.prop_acc_num++;
-          uint64_t number_of_reqs = rmw.entry[entry].dbg.prop_acc_num;
-
+          uint64_t number_of_reqs = 0;
+          if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+            rmw.entry[entry].dbg->prop_acc_num++;
+            number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
+          }
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          if (PRINT_LOGS)
+          if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
             fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
                      "version %u, m_id: %u, resp: %u \n",
                     kv_ptr[I]->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, flag);
@@ -464,14 +466,8 @@ inline void cache_batch_op_updates(uint32_t op_num, uint16_t t_id, struct write 
             if (glob_entry->state != INVALID_RMW)
               assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
           }
-          //if (is_global_ses_id_local(glob_sess_id, t_id) &&
-          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].rmw_id.id == rmw_l_id )//&&
-          //p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].state > INVALID_RMW &&
-          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].state < MUST_BCAST_COMMITS  &&
-          // p_ops->prop_info->entry[glob_ses_id_to_sess_id(glob_sess_id)].log_no == log_no) {
-          //cyan_printf("Received commit for local RMW id: bkt %u log no %u\n", glob_entry->key.bkt, log_no);
-          //}
           register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
+          check_registered_against_glob_last_registered(glob_entry, "handle remote commit", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
         }
         else if (ENABLE_ASSERTIONS) {
@@ -637,11 +633,14 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                   printf("Flag %u\n", flag);
             }
           }
-          if (ENABLE_ASSERTIONS) rmw.entry[entry].dbg.prop_acc_num++;
-          uint64_t number_of_reqs = rmw.entry[entry].dbg.prop_acc_num;
+          uint64_t number_of_reqs = 0;
+          if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+            rmw.entry[entry].dbg->prop_acc_num++;
+            number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
+          }
           check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received propose", t_id);
           optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
-          if (PRINT_LOGS)
+          if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
             fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
                      "version %u, m_id: %u, resp: %u \n",
                     kv_ptr[I]->key.bkt, log_no, number_of_reqs, prop_m_id, rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, flag);

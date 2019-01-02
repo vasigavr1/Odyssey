@@ -481,6 +481,10 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 void set_up_rmw_struct()
 {
   memset(&rmw, 0, sizeof(struct rmw_info));
+  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+    for (int i = 0; i < RMW_ENTRIES_NUM; i++)
+      rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
+  }
 //  for (uint16_t i = 0; i < RMW_ENTRIES_NUM; i++)
 //    rmw.empty_fifo[i] = i;
 //  rmw.ef_size = RMW_ENTRIES_NUM;
@@ -490,26 +494,26 @@ void set_up_rmw_struct()
 void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uint32_t pending_reads)
 {
   uint32_t i, j;
-  (*p_ops) = (struct pending_ops *) malloc(sizeof(struct pending_ops));
-  memset((*p_ops), 0, sizeof(struct pending_ops));
+  (*p_ops) = (struct pending_ops *) calloc(1, sizeof(struct pending_ops));
+  //memset((*p_ops), 0, sizeof(struct pending_ops));
   //(*p_writes)->write_ops = (struct write_op*) malloc(w_size * sizeof(struct write_op));
 
   (*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
   (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
-  (*p_ops)->w_session_id = (uint32_t *) malloc(pending_writes * sizeof(uint32_t));
-  (*p_ops)->r_session_id = (uint32_t *) malloc(pending_reads * sizeof(uint32_t));
-  memset((*p_ops)->w_session_id, 0, pending_writes * sizeof(uint32_t));
-  memset((*p_ops)->r_session_id, 0, pending_reads * sizeof(uint32_t));
-  (*p_ops)->session_has_pending_op = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
-  memset((*p_ops)->session_has_pending_op, 0, SESSIONS_PER_THREAD * sizeof(bool));
-  (*p_ops)->acks_seen = (uint8_t *) malloc(pending_writes * sizeof(uint8_t));
-  memset((*p_ops)->acks_seen, 0, pending_writes * sizeof(uint8_t));
-  (*p_ops)->read_info = (struct read_info *) malloc(pending_reads * sizeof(struct read_info));
-  memset((*p_ops)->read_info, 0, pending_reads * sizeof(struct read_info));
+  (*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
+  (*p_ops)->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
+  //memset((*p_ops)->w_session_id, 0, pending_writes * sizeof(uint32_t));
+  //memset((*p_ops)->r_session_id, 0, pending_reads * sizeof(uint32_t));
+  (*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
+  //memset((*p_ops)->session_has_pending_op, 0, SESSIONS_PER_THREAD * sizeof(bool));
+  (*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
+  //memset((*p_ops)->acks_seen, 0, pending_writes * sizeof(uint8_t));
+  (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));
+  //memset((*p_ops)->read_info, 0, pending_reads * sizeof(struct read_info));
 
   (*p_ops)->p_ooe_writes =
-    (struct pending_out_of_epoch_writes *) malloc(sizeof(struct pending_out_of_epoch_writes));
-  memset((*p_ops)->p_ooe_writes, 0, sizeof(struct pending_out_of_epoch_writes));
+    (struct pending_out_of_epoch_writes *) calloc(1, sizeof(struct pending_out_of_epoch_writes));
+  //memset((*p_ops)->p_ooe_writes, 0, sizeof(struct pending_out_of_epoch_writes));
 
   // R_REP_FIFO
   (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) malloc(sizeof(struct r_rep_fifo));
