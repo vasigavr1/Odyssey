@@ -495,70 +495,39 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 {
   uint32_t i, j;
   (*p_ops) = (struct pending_ops *) calloc(1, sizeof(struct pending_ops));
-  //memset((*p_ops), 0, sizeof(struct pending_ops));
-  //(*p_writes)->write_ops = (struct write_op*) malloc(w_size * sizeof(struct write_op));
 
   (*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
   (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
   (*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
   (*p_ops)->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
-  //memset((*p_ops)->w_session_id, 0, pending_writes * sizeof(uint32_t));
-  //memset((*p_ops)->r_session_id, 0, pending_reads * sizeof(uint32_t));
   (*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
-  //memset((*p_ops)->session_has_pending_op, 0, SESSIONS_PER_THREAD * sizeof(bool));
   (*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
-  //memset((*p_ops)->acks_seen, 0, pending_writes * sizeof(uint8_t));
   (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));
-  //memset((*p_ops)->read_info, 0, pending_reads * sizeof(struct read_info));
-
   (*p_ops)->p_ooe_writes =
     (struct pending_out_of_epoch_writes *) calloc(1, sizeof(struct pending_out_of_epoch_writes));
-  //memset((*p_ops)->p_ooe_writes, 0, sizeof(struct pending_out_of_epoch_writes));
-
   // R_REP_FIFO
-  (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) malloc(sizeof(struct r_rep_fifo));
-  memset((*p_ops)->r_rep_fifo, 0, sizeof(struct r_rep_fifo));
-  (*p_ops)->r_rep_fifo->r_rep_message = (struct r_rep_message *) malloc(R_REP_FIFO_SIZE * sizeof(struct r_rep_message));
-  memset((*p_ops)->r_rep_fifo->r_rep_message, 0, R_REP_FIFO_SIZE * sizeof(struct r_rep_message));
+  (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) calloc(1, sizeof(struct r_rep_fifo));
+  (*p_ops)->r_rep_fifo->r_rep_message = (struct r_rep_message *) calloc(R_REP_FIFO_SIZE, sizeof(struct r_rep_message));
   (*p_ops)->r_rep_fifo->rem_m_id = (uint8_t *) malloc(R_REP_FIFO_SIZE * sizeof(uint8_t));
   (*p_ops)->r_rep_fifo->pull_ptr = 1;
-  //memset((*p_ops)->r_rep_fifo->rem_m_id, 0, R_REP_FIFO_SIZE * sizeof(uint8_t));
   for (i= 0; i < R_REP_FIFO_SIZE; i++) (*p_ops)->r_rep_fifo->rem_m_id[i] = MACHINE_NUM;
-  (*p_ops)->r_rep_fifo->message_sizes = (uint16_t *) malloc(R_REP_FIFO_SIZE * sizeof(uint16_t));
-  memset((*p_ops)->r_rep_fifo->message_sizes, 0, R_REP_FIFO_SIZE * sizeof(uint16_t));
+  (*p_ops)->r_rep_fifo->message_sizes = (uint16_t *) calloc(R_REP_FIFO_SIZE, sizeof(uint16_t));
   // W_FIFO
-  (*p_ops)->w_fifo = (struct write_fifo *) malloc(sizeof(struct write_fifo));
-  memset((*p_ops)->w_fifo, 0, sizeof(struct write_fifo));
+  (*p_ops)->w_fifo = (struct write_fifo *) calloc(1, sizeof(struct write_fifo));
   (*p_ops)->w_fifo->w_message =
-    (struct w_message *) malloc(W_FIFO_SIZE * sizeof(struct w_message));
-  memset((*p_ops)->w_fifo->w_message, 0, W_FIFO_SIZE * sizeof(struct w_message));
+    (struct w_message *) calloc(W_FIFO_SIZE, sizeof(struct w_message));
   // R_FIFO
-  (*p_ops)->r_fifo = (struct read_fifo *) malloc(sizeof(struct read_fifo));
-  memset((*p_ops)->r_fifo, 0, sizeof(struct read_fifo));
+  (*p_ops)->r_fifo = (struct read_fifo *) calloc(1, sizeof(struct read_fifo));
   (*p_ops)->r_fifo->r_message =
-    (struct r_message *) malloc(R_FIFO_SIZE * sizeof(struct r_message));
-  memset((*p_ops)->r_fifo->r_message, 0, R_FIFO_SIZE * sizeof(struct r_message));
+    (struct r_message *) calloc(R_FIFO_SIZE, sizeof(struct r_message));
   // PREP STRUCT
-  (*p_ops)->prop_info = (struct prop_info *) malloc(sizeof(struct prop_info));
-  memset((*p_ops)->prop_info, 0, sizeof(struct prop_info));
+  (*p_ops)->prop_info = (struct prop_info *) calloc(1, sizeof(struct prop_info));
   (*p_ops)->prop_info->l_id = 1;
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
-    (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) malloc(sizeof(struct rmw_help_entry));
-    memset((*p_ops)->prop_info->entry[i].help_rmw, 0, sizeof(struct rmw_help_entry));
-
-    (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) malloc(sizeof(struct rmw_local_entry));
-    memset((*p_ops)->prop_info->entry[i].help_loc_entry, 0, sizeof(struct rmw_local_entry));
+    (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
+    (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) calloc(1, sizeof(struct rmw_local_entry));
   }
 
-  //(*p_ops)->prep_info->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
-  //memset((*p_ops)->prep_info->prep_fifo, 0, sizeof(struct prep_fifo));
-
-  //(*p_ops)->prep_info->prep_fifo->r_message =
-  //  (struct r_message *) malloc(LOCAL_PREP_NUM * sizeof(struct r_message));
- // memset((*p_ops)->prep_info->prep_fifo->r_message, 0, LOCAL_PREP_NUM * sizeof(struct r_message));
-
-
-//  (*p_ops)->r_payloads = (struct read_payload *) malloc(pending_reads * sizeof(struct read_payload));
   (*p_ops)->ptrs_to_r_headers = (struct r_message **) malloc(MAX_INCOMING_R * sizeof(struct r_message *));
   // PTRS to W_OPS
   (*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
@@ -566,29 +535,22 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->ptrs_to_r_ops = (struct read **) malloc(MAX_INCOMING_R * sizeof(struct read *));
   // PTRS to local ops to find the write after sending the first round of a release
   (*p_ops)->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
-  (*p_ops)->overwritten_values = (uint8_t *) malloc(pending_writes * SEND_CONF_VEC_SIZE);
-  memset((*p_ops)->overwritten_values, 0, pending_writes * SEND_CONF_VEC_SIZE);
+  (*p_ops)->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
+
 
   for (i = 0; i < W_FIFO_SIZE; i++) {
     (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
     for (j = 0; j < MAX_W_COALESCE; j++){
-      //(*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
+      (*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
       (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
-      (*p_ops)->w_fifo->w_message[i].write[j].opcode = CACHE_OP_PUT;
     }
   }
   for (i = 0; i < R_FIFO_SIZE; i++) {
     (*p_ops)->r_fifo->r_message[i].m_id = (uint8_t) machine_id;
-    for (j = 0; j < MAX_R_COALESCE; j++){
-      (*p_ops)->r_fifo->r_message[i].read[j].opcode = CACHE_OP_GET;
-    }
   }
-
   for (i = 0; i < R_REP_FIFO_SIZE; i++) {
     (*p_ops)->r_rep_fifo->r_rep_message[i].m_id = (uint8_t) machine_id;
-    (*p_ops)->r_rep_fifo->r_rep_message[i].opcode = (uint8_t) READ_REPLY;
   }
-
   for (i = 0; i < pending_reads; i++)
     (*p_ops)->r_state[i] = INVALID;
   for (i = 0; i < pending_writes; i++) {

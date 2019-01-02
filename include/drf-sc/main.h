@@ -31,7 +31,7 @@
 #define MAX_R_COALESCE 12
 #define W_CREDITS 3
 #define MAX_W_COALESCE 12
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT M_1
@@ -41,10 +41,10 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000 // this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 100 // this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RMWS_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++

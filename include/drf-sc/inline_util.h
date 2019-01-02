@@ -265,6 +265,13 @@ static inline uint8_t sum_of_reps(struct rmw_local_entry* loc_entry)
          loc_entry->rmw_reps.ts_stale + loc_entry->rmw_reps.seen_higher_prop;
 }
 
+static inline bool r_rep_has_big_size(uint8_t opcode)
+{
+  return opcode == TS_GREATER || (opcode == TS_GREATER + FALSE_POSITIVE_OFFSET) ||
+         opcode == RMW_ACCEPTED || (opcode == RMW_ACCEPTED + FALSE_POSITIVE_OFFSET) ||
+         opcode == RMW_TS_STALE || (opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET);
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ RDMA GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
@@ -861,10 +868,12 @@ static inline void check_global_sess_id(uint8_t machine_id, uint16_t t_id,
 
 // Do some preliminary checks for the write message,
 // the while loop is there to wait for the entire message to be written (currently not useful)
-static inline void check_the_polled_write_message(volatile struct w_message *w_mes,
+static inline void check_the_polled_write_message(struct w_message *w_mes,
                                                   uint32_t index, uint32_t polled_writes, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
+    assert(w_mes->m_id < MACHINE_NUM);
+    assert(w_mes->w_num <= MAX_W_COALESCE);
     uint32_t debug_cntr = 0;
     if (w_mes->w_num == 0) {
       red_printf("Wrkr %u received a write with w_num %u, op %u from machine %u with lid %lu \n",
@@ -1499,6 +1508,72 @@ static inline void check_local_commit_from_rep(struct rmw_entry *glob_entry, str
 }
 
 
+
+// Wait until the entire r_rep is there
+static inline void wait_for_the_entire_read(struct r_message *r_mes,
+                                            uint16_t t_id, uint32_t index)
+{
+  uint32_t debug_cntr = 0;
+  while (r_mes->read[r_mes->coalesce_num - 1].opcode != CACHE_OP_GET) {
+
+    if ((r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_GET_TS) ||
+        (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) ||
+        (r_mes->read[r_mes->coalesce_num - 1].opcode == PROPOSE_OP) ||
+        r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
+    if (ENABLE_ASSERTIONS) {
+      assert(false);
+      debug_cntr++;
+      if (debug_cntr == B_4_) {
+        red_printf("Wrkr %d stuck waiting for a read to come index %u coalesce id %u\n",
+                   t_id, index, r_mes->coalesce_num - 1);
+        print_wrkr_stats(t_id);
+        debug_cntr = 0;
+      }
+    }
+  }
+}
+
+
+static inline void check_when_polling_for_reads(struct r_message *r_mes, uint32_t index,
+                                                uint32_t polled_reads, uint16_t t_id)
+{
+  uint8_t r_num = r_mes->coalesce_num;
+  if (ENABLE_ASSERTIONS) {
+    assert(r_mes->coalesce_num > 0);
+    wait_for_the_entire_read(r_mes, t_id, index);
+    if (DEBUG_READS)
+      printf("Worker %u sees a read Opcode %d at offset %d, l_id %lu  \n", t_id,
+             r_mes->read[0].opcode, index, r_mes->l_id);
+    else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
+      struct prop_message *prop_mes = (struct prop_message *) r_mes;
+      cyan_printf("Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
+                    "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
+                  t_id, prop_mes->m_id, prop_mes->prop[0].opcode, index, prop_mes->prop[0].t_rmw_id,
+                  prop_mes->prop[0].glob_sess_id, prop_mes->prop[0].log_no,
+                  prop_mes->coalesce_num, prop_mes->prop[0].ts.version);
+    }
+    if (polled_reads + r_num > MAX_INCOMING_R) assert(false);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_reads_received[r_mes->m_id] += r_num;
+    t_stats[t_id].received_reads += r_num;
+    t_stats[t_id].received_reads_mes_num++;
+  }
+}
+
+static inline void check_read_opcode_when_polling_for_reads(struct read *read, uint16_t read_i,
+                                                            uint16_t r_num, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(MAX_PROP_COALESCE == 1); // this function won't work otherwise
+    if (read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE &&
+        read->opcode != CACHE_OP_GET_TS &&
+        read->opcode != PROPOSE_OP && read->opcode != OP_ACQUIRE_FLIP_BIT)
+      red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, read_i, r_num);
+  }
+}
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
 //---------------------------------------------------------------------------*/
@@ -1879,6 +1954,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr], &r_info->ts_to_read, TS_TUPLE_SIZE + TRUE_KEY_SIZE);
     memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, VALUE_SIZE);
     w_mes[w_mes_ptr].write[inside_w_ptr].opcode = r_info->opcode;
+    w_mes[w_mes_ptr].write[inside_w_ptr].val_len = VALUE_SIZE >> SHIFT_BITS;
     if (ENABLE_ASSERTIONS) {
       assert(source == FROM_READ);
       if (!(r_info->opcode == CACHE_OP_PUT ||
@@ -4183,7 +4259,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
     message_l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
     //printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
-    memcpy(&w_mes[w_mes_ptr].l_id, &message_l_id, 8);
+    w_mes[w_mes_ptr].l_id = message_l_id;
+    w_mes[w_mes_ptr].m_id = (uint8_t) machine_id;
   }
   if (ENABLE_ASSERTIONS)
     debug_checks_when_inserting_a_write(source, inside_w_ptr, w_mes_ptr, w_mes,
@@ -4982,8 +5059,8 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   uint32_t index = *pull_ptr;
   // Start polling
   while (polled_messages < completed_messages) {
-    check_the_polled_write_message(&incoming_ws[index].w_mes, index, polled_writes, t_id);
     struct w_message *w_mes = (struct w_message*) &incoming_ws[index].w_mes;
+    check_the_polled_write_message(w_mes, index, polled_writes, t_id);
     print_polled_write_message_info(w_mes, index, t_id);
     uint8_t w_num = w_mes->w_num;
     bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
@@ -5010,29 +5087,6 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   }
 }
 
-// Wait until the entire r_rep is there
-static inline void wait_for_the_entire_read(volatile struct r_message *r_mes,
-                                             uint16_t t_id, uint32_t index)
-{
-  uint32_t debug_cntr = 0;
-  while (r_mes->read[r_mes->coalesce_num - 1].opcode != CACHE_OP_GET) {
-
-    if ((r_mes->read[r_mes->coalesce_num - 1].opcode == CACHE_OP_GET_TS) ||
-        (r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE) ||
-        (r_mes->read[r_mes->coalesce_num - 1].opcode == PROPOSE_OP) ||
-          r_mes->read[r_mes->coalesce_num - 1].opcode == OP_ACQUIRE_FLIP_BIT) return;
-    if (ENABLE_ASSERTIONS) {
-      assert(false);
-      debug_cntr++;
-      if (debug_cntr == B_4_) {
-        red_printf("Wrkr %d stuck waiting for a read to come index %u coalesce id %u\n",
-                   t_id, index, r_mes->coalesce_num - 1);
-        print_wrkr_stats(t_id);
-        debug_cntr = 0;
-      }
-    }
-  }
-}
 
 // Poll for the r_rep broadcasts
 static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
@@ -5047,35 +5101,12 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
   uint32_t polled_messages = 0, polled_reads = 0;
   // Start polling
   while (polled_messages < completed_messages) {
-    if (ENABLE_ASSERTIONS) {
-      assert(incoming_rs[index].r_mes.coalesce_num > 0);
-      wait_for_the_entire_read(&incoming_rs[index].r_mes, t_id, index);
-    }
     struct r_message *r_mes = (struct r_message*) &incoming_rs[index].r_mes;
-    if (DEBUG_READS)
-      printf("Worker %u sees a read Opcode %d at offset %d, l_id %lu  \n", t_id,
-             incoming_rs[index].r_mes.read[0].opcode, index, incoming_rs[index].r_mes.l_id);
-    else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
-      struct prop_message *prop_mes = (struct prop_message *) r_mes;
-      cyan_printf("Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
-                  "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
-                  t_id, prop_mes->m_id, prop_mes->prop[0].opcode, index, prop_mes->prop[0].t_rmw_id,
-                  prop_mes->prop[0].glob_sess_id, prop_mes->prop[0].log_no,
-                  prop_mes->coalesce_num, prop_mes->prop[0].ts.version);
-    }
-
+    check_when_polling_for_reads(r_mes, index,polled_reads, t_id);
     uint8_t r_num = r_mes->coalesce_num;
-    if (polled_reads + r_num > MAX_INCOMING_R && ENABLE_ASSERTIONS) assert(false);
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
-      if (ENABLE_ASSERTIONS) {
-        assert(MAX_PROP_COALESCE == 1); // this function won't work otherwise
-        if (read->opcode != CACHE_OP_GET && read->opcode != OP_ACQUIRE &&
-            read->opcode != CACHE_OP_GET_TS &&
-            read->opcode != PROPOSE_OP && read->opcode != OP_ACQUIRE_FLIP_BIT)
-          red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, i, r_num);
-      }
-      //printf("version %u \n", read->ts.version);
+      check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
       if (read->opcode == OP_ACQUIRE)
         read->opcode = take_ownership_of_a_conf_bit(t_id, r_mes->l_id + i,
                                                     (uint16_t) r_mes->m_id);
@@ -5085,19 +5116,11 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
       p_ops->ptrs_to_r_headers[polled_reads] = r_mes;
       polled_reads++;
     }
-    if (ENABLE_STAT_COUNTING) {
-      if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_reads_received[r_mes->m_id] += r_num;
-      t_stats[t_id].received_reads += r_num;
-      t_stats[t_id].received_reads_mes_num++;
-    }
     if (ENABLE_ASSERTIONS) incoming_rs[index].r_mes.coalesce_num = 0;
     MOD_ADD(index, R_BUF_SLOTS);
     polled_messages++;
-    // Back-pressure
-    if (polled_messages + p_ops->r_rep_fifo->mes_size == R_REP_FIFO_SIZE) {
-      assert(false);
-      break;
-    }
+    if (ENABLE_ASSERTIONS)
+      assert(polled_messages + p_ops->r_rep_fifo->mes_size < R_REP_FIFO_SIZE);
   }
   (*pull_ptr) = index;
   // Poll for the completion of the receives
@@ -5106,8 +5129,6 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
     if (ENABLE_ASSERTIONS) dbg_counter[R_QP_ID] = 0;
   }
   else if (ENABLE_ASSERTIONS && p_ops->r_rep_fifo->mes_size == 0) dbg_counter[R_QP_ID]++;
-
-
 }
 
 
@@ -5242,6 +5263,8 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
 
 
 
+
+
 //Poll for read replies
 static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *incoming_r_reps,
                                          uint32_t *pull_ptr, struct pending_ops *p_ops,
@@ -5257,8 +5280,8 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   uint32_t polled_messages = 0;
   // Start polling
   while (polled_messages < completed_messages) {
-    print_and_check_mes_when_polling_r_reps((struct r_rep_message *) &incoming_r_reps[index].r_rep_mes, index, t_id);
     struct r_rep_message *r_rep_mes = (struct r_rep_message*) &incoming_r_reps[index].r_rep_mes;
+    print_and_check_mes_when_polling_r_reps(r_rep_mes, index, t_id);
     bool is_propose = r_rep_mes->opcode == PROP_REPLY;
     bool is_accept = r_rep_mes->opcode == ACCEPT_REPLY;
     increase_credits_when_polling_r_reps(credits, is_propose, is_accept, r_rep_mes->m_id, t_id);
@@ -5305,9 +5328,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
                                       index, p_ops, byte_ptr, t_id);
         }
       }
-      if (r_rep->opcode == TS_GREATER || (r_rep->opcode == TS_GREATER + FALSE_POSITIVE_OFFSET) ||
-          r_rep->opcode == RMW_ACCEPTED || (r_rep->opcode == RMW_ACCEPTED + FALSE_POSITIVE_OFFSET) ||
-          r_rep->opcode == RMW_TS_STALE || (r_rep->opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET))
+      if (r_rep_has_big_size(r_rep->opcode))
         byte_ptr += R_REP_SIZE;
       else if (r_rep->opcode == TS_GREATER_TS_ONLY) byte_ptr += R_REP_ONLY_TS_SIZE;
       else byte_ptr++;
@@ -5720,10 +5741,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
   for (uint16_t sess_i = 0; sess_i < SESSIONS_PER_THREAD; sess_i++) {
     struct rmw_local_entry* loc_entry = &p_ops->prop_info->entry[sess_i];
     uint8_t state = loc_entry->state;
-    if (state == INVALID_RMW) {
-      if (ENABLE_ASSERTIONS) assert(!p_ops->session_has_pending_op[sess_i]);
-      continue;
-    }
+    if (state == INVALID_RMW) continue;
     if (ENABLE_ASSERTIONS) assert(p_ops->session_has_pending_op[sess_i]);
 
     /* =============== ACCEPTED ======================== */
