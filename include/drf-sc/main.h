@@ -339,7 +339,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -741,6 +741,7 @@ struct rmw_entry {
   uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;
+  uint32_t last_registered_log_no;
   //atomic_flag lock;
 };
 
