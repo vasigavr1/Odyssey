@@ -167,7 +167,8 @@ void *worker(void *arg)
       (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 100000) && (!slept)) {
       uint seconds = 10;
       if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
-      sleep(seconds); slept = true;
+      exit(1);
+      //sleep(seconds); slept = true;
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
       print_verbouse_debug_info(p_ops, t_id, credits);

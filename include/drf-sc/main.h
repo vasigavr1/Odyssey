@@ -34,7 +34,7 @@
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
-#define RMW_BACK_OFF_TIMEOUT M_1
+#define RMW_BACK_OFF_TIMEOUT K_64// M_1
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -433,7 +433,7 @@ struct remote_qp {
 
 // Possible Helping flags
 #define NOT_HELPING 0
-#define HELPING_NEED_STASHING 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
+#define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
 #define HELPING_NO_STASHING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 
 

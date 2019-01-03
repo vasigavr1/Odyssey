@@ -1293,7 +1293,8 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
   }
 }
 
-static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc_entry)
+static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc_entry,
+                                                     const char *message, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) { // make sure the loc_entry is correctly set-up
     if (loc_entry->help_loc_entry == NULL) {
@@ -1302,7 +1303,7 @@ static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc
       assert(loc_entry->state == INVALID_RMW);
     }
     else {
-      assert(loc_entry->help_loc_entry->state == INVALID_RMW);
+      MY_ASSERT(loc_entry->help_loc_entry->state == INVALID_RMW, "Wrkr %u: %s \n", t_id, message);
       assert(loc_entry->rmw_reps.tot_replies == 0);
       assert(loc_entry->back_off_cntr == 0);
     }
@@ -2601,10 +2602,10 @@ static inline void take_actions_to_commit_rmw(struct rmw_entry *glob_entry,
 // After having helped another RMW, bring your own RMW back into the local entry
 static inline void reinstate_loc_entry_after_helping(struct rmw_local_entry *loc_entry, uint16_t t_id)
 {
-  if (loc_entry->helping_flag == HELPING_NEED_STASHING) {
-    loc_entry->opcode = loc_entry->help_rmw->opcode;
-    assign_second_rmw_id_to_first(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
-  }
+  //if (loc_entry->helping_flag == HELPING_NEED_STASHING) {
+  //  loc_entry->opcode = loc_entry->help_rmw->opcode;
+  //  assign_second_rmw_id_to_first(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
+ // }
   loc_entry->state = NEEDS_GLOBAL;
   loc_entry->helping_flag = NOT_HELPING;
   zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
@@ -2701,10 +2702,10 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
 
 // RMWs hijack the read fifo, to send propose broadcasts to all
 static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
-                                            uint8_t flag, uint16_t t_id)
+                                            uint16_t t_id)
 {
-
-  check_loc_entry_metadata_is_reset(loc_entry);
+  if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
+    check_loc_entry_metadata_is_reset(loc_entry, "insert_prop_to_read_fifo", t_id);
   struct r_message *r_mes = p_ops->r_fifo->r_message;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
@@ -3014,7 +3015,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
                                                         struct rmw_local_entry *loc_entry,
                                                         uint16_t t_id)
 {
-  check_loc_entry_metadata_is_reset(loc_entry);
+  check_loc_entry_metadata_is_reset(loc_entry, "insert_accept_in_writes_message_fifo", t_id);
   struct w_message *w_mes = p_ops->w_fifo->w_message;
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
@@ -3077,7 +3078,8 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   }
 
   if (rmw_ids_are_equal(&loc_entry->rmw_id, &glob_entry->rmw_id) &&
-      glob_entry->state != INVALID_RMW) {
+      glob_entry->state != INVALID_RMW &&
+      compare_ts(&loc_entry->new_ts, &glob_entry->new_ts) != SMALLER) {
     if (ENABLE_ASSERTIONS) {
       assert(glob_entry->log_no == loc_entry->log_no);
       assert(glob_entry->last_committed_log_no == loc_entry->log_no - 1);
@@ -3154,6 +3156,8 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
 
   if (help_loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[help_loc_entry->rmw_id.glob_sess_id]) {
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
+    if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
+      cyan_printf("Sess %u aborts because the rmw-id is already registered \n", loc_entry->sess_id);
     return ABORT_HELP;
   }
 
@@ -3166,15 +3170,21 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
   bool glob_entry_is_invalid_but_not_committed = glob_entry->state == INVALID_RMW &&
     glob_entry->last_committed_log_no < help_loc_entry->log_no;
 
+  bool helping_stuck_accept = loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED &&
+                              help_loc_entry->log_no == glob_entry->log_no &&
+                              glob_entry->state == ACCEPTED &&
+                              rmw_ids_are_equal(&glob_entry->rmw_id, &help_loc_entry->rmw_id) &&
+                              compare_ts(&glob_entry->new_ts, &loc_entry->new_ts) != GREATER;
+
 //    (glob_entry->state != INVALID_RMW &&
 //    compare_ts(&glob_entry->new_ts, &loc_entry->new_ts) == GREATER) ||
 //    glob_entry->last_committed_log_no >= help_loc_entry->log_no;
 
-  if (glob_entry_is_the_same || glob_entry_is_invalid_but_not_committed) {
+  if (glob_entry_is_the_same || glob_entry_is_invalid_but_not_committed || helping_stuck_accept) {
     if (ENABLE_ASSERTIONS) {
       // if the TS are equal it better be that it is because it remembers the proposed request
       if (glob_entry->state != INVALID_RMW &&
-          compare_ts(&glob_entry->new_ts, &loc_entry->new_ts) == EQUAL) {
+          compare_ts(&glob_entry->new_ts, &loc_entry->new_ts) == EQUAL && !helping_stuck_accept) {
         assert(rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry->rmw_id));
         if (glob_entry->state != PROPOSED) {
           red_printf("Wrkr: %u, state %u \n", t_id, glob_entry->state);
@@ -3204,10 +3214,10 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     //If the log entry is committed locally abort the help
     //if the global entry has accepted a higher TS then again abort help
    return_flag = ABORT_HELP;
-    if (DEBUG_RMW)
-      green_printf("Wrkr %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
+    if (DEBUG_RMW || (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0))
+      green_printf("Wrkr %u sess %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
                      "global entry rmw id %u, glob sess %u, state %u \n",
-                   t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
+                   t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
                    glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
 
 
@@ -3418,7 +3428,7 @@ static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct 
 
   zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
   if (local_state == ACCEPT_ACK) {
-    check_loc_entry_metadata_is_reset(loc_entry);
+    check_loc_entry_metadata_is_reset(loc_entry, "act_on_quorum_of_prop_acks", t_id);
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, t_id);
     if (ENABLE_ASSERTIONS) {
       assert(glob_ses_id_to_t_id(loc_entry->rmw_id.glob_sess_id) == t_id &&
@@ -3510,7 +3520,8 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
 {
   if (ENABLE_ASSERTIONS) {
     assert(loc_entry->state == PROPOSED);
-    assert(loc_entry->helping_flag == NOT_HELPING);
+    assert(loc_entry->helping_flag == NOT_HELPING ||
+           loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED);
   }
   loc_entry->rmw_reps.tot_replies++;
 
@@ -3571,7 +3582,7 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
       if (ENABLE_ASSERTIONS) assert(false);
   }
 
-  if (ENABLE_ASSERTIONS)
+  if (ENABLE_ASSERTIONS && loc_entry->helping_flag != HELPING_NO_STASHING)
     check_sum_of_reps(loc_entry);
 }
 
@@ -3700,26 +3711,21 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
                                                             struct rmw_entry *glob_entry, uint16_t t_id)
 {
   bool help = false;
+  struct rmw_local_entry *help_loc_entry = loc_entry->help_loc_entry;
   // set_up the entry to be helped
   optik_lock(loc_entry->ptr_to_kv_pair);
   // check again with the lock in hand
   if ((glob_entry->state == ACCEPTED &&
        rmw_ids_are_equal(&loc_entry->help_rmw->rmw_id, &glob_entry->rmw_id))) {
-    loc_entry->helping_flag = HELPING_NEED_STASHING;
-    // Need only to stash RMW-id, opcode & the state as log, TS, value are unknown
-    loc_entry->help_rmw->opcode = loc_entry->opcode;
-    loc_entry->help_rmw->state = loc_entry->state;
-    swap_rmw_ids(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
-    if (ENABLE_ASSERTIONS) {
-      assert(rmw_ids_are_equal(&loc_entry->rmw_id, &glob_entry->rmw_id));
-      //assert(committed_glob_sess_rmw_id[glob_entry->rmw_id.glob_sess_id] < glob_entry->rmw_id.id);
-    }
-    // Load the RMW to be helped (rmw-id is already there from swapping)
-    loc_entry->new_ts = glob_entry->new_ts;
     loc_entry->log_no = glob_entry->log_no;
-    assign_second_rmw_id_to_first(&loc_entry->last_registered_rmw_id, &glob_entry->last_registered_rmw_id);
-    check_last_registered_rmw_id(loc_entry, glob_entry, t_id);
-    memcpy(loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
+    help_loc_entry->new_ts = glob_entry->accepted_ts;
+    memcpy(help_loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
+    loc_entry->new_ts.version = glob_entry->new_ts.version + 2;
+    loc_entry->new_ts.m_id = (uint8_t) machine_id;
+    glob_entry->new_ts = loc_entry->new_ts;
+    if (ENABLE_ASSERTIONS) {
+      assert(glob_entry->new_ts.version > glob_entry->accepted_ts.version);
+    }
     help = true;
   }
   check_log_nos_of_glob_entry(glob_entry, "attempt_to_help_a_locally_accepted_value", t_id);
@@ -3736,9 +3742,24 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
                   glob_entry->log_no, loc_entry->log_no, glob_entry->last_committed_log_no,
                   committed_glob_sess_rmw_id[glob_entry->rmw_id.glob_sess_id], glob_entry->rmw_id.glob_sess_id,
                   loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
-    loc_entry->state = ACCEPTED;
+
+    loc_entry->state = PROPOSED;
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
-    insert_accept_in_writes_message_fifo(p_ops, loc_entry, t_id);
+    help_loc_entry->state = ACCEPTED;
+    loc_entry->helping_flag = PROPOSE_NOT_LOCALLY_ACKED;
+    if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
+      cyan_printf("Sess %u initiates prop help \n", loc_entry->sess_id);
+    help_loc_entry->sess_id = loc_entry->sess_id;
+    help_loc_entry->log_no = loc_entry->log_no;
+    help_loc_entry->rmw_id = loc_entry->help_rmw->rmw_id;
+    memcpy(&help_loc_entry->key, &loc_entry->key, TRUE_KEY_SIZE);
+    loc_entry->rmw_reps.tot_replies = 1;
+    loc_entry->rmw_reps.already_accepted = 1;
+
+
+    //loc_entry->state = ACCEPTED;
+
+    //insert_accept_in_writes_message_fifo(p_ops, loc_entry, t_id);
 //    if (ENABLE_ASSERTIONS) {
 //      assert(!(glob_ses_id_to_t_id(loc_entry->rmw_id.glob_sess_id) == t_id &&
 //               glob_ses_id_to_m_id(loc_entry->rmw_id.glob_sess_id) == machine_id));
@@ -3864,11 +3885,15 @@ static inline void act_on_receiving_already_accepted_rep_to_prop(struct pending_
   // If my ts is bigger then the accepted TS may need to be helped
   // if a quorum of acks could not be gathered
   if (accepted_ts_is_smaller) {
-    if (loc_entry->rmw_reps.acks >= REMOTE_QUORUM) {
+    if (loc_entry->rmw_reps.acks >= REMOTE_QUORUM &&
+        loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED) {
       act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
     }
     else { // help the accepted
       uint8_t flag = attempt_local_accept_to_help(p_ops, loc_entry, t_id);
+      if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
+        yellow_printf("Sess %u helping, local accept flag %u \n", loc_entry->sess_id, flag);
+
       if (flag == ACCEPT_ACK) {
         loc_entry->helping_flag = HELPING_NO_STASHING;
         loc_entry->state = ACCEPTED;
@@ -4063,7 +4088,7 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL);
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
     if (loc_entry->state == PROPOSED) {
-      insert_prop_to_read_fifo(p_ops, loc_entry, 0, t_id);
+      insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
     }
   } else if (loc_entry->state != PROPOSED) {
     if (loc_entry->state != ACCEPTED) {
@@ -4165,7 +4190,7 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
     check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL);
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
     if (loc_entry->state == PROPOSED) {
-      insert_prop_to_read_fifo(p_ops, loc_entry, 0, t_id);
+      insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
     }
   }
   else if (loc_entry->state != PROPOSED)
@@ -4449,7 +4474,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->key.meta.version,
                                           PROPOSED, (uint16_t) session_id, t_id);
     loc_entry->log_no = resp->log_no;
-    insert_prop_to_read_fifo(p_ops, loc_entry, 0, t_id);
+    insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
   }
   else my_assert(false, "Wrong resp type in RMW");
 }
@@ -4582,7 +4607,7 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
       if (!DEBUG_BIT_VECS)
-        red_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
+       if (t_id == 0) red_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
      // assert(false);
     }
     else {
@@ -5830,7 +5855,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
       }
       if (loc_entry->state == PROPOSED) {
         loc_entry->back_off_cntr = 0;
-        insert_prop_to_read_fifo(p_ops, loc_entry, 0, t_id);
+        insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
       }
       check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
                                     ACCEPTED);
