@@ -70,7 +70,7 @@
 #define DUMP_STATS_2_FILE 0
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
-  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf(STR, ARGS); assert((COND)); }}
+  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
@@ -434,8 +434,9 @@ struct remote_qp {
 // Possible Helping flags
 #define NOT_HELPING 0
 #define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
-#define HELPING_NO_STASHING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 
+#define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
+#define PROPOSE_LOCALLY_ACCEPTED 3
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
