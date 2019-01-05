@@ -86,6 +86,7 @@
 #define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
 #define RMW_ID_COMMITTED 36 // send the entire committed rmw
 #define LOG_TOO_SMALL 37 // send the entire committed rmw
+#define LOG_TOO_HIGH 38 // single byte-nack only proposes
 
 
 // this offset is added to the read reply opcode

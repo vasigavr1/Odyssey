@@ -417,7 +417,7 @@ struct remote_qp {
 #define RMW_ACK_ACCEPT 9 // only accepts
 #define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
 #define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
-//#define RMW_LOG_TOO_HIGH 12 // this means the propose will be acked
+#define RMW_LOG_TOO_HIGH 12 // this means the propose will be nacked
 
 //flags when receiving a commit
 
@@ -434,9 +434,13 @@ struct remote_qp {
 // Possible Helping flags
 #define NOT_HELPING 0
 #define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
-
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 #define PROPOSE_LOCALLY_ACCEPTED 3
+
+// Possible flags when trying to help a stuck glob entry at PROPOSED state
+#define NO_ACTION_REQUIRED 0
+#define HELP_LAST_ACCEPTED 1
+#define PROPOSE_PREVIOUS_LOG 2
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
@@ -735,14 +739,16 @@ struct rmw_entry {
   struct rmw_id rmw_id;
   struct rmw_id last_committed_rmw_id;
   struct rmw_id last_registered_rmw_id;
+  struct rmw_id accepted_rmw_id;
   struct dbg_glob_entry *dbg;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
   struct ts_tuple accepted_ts;
-  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t value[RMW_VALUE_SIZE]; // last accepted
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;
   uint32_t last_registered_log_no;
+  uint32_t accepted_log_no;
   //atomic_flag lock;
 };
 
@@ -773,6 +779,7 @@ struct rmw_rep_info {
   uint8_t already_accepted;
   uint8_t ts_stale;
   uint8_t seen_higher_prop;
+  uint8_t log_too_high;
   struct ts_tuple kvs_higher_ts;
   struct ts_tuple seen_higher_prop_ts;
 

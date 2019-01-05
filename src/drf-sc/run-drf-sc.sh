@@ -77,7 +77,7 @@ memcached -l 0.0.0.0 1>/dev/null 2>/dev/null &
 sleep 1
 #
 blue "Running  worker threads"
-sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
+ sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
 	./drf-sc \
 	--local-ip $localIP \
 	--remote-ips $remoteIPs \
