@@ -92,8 +92,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
 				key_in_store[op_i] = 1;
         if (ENABLE_ASSERTIONS && op[op_i].opcode != PROPOSE_OP)
-          MY_ASSERT(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED,
-                    "Wrkr %u: trace opcode %u on a key that has been rmwed \n", t_id, op[op_i].opcode);
+          assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
 
 				if (op[op_i].opcode == CACHE_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
           KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
@@ -177,8 +176,7 @@ inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write 
         if (op->opcode == CACHE_OP_PUT || op->opcode == OP_RELEASE ||
             op->opcode == OP_ACQUIRE) {
           if (ENABLE_ASSERTIONS)
-            MY_ASSERT(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED,
-                      "Wrkr %u updates: opcode %u on a key that has been rmwed \n", t_id, op->opcode);
+            assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
           KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
         }
         else if (op->opcode == ACCEPT_OP) {
@@ -253,8 +251,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
         key_in_store[op_i] = 1;
 
         if (ENABLE_ASSERTIONS && op->opcode != PROPOSE_OP)
-          MY_ASSERT(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED,
-                    "Wrkr %u: reads: opcode %u on a key that has been rmwed \n", t_id, op->opcode);
+          assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
 
         if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE ||
             op->opcode == OP_ACQUIRE_FP) {
