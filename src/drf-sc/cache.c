@@ -297,132 +297,77 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   }
 }
 
-// The worker uses this to send in the lin writes after receiving a write_quorum of read replies for them
-// Additionally worker sends reads that received a higher timestamp and thus have to be applied as writes
-inline void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, struct read_info **writes,
+// The  worker sends (out-of-epoch) reads that received a higher timestamp and thus have to be applied as writes
+// Could also be that the first round of an out-of-epoch write received a high TS
+// All out of epoch reads/writes must come in to update the epoch
+inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read_info **writes,
                                             struct pending_ops *p_ops,
                                             uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
-  int I, j;	/* I is batch index */
-#if CACHE_DEBUG == 1
-  //assert(cache.hash_table != NULL);
-	assert(op != NULL);
-	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
-	assert(resp != NULL);
-#endif
-
-#if CACHE_DEBUG == 2
-  for(I = 0; I < op_num; I++)
-		mica_print_op(&(*op)[I]);
-#endif
+  uint16_t op_i;
   if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
   unsigned int bkt[MAX_INCOMING_R];
   struct mica_bkt *bkt_ptr[MAX_INCOMING_R];
   unsigned int tag[MAX_INCOMING_R];
-  int key_in_store[MAX_INCOMING_R];	/* Is this key in the datastore? */
+  uint8_t key_in_store[MAX_INCOMING_R];	/* Is this key in the datastore? */
   struct cache_op *kv_ptr[MAX_INCOMING_R];	/* Ptr to KV item in log */
   /*
      * We first lookup the key in the datastore. The first two @I loops work
      * for both GETs and PUTs.
      */
-  for(I = 0; I < op_num; I++) {
-    struct key *key = (struct key*) writes[(pull_ptr + I) % max_op_size]->key;
-    bkt[I] = key->bkt & cache.hash_table.bkt_mask;
-    bkt_ptr[I] = &cache.hash_table.ht_index[bkt[I]];
-    __builtin_prefetch(bkt_ptr[I], 0, 0);
-    tag[I] = key->tag;
-
-    key_in_store[I] = 0;
-    kv_ptr[I] = NULL;  }
-  for(I = 0; I < op_num; I++) {
-    for(j = 0; j < 8; j++) {
-      if(bkt_ptr[I]->slots[j].in_use == 1 &&
-         bkt_ptr[I]->slots[j].tag == tag[I]) {
-        uint64_t log_offset = bkt_ptr[I]->slots[j].offset &
-                              cache.hash_table.log_mask;
-        /*
-                 * We can interpret the log entry as mica_op, even though it
-                 * may not contain the full MICA_MAX_VALUE value.
-                 */
-        kv_ptr[I] = (struct cache_op *) &cache.hash_table.ht_log[log_offset];
-
-        /* Small values (1--64 bytes) can span 2 cache lines */
-        __builtin_prefetch(kv_ptr[I], 0, 0);
-        __builtin_prefetch((uint8_t *) kv_ptr[I] + 64, 0, 0);
-
-        /* Detect if the head has wrapped around for this index entry */
-        if(cache.hash_table.log_head - bkt_ptr[I]->slots[j].offset >= cache.hash_table.log_cap) {
-          kv_ptr[I] = NULL;	/* If so, we mark it "not found" */
-        }
-
-        break;
-      }
-    }
+  for(op_i = 0; op_i < op_num; op_i++) {
+    struct key *op_key = (struct key*) writes[(pull_ptr + op_i) % max_op_size]->key;
+    KVS_locate_one_bucket_with_key(op_i, bkt, op_key, bkt_ptr, tag, kv_ptr,
+                          key_in_store, &cache);
   }
+  KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, &cache);
+
+
   // the following variables used to validate atomicity between a lock-free r_rep of an object
-  for(I = 0; I < op_num; I++) {
-    struct read_info *op = writes[(pull_ptr + I) % max_op_size];
-    if(kv_ptr[I] != NULL) {
+  for(op_i = 0; op_i < op_num; op_i++) {
+    struct read_info *op = writes[(pull_ptr + op_i) % max_op_size];
+    if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      long long *key_ptr_log = (long long *) kv_ptr[I];
+      long long *key_ptr_log = (long long *) kv_ptr[op_i];
       long long *key_ptr_req = (long long *) op->key;
       if(key_ptr_log[1] == key_ptr_req[0]) { //Cache Hit
-        key_in_store[I] = 1;
+        key_in_store[op_i] = 1;
         cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
         // The write must be performed with the max TS out of the one stored in the KV and read_info
         if (op->opcode == CACHE_OP_PUT) {
-          uint32_t r_info_version =  op->ts_to_read.version;
-          optik_lock(&kv_ptr[I]->key.meta);
-          // Change epoch if needed
-          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
-            *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
-          // find the the max ts and write it in the kvs
-          if (!optik_is_greater_version(kv_ptr[I]->key.meta, op_meta))
-            ( op->ts_to_read.version) = kv_ptr[I]->key.meta.version + 1;
-          memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-          optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
-          if (ENABLE_ASSERTIONS) {
-            assert(op->ts_to_read.m_id == machine_id);
-            assert(r_info_version <= op->ts_to_read.version);
-          }
-          // rectifying is not needed!
-          //if (r_info_version < op->ts_to_read.version)
-           // rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
-          // remove the write from the pending out-of-epoch writes
-          p_ops->p_ooe_writes->size--;
-          MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
+          KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, op_i, t_id);
         }
         else if (op->opcode == OP_ACQUIRE || op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-          optik_lock(&kv_ptr[I]->key.meta);
+          optik_lock(&kv_ptr[op_i]->key.meta);
 
-          if (optik_is_greater_version(kv_ptr[I]->key.meta, op_meta)) {
-            if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id)
-              *(uint16_t *) kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
-            memcpy(kv_ptr[I]->value, op->value, VALUE_SIZE);
-            optik_unlock(&kv_ptr[I]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
+          if (optik_is_greater_version(kv_ptr[op_i]->key.meta, op_meta)) {
+            if (op->epoch_id > *(uint16_t *)kv_ptr[op_i]->key.meta.epoch_id)
+              *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
+            memcpy(kv_ptr[op_i]->value, op->value, VALUE_SIZE);
+            optik_unlock(&kv_ptr[op_i]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
           }
           else {
-            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+            optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
             t_stats[t_id].failed_rem_writes++;
           }
         }
         else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-          if (op->epoch_id > *(uint16_t *)kv_ptr[I]->key.meta.epoch_id) {
-            optik_lock(&kv_ptr[I]->key.meta);
-            *(uint16_t*)kv_ptr[I]->key.meta.epoch_id = op->epoch_id;
-            optik_unlock_decrement_version(&kv_ptr[I]->key.meta);
+          if (op->epoch_id > *(uint16_t *)kv_ptr[op_i]->key.meta.epoch_id) {
+            optik_lock(&kv_ptr[op_i]->key.meta);
+            *(uint16_t*)kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
+            optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
             if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
           }
         }
         else {
           red_printf("Wrkr %u: read-first-round wrong opcode in cache: %d, req %d, m_id %u,version %u , \n",
-                     t_id, op->opcode, I, writes[(pull_ptr + I) % max_op_size]->ts_to_read.m_id,
-                     writes[(pull_ptr + I) % max_op_size]->ts_to_read.version);
+                     t_id, op->opcode, op_i, writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.m_id,
+                     writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.version);
           assert(0);
         }
       }
     }
-    if(key_in_store[I] == 0) {  //Cache miss --> We get here if either tag or log key match failed
+    if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
       if (ENABLE_ASSERTIONS) assert(false);
     }
     if (zero_ops) {
@@ -530,8 +475,6 @@ inline void cache_isolated_op(int t_id, struct write *write)
 
 
 }
-
-
 
 
 void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {

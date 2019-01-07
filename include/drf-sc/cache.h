@@ -96,12 +96,7 @@
 
 
 #define KEY_HIT 220
-
-
-
-
 #define UNSERVED_CACHE_MISS 140
-
 #define IS_WRITE(X) (((X) == CACHE_OP_PUT || (X) == OP_RELEASE) ? 1 : 0)
 
 char* code_to_str(uint8_t code);
@@ -180,7 +175,7 @@ void cache_batch_op_updates(uint16_t , uint16_t , struct write**, struct pending
 void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
                           uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
-void cache_batch_op_first_read_round(uint32_t op_num, uint16_t t_id, struct read_info **writes,
+void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read_info **writes,
                                      struct pending_ops *p_ops,
                                      uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 

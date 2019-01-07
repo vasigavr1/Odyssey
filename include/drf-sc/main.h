@@ -33,8 +33,8 @@
 #define MAX_W_COALESCE 12
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
-#define CREDIT_TIMEOUT  M_32 // B_4_EXACT //
-#define RMW_BACK_OFF_TIMEOUT K_64// M_1
+#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+#define RMW_BACK_OFF_TIMEOUT K_32 //K_32// M_1
 #define REL_CREDIT_TIMEOUT M_16
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -339,7 +339,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -433,14 +433,10 @@ struct remote_qp {
 
 // Possible Helping flags
 #define NOT_HELPING 0
-#define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long: the RMW meta data need to be stashed in the help entry
+#define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
-#define PROPOSE_LOCALLY_ACCEPTED 3
+#define PROPOSE_LOCALLY_ACCEPTED 3 // Needed ??
 
-// Possible flags when trying to help a stuck glob entry at PROPOSED state
-#define NO_ACTION_REQUIRED 0
-#define HELP_LAST_ACCEPTED 1
-#define PROPOSE_PREVIOUS_LOG 2
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
 enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
@@ -469,15 +465,7 @@ struct net_rmw_id {
   uint64_t id __attribute__((__packed__)); // the local rmw id of the source
 };__attribute__((__packed__))
 
-struct cache_resp {
-  uint8_t type;
-  uint8_t glob_entry_state;
-  uint32_t rmw_entry; // index into global rmw entries
-  uint32_t log_no; // the log_number of an RMW
-  cache_meta *kv_pair_ptr;
-  struct rmw_id glob_entry_rmw_id;
 
-};
 
 // format of a Timestamp tuple (Lamport clock)
 struct network_ts_tuple {
@@ -488,6 +476,16 @@ struct network_ts_tuple {
 struct ts_tuple {
   uint8_t m_id;
   uint32_t version;
+};
+
+struct cache_resp {
+  uint8_t type;
+  uint8_t glob_entry_state;
+  uint32_t rmw_entry; // index into global rmw entries
+  uint32_t log_no; // the log_number of an RMW
+  cache_meta *kv_pair_ptr;
+  struct ts_tuple glob_ts;
+  struct rmw_id glob_entry_rmw_id;
 };
 
 // The format of an ack message
