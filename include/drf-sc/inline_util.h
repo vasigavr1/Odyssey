@@ -563,6 +563,19 @@ static inline void print_wrkr_stats (uint16_t t_id)
 //  yellow_printf("Reads sent %ld/%ld \n", t_stats[g_id].r_reps_sent_mes_num, t_stats[g_id].r_reps_sent );
 }
 
+// Print the rep info received for a propose or an accept
+static inline void print_rmw_rep_info(struct rmw_local_entry *loc_entry, uint16_t t_id) {
+  struct rmw_rep_info *rmw_rep = &loc_entry->rmw_reps;
+  yellow_printf("Wrkr %u Printing rmw_rep for sess %u state %u helping flag %u \n"
+                  "Tot_replies %u \n acks: %u \n rmw_id_committed: %u \n log_too_small %u\n"
+                  "already_accepted : %u\n t ts_stale : %u \n seen_higher_prop : %u\n "
+                  "log_too_high: %u \n",
+                t_id, loc_entry->sess_id, loc_entry->state, loc_entry->helping_flag,
+                rmw_rep->tot_replies,
+                rmw_rep->acks, rmw_rep->rmw_id_commited, rmw_rep->log_too_small,
+                rmw_rep->already_accepted, rmw_rep->ts_stale,
+                rmw_rep->seen_higher_prop, rmw_rep->log_too_high);
+}
 
 // Leader checks its debug counters
 static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_dbg_counter,
@@ -1757,7 +1770,8 @@ static inline void check_the_proposed_log_no(struct rmw_entry *glob_entry, struc
   }
 }
 
-// Not needed, but kept around for debugging
+// Potentially useful (for performance only) when a propose receives already_committed
+// responses and still is holding the global entry
 static inline void free_glob_entry_if_rmw_failed(struct rmw_local_entry *loc_entry,
                                                  uint8_t state, uint16_t t_id)
 {
@@ -1783,7 +1797,8 @@ static inline void free_glob_entry_if_rmw_failed(struct rmw_local_entry *loc_ent
         rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry->rmw_id)) {
       if (state == PROPOSED && compare_ts(&glob_entry->new_ts, &loc_entry->new_ts) == EQUAL) {
         printf("clearing\n");
-        assert(false);
+        print_rmw_rep_info(loc_entry, t_id);
+        //assert(false);
         glob_entry->state = INVALID_RMW;
       }
       else if (state == ACCEPTED && compare_ts(&glob_entry->accepted_ts, &loc_entry->new_ts) == EQUAL)
@@ -3042,7 +3057,31 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(struct pending_
             loc_entry->new_ts.version, loc_entry->new_ts.m_id);
 }
 
-
+//When inspecting an accept/propose and have received a;ready-committed Response
+static inline void handle_already_committed_rmw(struct pending_ops *p_ops,
+                                                struct rmw_local_entry *loc_entry,
+                                                uint16_t t_id)
+{
+  if (loc_entry->rmw_reps.rmw_id_commited < REMOTE_QUORUM) {
+    if (loc_entry->help_loc_entry->log_no >= loc_entry->accepted_log_no)
+      loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
+    else {
+      loc_entry->log_no = loc_entry->accepted_log_no;
+      loc_entry->state = MUST_BCAST_COMMITS;
+      if (ENABLE_ASSERTIONS)
+        yellow_printf("Proposes: committed rmw received had too "
+                        "low a log, bcasting from loc_entry \n");
+    }
+    if (MACHINE_NUM <= 3 && ENABLE_ASSERTIONS) assert(false);
+  }
+  else {
+    //free the session here as well
+    loc_entry->state = INVALID_RMW;
+    free_session(p_ops, loc_entry->sess_id, t_id);
+  }
+  check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW,
+                                 MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
+}
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
@@ -4647,7 +4686,7 @@ static inline void take_global_entry_with_higher_TS(struct pending_ops *p_ops,
 }
 
 
-//------------------------------ EGULAR INSPECTIONS------------------------------------------
+//------------------------------REGULAR INSPECTIONS------------------------------------------
 
 // Inspect each propose that has gathered a quorum of replies
 static inline void inspect_proposes(struct pending_ops *p_ops,
@@ -4661,24 +4700,10 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
   // RMW_ID COMMITTED
   if (loc_entry->rmw_reps.rmw_id_commited > 0) {
     debug_fail_help(loc_entry, " rmw id committed", t_id);
-    if (loc_entry->rmw_reps.rmw_id_commited < REMOTE_QUORUM) {
-      if (loc_entry->help_loc_entry->log_no >= loc_entry->log_no)
-        loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
-      else {
-        loc_entry->state = MUST_BCAST_COMMITS;
-        if (ENABLE_ASSERTIONS)
-          yellow_printf("Accepts: committed rmw received had too "
-                          "low a log, bcasting from loc_entry \n");
-      }
-      if (MACHINE_NUM == 3) assert(false);
-    }
-    else {
-      //free the session here as well
-      loc_entry->state = INVALID_RMW;
-      free_session(p_ops, loc_entry->sess_id, t_id);
-    }
-    check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW,
-                                   MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
+    // as an optimization clear the global_entry entry if it is still in proposed state
+    if (loc_entry->accepted_log_no != loc_entry->log_no)
+      free_glob_entry_if_rmw_failed(loc_entry, PROPOSED, t_id);
+    handle_already_committed_rmw(p_ops, loc_entry, t_id);
   }
   // LOG_NO TOO SMALL
   else if (loc_entry->rmw_reps.log_too_small > 0) {
@@ -4734,13 +4759,13 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     }
   } else if (loc_entry->state != PROPOSED) {
     if (loc_entry->state != ACCEPTED) {
-      assert(loc_entry->state == INVALID_RMW || loc_entry->state == NEEDS_GLOBAL ||
-               loc_entry->state == MUST_BCAST_COMMITS_FROM_HELP);
+      check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, NEEDS_GLOBAL,
+                                     MUST_BCAST_COMMITS_FROM_HELP);
       if (ENABLE_ASSERTIONS && loc_entry->state != MUST_BCAST_COMMITS_FROM_HELP) {
         assert(dbg_loc_entry->log_no == loc_entry->log_no);
         assert(rmw_ids_are_equal(&dbg_loc_entry->rmw_id, &loc_entry->rmw_id));
         assert(compare_ts(&dbg_loc_entry->new_ts, &loc_entry->new_ts));
-        free_glob_entry_if_rmw_failed(loc_entry, PROPOSED, t_id);
+        //free_glob_entry_if_rmw_failed(loc_entry, PROPOSED, t_id);
       }
     }
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
@@ -4771,22 +4796,8 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
   }
   // RMW_ID COMMITTED
   if (loc_entry->rmw_reps.rmw_id_commited > 0) {
-    if (loc_entry->rmw_reps.rmw_id_commited < REMOTE_QUORUM) {
-      if (help_loc_entry->log_no >= loc_entry->log_no)
-        loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
-      else {
-        loc_entry->state = MUST_BCAST_COMMITS;
-        if (ENABLE_ASSERTIONS)
-          yellow_printf("Accepts: committed rmw received had too low a log, bcasting from loc_entry \n");
-      }
-    }
-    else {
-      loc_entry->state = INVALID_RMW;
-      free_session(p_ops, loc_entry->sess_id, t_id);
-    }
+    handle_already_committed_rmw(p_ops, loc_entry, t_id);
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);
-    check_state_with_allowed_flags(4, (int) loc_entry->state, MUST_BCAST_COMMITS,
-                                   MUST_BCAST_COMMITS_FROM_HELP, INVALID_RMW);
   }
   // LOG_NO TOO SMALL
   else if (loc_entry->rmw_reps.log_too_small > 0) {
@@ -6544,8 +6555,7 @@ static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_p
 /*-----------------------------READ-COMMITTING---------------------------------------------*/
 // On a read reply, we may want to write the KVS, if the TS has not been seen
 static inline void KVS_out_of_epoch_writes(struct read_info *op, struct cache_op *kv_ptr,
-                                      struct pending_ops *p_ops, uint16_t op_i,
-                                      uint16_t t_id)
+                                      struct pending_ops *p_ops, uint16_t t_id)
 {
   cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
   uint32_t r_info_version =  op->ts_to_read.version;
@@ -6570,5 +6580,23 @@ static inline void KVS_out_of_epoch_writes(struct read_info *op, struct cache_op
   MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
 }
 
+// Handle acquires/out-of-epoch-reads that have received a bigger version than locally stored, and need to apply the data
+static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, struct cache_op *kv_ptr,
+                                                       uint16_t t_id)
+{
+  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
+  optik_lock(&kv_ptr->key.meta);
+
+  if (optik_is_greater_version(kv_ptr->key.meta, op_meta)) {
+    if (op->epoch_id > *(uint16_t *)kv_ptr->key.meta.epoch_id)
+      *(uint16_t *) kv_ptr->key.meta.epoch_id = op->epoch_id;
+    memcpy(kv_ptr->value, op->value, VALUE_SIZE);
+    optik_unlock(&kv_ptr->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
+  }
+  else {
+    optik_unlock_decrement_version(&kv_ptr->key.meta);
+    if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
+  }
+}
 
 #endif /* INLINE_UTILS_H */

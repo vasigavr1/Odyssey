@@ -335,21 +335,10 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
         cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
         // The write must be performed with the max TS out of the one stored in the KV and read_info
         if (op->opcode == CACHE_OP_PUT) {
-          KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
         }
         else if (op->opcode == OP_ACQUIRE || op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-          optik_lock(&kv_ptr[op_i]->key.meta);
-
-          if (optik_is_greater_version(kv_ptr[op_i]->key.meta, op_meta)) {
-            if (op->epoch_id > *(uint16_t *)kv_ptr[op_i]->key.meta.epoch_id)
-              *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
-            memcpy(kv_ptr[op_i]->value, op->value, VALUE_SIZE);
-            optik_unlock(&kv_ptr[op_i]->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
-          }
-          else {
-            optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
-            t_stats[t_id].failed_rem_writes++;
-          }
+          KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
         }
         else if (op->opcode == UPDATE_EPOCH_OP_GET) {
           if (op->epoch_id > *(uint16_t *)kv_ptr[op_i]->key.meta.epoch_id) {
