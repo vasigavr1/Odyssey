@@ -22,7 +22,7 @@
 #define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define SESSIONS_PER_THREAD 25
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -410,15 +410,14 @@ struct remote_qp {
 #define NO_OP_ACQ_FLIP_BIT 2 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
 #define RMW_TS_SMALLER_THAN_KVS 3 //accepts and proposes
 #define RMW_ACK_PROPOSE 4 // only proposes: Send an 1-byte reply
-#define RMW_ALREADY_ACCEPTED 5 // only proposes: Send value, ts rmw-id
-#define RMW_SEEN_HIGHER_PROP_TS 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
-#define RMW_ALREADY_COMMITTED 7 //accepts and proposes
+#define RMW_SEEN_LOWER_ACC 5 // only proposes: Send value, ts rmw-id
+#define RMW_SEEN_HIGHER_PROP 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
+#define RMW_SEEN_HIGHER_ACC 7 //accepts and proposes
 #define RMW_LOG_TOO_SMALL 8 // accepts and proposes
 #define RMW_ACK_ACCEPT 9 // only accepts
-#define RMW_ACCEPTED_WITH_HIGHER_TS 10 // only accepts
+#define RMW_ALREADY_COMMITTED 10 // only accepts
 #define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
 #define RMW_LOG_TOO_HIGH 12 // this means the propose will be nacked
-
 //flags when receiving a commit
 
 
@@ -737,17 +736,16 @@ struct rmw_entry {
   struct rmw_id rmw_id;
   struct rmw_id last_committed_rmw_id;
   struct rmw_id last_registered_rmw_id;
-  struct rmw_id accepted_rmw_id;
+  struct rmw_id accepted_rmw_id; // not really needed, but good for debug
   struct dbg_glob_entry *dbg;
   //struct ts_tuple old_ts;
   struct ts_tuple new_ts;
-  struct ts_tuple accepted_ts;
+  struct ts_tuple accepted_ts; // really needed
   uint8_t value[RMW_VALUE_SIZE]; // last accepted
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;
   uint32_t last_registered_log_no;
-  uint32_t accepted_log_no;
-  //atomic_flag lock;
+  uint32_t accepted_log_no; // not really needed, but good for debug
 };
 
 // possible flags explaining how the last committed RMW was committed
@@ -776,10 +774,13 @@ struct rmw_rep_info {
   uint8_t log_too_small;
   uint8_t already_accepted;
   uint8_t ts_stale;
-  uint8_t seen_higher_prop;
+  uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
+  // used to know whether to help after a prop-- if you have seen a higher acc,
+  // then you should not try to help a lower accept, and thus dont try at all
+  bool seen_higher_acc;
   struct ts_tuple kvs_higher_ts;
-  struct ts_tuple seen_higher_prop_ts;
+  uint32_t seen_higher_prop_version;
 
 };
 

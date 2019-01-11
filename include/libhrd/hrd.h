@@ -111,7 +111,7 @@
 
 
 #define CEILING(x,y) (((x) + (y) - 1) / (y))
-#define MAX(x,y) (x > y ? x : y)
+#define MAX(x,y) ((x) > (y) ? (x) : (y))
 #define MIN(x,y) (x < y ? x : y)
 
 

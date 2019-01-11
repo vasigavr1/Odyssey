@@ -82,11 +82,16 @@
 #define TS_GREATER 31
 #define RMW_ACK 32 // 1 byte reply
 #define SEEN_HIGHER_PROP 33 // send that TS
-#define RMW_ACCEPTED 34 // send value, rmw-id, TS
+#define SEEN_LOWER_ACC 34 // send value, rmw-id, TS
 #define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
 #define RMW_ID_COMMITTED 36 // send the entire committed rmw
 #define LOG_TOO_SMALL 37 // send the entire committed rmw
 #define LOG_TOO_HIGH 38 // single byte-nack only proposes
+#define SEEN_HIGHER_ACC 39 //both accs and props- send only TS different op than SEEN_HIGHER_PROP only for debug
+// NO_OP_PROP_REP: Purely for debug: this is sent to proposes when an accept has been received
+// for the same RMW-id and TS, that means the proposer will never see this opcode because
+// it has already gathered prop reps quorum and sent accepts
+#define NO_OP_PROP_REP 40
 
 
 // this offset is added to the read reply opcode
