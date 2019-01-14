@@ -41,6 +41,47 @@ void cache_init(int cache_id, int num_threads) {
 	cache_populate_fixed_len(&cache.hash_table, CACHE_NUM_KEYS, VALUE_SIZE);
 }
 
+void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
+  //assert(cache != NULL);
+  assert(n > 0);
+  assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
+
+  /* This is needed for the eviction message below to make sense */
+  assert(kv->num_insert_op == 0 && kv->num_index_evictions == 0);
+
+  int i;
+  struct cache_op op;
+  struct mica_resp resp;
+  unsigned long long *op_key = (unsigned long long *) &op.key;
+
+  /* Generate the keys to insert */
+  uint128 *key_arr = mica_gen_keys(n);
+
+  for(i = n - 1; i >= 0; i--) {
+    optik_init(&op.key.meta);
+    memset((void *)op.key.meta.epoch_id, 0, EPOCH_BYTES);
+//		op.key.meta.state = VALID_STATE;
+    op_key[1] = key_arr[i].second;
+    if (ENABLE_RMWS && i < NUM_OF_RMW_KEYS)
+      op.opcode = KEY_HAS_NEVER_BEEN_RMWED;
+    else op.opcode = KEY_IS_NOT_RMWABLE;
+
+    //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
+    op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
+    uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
+    memset(op.value, val, (uint32_t) val_len);
+    //if (i < NUM_OF_RMW_KEYS)
+    // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
+    mica_insert_one(kv, (struct mica_op *) &op, &resp);
+  }
+
+  assert(kv->num_insert_op == n);
+  // printf("Cache: Populated instance %d with %d keys, length = %d. "
+  // 			   "Index eviction fraction = %.4f.\n",
+  // 	   cache.hash_table.instance_id, n, val_len,
+  // 	   (double) cache.hash_table.num_index_evictions / cache.hash_table.num_insert_op);
+}
+
 
 /* ---------------------------------------------------------------------------
 ------------------------------ DRF-SC--------------------------------
@@ -90,33 +131,41 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 			long long *key_ptr_req = (long long *) &op[op_i];
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
-				key_in_store[op_i] = 1;
-        if (ENABLE_ASSERTIONS && op[op_i].opcode != PROPOSE_OP)
-          assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
-
-				if (op[op_i].opcode == CACHE_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
-          KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
-                                            p_ops, &r_push_ptr, t_id);
-        }
-          // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
-        else if (op[op_i].opcode == CACHE_OP_PUT) {
-          KVS_from_trace_writes(&op[op_i], kv_ptr[op_i], &resp[op_i],
-                                p_ops, &r_push_ptr, t_id);
-				}
-        else if (op[op_i].opcode == OP_RELEASE) { // read the timestamp
-          KVS_from_trace_releases(&op[op_i], kv_ptr[op_i], &resp[op_i],
+        key_in_store[op_i] = 1;
+        //if (ENABLE_ASSERTIONS && op[op_i].opcode != PROPOSE_OP)
+        //  assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
+        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
+          if (op[op_i].opcode == CACHE_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
+            KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                                              p_ops, &r_push_ptr, t_id);
+          }
+            // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
+          else if (op[op_i].opcode == CACHE_OP_PUT) {
+            KVS_from_trace_writes(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                   p_ops, &r_push_ptr, t_id);
-        }
-        else if (ENABLE_RMWS && op[op_i].opcode == PROPOSE_OP) {
-          KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i], &resp[op_i],
-                             p_ops, &rmw_l_id, op_i, t_id);
+          }
+          else if (op[op_i].opcode == OP_RELEASE) { // read the timestamp
+            KVS_from_trace_releases(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                                    p_ops, &r_push_ptr, t_id);
+          }
+          else if (ENABLE_ASSERTIONS) assert(false);
         }
         else {
-        red_printf("Wrkr %u: cache_batch_op_trace wrong opcode in cache: %d, req %d \n",
-                   t_id, op[op_i].opcode, op_i);
-        assert(0);
-				}
-			}
+          if (ENABLE_RMWS && op[op_i].opcode == PROPOSE_OP) {
+            KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                               p_ops, &rmw_l_id, op_i, t_id);
+          }
+          else if (ENABLE_RMW_ACQUIRES && op[op_i].opcode == OP_ACQUIRE) {
+            KVS_from_trace_rmw_acquire(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                                       p_ops, &r_push_ptr, t_id);
+          }
+          else if (ENABLE_ASSERTIONS) {
+            red_printf("Wrkr %u: cache_batch_op_trace wrong opcode in cache: %d, req %d \n",
+                       t_id, op[op_i].opcode, op_i);
+            assert(0);
+          }
+        }
+      }
 		}
 		if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
       //red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
@@ -316,7 +365,7 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
      * for both GETs and PUTs.
      */
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct key *op_key = (struct key*) writes[(pull_ptr + op_i) % max_op_size]->key;
+    struct key *op_key = &writes[(pull_ptr + op_i) % max_op_size]->key;
     KVS_locate_one_bucket_with_key(op_i, bkt, op_key, bkt_ptr, tag, kv_ptr,
                           key_in_store, &cache);
   }
@@ -329,7 +378,7 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
     if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
       long long *key_ptr_log = (long long *) kv_ptr[op_i];
-      long long *key_ptr_req = (long long *) op->key;
+      long long *key_ptr_req = (long long *) &op->key;
       if(key_ptr_log[1] == key_ptr_req[0]) { //Cache Hit
         key_in_store[op_i] = 1;
         cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
@@ -466,44 +515,7 @@ inline void cache_isolated_op(int t_id, struct write *write)
 }
 
 
-void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
-	//assert(cache != NULL);
-	assert(n > 0);
-	assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
 
-	/* This is needed for the eviction message below to make sense */
-	assert(kv->num_insert_op == 0 && kv->num_index_evictions == 0);
-
-	int i;
-	struct cache_op op;
-	struct mica_resp resp;
-	unsigned long long *op_key = (unsigned long long *) &op.key;
-
-	/* Generate the keys to insert */
-	uint128 *key_arr = mica_gen_keys(n);
-
-	for(i = n - 1; i >= 0; i--) {
-		optik_init(&op.key.meta);
-		memset((void *)op.key.meta.epoch_id, 0, EPOCH_BYTES);
-//		op.key.meta.state = VALID_STATE;
-		op_key[1] = key_arr[i].second;
-		op.opcode = 0;
-
-		//printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
-		op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
-		uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
-		memset(op.value, val, (uint32_t) val_len);
-    //if (i < NUM_OF_RMW_KEYS)
-     // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
-		mica_insert_one(kv, (struct mica_op *) &op, &resp);
-	}
-
-	assert(kv->num_insert_op == n);
-	// printf("Cache: Populated instance %d with %d keys, length = %d. "
-	// 			   "Index eviction fraction = %.4f.\n",
-	// 	   cache.hash_table.instance_id, n, val_len,
-	// 	   (double) cache.hash_table.num_index_evictions / cache.hash_table.num_insert_op);
-}
 
 /*
  * WARNING: the following functions related to cache stats are not tested on this version of code

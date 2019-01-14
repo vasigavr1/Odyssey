@@ -57,20 +57,13 @@ int main(int argc, char *argv[])
   green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
 
-//  red_printf("MAX allowed pending RMWs per machine %d and total %d \n", RMW_ENTRIES_PER_MACHINE, RMW_ENTRIES_NUM);
-//  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
-//	assert(LEADER_MACHINE < MACHINE_NUM);
-//	assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
+
 	static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
-//  assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
-//  assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
-//  assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect
-  //static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_W, "");
-  //static_assert(CACHE_BATCH_SIZE > MAX_INCOMING_R, "");
   static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
   static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
   static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
+  static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct read) == R_SIZE, "");
   static_assert(SESSIONS_PER_THREAD < M_16, "");
@@ -134,6 +127,8 @@ int main(int argc, char *argv[])
   static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
   static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
 
+
+  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
 
   { // Check that prop and read have opcode in the same byte
     struct prop_message prop;
@@ -231,7 +226,7 @@ int main(int argc, char *argv[])
 
 	qps_are_set_up = 0;
 
-	cache_init(0, WORKERS_PER_MACHINE); // the first ids are taken by the workers
+	cache_init(0, WORKERS_PER_MACHINE);
 
 #if MEASURE_LATENCY == 1
   memset(&latency_count, 0, sizeof(struct latency_counters));

@@ -106,15 +106,28 @@ void multicast_testing(struct mcast_essentials*, int , struct hrd_ctrl_blk*);
 ------------------------------INITIALIZATION --------------------------------------
 ---------------------------------------------------------------------------*/
 
-
+struct opcode_info {
+	bool is_rmw;
+	bool is_update;
+	bool is_sc;
+	bool is_rmw_acquire;
+	uint32_t writes;
+	uint32_t reads;
+	uint32_t sc_reads;
+	uint32_t sc_writes;
+	uint32_t rmws;
+	uint32_t rmw_acquires;
+};
 
 // Worker calls this function to connect with all workers
 void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
 // Used by all kinds of threads to publish their QPs
 void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
 
+uint8_t compute_opcode(struct opcode_info *opc_info);
 int parse_trace(char* path, struct trace_command **cmds, int t_id);
-
+// Manufactures a trace without a file
+void manufacture_trace(struct trace_command **cmds, int t_id);
 
 void trace_init(void **cmds, uint16_t t_id);
 void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
@@ -164,8 +177,7 @@ void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
 // Set up the credits
 //void set_up_credits(uint16_t credits[][MACHINE_NUM]);
 void set_up_credits(uint16_t credits[][MACHINE_NUM]);
-// Manufactures a trace without a file
-void manufacture_trace(struct trace_command **cmds, int t_id);
+
 
 
 

@@ -40,6 +40,8 @@
 #define OP_ACQUIRE_FP 10
 #define CACHE_OP_GET 111
 #define CACHE_OP_PUT 112
+#define ACQUIRE_RMW_OP 113
+
 #define CACHE_OP_ACK 115
 #define ACK_NOT_YET_SENT 117
 #define CACHE_OP_GET_TS 118

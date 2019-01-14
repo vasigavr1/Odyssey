@@ -45,7 +45,9 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100 // this is out of 1000, e.g. 10 means 1%
+#define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
+#define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
@@ -112,6 +114,7 @@
 #define ENABLE_RELEASES (EMULATE_ABD == 1 ? 1 : (ENABLE_RELEASES_))
 #define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
+#define ENABLE_RMW_ACQUIRES (ENABLE_RMWS == 1 ? 0 : (ENABLE_RMW_ACQUIRES_))
 
 // RMW TRACE
 #define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
@@ -200,8 +203,9 @@
 #define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
 //#define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
-#define KEY_HAS_NEVER_BEEN_RMWED 0
-#define KEY_HAS_BEEN_RMWED 1
+#define KEY_IS_NOT_RMWABLE 0
+#define KEY_HAS_NEVER_BEEN_RMWED 1
+#define KEY_HAS_BEEN_RMWED 2
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
 
@@ -327,6 +331,7 @@
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0
+#define DEBUG_READ_REPS 0
 #define DEBUG_TS 0
 #define CHECK_DBG_COUNTERS 0
 #define VERBOSE_DBG_COUNTER 0
@@ -461,16 +466,16 @@ struct quorum_info {
 
 struct net_rmw_id {
   uint16_t glob_sess_id; // global session id
-  uint64_t id __attribute__((__packed__)); // the local rmw id of the source
-};__attribute__((__packed__))
+  uint64_t id; // the local rmw id of the source
+}__attribute__((__packed__));
 
 
 
 // format of a Timestamp tuple (Lamport clock)
 struct network_ts_tuple {
   uint8_t m_id;
-  uint32_t version __attribute__((__packed__));
-}; __attribute__((__packed__))
+  uint32_t version;
+} __attribute__((__packed__));
 
 struct ts_tuple {
   uint8_t m_id;
@@ -489,12 +494,12 @@ struct cache_resp {
 
 // The format of an ack message
 struct ack_message {
-	uint64_t local_id __attribute__((__packed__)); // the first local id that is being acked
+	uint64_t local_id ; // the first local id that is being acked
   uint8_t m_id;
   uint8_t opcode;
   uint16_t credits;
   uint16_t ack_num;
-};
+} __attribute__((__packed__));
 
 
 struct ack_message_ud_req {
@@ -506,33 +511,33 @@ struct ack_message_ud_req {
 
 struct write {
   uint8_t m_id;
-  uint32_t version __attribute__((__packed__));
-  uint8_t key[TRUE_KEY_SIZE];	/* 8B */
+  uint32_t version;
+  struct key key;
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
-};
+} __attribute__((__packed__));
 
 struct w_message {
   uint8_t m_id;
   uint8_t w_num;
-  uint64_t l_id __attribute__((__packed__));
+  uint64_t l_id ;
   struct write write[MAX_W_COALESCE];
-};
+} __attribute__((__packed__));
 
 
 struct accept {
-  uint64_t l_id __attribute__((__packed__));
+  uint64_t l_id ;
 	struct network_ts_tuple ts;
-	uint8_t key[TRUE_KEY_SIZE];
+  struct key key ;
 	uint8_t opcode;
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id __attribute__((__packed__));
-  uint16_t glob_sess_id __attribute__((__packed__)); // this is useful when helping
-  uint32_t log_no __attribute__((__packed__));
-  struct net_rmw_id last_registered_rmw_id __attribute__((__packed__));
-};__attribute__((__packed__))
+  uint64_t t_rmw_id ;
+  uint16_t glob_sess_id ; // this is useful when helping
+  uint32_t log_no ;
+  struct net_rmw_id last_registered_rmw_id ;
+} __attribute__((__packed__));
 
 struct accept_message {
   uint8_t m_id;
@@ -548,49 +553,49 @@ struct w_message_ud_req {
 
 struct commit {
   struct network_ts_tuple ts;
-  uint8_t key[TRUE_KEY_SIZE];
+  struct key key;
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id __attribute__((__packed__)); //rmw lid to be committed
-  uint16_t glob_sess_id __attribute__((__packed__));
-  uint32_t log_no __attribute__((__packed__));
-};
+  uint64_t t_rmw_id; //rmw lid to be committed
+  uint16_t glob_sess_id;
+  uint32_t log_no;
+} __attribute__((__packed__));
 
 struct commit_message {
   uint8_t m_id;
   uint8_t com_num;
-  uint64_t l_id __attribute__((__packed__)); // local id of the write -- to facilitate the ack
+  uint64_t l_id; // local id of the write -- to facilitate the ack
   struct commit com[MAX_ACC_COALESCE];
-};
+} __attribute__((__packed__));
 
 //
 struct read {
   struct network_ts_tuple ts;
-  uint8_t key[TRUE_KEY_SIZE];
+  struct key key;
   uint8_t opcode;
-};
+} __attribute__((__packed__));
 
 //
 struct r_message {
   uint8_t coalesce_num;
   uint8_t m_id;
-  uint64_t l_id __attribute__((__packed__));
+  uint64_t l_id ;
   struct read read[MAX_R_COALESCE];
-};
+} __attribute__((__packed__));
 
 
 
 //
 struct propose {
-  uint64_t l_id __attribute__((__packed__));
+  uint64_t l_id ;
   struct network_ts_tuple ts;
-  uint8_t key[TRUE_KEY_SIZE];
+  struct key key;
   uint8_t opcode;
-  uint64_t t_rmw_id __attribute__((__packed__));
-  uint16_t glob_sess_id __attribute__((__packed__));
-  uint32_t log_no __attribute__((__packed__));
-};
+  uint64_t t_rmw_id;
+  uint16_t glob_sess_id;
+  uint32_t log_no;
+} __attribute__((__packed__));
 
 struct prop_message {
   uint8_t coalesce_num;
@@ -648,9 +653,9 @@ struct r_rep_message {
   uint8_t coalesce_num;
   uint8_t m_id;
   uint8_t opcode;
-  uint64_t l_id __attribute__((__packed__));
+  uint64_t l_id;
   struct r_rep_big r_rep[MAX_R_REP_COALESCE];
-};
+} __attribute__((__packed__));
 
 
 struct r_rep_message_ud_req {
@@ -662,14 +667,14 @@ struct r_rep_message_ud_req {
 // Reply with the last committed RMW if the
 // proposal/accept had a low log number or has already been committed
 struct rmw_rep_last_committed {
-  uint64_t l_id __attribute__((__packed__)); // the l_id of the rmw local_entry
+  uint64_t l_id ; // the l_id of the rmw local_entry
   uint8_t opcode;
   struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
-  uint64_t rmw_id __attribute__((__packed__)); //accepted  OR last committed
-  uint16_t glob_sess_id __attribute__((__packed__)); //accepted  OR last committed
-  uint32_t log_no __attribute__((__packed__)); // last committed only
-};
+  uint64_t rmw_id; //accepted  OR last committed
+  uint16_t glob_sess_id; //accepted  OR last committed
+  uint32_t log_no; // last committed only
+} __attribute__((__packed__));
 
 //
 struct rmw_rep_message {
@@ -699,13 +704,16 @@ struct read_info {
   uint8_t times_seen_ts;
   bool seen_larger_ts;
 	uint8_t opcode;
-  struct network_ts_tuple ts_to_read;
-  uint8_t key[TRUE_KEY_SIZE];
+  struct ts_tuple ts_to_read;
+  struct key key;
 	// the value read locally, a greater value received or
 	// in case of a 2-round write, the value to be written
   uint8_t value[VALUE_SIZE];
   bool fp_detected; //detected false positive
   uint16_t epoch_id;
+  bool is_rmw;
+  uint32_t log_no;
+
   // when a data out-of-epoch write is inserted in a write message,
   // there is a chance we may need to change its version, so we need to
   // remember where it is stored in the w_fifo -- NOT NEEDED

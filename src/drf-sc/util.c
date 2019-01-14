@@ -61,17 +61,15 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)
     }
 }
 
-uint8_t compute_opcode(bool *is_rmw_, bool *is_update_, bool *is_sc_,
-                       uint32_t *writes, uint32_t *reads, uint32_t *sc_reads,
-                       uint32_t *sc_writes, uint32_t *rmws)
+//When manufacturing the trace
+uint8_t compute_opcode(struct opcode_info *opc_info)
 {
   uint8_t  opcode = 0;
-  bool is_rmw = *is_rmw_, is_update = *is_update_, is_sc = *is_sc_;
+  bool is_rmw = false, is_update = false, is_sc = false; bool is_rmw_acquire = false;
   if (ENABLE_RMWS) {
     if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
     else
       is_rmw = (rand() % 1000 < RMW_RATIO) ? true : false;
-
   }
   if (!is_rmw) {
     is_update = (rand() % 1000 < WRITE_RATIO) ? true : false;
@@ -81,32 +79,37 @@ uint8_t compute_opcode(bool *is_rmw_, bool *is_update_, bool *is_sc_,
   if (is_rmw) {
     //if (!ALL_RMWS_SINGLE_KEY && !RMW_ONE_KEY_PER_THREAD)
     //printf("Worker %u, command %u is an RMW \n", t_id, i);
-    (*rmws)++;
-    opcode = PROPOSE_OP;
+    is_rmw_acquire = ((rand() % 1000 < RMW_ACQUIRE_RATIO) ? true : false) &&
+                     ENABLE_RMW_ACQUIRES;
+    if (is_rmw_acquire) opc_info->rmw_acquires++;
+    else opc_info->rmws++;
+    opcode = (uint8_t) (is_rmw_acquire ? OP_ACQUIRE : PROPOSE_OP);
   }
   else if (is_update) {
     if (is_sc && ENABLE_RELEASES) {
       opcode = OP_RELEASE;
-      (*sc_writes)++;
+      opc_info->sc_writes++;
     }
     else {
       opcode = CACHE_OP_PUT;
-      (*writes)++;
+      opc_info->writes++;
     }
-
   }
   else  {
     if (is_sc && ENABLE_ACQUIRES) {
       opcode = OP_ACQUIRE;
-      (*sc_reads)++;
+      opc_info->sc_reads++;
     }
     else {
       opcode = CACHE_OP_GET;
-      (*reads)++;
+      opc_info->reads++;
     }
   }
 
-  *is_rmw_ = is_rmw, *is_update_ = is_update; *is_sc_ = is_sc;
+  opc_info->is_rmw = is_rmw;
+  opc_info->is_update = is_update;
+  opc_info->is_sc = is_sc;
+  opc_info->is_rmw_acquire = is_rmw_acquire;
   return opcode;
 }
 
@@ -120,8 +123,8 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
     char* word;
     char *saveptr;
     char* line = NULL;
-    uint32_t i = 0, hottest_key_counter = 0, writes = 0, reads = 0, sc_reads = 0,
-      sc_writes = 0, rmws = 0, cmd_count = 0, word_count = 0;
+    uint32_t i = 0, hottest_key_counter = 0, cmd_count = 0, word_count = 0;
+    struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
 
     fp = fopen(path, "r");
     if (fp == NULL){
@@ -160,9 +163,8 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
         (*cmds)[i].opcode = 0;
 
         //Before reading the request deside if it's gone be r_rep or write
-       bool is_rmw = false, is_update = false, is_sc = false;
-      (*cmds)[i].opcode = compute_opcode(&is_rmw, &is_update, &is_sc, &writes, &reads, &sc_reads,
-                                         &sc_writes, &rmws);;
+       //bool is_rmw = false, is_update = false, is_sc = false;
+      (*cmds)[i].opcode = compute_opcode(opc_info);
 
       while (word != NULL) {
         if (word[strlen(word) - 1] == '\n')
@@ -192,11 +194,11 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
                     (100 * hottest_key_counter / (double) cmd_count));
         printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
                  "Trace w_size %d \n",
-               (double) (writes * 100) / cmd_count,
-               (double) (sc_writes * 100) / cmd_count,
-               (double) (reads * 100) / cmd_count,
-               (double) (sc_reads * 100) / cmd_count,
-               (double) (rmws * 100) / cmd_count, cmd_count);
+               (double) (opc_info->writes * 100) / cmd_count,
+               (double) (opc_info->sc_writes * 100) / cmd_count,
+               (double) (opc_info->reads * 100) / cmd_count,
+               (double) (opc_info->sc_reads * 100) / cmd_count,
+               (double) (opc_info->rmws * 100) / cmd_count, cmd_count);
     }
     (*cmds)[cmd_count].opcode = NOP;
     // printf("Thread %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
@@ -217,8 +219,8 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
   clock_gettime(CLOCK_MONOTONIC, &time);
   uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
   srand ((uint)seed);
-  uint32_t i, writes = 0, reads = 0, sc_reads = 0, sc_writes = 0, rmws = 0,
-          keys_that_get_rmwed[NUM_OF_RMW_KEYS];
+  struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
+  uint32_t i, keys_that_get_rmwed[NUM_OF_RMW_KEYS];
   if (ENABLE_RMWS) {
     for (i = 0; i < NUM_OF_RMW_KEYS; i++)
       keys_that_get_rmwed[i] = i;
@@ -228,15 +230,13 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     (*cmds)[i].opcode = 0;
 
     //Before reading the request decide if it's gone be r_rep or write
-    bool is_rmw = false, is_update = false, is_sc = false;
-    (*cmds)[i].opcode = compute_opcode(&is_rmw, &is_update, &is_sc, &writes, &reads, &sc_reads,
-                                       &sc_writes, &rmws);
+    (*cmds)[i].opcode = compute_opcode(opc_info);
 
     //--- KEY ID----------
     uint32 key_id;
     if(USE_A_SINGLE_KEY == 1) key_id =  0;
     uint128 key_hash;// = CityHash128((char *) &(key_id), 4);
-    if (is_rmw) {
+    if (opc_info->is_rmw) {
       if (ALL_RMWS_SINGLE_KEY || ENABLE_ALL_CONFLICT_RMW)
         key_id = 0;
       else if (RMW_ONE_KEY_PER_THREAD)
@@ -247,7 +247,6 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
-      
     }
     else {
       bool found = false;
@@ -264,13 +263,15 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
 
   if (t_id  == 0) {
     cyan_printf("UNIFORM TRACE \n");
-    printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
-             "Trace w_size %d \n",
-           (double) (writes * 100) / TRACE_SIZE,
-           (double) (sc_writes * 100) / TRACE_SIZE,
-           (double) (reads * 100) / TRACE_SIZE,
-           (double) (sc_reads * 100) / TRACE_SIZE,
-           (double) (rmws * 100) / TRACE_SIZE, TRACE_SIZE);
+    printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%% "
+             "RMW-Acquires: %.2f%%\n Trace w_size %d \n",
+           (double) (opc_info->writes * 100) / TRACE_SIZE,
+           (double) (opc_info->sc_writes * 100) / TRACE_SIZE,
+           (double) (opc_info->reads * 100) / TRACE_SIZE,
+           (double) (opc_info->sc_reads * 100) / TRACE_SIZE,
+           (double) (opc_info->rmws * 100) / TRACE_SIZE,
+           (double) (opc_info->rmw_acquires * 100) / TRACE_SIZE,
+           TRACE_SIZE);
   }
   (*cmds)[TRACE_SIZE].opcode = NOP;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
@@ -485,9 +486,6 @@ void set_up_rmw_struct()
     for (int i = 0; i < RMW_ENTRIES_NUM; i++)
       rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
   }
-//  for (uint16_t i = 0; i < RMW_ENTRIES_NUM; i++)
-//    rmw.empty_fifo[i] = i;
-//  rmw.ef_size = RMW_ENTRIES_NUM;
 }
 
 // Initialize the pending ops struct
