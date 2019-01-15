@@ -5,7 +5,7 @@ void *worker(void *arg)
 {
 	struct thread_params params = *(struct thread_params *) arg;
 	uint16_t t_id = (uint16_t)params.id;
-  uint16_t gid = (uint16_t)(machine_id * WORKERS_PER_MACHINE) + t_id;
+  uint16_t gid = (uint16_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
 
 	if (ENABLE_MULTICAST == 1 && t_id == 0) {
 		cyan_printf("MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
@@ -147,6 +147,9 @@ void *worker(void *arg)
   }
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
   uint64_t debug_lids = 0;
+  // helper for polling writes: in a corner failure-realted case,
+  // it may be that not all avaialble writes can be polled due to the unavailability of the acks
+  uint32_t completed_but_not_polled_writes = 0;
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
@@ -178,9 +181,8 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR WRITES--------------------------
 		---------------------------------------------------------------------------*/
-
     poll_for_writes(w_buffer, &w_buf_pull_ptr, p_ops, cb->dgram_recv_cq[W_QP_ID],
-                    w_recv_wc, w_recv_info, acks, t_id);
+                    w_recv_wc, w_recv_info, acks, &completed_but_not_polled_writes, t_id);
 
     /* ---------------------------------------------------------------------------
        ------------------------------ SEND ACKS----------------------------------

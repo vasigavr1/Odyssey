@@ -1,7 +1,7 @@
 LD      := gcc
 LDFLAGS := -O3 -std=gnu11 -flto -lrt -lpthread -lnuma -libverbs -lmemcached  -lrdmacm#-lpapi
 CC = gcc
-CFLAGS =  -O3 -std=gnu11 -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc
+CFLAGS =  -O3 -std=gnu11 -g -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc
 APPS    := test
 
 all: ${APPS}

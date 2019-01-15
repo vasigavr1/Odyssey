@@ -120,8 +120,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
                          key_in_store, &cache);
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, &cache);
 
-	// the following variables used to validate atomicity between a lock-free r_rep of an object
-	cache_meta prev_meta;
   uint64_t rmw_l_id = p_ops->prop_info->l_id;
   uint32_t r_push_ptr = p_ops->r_push_ptr;
 	for(op_i = 0; op_i < op_num; op_i++) {
@@ -132,8 +130,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 
 			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[op_i] = 1;
-        //if (ENABLE_ASSERTIONS && op[op_i].opcode != PROPOSE_OP)
-        //  assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
         if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
           if (op[op_i].opcode == CACHE_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
             KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
@@ -282,8 +278,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
     if (unlikely(op->opcode == OP_ACQUIRE_FLIP_BIT)) continue;
     KVS_locate_one_kv_pair(op_i, tag, bkt_ptr, kv_ptr, &cache);
   }
-  cache_meta prev_meta;
-  // the following variables used to validate atomicity between a lock-free r_rep of an object
+
   for(op_i = 0; op_i < op_num; op_i++) {
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + op_i) % max_op_size];
     if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
@@ -298,45 +293,46 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       long long *key_ptr_req = (long long *) op;
       if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[op_i] = 1;
+        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
+          check_state_with_allowed_flags(5, op->opcode, CACHE_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
+                                         CACHE_OP_GET_TS);
+          if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE ||
+              op->opcode == OP_ACQUIRE_FP) {
+            KVS_reads_gets_or_acquires_or_acquires_fp(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (op->opcode == CACHE_OP_GET_TS) {
+            KVS_reads_get_TS(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (ENABLE_ASSERTIONS) {
+            red_printf("Wrkr %u wrong Opcode in cache: %d, req %d \n",
+                       t_id, op->opcode, op_i);
+             assert(false);
+            };
+        }
+        else if (ENABLE_RMWS) {
+          check_state_with_allowed_flags(3, kv_ptr[op_i]->opcode, KEY_HAS_BEEN_RMWED, KEY_HAS_NEVER_BEEN_RMWED);
+          if (op->opcode == PROPOSE_OP) {
+            KVS_reads_proposes(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (op->opcode == OP_ACQUIRE || op->opcode == OP_ACQUIRE_FP) {
+            assert(ENABLE_RMW_ACQUIRES);
+            KVS_reads_rmw_acquires(op, kv_ptr[op_i], p_ops, op_i, t_id);
 
-        if (ENABLE_ASSERTIONS && op->opcode != PROPOSE_OP)
-          assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
 
-        if (op->opcode == CACHE_OP_GET || op->opcode == OP_ACQUIRE ||
-            op->opcode == OP_ACQUIRE_FP) {
-          KVS_reads_gets_or_acquires_or_acquires_fp(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (ENABLE_ASSERTIONS){
+            //red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
+            //           op->opcode, I, reads[(pull_ptr + I) % max_op_size]->m_id,
+            //           reads[(pull_ptr + I) % max_op_size]->val_len,
+            //          reads[(pull_ptr + I) % max_op_size]->version);
+            assert(false);
+          }
         }
-        else if (ENABLE_RMWS && op->opcode == PROPOSE_OP) {
-          KVS_reads_proposes(op, kv_ptr[op_i], p_ops, op_i, t_id);
-        }
-        else if (op->opcode == CACHE_OP_GET_TS) {
-          uint32_t debug_cntr = 0;
-          do {
-            if (ENABLE_ASSERTIONS) {
-              debug_cntr++;
-              if (debug_cntr % M_4 == 0) {
-                printf("Worker %u stuck on a remote read version %u m_id %u, times %u \n",
-                       t_id, prev_meta.version, prev_meta.m_id, debug_cntr / M_4);
-                //debug_cntr = 0;
-              }
-            }
-            prev_meta = kv_ptr[op_i]->key.meta;
-          } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr[op_i]->key.meta));
-          insert_r_rep(p_ops, (struct network_ts_tuple *)&prev_meta.m_id, (struct network_ts_tuple *)&op->key.meta.m_id,
-                       p_ops->ptrs_to_r_headers[op_i]->l_id, t_id,
-                       p_ops->ptrs_to_r_headers[op_i]->m_id, (uint16_t) op_i, NULL, READ_TS, op->opcode);
-        }
-        else {
-          //red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
-          //           op->opcode, I, reads[(pull_ptr + I) % max_op_size]->m_id,
-          //           reads[(pull_ptr + I) % max_op_size]->val_len,
-          //          reads[(pull_ptr + I) % max_op_size]->version);
-          assert(false);
-        }
+        else if (ENABLE_ASSERTIONS) assert(false);
       }
     }
     if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-//      red_printf("Cache_miss: bkt %u, server %u, tag %u \n", op->key.bkt, op->key.server, op->key.tag);
+      red_printf("Opcode %u Cache_miss: bkt %u, server %u, tag %u \n", op->opcode, op->key.bkt, op->key.server, op->key.tag);
       assert(false); // cant have a miss since, it hit in the source's cache
     }
     if (zero_ops) {

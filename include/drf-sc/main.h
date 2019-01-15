@@ -47,7 +47,7 @@
 #define RMW_RATIO 100 // this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
-#define ENABLE_RMW_ACQUIRES_ 1
+#define ENABLE_RMW_ACQUIRES_ 0
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
@@ -114,7 +114,7 @@
 #define ENABLE_RELEASES (EMULATE_ABD == 1 ? 1 : (ENABLE_RELEASES_))
 #define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
 #define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
-#define ENABLE_RMW_ACQUIRES (ENABLE_RMWS == 1 ? 0 : (ENABLE_RMW_ACQUIRES_))
+#define ENABLE_RMW_ACQUIRES (ENABLE_RMWS == 1 ? (ENABLE_RMW_ACQUIRES_) : 0)
 
 // RMW TRACE
 #define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
@@ -413,15 +413,15 @@ struct remote_qp {
 #define READ 0
 #define READ_TS 1
 #define NO_OP_ACQ_FLIP_BIT 2 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
-#define RMW_TS_SMALLER_THAN_KVS 3 //accepts and proposes
-#define RMW_ACK_PROPOSE 4 // only proposes: Send an 1-byte reply
-#define RMW_SEEN_LOWER_ACC 5 // only proposes: Send value, ts rmw-id
-#define RMW_SEEN_HIGHER_PROP 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
-#define RMW_SEEN_HIGHER_ACC 7 //accepts and proposes
-#define RMW_LOG_TOO_SMALL 8 // accepts and proposes
-#define RMW_ACK_ACCEPT 9 // only accepts
-#define RMW_ALREADY_COMMITTED 10 // only accepts
-#define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
+//#define RMW_TS_SMALLER_THAN_KVS 3 //accepts and proposes
+//#define RMW_ACK_PROPOSE 4 // only proposes: Send an 1-byte reply
+//#define RMW_SEEN_LOWER_ACC 5 // only proposes: Send value, ts rmw-id
+//#define RMW_SEEN_HIGHER_PROP 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
+//#define RMW_SEEN_HIGHER_ACC 7 //accepts and proposes
+//#define RMW_LOG_TOO_SMALL 8 // accepts and proposes
+//#define RMW_ACK_ACCEPT 9 // only accepts
+//#define RMW_ALREADY_COMMITTED 10 // only accepts
+//#define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
 #define RMW_LOG_TOO_HIGH 12 // this means the propose will be nacked
 //flags when receiving a commit
 

@@ -44,7 +44,7 @@
 
 #define CACHE_OP_ACK 115
 #define ACK_NOT_YET_SENT 117
-#define CACHE_OP_GET_TS 118
+#define CACHE_OP_GET_TS 118 // first round of release, or out-of-epoch write
 #define UPDATE_EPOCH_OP_GET 119
 
 
