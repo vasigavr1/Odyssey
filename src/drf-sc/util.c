@@ -1,6 +1,164 @@
 #include "util.h"
 
+void static_assert_compile_parameters()
+{
 
+  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
+  static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
+  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
+  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
+  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
+  static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
+  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(sizeof(struct read) == R_SIZE, "");
+  static_assert(SESSIONS_PER_THREAD < M_16, "");
+  static_assert(MAX_W_COALESCE < 256, "");
+  static_assert(MAX_R_COALESCE < 256, "");
+  static_assert(MAX_R_REP_COALESCE < 256, "");
+
+  static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
+  static_assert(SESSIONS_PER_THREAD > 0, "");
+  //static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
+  static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
+  static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
+  static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
+  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
+
+  static_assert(VALUE_SIZE > BYTES_OVERRIDEN_IN_KVS_VALUE, "");
+  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
+
+  static_assert(sizeof(struct write) == W_SIZE, "");
+  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
+
+
+  // RMWs
+  static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
+
+  static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
+
+
+  // PROPOSES
+  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
+  static_assert(PROP_SIZE == sizeof(struct propose), "");
+  static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
+  static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
+  static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
+    " buffer allocated for a read message");
+
+  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
+  static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MESSAGE_SIZE, "");
+  static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
+
+  // ACCEPTS
+  //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
+  static_assert(MAX_ACC_COALESCE == 1, "");
+  static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
+  static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
+  static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
+  static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
+
+  // ACCEPT REPLIES MAP TO PROPOSE REPLIES
+  static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
+  static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
+  static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
+  static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
+  static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
+  static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
+
+  // COMMITS
+  static_assert(MAX_COM_COALESCE == 1, "");
+  static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
+  static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
+  static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
+
+  // RMW- ACQUIRES
+  static_assert(sizeof(struct rmw_acq_rep) == RMW_ACQ_REP_SIZE, "");
+
+
+  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
+  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, "");
+  static_assert(sizeof(cache_meta) == 8, "");
+  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
+  static_assert(!(VERIFY_PAXOS && PRINT_LOGS), "only one of those can be set");
+#if VERIFY_PAXOS == 1
+  static_assert(EXIT_ON_PRINT == 1, "");
+#endif
+}
+
+void print_parameters_in_the_start()
+{
+  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu,"
+                 "read info %llu\n",
+               sizeof(struct r_rep_message), R_REP_SEND_SIZE,
+               sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
+               sizeof (struct read_info));
+  cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
+              sizeof(struct ack_message), ACK_SIZE,
+              sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);
+  yellow_printf("READ: read %lu/%d, read message %lu/%d, read message ud req %lu/%d\n",
+                sizeof(struct read), R_SIZE,
+                sizeof(struct r_message), R_SEND_SIZE,
+                sizeof(struct r_message_ud_req), R_RECV_SIZE);
+  cyan_printf("Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
+              sizeof(struct write), W_SIZE,
+              sizeof(struct w_message), W_MES_SIZE,
+              sizeof(struct w_message_ud_req), W_RECV_SIZE);
+
+  green_printf("W INLINING %d, PENDING WRITES %d \n",
+               W_ENABLE_INLINING, PENDING_WRITES);
+  green_printf("R INLINING %d, PENDING_READS %d \n",
+               R_ENABLE_INLINING, PENDING_READS);
+  green_printf("R_REP INLINING %d \n",
+               R_REP_ENABLE_INLINING);
+  cyan_printf("W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
+              W_CREDITS, W_BUF_SLOTS, W_BUF_SIZE);
+
+  yellow_printf("Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
+  green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
+               SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
+}
+
+void handle_program_inputs(int argc, char *argv[])
+{
+  int c;
+  static struct option opts[] = {
+    { .name = "machine-id",			.has_arg = 1, .val = 'm' },
+    { .name = "is-roce",			.has_arg = 1, .val = 'r' },
+    { .name = "remote-ips",			.has_arg = 1, .val = 'i' },
+    { .name = "local-ip",			.has_arg = 1, .val = 'l' },
+    { .name = "device_name",			.has_arg = 1, .val = 'd'},
+    { 0 }
+  };
+
+  /* Parse and check arguments */
+  while(1) {
+    c = getopt_long(argc, argv, "M:t:b:N:n:c:u:m:p:r:i:l:x", opts, NULL);
+    if(c == -1) {
+      break;
+    }
+    switch (c) {
+      case 'm':
+        machine_id = atoi(optarg);
+        break;
+      case 'r':
+        is_roce = atoi(optarg);
+        break;
+      case 'i':
+        remote_IP = optarg;
+        break;
+      case 'l':
+        local_IP = optarg;
+        break;
+      case 'd':
+        dev_name = optarg;
+        break;
+      default:
+        printf("Invalid argument %d\n", c);
+        assert(false);
+    }
+  }
+}
 
 // Worker calls this function to connect with all workers
 void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)

@@ -45,9 +45,9 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100 // this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 500 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
-#define ENABLE_RMW_ACQUIRES_ 0
+#define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
@@ -142,6 +142,10 @@
 #define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1 ): REM_MACH_NUM)
 #define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
+#define LOG_NO_SIZE 4
+#define RMW_ID_SIZE 10
+#define BYTES_OVERRIDEN_IN_KVS_VALUE 4
+#define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
 #define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
@@ -164,10 +168,11 @@
 // READ REPLIES
 #define MAX_R_REP_COALESCE MAX_R_COALESCE
 #define R_REP_MES_HEADER (8 + 3) //l_id, coalesce_num, m_id, opcode // and credits
+#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
 #define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
 #define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
 #define R_REP_SMALL_SIZE (1)
-#define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * R_REP_SIZE))
+#define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE))
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
 #define R_REP_SLOTS_FOR_ACCEPTS (W_CREDITS * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
 #define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
@@ -199,15 +204,11 @@
 
 
 // RMWs
-#define BYTES_OVERRIDEN_IN_KVS_VALUE 4
-#define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
-//#define RMW_ENTRIES_PER_MACHINE (253 / MACHINE_NUM)
 #define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
 #define KEY_IS_NOT_RMWABLE 0
 #define KEY_HAS_NEVER_BEEN_RMWED 1
 #define KEY_HAS_BEEN_RMWED 2
-#define LOG_NO_SIZE 4
-#define RMW_ID_SIZE 10
+
 
 
 
@@ -344,7 +345,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -632,9 +633,6 @@ struct write_fifo {
   uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
 
-//
-
-
 // Sent when the timestamps are equal or smaller
 struct r_rep_small {
   uint8_t opcode;
@@ -646,7 +644,16 @@ struct r_rep_big {
   uint8_t opcode;
   struct network_ts_tuple ts;
   uint8_t value[VALUE_SIZE];
-};
+}__attribute__((__packed__));
+
+struct rmw_acq_rep {
+  uint8_t opcode;
+  struct network_ts_tuple ts;
+  uint8_t value[RMW_VALUE_SIZE];
+  uint32_t log_no; // last committed only
+  uint64_t rmw_id; // last committed
+  uint16_t glob_sess_id; // last committed
+} __attribute__((__packed__));
 
 //
 struct r_rep_message {
@@ -654,7 +661,7 @@ struct r_rep_message {
   uint8_t m_id;
   uint8_t opcode;
   uint64_t l_id;
-  struct r_rep_big r_rep[MAX_R_REP_COALESCE];
+  struct rmw_acq_rep r_rep[MAX_R_REP_COALESCE];
 } __attribute__((__packed__));
 
 
@@ -702,7 +709,7 @@ struct r_rep_fifo {
 struct read_info {
   uint8_t rep_num; // replies num
   uint8_t times_seen_ts;
-  bool seen_larger_ts;
+  bool seen_larger_ts; // used also for log numbers for rmw_acquires
 	uint8_t opcode;
   struct ts_tuple ts_to_read;
   struct key key;
@@ -713,6 +720,7 @@ struct read_info {
   uint16_t epoch_id;
   bool is_rmw;
   uint32_t log_no;
+  struct rmw_id rmw_id;
 
   // when a data out-of-epoch write is inserted in a write message,
   // there is a chance we may need to change its version, so we need to

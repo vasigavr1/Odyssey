@@ -26,136 +26,13 @@ FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 int main(int argc, char *argv[])
 {
-
-  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu,"
-                 "read info %llu\n",
-               sizeof(struct r_rep_message), R_REP_SEND_SIZE,
-               sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
-               sizeof (struct read_info));
-  cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
-               sizeof(struct ack_message), ACK_SIZE,
-               sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);
-  yellow_printf("READ: read %lu/%d, read message %lu/%d, read message ud req %lu/%d\n",
-                sizeof(struct read), R_SIZE,
-                sizeof(struct r_message), R_SEND_SIZE,
-                sizeof(struct r_message_ud_req), R_RECV_SIZE);
-  cyan_printf("Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
-              sizeof(struct write), W_SIZE,
-              sizeof(struct w_message), W_MES_SIZE,
-              sizeof(struct w_message_ud_req), W_RECV_SIZE);
-
-  green_printf("W INLINING %d, PENDING WRITES %d \n",
-							 W_ENABLE_INLINING, PENDING_WRITES);
-  green_printf("R INLINING %d, PENDING_READS %d \n",
-               R_ENABLE_INLINING, PENDING_READS);
-  green_printf("R_REP INLINING %d \n",
-               R_REP_ENABLE_INLINING);
-  cyan_printf("W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
-              W_CREDITS, W_BUF_SLOTS, W_BUF_SIZE);
-
-  yellow_printf("Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
-  green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
-               SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
-
-
-	static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
-  static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
-  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
-  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
-  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
-  static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
-  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
-  static_assert(sizeof(struct read) == R_SIZE, "");
-  static_assert(SESSIONS_PER_THREAD < M_16, "");
-  static_assert(MAX_W_COALESCE < 256, "");
-  static_assert(MAX_R_COALESCE < 256, "");
-  static_assert(MAX_R_REP_COALESCE < 256, "");
-
-  static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
-  static_assert(SESSIONS_PER_THREAD > 0, "");
-  //static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
-  static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
-	static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
-  static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
-  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
-
-  static_assert(VALUE_SIZE > BYTES_OVERRIDEN_IN_KVS_VALUE, "");
-  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
-
-  static_assert(sizeof(struct write) == W_SIZE, "");
-  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
-  static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
-
-
-  // RMWs
-  static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
-
-  static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
-
-
-  // PROPOSES
-  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
-  static_assert(PROP_SIZE == sizeof(struct propose), "");
-  static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
-  static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
-  static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
-    " buffer allocated for a read message");
-
-  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
-  static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MESSAGE_SIZE, "");
-  static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
-
-  // ACCEPTS
-  //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
-  static_assert(MAX_ACC_COALESCE == 1, "");
-  static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
-  static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
-  static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
-  static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
-
-  // ACCEPT REPLIES MAP TO PROPOSE REPLIES
-  static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
-  static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
-  static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
-  static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
-  static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
-  static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
-
-  // COMMITS
-  static_assert(MAX_COM_COALESCE == 1, "");
-  static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
-  static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
-  static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
-
-
-  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
-
-  { // Check that prop and read have opcode in the same byte
-    struct prop_message prop;
-    struct r_message r;
-    uint64_t r_dif = ((void *) &(r.read[0].opcode))-((void *)&r);
-    uint64_t prop_dif = ((void *) &(prop.prop[0].opcode))-((void *)&prop);
-    assert(r_dif == prop_dif); // The first opcode of both must be in the same offset.
-    r_dif = ((void *) &(r.coalesce_num))-((void *)&r);
-    prop_dif = ((void *) &(prop.coalesce_num))-((void *)&prop);
-    assert(r_dif == prop_dif); // The first opcode of both must be in the same offset.
-  }
-
-
-  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, "");
-  static_assert(sizeof(cache_meta) == 8, "");
-  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
-  static_assert(!(VERIFY_PAXOS && PRINT_LOGS), "only one of those can be set");
-#if VERIFY_PAXOS == 1
-   static_assert(EXIT_ON_PRINT == 1, "");
-#endif
-
-
+  print_parameters_in_the_start();
+  static_assert_compile_parameters();
 	int i, c;
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
-	remote_IP = (char *)malloc(16 * sizeof(char));
-  dev_name = (char *)malloc(16 * sizeof(char));
+	remote_IP = (char *) malloc(16 * sizeof(char));
+  dev_name = (char *) malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
   // This (sadly) seems to be the only way to initialize the locks
   // in struct_bit_vector, i.e. the atomic_flags
@@ -167,65 +44,23 @@ int main(int argc, char *argv[])
 	}
   //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
   send_bit_vector.state = UP_STABLE;
-
   print_for_debug = false;
 	next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
 
-
-
 	struct thread_params *param_arr;
 	pthread_t *thread_arr;
-
-	static struct option opts[] = {
-			{ .name = "machine-id",			.has_arg = 1, .val = 'm' },
-			{ .name = "is-roce",			.has_arg = 1, .val = 'r' },
-			{ .name = "remote-ips",			.has_arg = 1, .val = 'i' },
-			{ .name = "local-ip",			.has_arg = 1, .val = 'l' },
-      { .name = "device_name",			.has_arg = 1, .val = 'd'},
-			{ 0 }
-	};
-
-	/* Parse and check arguments */
-	while(1) {
-		c = getopt_long(argc, argv, "M:t:b:N:n:c:u:m:p:r:i:l:x", opts, NULL);
-		if(c == -1) {
-			break;
-		}
-		switch (c) {
-			case 'm':
-				machine_id = atoi(optarg);
-				break;
-			case 'r':
-				is_roce = atoi(optarg);
-				break;
-			case 'i':
-				remote_IP = optarg;
-				break;
-			case 'l':
-				local_IP = optarg;
-				break;
-      case 'd':
-       dev_name = optarg;
-       break;
-			default:
-				printf("Invalid argument %d\n", c);
-				assert(false);
-		}
-	}
+  handle_program_inputs(argc, argv);
 
 	/* Launch  threads */
 	assert(machine_id < MACHINE_NUM && machine_id >=0);
   assert(!(is_roce == 1 && ENABLE_MULTICAST));
 	num_threads =  WORKERS_PER_MACHINE;
 
-
 	param_arr = malloc(num_threads * sizeof(struct thread_params));
 	thread_arr = malloc((WORKERS_PER_MACHINE + 1) * sizeof(pthread_t));
 	memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-
 	qps_are_set_up = 0;
-
 	cache_init(0, WORKERS_PER_MACHINE);
 
 #if MEASURE_LATENCY == 1
@@ -262,10 +97,7 @@ int main(int argc, char *argv[])
 		pthread_create(&thread_arr[i], &attr, worker, &param_arr[i]);
 		occupied_cores[core] = 1;
 	}
-
-
 	for(i = 0; i < num_threads; i++)
 		pthread_join(thread_arr[i], NULL);
-
 	return 0;
 }

@@ -317,8 +317,6 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
           else if (op->opcode == OP_ACQUIRE || op->opcode == OP_ACQUIRE_FP) {
             assert(ENABLE_RMW_ACQUIRES);
             KVS_reads_rmw_acquires(op, kv_ptr[op_i], p_ops, op_i, t_id);
-
-
           }
           else if (ENABLE_ASSERTIONS){
             //red_printf("wrong Opcode in cache: %d, req %d, m_id %u, val_len %u, version %u , \n",
@@ -377,28 +375,36 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
       long long *key_ptr_req = (long long *) &op->key;
       if(key_ptr_log[1] == key_ptr_req[0]) { //Cache Hit
         key_in_store[op_i] = 1;
-        cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
-        // The write must be performed with the max TS out of the one stored in the KV and read_info
-        if (op->opcode == CACHE_OP_PUT) {
-          KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
-        }
-        else if (op->opcode == OP_ACQUIRE || op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-          KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
-        }
-        else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-          if (op->epoch_id > *(uint16_t *)kv_ptr[op_i]->key.meta.epoch_id) {
-            optik_lock(&kv_ptr[op_i]->key.meta);
-            *(uint16_t*)kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
-            optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
-            if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
+        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
+          // The write must be performed with the max TS out of the one stored in the KV and read_info
+          if (op->opcode == CACHE_OP_PUT) {
+            KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
+          } else if (op->opcode == OP_ACQUIRE ||
+                     op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
+            KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
+          } else if (op->opcode == UPDATE_EPOCH_OP_GET) {
+            if (op->epoch_id > *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id) {
+              optik_lock(&kv_ptr[op_i]->key.meta);
+              *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
+              optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
+              if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
+            }
+          } else {
+            red_printf("Wrkr %u: read-first-round wrong opcode in cache: %d, req %d, m_id %u,version %u , \n",
+                       t_id, op->opcode, op_i, writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.m_id,
+                       writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.version);
+            assert(0);
           }
         }
-        else {
-          red_printf("Wrkr %u: read-first-round wrong opcode in cache: %d, req %d, m_id %u,version %u , \n",
-                     t_id, op->opcode, op_i, writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.m_id,
-                     writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.version);
-          assert(0);
+        else if (ENABLE_RMWS) {
+          if (op->opcode == OP_ACQUIRE) {
+            assert(op->is_rmw);
+          }
+          else if (ENABLE_ASSERTIONS){
+            assert(false);
+          }
         }
+        else if (ENABLE_ASSERTIONS) assert(false);
       }
     }
     if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
