@@ -454,6 +454,10 @@ struct net_rmw_id {
 }__attribute__((__packed__));
 
 
+// flags that help to compare TS
+#define REGULAR_TS 0
+#define NETW_TS 1
+#define META_TS 2
 
 // format of a Timestamp tuple (Lamport clock)
 struct network_ts_tuple {

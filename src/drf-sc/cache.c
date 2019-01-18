@@ -307,7 +307,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
             red_printf("Wrkr %u wrong Opcode in cache: %d, req %d \n",
                        t_id, op->opcode, op_i);
              assert(false);
-            };
+          }
         }
         else if (ENABLE_RMWS) {
           check_state_with_allowed_flags(3, kv_ptr[op_i]->opcode, KEY_HAS_BEEN_RMWED, KEY_HAS_NEVER_BEEN_RMWED);
@@ -398,7 +398,8 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
         }
         else if (ENABLE_RMWS) {
           if (op->opcode == OP_ACQUIRE) {
-            assert(op->is_rmw);
+            //assert(op->is_rmw);
+            KVS_rmw_acquire_commits(op, kv_ptr[op_i], op_i, t_id);
           }
           else if (ENABLE_ASSERTIONS){
             assert(false);
