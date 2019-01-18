@@ -146,8 +146,8 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           }
           else if (ENABLE_ASSERTIONS) assert(false);
         }
-        else {
-          if (ENABLE_RMWS && op[op_i].opcode == PROPOSE_OP) {
+        else if (ENABLE_RMWS) {
+          if (op[op_i].opcode == PROPOSE_OP) {
             KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                p_ops, &rmw_l_id, op_i, t_id);
           }
@@ -161,6 +161,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
             assert(0);
           }
         }
+        else if (ENABLE_ASSERTIONS) assert(false);
       }
 		}
 		if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
@@ -282,9 +283,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   for(op_i = 0; op_i < op_num; op_i++) {
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + op_i) % max_op_size];
     if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
-      insert_r_rep(p_ops, NULL, NULL,
-                   p_ops->ptrs_to_r_headers[op_i]->l_id, t_id,
-                   p_ops->ptrs_to_r_headers[op_i]->m_id, (uint16_t) op_i, NULL, NO_OP_ACQ_FLIP_BIT, op->opcode);
+      insert_r_rep(p_ops, p_ops->ptrs_to_r_headers[op_i]->l_id, t_id,
+                   p_ops->ptrs_to_r_headers[op_i]->m_id, op->opcode);
       continue;
     }
     if(kv_ptr[op_i] != NULL) {

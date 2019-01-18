@@ -22,7 +22,7 @@
 #define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 25
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -345,7 +345,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -409,23 +409,6 @@ struct remote_qp {
 #define FOR_ACCEPT 4
 #define FROM_ACQUIRE 5
 #define FROM_COMMIT 6
-
-// Possible flag values when inserting a read reply
-#define READ 0
-#define READ_TS 1
-#define NO_OP_ACQ_FLIP_BIT 2 // Send an 1-byte reply to read messages from acquries that are only emant to flip a bit
-//#define RMW_TS_SMALLER_THAN_KVS 3 //accepts and proposes
-//#define RMW_ACK_PROPOSE 4 // only proposes: Send an 1-byte reply
-//#define RMW_SEEN_LOWER_ACC 5 // only proposes: Send value, ts rmw-id
-//#define RMW_SEEN_HIGHER_PROP 6 //accepts and proposes: Send a TS, because you have already acked a higher Propose
-//#define RMW_SEEN_HIGHER_ACC 7 //accepts and proposes
-//#define RMW_LOG_TOO_SMALL 8 // accepts and proposes
-//#define RMW_ACK_ACCEPT 9 // only accepts
-//#define RMW_ALREADY_COMMITTED 10 // only accepts
-//#define ACCEPTED_SAME_RMW_ID 11 // when have already accepted the same rmw id
-#define RMW_LOG_TOO_HIGH 12 // this means the propose will be nacked
-//flags when receiving a commit
-
 
 // Possible flags when accepting locally
 #define ACCEPT_ACK 1
