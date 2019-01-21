@@ -127,6 +127,22 @@ static inline enum ts_compare compare_meta_ts_with_ts(cache_meta *ts1, struct ts
   return ERROR;
 }
 
+static inline enum ts_compare compare_meta_ts_with_flat(cache_meta *ts1, uint32_t version2, uint8_t m_id2) {
+  if ((ts1->version == version2) &&
+      (ts1->m_id == m_id2))
+    return EQUAL;
+  else if ((ts1->version < version2) ||
+           ((ts1->version == version2) &&
+            (ts1->m_id < m_id2)))
+    return SMALLER;
+  else if ((ts1->version > version2) ||
+           ((ts1->version == version2)) &&
+           (ts1->m_id > m_id2))
+    return GREATER;
+
+  return ERROR;
+}
+
 static inline enum ts_compare compare_meta_ts_with_netw_ts(cache_meta *ts1, struct network_ts_tuple *ts2) {
   if ((ts1->version == ts2->version) &&
       (ts1->m_id == ts2->m_id))
@@ -2222,7 +2238,8 @@ static inline void register_committed_global_sess_id (uint16_t glob_sess_id, uin
 
 
 // Fill a write message with a commit
-static inline void fill_commit_message(struct commit_message* com_mes, struct rmw_local_entry* loc_entry, uint16_t t_id)
+static inline void fill_commit_message_from_l_entry(struct commit_message *com_mes, struct rmw_local_entry *loc_entry,
+                                                    uint16_t t_id)
 {
   struct commit *com = &com_mes->com[0];
   com->ts.m_id = loc_entry->new_ts.m_id;
@@ -2233,6 +2250,25 @@ static inline void fill_commit_message(struct commit_message* com_mes, struct rm
   com->t_rmw_id = loc_entry->rmw_id.id;
   com->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
   com->log_no = loc_entry->log_no;
+  if (ENABLE_ASSERTIONS) {
+    assert(com->log_no > 0);
+    assert(com->t_rmw_id > 0);
+  }
+}
+
+// Fill a write message with a commit from read info, after an rmw acquire
+static inline void fill_commit_message_from_r_info(struct commit_message* com_mes,
+                                                   struct read_info* r_info, uint16_t t_id)
+{
+  struct commit *com = &com_mes->com[0];
+  com->ts.m_id = r_info->ts_to_read.m_id;
+  com->ts.version = r_info->ts_to_read.version;
+  memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);
+  com->opcode = COMMIT_OP;
+  memcpy(com->value, r_info->value, (size_t) RMW_VALUE_SIZE);
+  com->t_rmw_id = r_info->rmw_id.id;
+  com->glob_sess_id = r_info->rmw_id.glob_sess_id;
+  com->log_no = r_info->log_no;
   if (ENABLE_ASSERTIONS) {
     assert(com->log_no > 0);
     assert(com->t_rmw_id > 0);
@@ -2267,7 +2303,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       print_true_key(&w_mes[w_mes_ptr].write[inside_w_ptr].key);
     }
   }
-  else if (source == FROM_COMMIT) {
+  else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_rmw)) {
     // always use a new slot for the commit
     if (inside_w_ptr > 0) {
       MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
@@ -2275,7 +2311,11 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       w_mes[w_mes_ptr].w_num = 0;
       inside_w_ptr = 0;
     }
-    fill_commit_message((struct commit_message*) &w_mes[w_mes_ptr], (struct rmw_local_entry*) write, t_id);
+    if (source == FROM_READ)
+    fill_commit_message_from_r_info((struct commit_message *) &w_mes[w_mes_ptr],
+                                    r_info, t_id);
+    else fill_commit_message_from_l_entry((struct commit_message *) &w_mes[w_mes_ptr],
+                                          (struct rmw_local_entry *) write,  t_id);
   }
   else { //source = FROM_READ: 2nd round of read/write/acquire/release
     // if the write is a release put it on a new message to
@@ -2293,6 +2333,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     w_mes[w_mes_ptr].write[inside_w_ptr].opcode = r_info->opcode;
     w_mes[w_mes_ptr].write[inside_w_ptr].val_len = VALUE_SIZE >> SHIFT_BITS;
     if (ENABLE_ASSERTIONS) {
+      assert(!r_info->is_rmw);
       assert(source == FROM_READ);
       if (!(r_info->opcode == CACHE_OP_PUT ||
             r_info->opcode == OP_RELEASE ||
@@ -2366,9 +2407,7 @@ static inline void set_flags_before_committing_a_read(struct read_info *read_inf
 
   (*insert_commit_flag) = read_info->is_rmw && acq_needs_second_round;
 
-  //(*commit_local_kvs) = read_info->is_rmw && read_info->seen_larger_ts;
-
-  (*insert_write_flag) = (read_info->opcode != CACHE_OP_GET)  && !read_info->is_rmw &&
+  (*insert_write_flag) = (read_info->opcode != CACHE_OP_GET) &&
                          (read_info->opcode == OP_RELEASE ||
                           read_info->opcode == CACHE_OP_PUT || acq_needs_second_round);
 
@@ -3506,7 +3545,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 
   write_bookkeeping_in_insertion_based_on_source(p_ops, write, source, incoming_pull_ptr,
                                                  &inside_w_ptr, &w_mes_ptr, w_mes,  r_info, t_id);
-  my_assert(inside_w_ptr < MAX_W_COALESCE, "After bookeeping: Inside pointer must not point to the last message");
+  my_assert(inside_w_ptr < MAX_W_COALESCE, "After bookkeeping: Inside pointer must not point to the last message");
   if (inside_w_ptr == 0) {
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
     message_l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
@@ -3520,10 +3559,6 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
   p_ops->w_state[w_ptr] = VALID;
   if (source == FROM_COMMIT) {
     struct rmw_local_entry* loc_entry = (struct rmw_local_entry*) write;
-    // we do not want to free the session if we are merely helping
-    //bool is_the_commit_helping = (bool) incoming_pull_ptr; // overloading this
-    //if (is_the_commit_helping)  p_ops->w_session_id[w_ptr] = SESSIONS_PER_THREAD;
-    //else
     p_ops->w_session_id[w_ptr] = loc_entry->sess_id;
   }
   else if (source != FROM_READ) { //source = FROM_WRITE || FROM_TRACE || LIN_WRITE
@@ -3533,7 +3568,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
       //  cyan_printf("Wrkr: %u third round of release by session %u \n", t_id, p_ops->w_session_id[w_ptr]);
     }
   }
-    // source = FROM_READ: data reads/writes need not care about the session id as they are not blocking it
+  // source = FROM_READ: data reads/writes need not care about the session id as they are not blocking it
+  // This also includes Commits triggered by RMW-Acquires
   else if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE)
     p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
 
@@ -4243,9 +4279,9 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
 
 // Check if the commit must be applied to the KVS and
 // transition the global entry to INVALID_RMW if it has been waiting for this commit
-static inline bool handle_remote_commit(struct rmw_entry* glob_entry, struct commit* com,
-                                        struct read_info *r_info, bool use_commit,
-                                        uint16_t t_id)
+static inline bool attempt_remote_commit(struct rmw_entry *glob_entry, struct commit *com,
+                                         struct read_info *r_info, bool use_commit,
+                                         uint16_t t_id)
 {
   uint32_t new_log_no = use_commit ? com->log_no : r_info->log_no;
   uint64_t new_rmw_id = use_commit ? com->t_rmw_id : r_info->rmw_id.id;
@@ -4286,6 +4322,68 @@ static inline bool handle_remote_commit(struct rmw_entry* glob_entry, struct com
                  glob_entry->log_no, glob_entry->state, glob_entry->rmw_id.id,  glob_entry->rmw_id.glob_sess_id);
   }
   return overwrite_kv;
+}
+
+static inline uint64_t handle_remote_commit_message(struct cache_op *kv_ptr, void* op, bool use_commit, uint16_t t_id)
+{
+
+  bool overwrite_kv;
+  struct read_info * r_info = (struct read_info*) op;
+  struct commit *com = (struct commit*) op;
+  uint64_t rmw_l_id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
+  uint16_t glob_sess_id = !use_commit ? r_info->rmw_id.glob_sess_id : com->glob_sess_id;
+  uint32_t log_no = !use_commit ? r_info->log_no : com->log_no;
+  struct key *key = !use_commit ? &r_info->key : &com->key;
+  uint8_t *value = !use_commit ? r_info->value : com->value;
+  uint32_t version = !use_commit ? r_info->ts_to_read.version : com->ts.version;
+  uint8_t m_id = !use_commit ? r_info->ts_to_read.m_id : com->ts.m_id;
+  uint32_t entry;
+
+  optik_lock(&kv_ptr->key.meta);
+
+  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
+    entry = grab_RMW_entry(COMMITTED, kv_ptr, 0, 0, 0,
+                           rmw_l_id, log_no, glob_sess_id, t_id);
+    if (ENABLE_ASSERTIONS) {
+      assert(kv_ptr->key.meta.version == 1);
+      assert(entry == *(uint32_t *) kv_ptr->value);
+    }
+    overwrite_kv = true;
+    kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
+  }
+  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
+    entry = *(uint32_t *) kv_ptr->value;
+    check_keys_with_one_cache_op(key, kv_ptr, entry);
+    struct rmw_entry *glob_entry = &rmw.entry[entry];
+    overwrite_kv = attempt_remote_commit(glob_entry, com, r_info, use_commit, t_id);
+  }
+  else if (ENABLE_ASSERTIONS) assert(false);
+  // The commit must be applied to the KVS
+  if (overwrite_kv) {
+    if (compare_meta_ts_with_flat(&kv_ptr->key.meta, version, m_id) == SMALLER) {
+      kv_ptr->key.meta.m_id = m_id;
+      kv_ptr->key.meta.version = version + 1; // the unlock function will decrement 1
+    }
+    memcpy(&kv_ptr->value[BYTES_OVERRIDEN_IN_KVS_VALUE], value, (size_t) RMW_VALUE_SIZE);
+  }
+  struct rmw_entry *glob_entry = &rmw.entry[entry];
+  check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
+  if (ENABLE_ASSERTIONS) {
+    if (glob_entry->state != INVALID_RMW)
+      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
+  }
+  uint64_t number_of_reqs = 0;
+  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+    rmw.entry[entry].dbg->prop_acc_num++;
+    number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
+  }
+  register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
+  check_registered_against_glob_last_registered(glob_entry, rmw_l_id, glob_sess_id,
+                                                "handle remote commit", t_id);
+
+  optik_unlock_decrement_version(&kv_ptr->key.meta);
+  return number_of_reqs;
+
 }
 
 // On gathering quorum of acks for commit, commit locally and signal that the session must be freed if not helping
@@ -5971,14 +6069,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
     }
     else if (insert_commit_flag) {
       // TODO also move the session responsibility to the commit.
-      // insert_write(p_ops, NULL, FROM_COMMIT, pull_ptr, t_id); // TODO do this from a read info
-      // for now just free the  session
-//      if (ENABLE_ASSERTIONS) {
-//        assert(p_ops->r_session_id[pull_ptr] < SESSIONS_PER_THREAD);
-//        assert(p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]]);
-//      }
-//      p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
-//      p_ops->all_sessions_stalled = false;
+       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id); // TODO do this from a read info
+
     }
 
 
@@ -6011,7 +6103,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
           p_ops->r_session_id[pull_ptr] == latency_info->measured_sess_id)
         report_latency(latency_info);
     }
-    else assert(!read_info->is_rmw);
+    else if (ENABLE_ASSERTIONS) assert(!read_info->is_rmw);
 
     // Clean-up code
     memset(&p_ops->read_info[pull_ptr], 0, 3); // a lin write uses these bytes for the session id but it's still fine to clear them
@@ -6578,63 +6670,23 @@ static inline void KVS_updates_commits(struct cache_op *op, struct cache_op *kv_
 {
   struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
   if (ENABLE_ASSERTIONS) assert(com->ts.version > 0);
-  bool overwrite_kv;
-  uint64_t rmw_l_id = com->t_rmw_id;
-  uint16_t glob_sess_id = com->glob_sess_id;
-  uint32_t log_no = com->log_no;
-  uint32_t entry;
   if (DEBUG_RMW)
     green_printf("Worker %u is handling a remote RMW commit on op %u, "
                    "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                 t_id, op_i, rmw_l_id, glob_sess_id, log_no, com->ts.version);
-  optik_lock(&kv_ptr->key.meta);
-  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-    entry = grab_RMW_entry(COMMITTED, kv_ptr, 0, 0, 0,
-                           rmw_l_id, log_no, glob_sess_id, t_id);
-    if (ENABLE_ASSERTIONS) {
-      assert(kv_ptr->key.meta.version == 1);
-      assert(entry == *(uint32_t *) kv_ptr->value);
-    }
-    overwrite_kv = true;
-    kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
-  }
-  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
-    entry = *(uint32_t *) kv_ptr->value;
-    check_keys_with_one_cache_op(&com->key, kv_ptr, entry);
-    struct rmw_entry *glob_entry = &rmw.entry[entry];
-    overwrite_kv = handle_remote_commit(glob_entry, com, NULL, true, t_id);
-  }
-  else if (ENABLE_ASSERTIONS) assert(false);
-  // The commit must be applied to the KVS
-  if (overwrite_kv) {
-    if (compare_meta_ts_with_netw_ts(&kv_ptr->key.meta, &com->ts) == SMALLER) {
-      kv_ptr->key.meta.m_id = com->ts.m_id;
-      kv_ptr->key.meta.version = (com->ts.version) + 1; // the unlock function will decrement 1
-    }
-    memcpy(&kv_ptr->value[BYTES_OVERRIDEN_IN_KVS_VALUE], com->value, (size_t) RMW_VALUE_SIZE);
-  }
-  struct rmw_entry *glob_entry = &rmw.entry[entry];
-  check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
-  if (ENABLE_ASSERTIONS) {
-    if (glob_entry->state != INVALID_RMW)
-      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
-  }
-  uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-    rmw.entry[entry].dbg->prop_acc_num++;
-    number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
-  }
-  register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
-  check_registered_against_glob_last_registered(glob_entry, rmw_l_id, glob_sess_id,
-                                                "handle remote commit", t_id);
-  optik_unlock_decrement_version(&kv_ptr->key.meta);
+                 t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->ts.version);
+
+  uint64_t number_of_reqs;
+  if (PRINT_LOGS)
+    number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
+  else handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
+
 
   if (PRINT_LOGS) {
     struct commit_message *com_mes = (struct commit_message *) (((void *)com) - COMMIT_MES_HEADER);
     uint8_t acc_m_id = com_mes->m_id;
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Com: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id, com->ts.version, com->ts.m_id);
+            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id, com->glob_sess_id, com->ts.version, com->ts.m_id);
   }
 }
 
@@ -6833,75 +6885,25 @@ static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, str
 }
 
 
-
-
 // Handle committing an RMW from a response to an rmw acquire
 static inline void KVS_rmw_acquire_commits(struct read_info *op, struct cache_op *kv_ptr,
                                            uint16_t op_i, uint16_t t_id)
 {
-//  return;
- // struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
   if (ENABLE_ASSERTIONS) assert(op->ts_to_read.version > 0);
-  bool overwrite_kv;
-  uint64_t rmw_l_id = op->rmw_id.id;
-  uint16_t glob_sess_id = op->rmw_id.glob_sess_id;
-  uint32_t log_no = op->log_no;
-  uint32_t entry;
   if (DEBUG_RMW)
     green_printf("Worker %u is handling a remote RMW commit on op %u, "
                    "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                 t_id, op_i, rmw_l_id, glob_sess_id, log_no, op->ts_to_read.version);
-
-  optik_lock(&kv_ptr->key.meta);
-
-  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-    entry = grab_RMW_entry(COMMITTED, kv_ptr, 0, 0, 0,
-                           rmw_l_id, log_no, glob_sess_id, t_id);
-    if (ENABLE_ASSERTIONS) {
-      assert(kv_ptr->key.meta.version == 1);
-      assert(entry == *(uint32_t *) kv_ptr->value);
-    }
-    overwrite_kv = true;
-    kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
-  }
-  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
-    entry = *(uint32_t *) kv_ptr->value;
-    check_keys_with_one_cache_op(&op->key, kv_ptr, entry);
-    struct rmw_entry *glob_entry = &rmw.entry[entry];
-    overwrite_kv = handle_remote_commit(glob_entry, NULL, op, false, t_id);
-  }
-  else if (ENABLE_ASSERTIONS) assert(false);
-  // The commit must be applied to the KVS
-  if (overwrite_kv) {
-    if (compare_meta_ts_with_ts(&kv_ptr->key.meta, &op->ts_to_read) == SMALLER) { // TODO care here commit has netw ts read_info has regular
-      kv_ptr->key.meta.m_id = op->ts_to_read.m_id;
-      kv_ptr->key.meta.version = (op->ts_to_read.version) + 1; // the unlock function will decrement 1
-    }
-    memcpy(&kv_ptr->value[BYTES_OVERRIDEN_IN_KVS_VALUE], op->value, (size_t) RMW_VALUE_SIZE);
-  }
-  struct rmw_entry *glob_entry = &rmw.entry[entry];
-  check_log_nos_of_glob_entry(glob_entry, "Unlocking after received commit", t_id);
-  if (ENABLE_ASSERTIONS) {
-    if (glob_entry->state != INVALID_RMW)
-      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->rmw_id, rmw_l_id, glob_sess_id));
-  }
-  uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-    rmw.entry[entry].dbg->prop_acc_num++;
-    number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
-  }
-  register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
-  check_registered_against_glob_last_registered(glob_entry, rmw_l_id, glob_sess_id,
-                                                "handle remote commit", t_id);
-
-  optik_unlock_decrement_version(&kv_ptr->key.meta);
-
+                 t_id, op_i, op->rmw_id.id, op->rmw_id.glob_sess_id,
+                 op->log_no, op->ts_to_read.version);
+  uint64_t number_of_reqs;
+  if (PRINT_LOGS)
+    number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
+  else handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
   if (PRINT_LOGS) {
-    //struct commit_message *com_mes = (struct commit_message *) (((void *)com) - COMMIT_MES_HEADER);
-    //uint8_t acc_m_id = com_mes->m_id;
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, log_no, number_of_reqs, rmw_l_id, glob_sess_id, op->ts_to_read.version, op->ts_to_read.m_id);
+            kv_ptr->key.bkt, op->log_no, number_of_reqs,  op->rmw_id.id, op->rmw_id.glob_sess_id,
+            op->ts_to_read.version, op->ts_to_read.m_id);
   }
 }
 
