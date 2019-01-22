@@ -952,7 +952,7 @@ static inline void checks_when_forging_a_commit(struct commit_message *com_mes, 
              send_sgl[br_i].length);
     if (ENABLE_ASSERTIONS) {
       assert(com_mes->com[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(com_mes->com[i].opcode == COMMIT_OP);
+      assert(com_mes->com[i].opcode == COMMIT_OP || com_mes->com[i].opcode == RMW_ACQ_COMMIT_OP);
     }
   }
 }
@@ -2264,7 +2264,7 @@ static inline void fill_commit_message_from_r_info(struct commit_message* com_me
   com->ts.m_id = r_info->ts_to_read.m_id;
   com->ts.version = r_info->ts_to_read.version;
   memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);
-  com->opcode = COMMIT_OP;
+  com->opcode = RMW_ACQ_COMMIT_OP;
   memcpy(com->value, r_info->value, (size_t) RMW_VALUE_SIZE);
   com->t_rmw_id = r_info->rmw_id.id;
   com->glob_sess_id = r_info->rmw_id.glob_sess_id;
@@ -2312,8 +2312,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       inside_w_ptr = 0;
     }
     if (source == FROM_READ)
-    fill_commit_message_from_r_info((struct commit_message *) &w_mes[w_mes_ptr],
-                                    r_info, t_id);
+      fill_commit_message_from_r_info((struct commit_message *) &w_mes[w_mes_ptr], r_info, t_id);
     else fill_commit_message_from_l_entry((struct commit_message *) &w_mes[w_mes_ptr],
                                           (struct rmw_local_entry *) write,  t_id);
   }
@@ -2386,9 +2385,14 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops,
     }
     uint8_t w_state;
     if (w_mes->write[i].opcode == COMMIT_OP) w_state = SENT_COMMIT;
+    else if (w_mes->write[i].opcode == RMW_ACQ_COMMIT_OP) {
+      w_state = SENT_RMW_ACQ_COMMIT;
+      w_mes->write[i].opcode = COMMIT_OP;
+    }
     else if (w_mes->write[i].opcode == CACHE_OP_PUT) w_state = SENT_PUT;
     else if (unlikely(w_mes->write[i].opcode == OP_RELEASE_BIT_VECTOR))
       w_state = SENT_BIT_VECTOR;
+
     else w_state = SENT_RELEASE; // Release or second round of acquire!!
     if (ENABLE_ASSERTIONS) if (w_state == OP_RELEASE_BIT_VECTOR) assert(i == 0);
     p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = w_state;
@@ -2407,7 +2411,7 @@ static inline void set_flags_before_committing_a_read(struct read_info *read_inf
 
   (*insert_commit_flag) = read_info->is_rmw && acq_needs_second_round;
 
-  (*insert_write_flag) = (read_info->opcode != CACHE_OP_GET) &&
+  (*insert_write_flag) = (read_info->opcode != CACHE_OP_GET)  && !read_info->is_rmw &&
                          (read_info->opcode == OP_RELEASE ||
                           read_info->opcode == CACHE_OP_PUT || acq_needs_second_round);
 
@@ -2695,7 +2699,7 @@ static inline uint32_t calculate_write_message_size(uint8_t opcode, uint8_t coal
     if (opcode == ACCEPT_OP) {
       header_size = ACCEPT_MES_HEADER;
       size_of_struct = ACCEPT_SIZE;
-    } else if (opcode == COMMIT_OP) {
+    } else if (opcode == COMMIT_OP || opcode == RMW_ACQ_COMMIT_OP) {
       header_size = COMMIT_MES_HEADER;
       size_of_struct = COMMIT_SIZE;
     } else {
@@ -3523,7 +3527,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 
   bool last_mes_is_rmw = inside_w_ptr > 0 &&
                          (w_mes[w_mes_ptr].write[0].opcode == ACCEPT_OP ||
-                          w_mes[w_mes_ptr].write[0].opcode == COMMIT_OP);
+                          w_mes[w_mes_ptr].write[0].opcode == COMMIT_OP ||
+                          w_mes[w_mes_ptr].write[0].opcode == RMW_ACQ_COMMIT_OP);
   if (ENABLE_RMWS && last_mes_is_rmw) { // Do not coalesce a write with an accept or commit
     MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
     w_mes_ptr = p_ops->w_fifo->push_ptr;
@@ -3531,8 +3536,6 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
     inside_w_ptr = 0;
   }
   //printf("Insert a write %u \n", *(uint32_t *)write);
-
-
   if (DEBUG_READS && source == FROM_READ) {
     yellow_printf("Wrkr %u Inserting a write as a second round of read/write w_size %u/%d, bcast size %u, "
                     " push_ptr %u, pull_ptr %u "
@@ -3542,9 +3545,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
                   w_mes->l_id, p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
   }
 
-
   write_bookkeeping_in_insertion_based_on_source(p_ops, write, source, incoming_pull_ptr,
-                                                 &inside_w_ptr, &w_mes_ptr, w_mes,  r_info, t_id);
+                                                 &inside_w_ptr, &w_mes_ptr, w_mes, r_info, t_id);
   my_assert(inside_w_ptr < MAX_W_COALESCE, "After bookkeeping: Inside pointer must not point to the last message");
   if (inside_w_ptr == 0) {
     p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
@@ -3954,7 +3956,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   uint8_t return_flag;
   struct rmw_entry *glob_entry = &rmw.entry[loc_entry->index_to_rmw];
   my_assert(true_keys_are_equal(&loc_entry->key, &glob_entry->key),
-            "Local entry does not contain the same key as global entry");
+            "Attempt local accept: Local entry does not contain the same key as global entry");
 
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
@@ -4037,7 +4039,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
   struct rmw_local_entry* help_loc_entry = loc_entry->help_loc_entry;
   help_loc_entry->new_ts = loc_entry->new_ts;
   my_assert(true_keys_are_equal(&help_loc_entry->key, &glob_entry->key),
-            "Local entry does not contain the same key as global entry");
+            "Attempt local accpet to help: Local entry does not contain the same key as global entry");
   my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
             " the help entry and the regular have not the same log nos");
   if (ENABLE_ASSERTIONS) assert(help_loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
@@ -4191,7 +4193,7 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
 
   struct rmw_entry *glob_entry = &rmw.entry[loc_entry->index_to_rmw];
   my_assert(true_keys_are_equal(&loc_entry->key, &glob_entry->key),
-            "Local entry does not contain the same key as global entry");
+            "Attempt local commit: Local entry does not contain the same key as global entry");
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
   optik_lock(loc_entry->ptr_to_kv_pair);
   if (loc_entry->state == COMMITTED)
@@ -4227,7 +4229,7 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
   uint16_t new_glob_sess_id = rmw_rep->glob_sess_id;
   if (glob_entry->last_committed_log_no >= new_log_no) return;
   my_assert(true_keys_are_equal(&loc_entry->key, &glob_entry->key),
-            "Local entry does not contain the same key as global entry, when committing after rmw reply");
+            "Attempt local commit from rep: Local entry does not contain the same key as global entry");
 
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
   optik_lock(loc_entry->ptr_to_kv_pair);
@@ -5430,7 +5432,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   uint32_t backward_ptr = p_ops->w_fifo->backward_ptrs[w_mes_i];
   uint8_t coalesce_num = w_mes->w_num;
   bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
-  bool is_commit = w_mes->write[0].opcode == COMMIT_OP;
+  bool is_commit = w_mes->write[0].opcode == COMMIT_OP || w_mes->write[0].opcode == RMW_ACQ_COMMIT_OP;
   send_sgl[br_i].length = calculate_write_message_size(w_mes->write[0].opcode, coalesce_num, t_id);
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) w_mes;
   if (ENABLE_ADAPTIVE_INLINING)
@@ -6067,10 +6069,9 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
+    // insert commit after rmw acquire if not a quorum of people have seen the last committed value
     else if (insert_commit_flag) {
-      // TODO also move the session responsibility to the commit.
-       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id); // TODO do this from a read info
-
+      insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
 
 
@@ -6091,7 +6092,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
     }
 
     // SESSION: Acquires that wont have a second round and thus must free the session
-    if (!insert_write_flag && (read_info->opcode == OP_ACQUIRE)) {
+    if (!insert_write_flag && !insert_commit_flag && (read_info->opcode == OP_ACQUIRE)) {
       if (ENABLE_ASSERTIONS) {
         assert(p_ops->r_session_id[pull_ptr] < SESSIONS_PER_THREAD);
         assert(p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]]);
@@ -6103,7 +6104,6 @@ static inline void commit_reads(struct pending_ops *p_ops,
           p_ops->r_session_id[pull_ptr] == latency_info->measured_sess_id)
         report_latency(latency_info);
     }
-    else if (ENABLE_ASSERTIONS) assert(!read_info->is_rmw);
 
     // Clean-up code
     memset(&p_ops->read_info[pull_ptr], 0, 3); // a lin write uses these bytes for the session id but it's still fine to clear them
@@ -6256,7 +6256,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
 
     uint32_t sess_id = p_ops->w_session_id[w_pull_ptr];
     if (ENABLE_ASSERTIONS) assert(sess_id < SESSIONS_PER_THREAD);
-    if (w_state == READY_RELEASE) {
+    if (w_state == READY_RELEASE || w_state == READY_RMW_ACQ_COMMIT) {
       if (ENABLE_ASSERTIONS) assert(p_ops->session_has_pending_op[sess_id]);
       p_ops->session_has_pending_op[sess_id] = false;
       p_ops->all_sessions_stalled = false;
@@ -6334,6 +6334,8 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
         else if (p_ops->w_state[ack_ptr] == SENT_PUT) p_ops->w_state[ack_ptr] = READY_PUT;
         else if (p_ops->w_state[ack_ptr] == SENT_COMMIT)
           act_on_quorum_of_commit_acks(p_ops, ack_ptr, t_id);
+        else if (p_ops->w_state[ack_ptr] == SENT_RMW_ACQ_COMMIT)
+          p_ops->w_state[ack_ptr] = READY_RMW_ACQ_COMMIT;
         else {
           p_ops->w_state[ack_ptr] = READY_RELEASE;
           if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
@@ -6556,6 +6558,8 @@ static inline void KVS_from_trace_rmw_acquire(struct cache_op *op, struct cache_
     check_keys_with_one_cache_op((struct key *) &op->key.bkt, kv_ptr, entry);
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     r_info->log_no = glob_entry->last_committed_log_no;
+    r_info->rmw_id = glob_entry->last_committed_rmw_id;
+    memcpy(r_info->value, &kv_ptr->value[BYTES_OVERRIDEN_IN_KVS_VALUE], (size_t) RMW_VALUE_SIZE);
   }
   r_info->ts_to_read.version = kv_ptr->key.meta.version - 1;
   r_info->ts_to_read.m_id = kv_ptr->key.meta.m_id;

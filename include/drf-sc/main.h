@@ -354,7 +354,7 @@
 #define POLL_CQ_R_REP 2
 #define POLL_CQ_ACK 3
 
-//LATENCY Measurment
+//LATENCY Measurements
 #define MAX_LATENCY 400 //in us
 #define LATENCY_BUCKETS 200 //latency accuracy
 
@@ -394,11 +394,12 @@ struct remote_qp {
 #define SENT_RELEASE 5 // Release or second round of acquire!!
 #define SENT_BIT_VECTOR 6
 #define SENT_COMMIT 7 // For commits
-#define READY_PUT 8
-#define READY_COMMIT 9
-//#define READY_COMMIT_HELPED 10
-#define READY_RELEASE 11 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 12
+#define SENT_RMW_ACQ_COMMIT 8
+#define READY_PUT 9
+#define READY_COMMIT 10
+#define READY_RMW_ACQ_COMMIT 11
+#define READY_RELEASE 12 // Release or second round of acquire!!
+#define READY_BIT_VECTOR 13
 
 
 // Possible write sources

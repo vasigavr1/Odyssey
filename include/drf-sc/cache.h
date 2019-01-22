@@ -25,7 +25,12 @@
 #define WRITE_STATE 4
 #define WRITE_REPLAY_STATE 5
 
-//Cache Opcode
+// MESSAGE OPCODES
+
+// when inserting the commit use this OP and change it to COMMIT_OP
+// before broadcasting. The purpose is for the state of the commit message to be tagged as SENT_RMW_ACQ
+// such that whens acks are gathered, it will be recognized that local entry need not get freed
+#define RMW_ACQ_COMMIT_OP 101
 #define COMMIT_OP 102
 #define ACCEPT_OP 103
 #define PROPOSE_OP 104
