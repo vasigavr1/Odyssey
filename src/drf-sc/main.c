@@ -23,7 +23,6 @@ atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 
-
 int main(int argc, char *argv[])
 {
   print_parameters_in_the_start();

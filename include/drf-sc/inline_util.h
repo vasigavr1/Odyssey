@@ -1077,14 +1077,14 @@ static inline void debug_all_sessions(struct session_dbg *ses_dbg, struct pendin
   if (DEBUG_SESSIONS) {
     for (uint16_t sess_id = 0; sess_id < SESSIONS_PER_THREAD; sess_id++) {
       ses_dbg->dbg_cnt[sess_id]++;
-      assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
+      //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
       if (ses_dbg->dbg_cnt[sess_id] == DEBUG_SESS_COUNTER) {
         if (sess_id == 0) {
           red_printf("Wrkr %u Session %u seems to be stuck-- all stuck \n", t_id, sess_id);
           for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++)
             printf("%u - %u- %u - %u, ", ses_dbg->dbg_cnt[i],
-                   p_ops->prop_info->entry[sess_id].state, p_ops->prop_info->entry[sess_id].back_off_cntr,
-                   p_ops->prop_info->entry[sess_id].index_to_rmw);
+                   p_ops->prop_info->entry[i].state, p_ops->prop_info->entry[i].back_off_cntr,
+                   p_ops->prop_info->entry[i].index_to_rmw);
           printf ("\n");
         }
         ses_dbg->dbg_cnt[sess_id] = 0;
@@ -1128,6 +1128,7 @@ static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint
     if (read_info->is_rmw) {
       assert(read_info->opcode == OP_ACQUIRE);
       assert(!insert_write_flag);
+      assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO > 0);
     }
     if (read_info->opcode == OP_ACQUIRE_FLIP_BIT)
       assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag);
@@ -1431,8 +1432,8 @@ static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t 
     //printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
     assert(p_ops->r_state[r_ptr] == INVALID);
     struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
-    check_state_with_allowed_flags(6, read->opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
-                                   OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT, ACQUIRE_RMW_OP);
+    check_state_with_allowed_flags(5, read->opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
+                                   OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
     if (source == FROM_TRACE) {
       assert(true_keys_are_equal(&read->key, &r_info->key));
       if (!r_info->is_rmw) assert(compare_netw_ts_with_ts(&read->ts, &r_info->ts_to_read) == EQUAL);
@@ -1806,11 +1807,9 @@ static inline void check_when_polling_for_reads(struct r_message *r_mes, uint32_
   uint8_t r_num = r_mes->coalesce_num;
   if (ENABLE_ASSERTIONS) {
     assert(r_mes->coalesce_num > 0);
-    check_state_with_allowed_flags(7, r_mes->read[r_mes->coalesce_num - 1].opcode,
+    check_state_with_allowed_flags(6, r_mes->read[r_mes->coalesce_num - 1].opcode,
                                    CACHE_OP_GET_TS, OP_ACQUIRE, PROPOSE_OP,
-                                   CACHE_OP_GET, OP_ACQUIRE_FLIP_BIT, ACQUIRE_RMW_OP);
-    //if (r_mes->read[r_mes->coalesce_num - 1].opcode == ACQUIRE_RMW_OP)
-      //assert(r_mes->coalesce_num == 1);
+                                   CACHE_OP_GET, OP_ACQUIRE_FLIP_BIT);
     if (DEBUG_READ_REPS)
       printf("Worker %u sees a read Opcode %d at offset %d, l_id %lu  \n", t_id,
              r_mes->read[0].opcode, index, r_mes->l_id);
@@ -3137,7 +3136,6 @@ static inline void handle_already_committed_rmw(struct pending_ops *p_ops,
                       loc_entry->state == PROPOSED? "Propose" : "Accept");
       loc_entry->log_no = loc_entry->accepted_log_no;
       loc_entry->state = MUST_BCAST_COMMITS;
-
     }
     if (MACHINE_NUM <= 3 && ENABLE_ASSERTIONS) assert(false);
   }
@@ -3442,11 +3440,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
   bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
   //
 
-  bool first_is_rmw = r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP ||
-                      r_mes[r_mes_ptr].read[0].opcode == ACQUIRE_RMW_OP;
-  bool change_mes = inside_r_ptr > 0 && (first_is_rmw);// || is_rmw_acquire);
-  //change_mes = inside_r_ptr == 1 && r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP;
-
+  bool first_is_rmw = r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP;
+  bool change_mes = inside_r_ptr > 0 && (first_is_rmw);
   if (change_mes) {
     MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
     r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
@@ -3454,9 +3449,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
     inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
   }
 
-
   struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
-
   // this means that the purpose of the read is solely to flip remote bits
   if (source == FROM_ACQUIRE) {
     // overload the key with local_r_id
@@ -3472,7 +3465,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
     else assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
     read->key = r_info->key;
     r_info->epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
-    uint8_t opcode = (uint8_t) (is_rmw_acquire ? ACQUIRE_RMW_OP : r_info->opcode);
+    uint8_t opcode = r_info->opcode;
     read->opcode = (opcode == OP_RELEASE || opcode == CACHE_OP_PUT) ?
                    (uint8_t) CACHE_OP_GET_TS : opcode;
   }
@@ -3517,13 +3510,11 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 {
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
-  //  else if (source == RELEASE_SECOND) r_info = (struct read_info *) write;
-  // TODO DO not coalesce with an accept...
   struct w_message *w_mes = p_ops->w_fifo->w_message;
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
   uint32_t w_ptr = p_ops->w_push_ptr;
-  uint64_t message_l_id;
+  uint64_t message_l_id = 0;
 
   bool last_mes_is_rmw = inside_w_ptr > 0 &&
                          (w_mes[w_mes_ptr].write[0].opcode == ACCEPT_OP ||
@@ -4309,7 +4300,7 @@ static inline bool attempt_remote_commit(struct rmw_entry *glob_entry, struct co
   }
   else if (glob_entry->last_committed_log_no == new_log_no) {
     check_that_the_rmw_ids_match(glob_entry,  new_rmw_id, glob_sess_id, new_log_no,
-                                 new_version, new_m_id, "handle_remote_commit", t_id);
+                                 new_version, new_m_id, "attempt_remote_commit", t_id);
   }
 
   // now check if the entry was waiting for this message to get cleared
@@ -4328,7 +4319,7 @@ static inline bool attempt_remote_commit(struct rmw_entry *glob_entry, struct co
 
 static inline uint64_t handle_remote_commit_message(struct cache_op *kv_ptr, void* op, bool use_commit, uint16_t t_id)
 {
-
+  if (ENABLE_ASSERTIONS) if (!use_commit) assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO);
   bool overwrite_kv;
   struct read_info * r_info = (struct read_info*) op;
   struct commit *com = (struct commit*) op;
@@ -5057,8 +5048,8 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     }
   } else if (loc_entry->state != PROPOSED) {
     if (loc_entry->state != ACCEPTED) {
-      check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, NEEDS_GLOBAL,
-                                     MUST_BCAST_COMMITS_FROM_HELP);
+      check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW, NEEDS_GLOBAL,
+                                     MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
       if (ENABLE_ASSERTIONS && loc_entry->state != MUST_BCAST_COMMITS_FROM_HELP) {
         assert(dbg_loc_entry->log_no == loc_entry->log_no);
         assert(rmw_ids_are_equal(&dbg_loc_entry->rmw_id, &loc_entry->rmw_id));
@@ -5197,10 +5188,10 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
         if (ENABLE_ASSERTIONS) assert(p_ops->session_has_pending_op[sess_i]);
         loc_entry->back_off_cntr++;
         if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
-         // yellow_printf("Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
-         //               t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
-         //               loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
-         //               loc_entry->help_rmw->state);
+//          yellow_printf("Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
+//                        t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
+//                        loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
+//                        loc_entry->help_rmw->state);
 
           // This is failure-related help/stealing it should not be that we are being held up by the local machine
           // However we may wait on a "local" glob sess id, because it is being helped
@@ -5233,8 +5224,8 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
         if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED ||
             loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED)
           loc_entry->helping_flag = NOT_HELPING;
-        check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
-                                       ACCEPTED, MUST_BCAST_COMMITS_FROM_HELP);
+        check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
+                                       ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
       }
     }
   }
@@ -5613,8 +5604,8 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
         yellow_printf("Read %d/%u, message mes_size %d, version %u \n", i, coalesce_num,
                       send_sgl[br_i].length, r_mes->read[i].ts.version);
       if (ENABLE_ASSERTIONS) {
-        check_state_with_allowed_flags(6, r_mes->read[i].opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
-                                       OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT, ACQUIRE_RMW_OP);
+        check_state_with_allowed_flags(5, r_mes->read[i].opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
+                                       OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
       }
     }
   }
@@ -5798,7 +5789,6 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
 
     for (uint16_t i = 0; i < r_num; i++) {
       struct read *read = &r_mes->read[i];
-      if (read->opcode == ACQUIRE_RMW_OP) read->opcode = OP_ACQUIRE;
       check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
       if (read->opcode == OP_ACQUIRE)
         read->opcode = take_ownership_of_a_conf_bit(t_id, r_mes->l_id + i,
@@ -6545,6 +6535,7 @@ static inline void KVS_from_trace_rmw_acquire(struct cache_op *op, struct cache_
                                               struct cache_resp *resp, struct pending_ops *p_ops,
                                               uint32_t *r_push_ptr_, uint16_t t_id)
 {
+  if (ENABLE_ASSERTIONS) assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO > 0);
   //printf("rmw acquire\n");
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
@@ -6680,11 +6671,7 @@ static inline void KVS_updates_commits(struct cache_op *op, struct cache_op *kv_
                  t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->ts.version);
 
   uint64_t number_of_reqs;
-  if (PRINT_LOGS)
-    number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
-  else handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
-
-
+  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
   if (PRINT_LOGS) {
     struct commit_message *com_mes = (struct commit_message *) (((void *)com) - COMMIT_MES_HEADER);
     uint8_t acc_m_id = com_mes->m_id;
@@ -6900,9 +6887,7 @@ static inline void KVS_rmw_acquire_commits(struct read_info *op, struct cache_op
                  t_id, op_i, op->rmw_id.id, op->rmw_id.glob_sess_id,
                  op->log_no, op->ts_to_read.version);
   uint64_t number_of_reqs;
-  if (PRINT_LOGS)
-    number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
-  else handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
+  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
   if (PRINT_LOGS) {
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",

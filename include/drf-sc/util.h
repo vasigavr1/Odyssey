@@ -127,7 +127,7 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
 // Used by all kinds of threads to publish their QPs
 void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
 
-uint8_t compute_opcode(struct opcode_info *opc_info);
+uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed);
 int parse_trace(char* path, struct trace_command **cmds, int t_id);
 // Manufactures a trace without a file
 void manufacture_trace(struct trace_command **cmds, int t_id);

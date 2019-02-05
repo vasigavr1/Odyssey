@@ -20,8 +20,8 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 5
-#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define MACHINE_NUM 4
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -29,23 +29,22 @@
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 7
 #define MAX_R_COALESCE 12
-#define W_CREDITS 3
+#define W_CREDITS 5
 #define MAX_W_COALESCE 12
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define RMW_BACK_OFF_TIMEOUT K_32 //K_32// M_1
-#define REL_CREDIT_TIMEOUT M_16
+#define RMW_BACK_OFF_TIMEOUT 15000 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 00// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 100 // this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 500 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_RATIO 00 // this is out of 1000, e.g. 10 means 1%
+#define RMW_ACQUIRE_RATIO 00 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
@@ -124,7 +123,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 1000
+#define NUM_OF_RMW_KEYS 100
 
 
 
@@ -259,7 +258,7 @@
 // RMW entry states for local and global entries
 #define INVALID_RMW 0
 #define PROPOSED 1 // has seen a propose || has been proposed
-#define ACCEPTED 2 // has acked an acccept || has fired accepts
+#define ACCEPTED 2 // has acked an accept || has fired accepts
 #define NEEDS_GLOBAL 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
@@ -345,7 +344,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 

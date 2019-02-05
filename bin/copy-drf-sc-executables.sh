@@ -12,15 +12,17 @@ HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" )
 LOCAL_HOST=`hostname`
 EXECUTABLES=("drf-sc" "run-drf-sc.sh")
 HOME_FOLDER="/home/s1687259/drf-sc/src/drf-sc"
+MAKE_FOLDER="/home/s1687259/drf-sc/src"
 DEST_FOLDER="/home/s1687259/drf-sc-exec/src/drf-sc"
 
-cd $HOME_FOLDER
+cd $MAKE_FOLDER
+make clean
 make
 cd -
 
 for EXEC in "${EXECUTABLES[@]}"
 do
 	#echo "${EXEC} copied to {${HOSTS[@]/$LOCAL_HOST}}"
-	parallel scp ${HOME_FOLDER}/${EXEC} {}:${DEST_FOLDER}/${EXEC} ::: $(echo ${HOSTS[@]/$LOCAL_HOST})
+	parallel --will-cite scp ${HOME_FOLDER}/${EXEC} {}:${DEST_FOLDER}/${EXEC} ::: $(echo ${HOSTS[@]/$LOCAL_HOST})
 	echo "${EXEC} copied to {${HOSTS[@]/$LOCAL_HOST}}"
 done

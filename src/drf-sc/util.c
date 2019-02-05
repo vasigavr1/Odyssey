@@ -220,24 +220,24 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)
 }
 
 //When manufacturing the trace
-uint8_t compute_opcode(struct opcode_info *opc_info)
+uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
 {
   uint8_t  opcode = 0;
   bool is_rmw = false, is_update = false, is_sc = false; bool is_rmw_acquire = false;
   if (ENABLE_RMWS) {
     if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
     else
-      is_rmw = (rand() % 1000 < RMW_RATIO) ? true : false;
+      is_rmw = rand_r(seed) % 1000 < RMW_RATIO;
   }
   if (!is_rmw) {
-    is_update = (rand() % 1000 < WRITE_RATIO) ? true : false;
-    is_sc = (rand() % 1000 < SC_RATIO) ? true : false;
+    is_update = rand_r(seed) % 1000 < WRITE_RATIO;
+    is_sc = rand_r(seed) % 1000 < SC_RATIO;
   }
 
   if (is_rmw) {
     //if (!ALL_RMWS_SINGLE_KEY && !RMW_ONE_KEY_PER_THREAD)
     //printf("Worker %u, command %u is an RMW \n", t_id, i);
-    is_rmw_acquire = ((rand() % 1000 < RMW_ACQUIRE_RATIO) ? true : false) &&
+    is_rmw_acquire = ((rand_r(seed) % 1000 < RMW_ACQUIRE_RATIO) ? true : false) &&
                      ENABLE_RMW_ACQUIRES;
     if (is_rmw_acquire) opc_info->rmw_acquires++;
     else opc_info->rmws++;
@@ -277,10 +277,7 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
     FILE * fp;
     ssize_t read;
     size_t len = 0;
-    char* ptr;
-    char* word;
-    char *saveptr;
-    char* line = NULL;
+    char* ptr, *word, *saveptr, *line = NULL;
     uint32_t i = 0, hottest_key_counter = 0, cmd_count = 0, word_count = 0;
     struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
 
@@ -290,13 +287,9 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
         exit(EXIT_FAILURE);
     }
 
-    while ((getline(&line, &len, fp)) != -1)
-        cmd_count++;
-
+    while ((getline(&line, &len, fp)) != -1) cmd_count++;
     fclose(fp);
-    if (line)
-        free(line);
-
+    if (line) free(line);
     len = 0;
     line = NULL;
 
@@ -309,8 +302,8 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
     (*cmds) = (struct trace_command *)malloc((cmd_count + 1) * sizeof(struct trace_command));
     struct timespec time;
     clock_gettime(CLOCK_MONOTONIC, &time);
-    uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
-    srand ((uint)seed);
+    uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds));
+    srand (seed);
     int debug_cnt = 0;
     //parse file line by line and insert trace to cmd.
     for (i = 0; i < cmd_count; i++) {
@@ -322,7 +315,7 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
 
         //Before reading the request deside if it's gone be r_rep or write
        //bool is_rmw = false, is_update = false, is_sc = false;
-      (*cmds)[i].opcode = compute_opcode(opc_info);
+      (*cmds)[i].opcode = compute_opcode(opc_info, &seed);
 
       while (word != NULL) {
         if (word[strlen(word) - 1] == '\n')
@@ -374,9 +367,10 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
 {
   (*cmds) = (struct trace_command *)malloc((TRACE_SIZE + 1) * sizeof(struct trace_command));
   struct timespec time;
+  //struct random_data *buf;
   clock_gettime(CLOCK_MONOTONIC, &time);
-  uint64_t seed = time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
-  srand ((uint)seed);
+  uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds));
+  srand (seed);
   struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
   uint32_t i, keys_that_get_rmwed[NUM_OF_RMW_KEYS];
   if (ENABLE_RMWS) {
@@ -388,7 +382,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     (*cmds)[i].opcode = 0;
 
     //Before reading the request decide if it's gone be r_rep or write
-    (*cmds)[i].opcode = compute_opcode(opc_info);
+    (*cmds)[i].opcode = compute_opcode(opc_info, &seed);
 
     //--- KEY ID----------
     uint32 key_id;
@@ -401,7 +395,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
         key_id = (uint32_t) t_id;
       else if (ENABLE_NO_CONFLICT_RMW)
         key_id = (uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
-      else key_id = (uint32_t) (rand() % NUM_OF_RMW_KEYS);
+      else key_id = (uint32_t) (rand_r(&seed) % NUM_OF_RMW_KEYS);
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
@@ -409,7 +403,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     else {
       bool found = false;
       do {
-        key_id = (uint32) rand() % CACHE_NUM_KEYS;
+        key_id = (uint32) rand_r(&seed) % CACHE_NUM_KEYS;
         found = false;
         for (uint32_t j = 0; j < NUM_OF_RMW_KEYS; j++)
           if (key_id == keys_that_get_rmwed[j]) found = true;
@@ -422,13 +416,15 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
   if (t_id  == 0) {
     cyan_printf("UNIFORM TRACE \n");
     printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%% "
-             "RMW-Acquires: %.2f%%\n Trace w_size %d \n",
+             "RMW-Acquires: %.2f%%\n Trace w_size %u/%d \n",
            (double) (opc_info->writes * 100) / TRACE_SIZE,
            (double) (opc_info->sc_writes * 100) / TRACE_SIZE,
            (double) (opc_info->reads * 100) / TRACE_SIZE,
            (double) (opc_info->sc_reads * 100) / TRACE_SIZE,
            (double) (opc_info->rmws * 100) / TRACE_SIZE,
            (double) (opc_info->rmw_acquires * 100) / TRACE_SIZE,
+           opc_info->writes + opc_info->sc_writes + opc_info->reads + opc_info->sc_reads + opc_info->rmws +
+           opc_info->rmw_acquires,
            TRACE_SIZE);
   }
   (*cmds)[TRACE_SIZE].opcode = NOP;

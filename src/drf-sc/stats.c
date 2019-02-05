@@ -9,7 +9,7 @@ void *print_stats(void* no_arg) {
   long long all_clients_cache_hits = 0;
   double total_throughput = 0;
 
-  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 16 : 10;
+  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 16 : 16;
   struct thread_stats *curr_c_stats, *prev_c_stats;
   curr_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
   prev_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
