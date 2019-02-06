@@ -7,7 +7,7 @@ PROF    := -g -fno-omit-frame-pointer
 
 all: ${APPS}
 
-drf-sc: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o ../mica/mica.o ../mica/city.o main.o worker.o cache.o util.o stats.o
+drf-sc: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o ../mica/mica.o ../mica/city.o main.o client.o worker.o cache.o util.o stats.o
 	${LD} -o $@ $^ ${LDFLAGS}
 
 

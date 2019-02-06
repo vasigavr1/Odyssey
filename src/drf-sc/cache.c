@@ -68,7 +68,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 
     //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
     op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
-    uint8_t val = 'a';//(uint8_t) (op_key[1] & 0xff);
+    uint8_t val = 0;//(uint8_t) (op_key[1] & 0xff);
     memset(op.value, val, (uint32_t) val_len);
     //if (i < NUM_OF_RMW_KEYS)
     // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
@@ -90,7 +90,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op,
+inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op *op,
                                  struct cache_resp *resp,
                                  struct pending_ops *p_ops)
 {
@@ -116,8 +116,12 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
 	 * We first lookup the key in the datastore. The first two @I loops work
 	 * for both GETs and PUTs.
 	 */
-  KVS_locate_all_buckets(op_num, bkt, op, bkt_ptr, tag, kv_ptr,
-                         key_in_store, &cache);
+  for(op_i = 0; op_i < op_num; op_i++) {
+    struct cache_op *c_op = (struct cache_op*) &op[op_i];
+    KVS_locate_one_bucket(op_i, bkt, c_op, bkt_ptr, tag, kv_ptr,
+                          key_in_store, &cache);
+  }
+
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, &cache);
 
   uint64_t rmw_l_id = p_ops->prop_info->l_id;
@@ -147,7 +151,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op
           else if (ENABLE_ASSERTIONS) assert(false);
         }
         else if (ENABLE_RMWS) {
-          if (op[op_i].opcode == PROPOSE_OP) {
+          if (opcode_is_rmw(op[op_i].opcode)) {
             KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                p_ops, &rmw_l_id, op_i, t_id);
           }

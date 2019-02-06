@@ -372,6 +372,17 @@ optik_is_same_version_and_valid_netw_ts_meta(struct network_ts_tuple v1, volatil
   return v1.version == v2.version && v1.m_id == v2.m_id && v1.version % 2 == 0;
 }
 
+
+static inline bool opcode_is_rmw(uint8_t opcode)
+{
+  return opcode == FETCH_AND_ADD || opcode == COMPARE_AND_SWAP;
+}
+
+static inline bool opcode_is_compare_rmw(uint8_t opcode)
+{
+  return opcode == COMPARE_AND_SWAP;
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------ RDMA GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
@@ -828,7 +839,7 @@ static inline void check_trace_req(struct pending_ops *p_ops, struct trace_comma
   if (ENABLE_ASSERTIONS) {
     assert(trace->opcode != NOP);
     check_state_with_allowed_flags(6, trace->opcode, OP_RELEASE, CACHE_OP_PUT,
-                                   OP_ACQUIRE, CACHE_OP_GET, PROPOSE_OP);
+                                   OP_ACQUIRE, CACHE_OP_GET, FETCH_AND_ADD);
     assert(!p_ops->session_has_pending_op[working_session]);
     if (ENABLE_RMWS && p_ops->prop_info->entry[working_session].state != INVALID_RMW) {
       cyan_printf("wrk %u  Session %u has loc_entry state %u , helping flag %u\n", t_id,
@@ -1552,15 +1563,15 @@ static inline void check_keys_with_one_cache_op(struct key *com_key, struct cach
 }
 
 // Before batching to cache we give all ops an odd version, check if it were changed
-static inline void check_version_after_batching_trace_to_cache(struct cache_op* op,
+static inline void check_version_after_batching_trace_to_cache(struct trace_op* op,
                                                                struct cache_resp* resp, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    if (op->key.meta.version % 2 != 0) {
+    if (op->ts.version % 2 != 0) {
       red_printf("Wrkr %u, Trace to cache: Version not even: %u, opcode %u, resp %u \n",
-      t_id, op->key.meta.version, op->opcode, resp->type);
+      t_id, op->ts.version, op->opcode, resp->type);
     }
-    my_assert(op->key.meta.version % 2 == 0, "Trace to cache: Version must be even after cache");
+    my_assert(op->ts.version % 2 == 0, "Trace to cache: Version must be even after cache");
   }
 }
 
@@ -1693,7 +1704,9 @@ static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id
     //if (committed_log_no != *(uint32_t *)loc_entry->value_to_write)
     //  red_printf ("vale_to write/log no %u/%u",
      //             *(uint32_t *)loc_entry->value_to_write, committed_log_no );
-    fprintf(rmw_verify_fp[t_id], "%u %u %u \n", loc_entry->key.bkt, 0, loc_entry->accepted_log_no);
+    uint64_t val = *(uint64_t *)loc_entry->value_to_read;
+    assert(val == loc_entry->accepted_log_no - 1);
+    fprintf(rmw_verify_fp[t_id], "%u %lu %u \n", loc_entry->key.bkt, val, loc_entry->accepted_log_no);
   }
 }
 
@@ -2197,12 +2210,11 @@ static inline void increment_per_req_counters(uint8_t opcode, uint16_t t_id)
 }
 
 // In case of a miss in the KVS clean up the op, sessions and what not
-static inline void clean_up_on_KVS_miss(struct cache_op *op, struct pending_ops *p_ops,
+static inline void clean_up_on_KVS_miss(struct trace_op *op, struct pending_ops *p_ops,
                                         struct latency_flags *latency_info, uint16_t t_id)
 {
   if (op->opcode == OP_RELEASE || op->opcode == OP_ACQUIRE) {
-    uint32_t session_id = 0;
-    memcpy(&session_id, op, SESSION_BYTES);
+    uint16_t session_id = op->session_id;
     yellow_printf("Cache_miss, session %u \n", session_id);
     if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
     p_ops->session_has_pending_op[session_id] = false;
@@ -2750,15 +2762,15 @@ static inline bool glob_state_has_changed(struct rmw_entry* glob_entry,
 
 // Initialize a local  RMW entry on the first time it gets allocated
 static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p_ops,
-                                  struct cache_op *prop, uint16_t session_id,
+                                  struct trace_op *prop,
                                   uint16_t t_id, struct rmw_local_entry* loc_entry)
 {
-  loc_entry->opcode = PROPOSE_OP;
-  memcpy(&loc_entry->key, &prop->key.bkt, TRUE_KEY_SIZE);
+  loc_entry->opcode = prop->opcode;
+  memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   loc_entry->index_to_rmw = resp->rmw_entry;
   loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
-  loc_entry->sess_id = (uint16_t) session_id;
+  loc_entry->sess_id = prop->session_id;
   //loc_entry->accept_acks = 0;
   //loc_entry->accept_replies = 0;
   loc_entry->back_off_cntr = 0;
@@ -2767,7 +2779,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   loc_entry->rmw_id.id = p_ops->prop_info->l_id;
   loc_entry->l_id = p_ops->prop_info->l_id;
   loc_entry->help_loc_entry->l_id = p_ops->prop_info->l_id;
-  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, (uint16_t) session_id);
+  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, prop->session_id);
   loc_entry->accepted_log_no = 0;
   //yellow_printf("Init  RMW-id %u glob_sess_id %u \n", loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
   //loc_entry->help_loc_entry->log_no = 0;
@@ -3319,7 +3331,20 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, st
   read_info->rep_num++;
 }
 
-
+static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_entry,
+                                                    struct cache_op *kv_pair,
+                                                    uint16_t t_id)
+{
+ switch (loc_entry->opcode) {
+   case FETCH_AND_ADD:
+     memcpy(loc_entry->value_to_read, &kv_pair->value[BYTES_OVERRIDEN_IN_KVS_VALUE], (size_t) RMW_VALUE_SIZE);
+     *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + 1;
+     //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
+     break;
+   default:
+     if (ENABLE_ASSERTIONS) assert(false);
+ }
+}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
@@ -3352,7 +3377,7 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
   struct propose *prop = &p_mes->prop[inside_r_ptr];
   assign_ts_to_netw_ts(&prop->ts, &loc_entry->new_ts);
   memcpy(&prop->key, (void *)&loc_entry->key, TRUE_KEY_SIZE);
-  prop->opcode = loc_entry->opcode;
+  prop->opcode = PROPOSE_OP;
   prop->l_id = loc_entry->l_id;
   prop->t_rmw_id = loc_entry->rmw_id.id;
   prop->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
@@ -3664,12 +3689,12 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 
 
 // Insert an RMW in the local RMW structs
-static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
+static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
                               struct cache_resp *resp, uint16_t t_id)
 {
   //struct cache_op *prop = &ops[op_i];
   uint32_t session_id = 0;
-  memcpy(&session_id, prop, SESSION_BYTES);
+  session_id = prop->session_id;
   if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
   struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[session_id];
   if (ENABLE_ASSERTIONS) {
@@ -3679,7 +3704,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
       assert(false);
     }
   }
-  init_loc_entry(resp, p_ops, prop, (uint16_t) session_id, t_id, loc_entry);
+  init_loc_entry(resp, p_ops, prop, t_id, loc_entry);
   p_ops->prop_info->l_id++;
   // if the global RMW entry was occupied, put in the next op to try next round
   if (resp->type == RETRY_RMW_KEY_EXISTS) {
@@ -3693,7 +3718,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
     loc_entry->help_rmw->log_no = resp->log_no;
   }
   else if (resp->type == RMW_SUCCESS) { // the RMW has gotten an entry and is to be sent
-    fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->key.meta.version,
+    fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->ts.version,
                                           PROPOSED, (uint16_t) session_id, t_id);
     loc_entry->log_no = resp->log_no;
     insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
@@ -3705,11 +3730,12 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct cache_op *prop,
 
 // Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
 static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t_id,
-                                                 struct trace_command *trace, struct cache_op *ops,
+                                                 struct trace_command *trace, struct trace_op *ops,
                                                  struct pending_ops *p_ops, struct cache_resp *resp,
                                                  struct latency_flags *latency_info,
                                                  struct session_dbg *ses_dbg)
 {
+
   uint16_t writes_num = 0, reads_num = 0, op_i = 0;
   bool is_update;
   int working_session = -1;
@@ -3732,6 +3758,10 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     check_trace_req(p_ops, &trace[trace_iter], working_session, t_id);
     is_update = (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT ||
                  trace[trace_iter].opcode == (uint8_t) OP_RELEASE);
+    bool is_rmw = opcode_is_rmw(trace[trace_iter].opcode);
+    if (opcode_is_compare_rmw(trace[trace_iter].opcode)) {
+      ops[op_i].compare_val = ops[op_i].value;
+    }
     // Create some back pressure from the buffers, since the sessions may never be stalled
     if (!EMULATE_ABD) {
       if (trace[trace_iter].opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
@@ -3741,13 +3771,15 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
         break;
     }
     increment_per_req_counters(trace[trace_iter].opcode, t_id);
-    memcpy(((void *)&(ops[op_i].key)) + TRUE_KEY_SIZE, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
+    memcpy(&ops[op_i].key, trace[trace_iter].key_hash, TRUE_KEY_SIZE);
     ops[op_i].opcode = trace[trace_iter].opcode;
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
+
     if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE
-        || ops[op_i].opcode == PROPOSE_OP) {
+        || is_rmw) {
       p_ops->session_has_pending_op[working_session] = true;
-      memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
+      ops[op_i].session_id = (uint16_t) working_session;
+      //memcpy(&ops[op_i], &working_session, SESSION_BYTES);// Overload this field to associate a session with an op
     }
     if (ENABLE_ASSERTIONS && DEBUG_SESSIONS) ses_dbg->dbg_cnt[working_session] = 0;
     if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
@@ -3766,7 +3798,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     if (ENABLE_ASSERTIONS) {
       assert(WRITE_RATIO > 0 || is_update == 0);
       if (is_update) assert(ops[op_i].val_len > 0);
-      ops[op_i].key.meta.version = 1;
+      ops[op_i].ts.version = 1;
     }
     resp[op_i].type = EMPTY;
     trace_iter++;
@@ -3785,15 +3817,15 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
     }
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS);
-    else if (ENABLE_RMWS && ops[i].opcode == PROPOSE_OP) {
+    else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
       insert_rmw(p_ops, &ops[i], &resp[i], t_id);
     }
     else if (resp[i].type == CACHE_PUT_SUCCESS)
-      insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
+      insert_write(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, 0, t_id);
     else {
       if (ENABLE_ASSERTIONS) assert(resp[i].type == CACHE_GET_SUCCESS ||
                                     resp[i].type == CACHE_GET_TS_SUCCESS);
-      insert_read(p_ops, &ops[i], FROM_TRACE, t_id);
+      insert_read(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, t_id);
     }
   }
   return trace_iter;
@@ -3971,11 +4003,9 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
     glob_entry->state = ACCEPTED;
     // calculate the new value depending on the type of RMW
     struct cache_op *kv_pair = (struct cache_op *) loc_entry->ptr_to_kv_pair;
-    memcpy(glob_entry->value, &kv_pair->value[BYTES_OVERRIDEN_IN_KVS_VALUE], (size_t) RMW_VALUE_SIZE);
-    if (RMW_VALUE_SIZE >= 8) {
-      *(uint32_t *) glob_entry->value = glob_entry->log_no;
-      *(uint32_t *) loc_entry->value_to_write = glob_entry->log_no;
-    }
+    perform_the_rmw_on_the_loc_entry(loc_entry, kv_pair, t_id);
+    // we need to remember the last accepted value
+    memcpy(glob_entry->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     loc_entry->accepted_log_no = glob_entry->log_no;
     assign_second_rmw_id_to_first(&loc_entry->last_registered_rmw_id, &glob_entry->last_registered_rmw_id);
     check_last_registered_rmw_id(loc_entry, glob_entry, loc_entry->helping_flag, t_id);
@@ -6361,7 +6391,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
 /*-----------------------------FROM TRACE---------------------------------------------*/
 
 // Handle a local read/acquire from the trace in the KVS
-static inline void KVS_from_trace_reads_and_acquires(struct cache_op *op,
+static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
                                                      struct cache_op *kv_ptr, struct cache_resp *resp,
                                                      struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                                      uint16_t t_id)
@@ -6373,7 +6403,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct cache_op *op,
   bool value_forwarded = false; // has a pending out-of-epoch write forwarded its value to this
   if (op->opcode == CACHE_OP_GET && p_ops->p_ooe_writes->size > 0) {
     uint8_t *val_ptr;
-    if (search_out_of_epoch_writes(p_ops, (struct key *)&op->key.bkt, t_id, (void **) &val_ptr)) {
+    if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
       memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
       //red_printf("Wrkr %u Forwarding a value \n", t_id);
       value_forwarded = true;
@@ -6393,8 +6423,8 @@ static inline void KVS_from_trace_reads_and_acquires(struct cache_op *op,
     p_ops->read_info[r_push_ptr].opcode = op->opcode;
     p_ops->read_info[r_push_ptr].ts_to_read.m_id = prev_meta.m_id;
     p_ops->read_info[r_push_ptr].ts_to_read.version = prev_meta.version;
-    p_ops->read_info[r_push_ptr].key = *(struct key*) &op->key.bkt;
-    if (ENABLE_ASSERTIONS) op->key.meta.version = prev_meta.version;
+    p_ops->read_info[r_push_ptr].key = op->key;
+    if (ENABLE_ASSERTIONS) op->ts.version = prev_meta.version;
     resp->type = CACHE_GET_SUCCESS;
     if (ENABLE_STAT_COUNTING && op->opcode == CACHE_OP_GET) {
       t_stats[t_id].quorum_reads++;
@@ -6404,13 +6434,13 @@ static inline void KVS_from_trace_reads_and_acquires(struct cache_op *op,
   else { //stored value can be read locally or has been forwarded
     resp->type = CACHE_LOCAL_GET_SUCCESS;
     // this is needed to trick the version check in batch_from_trace_to_cache()
-    if (ENABLE_ASSERTIONS) op->key.meta.version = 0;
+    if (ENABLE_ASSERTIONS) op->ts.version = 0;
   }
   (*r_push_ptr_) =  r_push_ptr;
 }
 
 // Handle a local write from the trace in the KVS
-static inline void KVS_from_trace_writes(struct cache_op *op,
+static inline void KVS_from_trace_writes(struct trace_op *op,
                                          struct cache_op *kv_ptr, struct cache_resp *resp,
                                          struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                          uint16_t t_id)
@@ -6424,8 +6454,8 @@ static inline void KVS_from_trace_writes(struct cache_op *op,
     p_ops->read_info[r_push_ptr].ts_to_read.version = kv_ptr->key.meta.version - 1;
     optik_unlock_decrement_version(&kv_ptr->key.meta);
     p_ops->read_info[r_push_ptr].opcode = op->opcode;
-    p_ops->read_info[r_push_ptr].key = *(struct  key*) &op->key.bkt;
-    if (ENABLE_ASSERTIONS) op->key.meta.version = p_ops->read_info[r_push_ptr].ts_to_read.version;
+    p_ops->read_info[r_push_ptr].key = op->key;
+    if (ENABLE_ASSERTIONS) op->ts.version = p_ops->read_info[r_push_ptr].ts_to_read.version;
     // Store the value to be written in the read_info to be used in the second round
     memcpy(p_ops->read_info[r_push_ptr].value, op->value, VALUE_SIZE);
     p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
@@ -6438,14 +6468,14 @@ static inline void KVS_from_trace_writes(struct cache_op *op,
   else { // IN-EPOCH
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
     // This also writes the new version to op
-    optik_unlock_write(&kv_ptr->key.meta, (uint8_t) machine_id, (uint32_t *) &op->key.meta.version);
+    optik_unlock_write(&kv_ptr->key.meta, (uint8_t) machine_id, (uint32_t *) &op->ts.version);
     resp->type = CACHE_PUT_SUCCESS;
   }
 }
 
 
 // Handle a local release from the trace in the KVS
-static inline void KVS_from_trace_releases(struct cache_op *op,
+static inline void KVS_from_trace_releases(struct trace_op *op,
                                            struct cache_op *kv_ptr, struct cache_resp *resp,
                                            struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                            uint16_t t_id)
@@ -6458,10 +6488,10 @@ static inline void KVS_from_trace_releases(struct cache_op *op,
     debug_stalling_on_lock(&debug_cntr, "trace releases", t_id);
   } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr->key.meta));
 
-  if (ENABLE_ASSERTIONS) op->key.meta.version = prev_meta.version;
+  if (ENABLE_ASSERTIONS) op->ts.version = prev_meta.version;
   p_ops->read_info[r_push_ptr].ts_to_read.m_id = prev_meta.m_id;
   p_ops->read_info[r_push_ptr].ts_to_read.version = prev_meta.version;
-  p_ops->read_info[r_push_ptr].key = *(struct key*) &op->key.bkt;
+  p_ops->read_info[r_push_ptr].key = op->key;
   p_ops->read_info[r_push_ptr].opcode = op->opcode;
   // Store the value to be written in the read_info to be used in the second round
   memcpy(p_ops->read_info[r_push_ptr].value, op->value, VALUE_SIZE);
@@ -6471,7 +6501,7 @@ static inline void KVS_from_trace_releases(struct cache_op *op,
 }
 
 // Handle a local rmw from the trace in the KVS
-static inline void KVS_from_trace_rmw(struct cache_op *op,
+static inline void KVS_from_trace_rmw(struct trace_op *op,
                                       struct cache_op *kv_ptr, struct cache_resp *resp,
                                       struct pending_ops *p_ops, uint64_t *rmw_l_id_,
                                       uint16_t op_i, uint16_t t_id)
@@ -6481,6 +6511,7 @@ static inline void KVS_from_trace_rmw(struct cache_op *op,
   uint32_t entry = 0;
   uint32_t new_version = 0;
   optik_lock(&kv_ptr->key.meta);
+
   // if it's the first RMW
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
     // sess_id is stored in the first bytes of op
@@ -6499,7 +6530,7 @@ static inline void KVS_from_trace_rmw(struct cache_op *op,
     // key has been RMWed before
   else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) {
     entry = *(uint32_t *) kv_ptr->value;
-    check_keys_with_two_cache_ops(op, kv_ptr, entry);
+    check_keys_with_two_cache_ops((struct cache_op*) op, kv_ptr, entry);
     check_log_nos_of_glob_entry(&rmw.entry[entry], "cache_batch_op_trace", t_id);
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     if (glob_entry->state == INVALID_RMW) {
@@ -6524,14 +6555,14 @@ static inline void KVS_from_trace_rmw(struct cache_op *op,
   }
   resp->kv_pair_ptr = &kv_ptr->key.meta;
   // We need to put the new timestamp in the op too, both to send it and to store it for later
-  op->key.meta.version = new_version;
+  op->ts.version = new_version;
   optik_unlock_decrement_version(&kv_ptr->key.meta);
   resp->rmw_entry = entry;
   (*rmw_l_id_)++;
 }
 
 // Handle a local rmw from the trace in the KVS
-static inline void KVS_from_trace_rmw_acquire(struct cache_op *op, struct cache_op *kv_ptr,
+static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_op *kv_ptr,
                                               struct cache_resp *resp, struct pending_ops *p_ops,
                                               uint32_t *r_push_ptr_, uint16_t t_id)
 {
@@ -6546,7 +6577,7 @@ static inline void KVS_from_trace_rmw_acquire(struct cache_op *op, struct cache_
   else {
     if (ENABLE_ASSERTIONS) assert(kv_ptr->opcode == KEY_HAS_BEEN_RMWED);
     uint32_t entry = *(uint32_t *) kv_ptr->value;
-    check_keys_with_one_cache_op((struct key *) &op->key.bkt, kv_ptr, entry);
+    check_keys_with_one_cache_op(&op->key, kv_ptr, entry);
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     r_info->log_no = glob_entry->last_committed_log_no;
     r_info->rmw_id = glob_entry->last_committed_rmw_id;
@@ -6556,8 +6587,8 @@ static inline void KVS_from_trace_rmw_acquire(struct cache_op *op, struct cache_
   r_info->ts_to_read.m_id = kv_ptr->key.meta.m_id;
   memcpy(r_info->value, kv_ptr->value, VALUE_SIZE);
   optik_unlock_decrement_version(&kv_ptr->key.meta);
-  if (ENABLE_ASSERTIONS) op->key.meta.version = r_info->ts_to_read.version;
-  p_ops->read_info[r_push_ptr].key = *(struct key*) &op->key.bkt;
+  if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
+  p_ops->read_info[r_push_ptr].key = op->key;
   r_info->is_rmw = true;
   r_info->opcode = OP_ACQUIRE;
   MOD_ADD(r_push_ptr, PENDING_READS);

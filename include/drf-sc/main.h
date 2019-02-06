@@ -18,10 +18,12 @@
 #define WORKER_HYPERTHREADING 0 // schedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
+
+
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
-#define MACHINE_NUM 4
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define MACHINE_NUM 5
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -40,17 +42,21 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 00// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 400// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 00 // this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 00 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_RATIO 200 // this is out of 1000, e.g. 10 means 1%
+#define RMW_ACQUIRE_RATIO 200 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
-
+// CLIENTS
+#define ENABLE_CLIENTS 0
+#define CLIENTS_PER_MACHINE_ 1
+#define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
+#define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
 
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 #define SESSIONS_PER_MACHINE (WORKERS_PER_MACHINE * SESSIONS_PER_THREAD)
@@ -59,7 +65,7 @@
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
 #define CACHE_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
-#define SESSION_BYTES 3 // session ids must fit in 3 bytes i.e.
+#define SESSION_BYTES 2 // session ids must fit in 3 bytes i.e.
 
 
 
@@ -123,7 +129,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 100
+#define NUM_OF_RMW_KEYS 10000
 
 
 
@@ -904,7 +910,24 @@ struct fifo {
 
 };
 
+struct trace_op {
+  uint16_t session_id;
+  uint8_t unused;
+  struct network_ts_tuple ts;
+  struct key key;	/* This must be the 1st field and 16B aligned */
+  uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
+  uint8_t val_len;
+  uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
+  uint8_t* compare_val; //ptr to value to compare against on a CAS
+}__attribute__((__packed__));
 
+struct client_op {
+  struct key key;
+  uint8_t value[VALUE_SIZE];
+};
+
+
+// Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
   uint64_t reads_per_thread;
@@ -965,6 +988,11 @@ struct thread_stats { // 2 cache lines
 
 	//long long unused[3]; // padding to avoid false sharing
 };
+
+
+
+
+
 
 
 #define UP_STABLE 0
@@ -1067,8 +1095,8 @@ struct local_latency {
 
 extern struct latency_counters latency_count;
 
-void *follower(void *arg);
-void *leader(void *arg);
+
+void *client(void *arg);
 void *worker(void *arg);
 void *print_stats(void*);
 

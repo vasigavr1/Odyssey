@@ -114,7 +114,7 @@ void *worker(void *arg)
   set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, W_FIFO_SIZE * sizeof(struct w_message), cb);
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
 
-  struct cache_op *ops = (struct cache_op *) malloc(MAX_OP_BATCH * sizeof(struct cache_op));
+  struct trace_op *ops = (struct trace_op *) calloc(MAX_OP_BATCH, sizeof(struct trace_op));
   struct cache_resp *resp = (struct cache_resp *) malloc(MAX_OP_BATCH * sizeof(struct cache_resp));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl, w_recv_wr, w_recv_sgl,
                    r_recv_wr, r_recv_sgl,t_id, cb, w_mr, r_mr);

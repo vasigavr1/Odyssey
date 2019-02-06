@@ -177,6 +177,33 @@ src/drf-sc/cache.c.s:
 	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/drf-sc/cache.c.s
 .PHONY : src/drf-sc/cache.c.s
 
+src/drf-sc/client.o: src/drf-sc/client.c.o
+
+.PHONY : src/drf-sc/client.o
+
+# target to build an object file
+src/drf-sc/client.c.o:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/drf-sc/client.c.o
+.PHONY : src/drf-sc/client.c.o
+
+src/drf-sc/client.i: src/drf-sc/client.c.i
+
+.PHONY : src/drf-sc/client.i
+
+# target to preprocess a source file
+src/drf-sc/client.c.i:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/drf-sc/client.c.i
+.PHONY : src/drf-sc/client.c.i
+
+src/drf-sc/client.s: src/drf-sc/client.c.s
+
+.PHONY : src/drf-sc/client.s
+
+# target to generate assembly for a file
+src/drf-sc/client.c.s:
+	$(MAKE) -f CMakeFiles/drf-sc.dir/build.make CMakeFiles/drf-sc.dir/src/drf-sc/client.c.s
+.PHONY : src/drf-sc/client.c.s
+
 src/drf-sc/main.o: src/drf-sc/main.c.o
 
 .PHONY : src/drf-sc/main.o
@@ -435,6 +462,9 @@ help:
 	@echo "... src/drf-sc/cache.o"
 	@echo "... src/drf-sc/cache.i"
 	@echo "... src/drf-sc/cache.s"
+	@echo "... src/drf-sc/client.o"
+	@echo "... src/drf-sc/client.i"
+	@echo "... src/drf-sc/client.s"
 	@echo "... src/drf-sc/main.o"
 	@echo "... src/drf-sc/main.i"
 	@echo "... src/drf-sc/main.s"

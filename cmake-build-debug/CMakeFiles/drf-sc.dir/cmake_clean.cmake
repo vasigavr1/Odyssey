@@ -10,6 +10,7 @@ file(REMOVE_RECURSE
   "CMakeFiles/drf-sc.dir/src/mica/mica.c.o"
   "CMakeFiles/drf-sc.dir/src/mica/test.c.o"
   "CMakeFiles/drf-sc.dir/src/PaxosVerifier/PaxosVerifier.cpp.o"
+  "CMakeFiles/drf-sc.dir/src/drf-sc/client.c.o"
   "drf-sc.pdb"
   "drf-sc"
 )

@@ -27,6 +27,8 @@
 
 // MESSAGE OPCODES
 
+#define FETCH_AND_ADD 99
+#define COMPARE_AND_SWAP 100
 // when inserting the commit use this OP and change it to COMMIT_OP
 // before broadcasting. The purpose is for the state of the commit message to be tagged as SENT_RMW_ACQ
 // such that whens acks are gathered, it will be recognized that local entry need not get freed
@@ -180,7 +182,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 
 /* The leader and follower send their local requests to this, reads get served
  * But writes do not get served, writes are only propagated here to see whether their keys exist */
-void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct cache_op *op,
+void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op *op,
                           struct cache_resp *resp, struct pending_ops *);
 /* The leader sends the writes to be committed with this function*/
 void cache_batch_op_updates(uint16_t , uint16_t , struct write**, struct pending_ops*, uint32_t,  uint32_t, bool);

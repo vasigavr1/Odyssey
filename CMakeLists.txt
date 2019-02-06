@@ -44,7 +44,7 @@ set(SOURCE_FILES
         include/optik/measurements.h
         /usr/include/infiniband/verbs.h
         #Paxos Verifier
-        src/PaxosVerifier/PaxosVerifier.cpp)
+        src/PaxosVerifier/PaxosVerifier.cpp src/drf-sc/client.c)
 
 
 

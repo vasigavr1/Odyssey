@@ -27,7 +27,7 @@ void *print_stats(void* no_arg) {
 //        memcpy(curr_w_stats, (void*) f_stats, FOLLOWERS_PER_MACHINE * (sizeof(struct follower_stats)));
     all_clients_cache_hits = 0;
     print_count++;
-    if (EXIT_ON_PRINT == 1 && print_count == PRINT_NUM) {
+    if (EXIT_ON_PRINT  && print_count == PRINT_NUM) {
       if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE) print_latency_stats();
       printf("---------------------------------------\n");
       printf("------------RUN TERMINATED-------------\n");

@@ -143,6 +143,9 @@
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/cache.c">
 			<Option target="drf-sc"/>
 		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/client.c">
+			<Option target="drf-sc"/>
+		</Unit>
 		<Unit filename="/home/vasilis/Documents/houston/drf-sc/src/drf-sc/main.c">
 			<Option target="drf-sc"/>
 		</Unit>

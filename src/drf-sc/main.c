@@ -25,9 +25,9 @@ FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 int main(int argc, char *argv[])
 {
+	uint16_t i = 0;
   print_parameters_in_the_start();
   static_assert_compile_parameters();
-	int i, c;
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
 	remote_IP = (char *) malloc(16 * sizeof(char));
@@ -46,24 +46,18 @@ int main(int argc, char *argv[])
   print_for_debug = false;
 	next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
-
-	struct thread_params *param_arr;
-	pthread_t *thread_arr;
-  handle_program_inputs(argc, argv);
-
-	/* Launch  threads */
-	assert(machine_id < MACHINE_NUM && machine_id >=0);
-  assert(!(is_roce == 1 && ENABLE_MULTICAST));
-	num_threads =  WORKERS_PER_MACHINE;
-
-	param_arr = malloc(num_threads * sizeof(struct thread_params));
-	thread_arr = malloc((WORKERS_PER_MACHINE + 1) * sizeof(pthread_t));
 	memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
 	qps_are_set_up = 0;
 	cache_init(0, WORKERS_PER_MACHINE);
 
+	/* Handle Inputs */
+  handle_program_inputs(argc, argv);
+	assert(machine_id < MACHINE_NUM && machine_id >=0);
+	assert(!(is_roce == 1 && ENABLE_MULTICAST));
+
+	/* Latency Measurements initializations */
 #if MEASURE_LATENCY == 1
-  memset(&latency_count, 0, sizeof(struct latency_counters));
+	memset(&latency_count, 0, sizeof(struct latency_counters));
 	latency_count.hot_writes  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
   memset(latency_count.hot_writes, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
 	latency_count.hot_reads   = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
@@ -73,29 +67,38 @@ int main(int argc, char *argv[])
 	latency_count.acquires = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
   memset(latency_count.acquires, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
 #endif
+
+	/* Launch  threads */
+
+	num_threads = TOTAL_THREADS;
+	struct thread_params *param_arr = malloc(TOTAL_THREADS * sizeof(struct thread_params));
+	pthread_t *thread_arr = malloc(TOTAL_THREADS * sizeof(pthread_t));
 	pthread_attr_t attr;
 	cpu_set_t pinned_hw_threads;
 	pthread_attr_init(&attr);
-	int occupied_cores[TOTAL_CORES] = { 0 };
+	bool occupied_cores[TOTAL_CORES] = { 0 };
   char node_purpose[15];
   sprintf(node_purpose, "Worker");
-	for(i = 0; i < num_threads; i++) {
-    // PAXOS VERIFIER
-    if (VERIFY_PAXOS || PRINT_LOGS) {
-      char fp_name[40];
-      sprintf(fp_name, "../PaxosVerifier/thread%d.out", GET_GLOBAL_T_ID(machine_id, i));
-      rmw_verify_fp[i] = fopen(fp_name, "w+");
-    }
-    //--
-		param_arr[i].id = i;
-		int core = pin_thread(i);
-		yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[i].id, core);
-		CPU_ZERO(&pinned_hw_threads);
-		CPU_SET(core, &pinned_hw_threads);
-		pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &pinned_hw_threads);
-		pthread_create(&thread_arr[i], &attr, worker, &param_arr[i]);
-		occupied_cores[core] = 1;
+	for(i = 0; i < TOTAL_THREADS; i++) {
+		if (i < WORKERS_PER_MACHINE) {
+			// PAXOS VERIFIER
+			if (VERIFY_PAXOS || PRINT_LOGS) {
+				char fp_name[40];
+				sprintf(fp_name, "../PaxosVerifier/thread%d.out", GET_GLOBAL_T_ID(machine_id, i));
+				rmw_verify_fp[i] = fopen(fp_name, "w+");
+			}
+      spawn_threads(param_arr, i, "Worker", &pinned_hw_threads, &attr, thread_arr, worker, occupied_cores);
+		}
+    else {
+			assert(ENABLE_CLIENTS);
+			spawn_threads(param_arr, i, "Client", &pinned_hw_threads, &attr, thread_arr, client, occupied_cores);
+		}
+
 	}
+
+
+
+
 	for(i = 0; i < num_threads; i++)
 		pthread_join(thread_arr[i], NULL);
 	return 0;

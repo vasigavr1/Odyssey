@@ -84,6 +84,7 @@ void static_assert_compile_parameters()
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
 #endif
+  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  , "");
 }
 
 void print_parameters_in_the_start()
@@ -158,6 +159,20 @@ void handle_program_inputs(int argc, char *argv[])
         assert(false);
     }
   }
+}
+
+void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
+                   cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,
+                   void *(*__start_routine) (void *), bool *occupied_cores)
+{
+  param_arr[t_id].id = t_id;
+  int core = pin_thread(t_id);
+  yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
+  CPU_ZERO(pinned_hw_threads);
+  CPU_SET(core, pinned_hw_threads);
+  pthread_attr_setaffinity_np(attr, sizeof(cpu_set_t), pinned_hw_threads);
+  pthread_create(&thread_arr[t_id], attr, __start_routine, &param_arr[t_id]);
+  occupied_cores[core] = 1;
 }
 
 // Worker calls this function to connect with all workers
@@ -241,7 +256,7 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
                      ENABLE_RMW_ACQUIRES;
     if (is_rmw_acquire) opc_info->rmw_acquires++;
     else opc_info->rmws++;
-    opcode = (uint8_t) (is_rmw_acquire ? OP_ACQUIRE : PROPOSE_OP);
+    opcode = (uint8_t) (is_rmw_acquire ? OP_ACQUIRE : FETCH_AND_ADD);
   }
   else if (is_update) {
     if (is_sc && ENABLE_RELEASES) {
