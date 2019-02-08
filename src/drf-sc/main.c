@@ -96,9 +96,6 @@ int main(int argc, char *argv[])
 
 	}
 
-
-
-
 	for(i = 0; i < num_threads; i++)
 		pthread_join(thread_arr[i], NULL);
 	return 0;

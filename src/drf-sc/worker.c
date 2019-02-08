@@ -56,48 +56,44 @@ void *worker(void *arg)
 	---------------------------------------------------------*/
   // R_QP_ID 0: send Reads -- receive Reads
   struct ibv_send_wr r_send_wr[MAX_R_WRS];
-  struct ibv_sge r_send_sgl[MAX_BCAST_BATCH], r_recv_sgl[MAX_RECV_R_WRS];
+  struct ibv_sge r_send_sgl[MAX_BCAST_BATCH];
   struct ibv_wc r_recv_wc[MAX_RECV_R_WRS];
-  struct ibv_recv_wr r_recv_wr[MAX_RECV_R_WRS];
 
   // R_REP_QP_ID 1: send Read Replies  -- receive Read Replies
   struct ibv_send_wr r_rep_send_wr[MAX_R_REP_WRS];
-  struct ibv_sge r_rep_send_sgl[MAX_R_REP_WRS], r_rep_recv_sgl[MAX_RECV_R_REP_WRS];
+  struct ibv_sge r_rep_send_sgl[MAX_R_REP_WRS];
   struct ibv_wc r_rep_recv_wc[MAX_RECV_R_REP_WRS];
-  struct ibv_recv_wr r_rep_recv_wr[MAX_RECV_R_REP_WRS];
 
   // W_QP_ID 2: Send Writes receive Writes
   struct ibv_send_wr w_send_wr[MAX_W_WRS];
-  struct ibv_sge w_send_sgl[MAX_BCAST_BATCH], w_recv_sgl[MAX_RECV_W_WRS];
+  struct ibv_sge w_send_sgl[MAX_BCAST_BATCH];
   struct ibv_wc w_recv_wc[MAX_RECV_W_WRS];
-  struct ibv_recv_wr w_recv_wr[MAX_RECV_W_WRS];
 
   // ACK_QP_ID 3: send ACKs -- receive ACKs
   struct ibv_send_wr ack_send_wr[MAX_ACK_WRS];
-  struct ibv_sge ack_send_sgl[MAX_ACK_WRS], ack_recv_sgl[MAX_RECV_ACK_WRS];
+  struct ibv_sge ack_send_sgl[MAX_ACK_WRS];
   struct ibv_wc ack_recv_wc[MAX_RECV_ACK_WRS];
-  struct ibv_recv_wr ack_recv_wr[MAX_RECV_ACK_WRS];
 
 
  	uint16_t credits[VC_NUM][MACHINE_NUM];
   uint64_t r_br_tx = 0, w_br_tx = 0, r_rep_tx = 0, ack_tx = 0;
-
-
 	uint32_t trace_iter = 0;
 
-  struct recv_info *w_recv_info, *ack_recv_info, *r_recv_info, *r_rep_recv_info;
-  init_recv_info(&w_recv_info, w_buf_push_ptr, W_BUF_SLOTS,
-                 (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS, w_recv_wr, cb->dgram_qp[W_QP_ID],
-                 w_recv_sgl, (void*) w_buffer);
-  init_recv_info(&ack_recv_info, ack_buf_push_ptr, ACK_BUF_SLOTS,
-                 (uint32_t) ACK_RECV_SIZE, 0, ack_recv_wr, cb->dgram_qp[ACK_QP_ID], ack_recv_sgl,
-                 (void*) ack_buffer);
-  init_recv_info(&r_recv_info, r_buf_push_ptr, R_BUF_SLOTS,
-                 (uint32_t) R_RECV_SIZE, 0, r_recv_wr, cb->dgram_qp[R_QP_ID], r_recv_sgl,
+  struct recv_info *r_recv_info, *r_rep_recv_info, *w_recv_info, *ack_recv_info ;
+  init_recv_info(cb, &r_recv_info, r_buf_push_ptr, R_BUF_SLOTS,
+                 (uint32_t) R_RECV_SIZE, 0, cb->dgram_qp[R_QP_ID], MAX_RECV_R_WRS,
                  (void*) r_buffer);
-  init_recv_info(&r_rep_recv_info, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
-                 (uint32_t) R_REP_RECV_SIZE, 0, r_rep_recv_wr, cb->dgram_qp[R_REP_QP_ID], r_rep_recv_sgl,
+  init_recv_info(cb, &r_rep_recv_info, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
+                 (uint32_t) R_REP_RECV_SIZE, 0, cb->dgram_qp[R_REP_QP_ID], MAX_RECV_R_REP_WRS,
                  (void*) r_rep_buffer);
+
+  init_recv_info(cb, &w_recv_info, w_buf_push_ptr, W_BUF_SLOTS,
+                 (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS,  cb->dgram_qp[W_QP_ID],
+                 MAX_RECV_W_WRS, (void*) w_buffer);
+
+  init_recv_info(cb, &ack_recv_info, ack_buf_push_ptr, ACK_BUF_SLOTS,
+                 (uint32_t) ACK_RECV_SIZE, 0, cb->dgram_qp[ACK_QP_ID], MAX_RECV_ACK_WRS,
+                 (void*) ack_buffer);
 
   struct ack_message acks[MACHINE_NUM] = {0};
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {
@@ -115,11 +111,12 @@ void *worker(void *arg)
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
 
   struct trace_op *ops = (struct trace_op *) calloc(MAX_OP_BATCH, sizeof(struct trace_op));
+  randomize_op_values(ops, t_id);
   struct cache_resp *resp = (struct cache_resp *) malloc(MAX_OP_BATCH * sizeof(struct cache_resp));
-  set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl, w_recv_wr, w_recv_sgl,
-                   r_recv_wr, r_recv_sgl,t_id, cb, w_mr, r_mr);
-  set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl, ack_recv_wr, ack_recv_sgl,
-                         r_rep_recv_wr, r_rep_recv_sgl, cb, r_rep_mr, acks, t_id);
+  set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl,
+                   t_id, cb, w_mr, r_mr);
+  set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl,
+                         cb, r_rep_mr, acks, t_id);
   set_up_credits(credits);
   assert(credits[R_VC][0] == R_CREDITS && credits[W_VC][0] == W_CREDITS);
   struct quorum_info *q_info;
@@ -228,7 +225,8 @@ void *worker(void *arg)
     ---------------------------------------------------------------------------*/
     // if (WRITE_RATIO > 0)
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
-              ack_recv_wc,  ack_recv_info, &latency_info, t_id, waiting_dbg_counter, &outstanding_writes);
+              ack_recv_wc, ack_recv_info, &latency_info,
+              t_id, waiting_dbg_counter, &outstanding_writes);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------

@@ -24,8 +24,8 @@ void static_assert_compile_parameters()
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
 
-  static_assert(VALUE_SIZE > BYTES_OVERRIDEN_IN_KVS_VALUE, "");
-  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + BYTES_OVERRIDEN_IN_KVS_VALUE), "RMW requires the value to be at least this many bytes");
+  static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
+  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + RMW_BYTE_OFFSET), "RMW requires the value to be at least this many bytes");
 
   static_assert(sizeof(struct write) == W_SIZE, "");
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
@@ -84,7 +84,8 @@ void static_assert_compile_parameters()
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
 #endif
-  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  , "");
+  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8, "");
+  static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 }
 
 void print_parameters_in_the_start()
@@ -238,6 +239,7 @@ void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb)
 uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
 {
   uint8_t  opcode = 0;
+  uint8_t cas_opcode = USE_WEAK_CAS ? COMPARE_AND_SWAP_WEAK : COMPARE_AND_SWAP_STRONG;
   bool is_rmw = false, is_update = false, is_sc = false; bool is_rmw_acquire = false;
   if (ENABLE_RMWS) {
     if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
@@ -252,11 +254,21 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
   if (is_rmw) {
     //if (!ALL_RMWS_SINGLE_KEY && !RMW_ONE_KEY_PER_THREAD)
     //printf("Worker %u, command %u is an RMW \n", t_id, i);
-    is_rmw_acquire = ((rand_r(seed) % 1000 < RMW_ACQUIRE_RATIO) ? true : false) &&
+    is_rmw_acquire = (rand_r(seed) % 1000 < RMW_ACQUIRE_RATIO) &&
                      ENABLE_RMW_ACQUIRES;
-    if (is_rmw_acquire) opc_info->rmw_acquires++;
-    else opc_info->rmws++;
-    opcode = (uint8_t) (is_rmw_acquire ? OP_ACQUIRE : FETCH_AND_ADD);
+    if (!is_rmw_acquire) {
+      opc_info->rmws++;
+      if (TRACE_ONLY_CAS) opcode = cas_opcode;
+      else if (TRACE_ONLY_FA) opcode = FETCH_AND_ADD;
+      else if (TRACE_MIXED_RMWS)
+        opcode = (uint8_t) ((rand_r(seed) % 1000 < TRACE_CAS_RATIO) ? cas_opcode : FETCH_AND_ADD);
+    if (opcode == cas_opcode) opc_info->cas++;
+    else opc_info->fa++;
+    }
+    else {
+      opcode = (uint8_t) OP_ACQUIRE;
+      opc_info->rmw_acquires++;
+    }
   }
   else if (is_update) {
     if (is_sc && ENABLE_RELEASES) {
@@ -430,13 +442,15 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
 
   if (t_id  == 0) {
     cyan_printf("UNIFORM TRACE \n");
-    printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%% "
-             "RMW-Acquires: %.2f%%\n Trace w_size %u/%d \n",
+    printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%, "
+             "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d \n",
            (double) (opc_info->writes * 100) / TRACE_SIZE,
            (double) (opc_info->sc_writes * 100) / TRACE_SIZE,
            (double) (opc_info->reads * 100) / TRACE_SIZE,
            (double) (opc_info->sc_reads * 100) / TRACE_SIZE,
            (double) (opc_info->rmws * 100) / TRACE_SIZE,
+           (double) (opc_info->cas * 100) / TRACE_SIZE,
+           (double) (opc_info->fa * 100) / TRACE_SIZE,
            (double) (opc_info->rmw_acquires * 100) / TRACE_SIZE,
            opc_info->writes + opc_info->sc_writes + opc_info->reads + opc_info->sc_reads + opc_info->rmws +
            opc_info->rmw_acquires,
@@ -617,7 +631,7 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctr
 }
 
 /* ---------------------------------------------------------------------------
-------------------------------ABD--------------------------------------
+------------------------------DRF--------------------------------------
 ---------------------------------------------------------------------------*/
 // set the different queue depths for the queue pairs
 void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
@@ -645,7 +659,7 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 }
 
 /* ---------------------------------------------------------------------------
-------------------------------ABD WORKER --------------------------------------
+------------------------------DRF WORKER --------------------------------------
 ---------------------------------------------------------------------------*/
 // Initialize the rmw struct
 void set_up_rmw_struct()
@@ -755,8 +769,6 @@ void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t 
 // Set up all Broadcast WRs
 void set_up_bcast_WRs(struct ibv_send_wr *w_send_wr, struct ibv_sge *w_send_sgl,
                       struct ibv_send_wr *r_send_wr, struct ibv_sge *r_send_sgl,
-                      struct ibv_recv_wr *w_recv_wr, struct ibv_sge *w_recv_sgl,
-                      struct ibv_recv_wr *r_recv_wr, struct ibv_sge *r_recv_sgl,
                       uint16_t remote_thread,  struct hrd_ctrl_blk *cb,
                       struct ibv_mr *w_mr, struct ibv_mr *r_mr)
 {
@@ -791,28 +803,11 @@ void set_up_bcast_WRs(struct ibv_send_wr *w_send_wr, struct ibv_sge *w_send_sgl,
       r_send_wr[index].next = (i == MESSAGES_IN_BCAST - 1) ? NULL : &r_send_wr[index + 1];
     }
   }
-  // W RECVs
-  for (i = 0; i < MAX_RECV_W_WRS; i++) {
-    w_recv_sgl[i].length = (uint32_t)W_RECV_SIZE;
-    w_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    w_recv_wr[i].sg_list = &w_recv_sgl[i];
-    w_recv_wr[i].num_sge = 1;
-  }
-  // R RECVs
-  for (i = 0; i < MAX_RECV_R_WRS; i++) {
-    r_recv_sgl[i].length = (uint32_t)R_RECV_SIZE;
-    r_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    r_recv_wr[i].sg_list = &r_recv_sgl[i];
-    r_recv_wr[i].num_sge = 1;
-  }
-
 }
 
 // Set up the r_rep replies and acks send and recv wrs
 void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_send_sgl,
                             struct ibv_send_wr *r_rep_send_wr, struct ibv_sge *r_rep_send_sgl,
-                            struct ibv_recv_wr *ack_recv_wr, struct ibv_sge *ack_recv_sgl,
-                            struct ibv_recv_wr *r_rep_recv_wr, struct ibv_sge *r_rep_recv_sgl,
                             struct hrd_ctrl_blk *cb, struct ibv_mr *r_rep_mr,
                             struct ack_message *acks, uint16_t remote_thread) {
   uint16_t i;
@@ -841,20 +836,6 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack
     r_rep_send_wr[i].num_sge = 1;
     r_rep_send_wr[i].sg_list = &r_rep_send_sgl[i];
   }
-
-  // ACK Receives
-  for (i = 0; i < MAX_RECV_ACK_WRS; i++) {
-    ack_recv_sgl[i].length = ACK_RECV_SIZE;
-    ack_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    ack_recv_wr[i].sg_list = &ack_recv_sgl[i];
-    ack_recv_wr[i].num_sge = 1;
-  }
-  for (i = 0; i < MAX_RECV_R_REP_WRS; i++) {
-    r_rep_recv_sgl[i].length = (uint32_t)R_REP_RECV_SIZE;
-    r_rep_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    r_rep_recv_wr[i].sg_list = &r_rep_recv_sgl[i];
-    r_rep_recv_wr[i].num_sge = 1;
-  }
 }
 
 
@@ -871,19 +852,28 @@ void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
 }
 
 // Set up the receive info
-void init_recv_info(struct recv_info **recv, uint32_t push_ptr, uint32_t buf_slots,
-                    uint32_t slot_size, uint32_t posted_recvs, struct ibv_recv_wr *recv_wr,
-                    struct ibv_qp * recv_qp, struct ibv_sge* recv_sgl, void* buf)
+void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
+                    uint32_t push_ptr, uint32_t buf_slots,
+                    uint32_t slot_size, uint32_t posted_recvs,
+                    struct ibv_qp *recv_qp, int max_recv_wrs, void* buf)
 {
   (*recv) = malloc(sizeof(struct recv_info));
   (*recv)->push_ptr = push_ptr;
   (*recv)->buf_slots = buf_slots;
   (*recv)->slot_size = slot_size;
   (*recv)->posted_recvs = posted_recvs;
-  (*recv)->recv_wr = recv_wr;
   (*recv)->recv_qp = recv_qp;
-  (*recv)->recv_sgl = recv_sgl;
   (*recv)->buf = buf;
+  (*recv)->recv_wr = (struct ibv_recv_wr *)malloc(max_recv_wrs * sizeof(struct ibv_recv_wr));
+  (*recv)->recv_sgl = (struct ibv_sge *)malloc(max_recv_wrs * sizeof(struct ibv_sge));
+
+  for (int i = 0; i < max_recv_wrs; i++) {
+    (*recv)->recv_sgl[i].length = slot_size;
+    (*recv)->recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
+    (*recv)->recv_wr[i].sg_list = &((*recv)->recv_sgl[i]);
+    (*recv)->recv_wr[i].num_sge = 1;
+  }
+
 }
 
 
@@ -911,7 +901,15 @@ void set_up_credits(uint16_t credits[][MACHINE_NUM])
 
 }
 
-
+// If reading CAS rmws out of the trace, CASes that compare against 0 succeed the rest fail
+void randomize_op_values(struct trace_op *ops, uint16_t t_id)
+{
+  for (uint16_t i = 0; i < MAX_OP_BATCH; i++) {
+    if (rand() % 1000 < RMW_CAS_CANCEL_RATIO)
+      memset(ops[i].value, 1, VALUE_SIZE);
+    else memset(ops[i].value, 0, VALUE_SIZE);
+  }
+}
 
 /* ---------------------------------------------------------------------------
 ------------------------------MULTICAST --------------------------------------

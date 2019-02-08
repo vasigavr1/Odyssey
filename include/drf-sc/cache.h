@@ -26,9 +26,11 @@
 #define WRITE_REPLAY_STATE 5
 
 // MESSAGE OPCODES
-
+#define COMPARE_AND_SWAP_STRONG 97
+#define COMPARE_AND_SWAP_WEAK 98
 #define FETCH_AND_ADD 99
-#define COMPARE_AND_SWAP 100
+
+
 // when inserting the commit use this OP and change it to COMMIT_OP
 // before broadcasting. The purpose is for the state of the commit message to be tagged as SENT_RMW_ACQ
 // such that whens acks are gathered, it will be recognized that local entry need not get freed
@@ -59,7 +61,9 @@
 //Cache Response
 //#define RETRY_RMW_NO_ENTRIES 0
 #define RETRY_RMW_KEY_EXISTS 1
+#define RMW_FAILURE 2 // when a CAS has to be cut short
 #define RMW_SUCCESS 118
+
 
 #define EMPTY 120
 #define CACHE_GET_TS_SUCCESS 21

@@ -35,22 +35,21 @@ void *print_stats(void* no_arg) {
       exit(0);
     }
     seconds *= MILLION;//1000; // compute only MIOPS
-    for (i = 0; i < num_threads; i++) {
+    uint64_t total_cancelled_rmws =  0, total_rmws = 0;
+    for (i = 0; i < WORKERS_PER_MACHINE; i++) {
 
       all_clients_cache_hits += curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread;
+      total_cancelled_rmws += curr_c_stats[i].cancelled_rmws - prev_c_stats[i].cancelled_rmws;
+      total_rmws += curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed;
       all_stats.cache_hits_per_thread[i] =
         (curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread) / seconds;
 
 
-//      all_stats.stalled_gid[i] = (curr_c_stats[i].stalled_gid - prev_c_stats[i].stalled_gid) / seconds;
+
       all_stats.stalled_ack[i] = (curr_c_stats[i].stalled_ack - prev_c_stats[i].stalled_ack) / seconds;
       all_stats.stalled_r_rep[i] =
         (curr_c_stats[i].stalled_r_rep - prev_c_stats[i].stalled_r_rep) / seconds;
-     // if (WRITE_RATIO < 1000 && ENABLE_LIN)
-     //   all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) * (1000 - WRITE_RATIO) / (1000 * seconds);
-     // else
-        all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
-
+      all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
       all_stats.rmws_completed[i] = (curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed) / (seconds);
       all_stats.proposes_sent[i] = (curr_c_stats[i].proposes_sent - prev_c_stats[i].proposes_sent) / (seconds);
       all_stats.accepts_sent[i] = (curr_c_stats[i].accepts_sent - prev_c_stats[i].accepts_sent) / (seconds);
@@ -66,12 +65,12 @@ void *print_stats(void* no_arg) {
       all_stats.received_r_reps[i] = (curr_c_stats[i].received_r_reps - prev_c_stats[i].received_r_reps) / seconds;
       all_stats.received_acks[i] = (curr_c_stats[i].received_acks - prev_c_stats[i].received_acks) / seconds;
 
-        all_stats.ack_batch_size[i] = (curr_c_stats[i].acks_sent - prev_c_stats[i].acks_sent) /
-                                      (double) (curr_c_stats[i].acks_sent_mes_num -
-                                                prev_c_stats[i].acks_sent_mes_num);
-        all_stats.write_batch_size[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) /
-                                      (double) (curr_c_stats[i].writes_sent_mes_num -
-                                                prev_c_stats[i].writes_sent_mes_num);
+      all_stats.ack_batch_size[i] = (curr_c_stats[i].acks_sent - prev_c_stats[i].acks_sent) /
+                                    (double) (curr_c_stats[i].acks_sent_mes_num -
+                                              prev_c_stats[i].acks_sent_mes_num);
+      all_stats.write_batch_size[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) /
+                                    (double) (curr_c_stats[i].writes_sent_mes_num -
+                                              prev_c_stats[i].writes_sent_mes_num);
       all_stats.r_batch_size[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) /
                                       (double) (curr_c_stats[i].reads_sent_mes_num -
                                                 prev_c_stats[i].reads_sent_mes_num);
@@ -86,12 +85,13 @@ void *print_stats(void* no_arg) {
       uint64_t prev_true_read_sent = prev_c_stats[i].reads_sent - prev_c_stats[i].releases_per_thread;
       all_stats.reads_that_become_writes[i] = (curr_c_stats[i].read_to_write - prev_c_stats[i].read_to_write) /
                                               (double)((curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent));
+
     }
 
     memcpy(prev_c_stats, curr_c_stats, num_threads * (sizeof(struct thread_stats)));
     total_throughput = (all_clients_cache_hits) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f \n", print_count, total_throughput);
+    green_printf("%u %.2f %.2f\n", print_count, total_throughput,  (total_cancelled_rmws / (double) total_rmws));
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

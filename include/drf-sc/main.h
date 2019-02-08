@@ -36,7 +36,7 @@
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define RMW_BACK_OFF_TIMEOUT 15000 //K_32 //K_32// M_1
+#define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
@@ -129,7 +129,14 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 10000
+#define NUM_OF_RMW_KEYS 1000
+#define TRACE_ONLY_CAS 1
+#define TRACE_ONLY_FA 0
+#define TRACE_MIXED_RMWS 0
+#define TRACE_CAS_RATIO 500 // out of a 1000
+#define ENABLE_CAS_CANCELLING 1
+#define RMW_CAS_CANCEL_RATIO 400 // out of 1000
+#define USE_WEAK_CAS 0
 
 
 
@@ -149,8 +156,8 @@
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
-#define BYTES_OVERRIDEN_IN_KVS_VALUE 4
-#define RMW_VALUE_SIZE (VALUE_SIZE - BYTES_OVERRIDEN_IN_KVS_VALUE)
+#define RMW_BYTE_OFFSET 4 // the value starts 4 bytes in
+#define RMW_VALUE_SIZE (VALUE_SIZE - RMW_BYTE_OFFSET)
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
 #define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
@@ -800,9 +807,11 @@ struct rmw_local_entry {
   uint8_t opcode;
   uint8_t state;
   uint8_t helping_flag;
-
+  bool killable;
+  bool rmw_is_successful;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
+  uint8_t *compare_val; //for CAS
   struct rmw_id rmw_id; // this is implicitly the l_id
   struct rmw_id last_registered_rmw_id;
   struct rmw_rep_info rmw_reps;
@@ -899,8 +908,16 @@ struct recv_info {
 	struct ibv_qp * recv_qp;
 	struct ibv_sge* recv_sgl;
 	void* buf;
-
 };
+
+struct send_info {
+  struct ibv_send_wr *send_wr;
+  struct ibv_sge *r_send_sgl;
+  struct ibv_sge *r_recv_sgl;
+  struct ibv_wc *r_recv_wc;
+  struct ibv_recv_wr *r_recv_wr;
+};
+
 
 struct fifo {
   void *fifo;
@@ -918,7 +935,7 @@ struct trace_op {
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
   uint8_t val_len;
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
-  uint8_t* compare_val; //ptr to value to compare against on a CAS
+  uint8_t* argument_ptr; //ptr to argument:compare value for CAS/  addition argument for F&A
 }__attribute__((__packed__));
 
 struct client_op {
@@ -980,6 +997,7 @@ struct thread_stats { // 2 cache lines
   uint64_t accepts_sent; // number of broadcast
   uint64_t commits_sent;
   uint64_t rmws_completed;
+  uint64_t cancelled_rmws;
 
 
 
@@ -988,11 +1006,6 @@ struct thread_stats { // 2 cache lines
 
 	//long long unused[3]; // padding to avoid false sharing
 };
-
-
-
-
-
 
 
 #define UP_STABLE 0

@@ -55,6 +55,7 @@ struct stats {
 	double received_reads[WORKERS_PER_MACHINE];
 	double received_acks[WORKERS_PER_MACHINE];
 	double received_r_reps[WORKERS_PER_MACHINE];
+  double cancelled_rmws[WORKERS_PER_MACHINE];
 
 	double reads_that_become_writes[WORKERS_PER_MACHINE];
 };
@@ -123,6 +124,8 @@ struct opcode_info {
 	uint32_t sc_writes;
 	uint32_t rmws;
 	uint32_t rmw_acquires;
+  uint32_t cas; // number of compare and swaps
+  uint32_t fa; // number of Fetch and adds
 };
 
 // Worker calls this function to connect with all workers
@@ -156,14 +159,12 @@ void set_up_q_info(struct quorum_info **q_info);
 void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t buffer_size,
                struct hrd_ctrl_blk *cb);
 // Set up all Broadcast WRs
-void set_up_bcast_WRs(struct ibv_send_wr*, struct ibv_sge*, struct ibv_send_wr*,
-                      struct ibv_sge*, struct ibv_recv_wr*, struct ibv_sge*,
-                      struct ibv_recv_wr*, struct ibv_sge*, uint16_t,
+void set_up_bcast_WRs(struct ibv_send_wr*, struct ibv_sge*,
+                      struct ibv_send_wr*, struct ibv_sge*, uint16_t,
                       struct hrd_ctrl_blk*, struct ibv_mr*, struct ibv_mr*);
 // Set up the r_rep replies and acks send and recv wrs
-void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*, struct ibv_send_wr*,
-                            struct ibv_sge*, struct ibv_recv_wr*, struct ibv_sge*,
-                            struct ibv_recv_wr*, struct ibv_sge*,
+void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*,
+                            struct ibv_send_wr*, struct ibv_sge*,
                             struct hrd_ctrl_blk*, struct ibv_mr*,
                             struct ack_message*, uint16_t);
 
@@ -171,9 +172,9 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*, struct ibv_sen
 // construct a prep_message-- max_size must be in bytes
 void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t);
 // Set up the receive info
-void init_recv_info(struct recv_info **recv, uint32_t push_ptr, uint32_t buf_slots,
-                    uint32_t slot_size, uint32_t, struct ibv_recv_wr *recv_wr,
-                    struct ibv_qp * recv_qp, struct ibv_sge* recv_sgl, void* buf);
+void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
+                    uint32_t push_ptr, uint32_t buf_slots,
+                    uint32_t slot_size, uint32_t, struct ibv_qp * recv_qp, int, void* buf);
 
 
 // Post receives for the coherence traffic in the init phase
@@ -181,10 +182,9 @@ void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
                     uint32_t, uint32_t, uint16_t, uint32_t);
 
 // Set up the credits
-//void set_up_credits(uint16_t credits[][MACHINE_NUM]);
 void set_up_credits(uint16_t credits[][MACHINE_NUM]);
 
-
+void randomize_op_values(struct trace_op *ops, uint16_t t_id);
 
 
 /* ---------------------------------------------------------------------------
