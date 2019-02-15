@@ -169,9 +169,10 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
       }
 		}
 		if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-      //red_printf("Cache_miss: bkt %u/%u, server %u/%u, tag %u/%u \n",
-      //          op[I].key.bkt, kv_ptr[I]->key.bkt ,op[I].key.server,
-      //          kv_ptr[I]->key.server, op[I].key.tag, kv_ptr[I]->key.tag);
+      red_printf("miss\n");
+      //red_printf("Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+            //    op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
+           //     kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
 			resp[op_i].type = CACHE_MISS;
 		}
 	}

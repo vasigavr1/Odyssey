@@ -84,8 +84,15 @@ void static_assert_compile_parameters()
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
 #endif
-  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8, "");
+  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8 + 4, "");
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
+
+  // CLIENT
+//  printf(" \n \n %u  %u \n \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
+  static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
+  static_assert(sizeof(struct client_op) == CLIENT_OP_SIZE, "");
+  static_assert(sizeof(struct client_op) % 64 == 0, "");
+
 }
 
 void print_parameters_in_the_start()
@@ -478,7 +485,8 @@ void trace_init(void **cmds, uint16_t t_id) {
 
       //initialize the command array from the trace file
       parse_trace(path, (struct trace_command **)cmds, t_id);
-    }else {
+    }
+    else {
       manufacture_trace((struct trace_command **)cmds, t_id);
     }
 

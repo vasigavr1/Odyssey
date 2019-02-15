@@ -22,6 +22,8 @@ atomic_uint_fast32_t next_rmw_entry_available;
 atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
+struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+
 
 int main(int argc, char *argv[])
 {
@@ -49,6 +51,8 @@ int main(int argc, char *argv[])
 	memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
 	qps_are_set_up = 0;
 	cache_init(0, WORKERS_PER_MACHINE);
+
+  //req_array = calloc(PER_SESSION_REQ_NUM * SESSIONS_PER_THREAD,  sizeof(struct client_op));
 
 	/* Handle Inputs */
   handle_program_inputs(argc, argv);

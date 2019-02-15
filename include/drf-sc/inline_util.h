@@ -3903,6 +3903,128 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
 }
 
 
+
+
+
+// Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
+static inline void batch_from_client_to_cache(uint32_t *pull_ptr, uint16_t t_id,
+                                                 struct trace_op *ops,
+                                                 struct pending_ops *p_ops, struct cache_resp *resp,
+                                                 struct latency_flags *latency_info,
+                                                 struct session_dbg *ses_dbg)
+{
+
+  uint16_t writes_num = 0, reads_num = 0, op_i = 0;
+  bool is_update;
+  int working_session = -1;
+  if (p_ops->all_sessions_stalled) {
+    if (ENABLE_ASSERTIONS) debug_all_sessions(ses_dbg, p_ops, t_id);
+    return;
+  }
+  for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
+    if (!p_ops->session_has_pending_op[i] && (req_array[i][pull_ptr[i]].state == ACTIVE_REQ)) {
+      working_session = i;
+      break;
+    }
+    else if (ENABLE_ASSERTIONS) debug_sessions(ses_dbg, p_ops, i, t_id);
+  }
+  //printf("working session = %d\n", working_session);
+  if (working_session == -1) return;
+  if (ENABLE_ASSERTIONS) assert(working_session != -1);
+
+
+
+  //green_printf("op_i %d , pull_ptr %d, trace[pull_ptr[working_session]].opcode %d \n",
+  // op_i, pull_ptr, trace[pull_ptr[working_session]].opcode);
+  while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
+    //check_trace_req(p_ops, &trace[pull_ptr[working_session]], working_session, t_id);
+    uint8_t opcode = req_array[working_session][pull_ptr[working_session]].opcode;
+    struct key *key = &req_array[working_session][pull_ptr[working_session]].key;
+    ops[op_i].ptr_to_req_array = pull_ptr[working_session];
+    MOD_ADD(pull_ptr[working_session], PER_SESSION_REQ_NUM);
+    is_update = (opcode == (uint8_t) CACHE_OP_PUT ||
+                 opcode == (uint8_t) OP_RELEASE);
+    bool is_rmw = opcode_is_rmw(opcode);
+    if (opcode_is_compare_rmw(opcode)) {
+      ops[op_i].argument_ptr = ops[op_i].value;
+    }
+    // Create some back pressure from the buffers, since the sessions may never be stalled
+    if (!EMULATE_ABD) {
+      if (opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
+      // A write (relaxed or release) can first trigger a read
+      reads_num += opcode == (uint8_t) OP_ACQUIRE ? 2 : 1;
+      if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE || p_ops->virt_r_size + reads_num >= MAX_ALLOWED_R_SIZE)
+        break;
+    }
+    increment_per_req_counters(opcode, t_id);
+    memcpy(&ops[op_i].key, key, TRUE_KEY_SIZE);
+    ops[op_i].opcode = opcode;
+    ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
+
+    if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE
+        || is_rmw) {
+      p_ops->session_has_pending_op[working_session] = true;
+    }
+    ops[op_i].session_id = (uint16_t) working_session;
+    if (ENABLE_ASSERTIONS && DEBUG_SESSIONS) ses_dbg->dbg_cnt[working_session] = 0;
+    if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
+
+    //if (pull_ptr[[working_session]] == 100000) yellow_printf("Working ses %u \n", working_session);
+    //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
+
+    while (p_ops->session_has_pending_op[working_session] || req_array[working_session][pull_ptr[working_session]].state != ACTIVE_REQ) {
+      if (ENABLE_ASSERTIONS) debug_sessions(ses_dbg, p_ops, (uint32_t) working_session, t_id);
+      working_session++;
+      if (working_session == SESSIONS_PER_THREAD) {
+        //p_ops->all_sessions_stalled = true;
+        break;
+      }
+    }
+    //cyan_printf("thread %d  next working session %d total ops %d, opcode %u \n",
+     //           t_id, working_session, op_i, ops[op_i].opcode);
+    if (ENABLE_ASSERTIONS) {
+      assert(WRITE_RATIO > 0 || is_update == 0);
+      if (is_update) assert(ops[op_i].val_len > 0);
+      ops[op_i].ts.version = 1;
+    }
+    resp[op_i].type = EMPTY;
+    op_i++;
+  }
+
+  t_stats[t_id].cache_hits_per_thread += op_i;
+  cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
+  //cyan_printf("thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
+  for (uint16_t i = 0; i < op_i; i++) {
+    //printf("%u %u \n", i, ops[i].opcode);
+    check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
+    // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
+    if (resp[i].type == CACHE_MISS)  {
+      green_printf("Cache_miss %u: bkt %u, server %u, tag %u \n", i, ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
+      assert(false);
+      clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
+    }
+    else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
+      assert(ops[i].session_id < SESSIONS_PER_THREAD);
+      green_printf("Releasing sess %u, op_i %u, ptr_to_req %u ptr %p \n", ops[i].session_id, i,
+                  ops[i].ptr_to_req_array, &req_array[ops[i].session_id][ops[i].ptr_to_req_array].state);
+      atomic_store_explicit(&req_array[ops[i].session_id][ops[i].ptr_to_req_array].state, COMPLETED_REQ, memory_order_release);
+    }
+    else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
+      insert_rmw(p_ops, &ops[i], &resp[i], t_id);
+    }
+    else if (resp[i].type == CACHE_PUT_SUCCESS)
+      insert_write(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, 0, t_id);
+    else {
+      if (ENABLE_ASSERTIONS) assert(resp[i].type == CACHE_GET_SUCCESS ||
+                                    resp[i].type == CACHE_GET_TS_SUCCESS);
+      insert_read(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, t_id);
+    }
+  }
+}
+
+
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ RMW------------------------------------------
 //---------------------------------------------------------------------------*/
