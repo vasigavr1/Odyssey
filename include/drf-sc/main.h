@@ -23,8 +23,8 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 2
-#define WRITE_RATIO 0 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 1
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 8
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -42,8 +42,8 @@
 #define ENABLE_STAT_COUNTING 0
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 000// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 1
+#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES_ 0
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
@@ -94,6 +94,7 @@
 
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_OP_SIZE 64 // TODO fix this
+#define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
 	-----------------MULTICAST-------------------------
@@ -860,6 +861,8 @@ struct pending_ops {
   uint64_t local_r_id;
   uint32_t *r_session_id;
   uint32_t *w_session_id;
+  uint32_t *w_index_to_req_array;
+  uint32_t *r_index_to_req_array;
 
   uint8_t *w_state;
   uint8_t *r_state;
@@ -936,7 +939,7 @@ struct trace_op {
   uint8_t val_len;
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
   uint8_t* argument_ptr; //ptr to argument:compare value for CAS/  addition argument for F&A
-  uint32_t ptr_to_req_array;
+  uint32_t index_to_req_array;
 }__attribute__((__packed__));
 
 #define INVALID_REQ 0 // entry not being used
@@ -956,6 +959,7 @@ struct client_op {
 
 
 extern struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+extern atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
 
 // Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines
@@ -1067,7 +1071,7 @@ struct multiple_owner_bit {
 // increased their epoch id
 extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
-extern atomic_char qps_are_set_up;
+extern atomic_bool qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;

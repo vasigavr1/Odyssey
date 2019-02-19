@@ -12,7 +12,7 @@ struct bit_vector send_bit_vector;
 //struct bit_vector conf_bit_vector;
 struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 
-atomic_char qps_are_set_up;
+atomic_bool qps_are_set_up;
 atomic_uint_fast16_t epoch_id;
 atomic_bool print_for_debug;
 const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
@@ -23,6 +23,7 @@ atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
 struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
 
 
 int main(int argc, char *argv[])
@@ -49,9 +50,9 @@ int main(int argc, char *argv[])
 	next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
 	memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-	qps_are_set_up = 0;
+	qps_are_set_up = false;
 	cache_init(0, WORKERS_PER_MACHINE);
-
+  //memset(buffer_state, 0, SESSIONS_PER_THREAD);
   //req_array = calloc(PER_SESSION_REQ_NUM * SESSIONS_PER_THREAD,  sizeof(struct client_op));
 
 	/* Handle Inputs */
@@ -91,11 +92,13 @@ int main(int argc, char *argv[])
 				sprintf(fp_name, "../PaxosVerifier/thread%d.out", GET_GLOBAL_T_ID(machine_id, i));
 				rmw_verify_fp[i] = fopen(fp_name, "w+");
 			}
-      spawn_threads(param_arr, i, "Worker", &pinned_hw_threads, &attr, thread_arr, worker, occupied_cores);
+      spawn_threads(param_arr, i, "Worker", &pinned_hw_threads,
+                    &attr, thread_arr, worker, occupied_cores);
 		}
     else {
 			assert(ENABLE_CLIENTS);
-			spawn_threads(param_arr, i, "Client", &pinned_hw_threads, &attr, thread_arr, client, occupied_cores);
+			spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
+                    &attr, thread_arr, client, occupied_cores);
 		}
 
 	}

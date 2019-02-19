@@ -174,7 +174,7 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
                    void *(*__start_routine) (void *), bool *occupied_cores)
 {
   param_arr[t_id].id = t_id;
-  int core = pin_thread(t_id);
+  int core = pin_thread(t_id) + 8 + t_id * 20;
   yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
   CPU_ZERO(pinned_hw_threads);
   CPU_SET(core, pinned_hw_threads);
@@ -625,14 +625,14 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctr
 
     if (t_id == 0) {
       get_qps_from_all_other_machines(global_id, cb);
-      assert(qps_are_set_up == 0);
+      assert(!qps_are_set_up);
       // Spawn a thread that prints the stats
       if (spawn_stats_thread() != 0)
           red_printf("Stats thread was not successfully spawned \n");
-      atomic_store_explicit(&qps_are_set_up, 1, memory_order_release);
+      atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
     }
     else {
-        while (atomic_load_explicit(&qps_are_set_up, memory_order_acquire)== 0);  usleep(200000);
+        while (atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
     }
     assert(qps_are_set_up == 1);
 //    printf("Thread %d has all the needed ahs\n", global_id );
@@ -689,6 +689,8 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
   (*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
   (*p_ops)->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
+  (*p_ops)->w_index_to_req_array = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
+  (*p_ops)->r_index_to_req_array = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
   (*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
   (*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
   (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));

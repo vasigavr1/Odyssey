@@ -147,7 +147,7 @@ void *worker(void *arg)
   // helper for polling writes: in a corner failure-realted case,
   // it may be that not all avaialble writes can be polled due to the unavailability of the acks
   uint32_t completed_but_not_polled_writes = 0;
-  uint32_t client_req_push_ptr[SESSIONS_PER_THREAD] = {0};
+  uint32_t client_req_pull_ptr[SESSIONS_PER_THREAD] = {0};
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
@@ -240,7 +240,7 @@ void *worker(void *arg)
                                            p_ops, resp, &latency_info,
                                            ses_dbg);
     else
-      batch_from_client_to_cache(client_req_push_ptr, t_id, ops,
+      batch_from_client_to_cache(client_req_pull_ptr, t_id, ops,
                                  p_ops, resp, &latency_info,
                                  ses_dbg);
 

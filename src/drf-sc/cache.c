@@ -121,7 +121,6 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
     KVS_locate_one_bucket(op_i, bkt, c_op, bkt_ptr, tag, kv_ptr,
                           key_in_store, &cache);
   }
-
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, &cache);
 
   uint64_t rmw_l_id = p_ops->prop_info->l_id;
