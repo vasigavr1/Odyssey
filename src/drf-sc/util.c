@@ -174,7 +174,7 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
                    void *(*__start_routine) (void *), bool *occupied_cores)
 {
   param_arr[t_id].id = t_id;
-  int core = pin_thread(t_id) + 8 + t_id * 20;
+  int core = pin_thread(t_id); // + 8 + t_id * 20;
   yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
   CPU_ZERO(pinned_hw_threads);
   CPU_SET(core, pinned_hw_threads);
@@ -632,9 +632,9 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctr
       atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
     }
     else {
-        while (atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
+        while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
     }
-    assert(qps_are_set_up == 1);
+    assert(qps_are_set_up);
 //    printf("Thread %d has all the needed ahs\n", global_id );
 }
 

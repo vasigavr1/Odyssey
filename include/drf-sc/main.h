@@ -22,7 +22,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 2
+#define MACHINE_NUM 5
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 8
 #define MEASURE_LATENCY 0
@@ -39,14 +39,14 @@
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 0
+#define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
 #define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 0
+#define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 0
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
@@ -818,6 +818,7 @@ struct rmw_local_entry {
   struct rmw_rep_info rmw_reps;
   uint16_t epoch_id;
   uint16_t sess_id;
+  uint32_t index_to_req_array;
   uint32_t back_off_cntr;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;

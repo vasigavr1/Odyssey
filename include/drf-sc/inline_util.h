@@ -1078,7 +1078,7 @@ static inline void increase_credits_when_polling_r_reps(uint16_t credits[][MACHI
 static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
                                   uint32_t sess_id, uint16_t t_id)
 {
-  if (DEBUG_SESSIONS) {
+  if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
     //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
     ses_dbg->dbg_cnt[sess_id]++;
     if (ses_dbg->dbg_cnt[sess_id] == DEBUG_SESS_COUNTER) {
@@ -1088,11 +1088,11 @@ static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_op
   }
 }
 
-// Debug session
+// Debug all the session
 static inline void debug_all_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
                                       uint16_t t_id)
 {
-  if (DEBUG_SESSIONS) {
+  if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
     for (uint16_t sess_id = 0; sess_id < SESSIONS_PER_THREAD; sess_id++) {
       ses_dbg->dbg_cnt[sess_id]++;
       //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
@@ -1941,28 +1941,28 @@ static inline void free_glob_entry_if_rmw_failed(struct rmw_local_entry *loc_ent
   }
 }
 
-// is any request of the client request array active
-static inline bool any_request_active(uint16_t session_id, uint32_t pull_ptr)
+static inline void debug_set_version_of_op_to_one(struct trace_op *ops, uint16_t op_i, uint8_t opcode,
+                                                  uint16_t t_id)
 {
-  for (uint32_t i = 0; i < PER_SESSION_REQ_NUM; i++) {
-    if (req_array[session_id][i].state == ACTIVE_REQ) {
-      red_printf("session %u slot %u, state %u pull ptr %u\n",
-                 session_id, i, req_array[session_id][i].state, pull_ptr);
-      if (i == pull_ptr) return false;
-      return true;
-    }
+  if (ENABLE_ASSERTIONS) {
+    bool is_update = (opcode == (uint8_t) CACHE_OP_PUT ||
+                      opcode == (uint8_t) OP_RELEASE);
+    assert(WRITE_RATIO > 0 || is_update == 0);
+    if (is_update) assert(ops[op_i].val_len > 0);
+    ops[op_i].ts.version = 1;
   }
-
-  return false;
 }
 
-// singla completion of a request to the client
-static inline void signal_completion_to_client(uint32_t sess_id,
-                                               uint32_t req_array_i, uint16_t t_id)
+static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16_t req_array_i, uint16_t t_id)
 {
-  if (ENABLE_CLIENTS)
-    atomic_store_explicit(&req_array[sess_id][req_array_i].state, COMPLETED_REQ, memory_order_release);
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_id < SESSIONS_PER_THREAD);
+    assert(req_array_i < PER_SESSION_REQ_NUM);
+    assert(t_id < WORKERS_PER_MACHINE);
+
+  }
 }
+
 
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------
@@ -2228,6 +2228,67 @@ static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
 //------------------------------ DRF-SPECIFIC UTILITY-------------------------
 //---------------------------------------------------------------------------*/
 
+/*-------------------------------- CLIENT REQUEST ARRAY ----------------------------------------*/
+// singal completion of a request to the client
+static inline void signal_completion_to_client(uint32_t sess_id,
+                                               uint32_t req_array_i, uint16_t t_id)
+{
+  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+  if (ENABLE_CLIENTS)
+    atomic_store_explicit(&req_array[sess_id][req_array_i].state, COMPLETED_REQ, memory_order_release);
+  if (CLIENT_DEBUG)
+    green_printf("Releasing sess %u, ptr_to_req %u ptr %p \n", sess_id,
+                 req_array_i, &req_array[sess_id][req_array_i].state);
+}
+
+// singal that the requuqest is being processed to tne client
+static inline void signal_in_progress_to_client(uint32_t sess_id,
+                                                uint32_t req_array_i, uint16_t t_id)
+{
+  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+  if (ENABLE_CLIENTS)
+    atomic_store_explicit(&req_array[sess_id][req_array_i].state, IN_PROGRESS_REQ, memory_order_release);
+}
+
+// Returns whether a certain request is active, i.e. if the client has issued a request in a slot
+static inline bool is_client_req_active(uint32_t sess_id,
+                                        uint32_t req_array_i, uint16_t t_id)
+{
+  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+  return req_array[sess_id][req_array_i].state == ACTIVE_REQ;
+}
+
+// is any request of the client request array active
+static inline bool any_request_active(uint16_t session_id, uint32_t pull_ptr, uint16_t t_id)
+{
+  for (uint32_t i = 0; i < PER_SESSION_REQ_NUM; i++) {
+    if (is_client_req_active(session_id, i, t_id)) {
+      red_printf("session %u slot %u, state %u pull ptr %u\n",
+                 session_id, i, req_array[session_id][i].state, pull_ptr);
+      if (i == pull_ptr) return false;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns ture if it's valid to pull a request for that session
+static inline bool pull_request_from_this_session(struct pending_ops *p_ops, uint16_t sess_id,
+                                                  uint32_t *pull_ptr, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_id < SESSIONS_PER_THREAD);
+    if (ENABLE_CLIENTS) {
+      assert(pull_ptr!= NULL);
+      assert(pull_ptr[sess_id] < PER_SESSION_REQ_NUM);
+    }
+  }
+  if (ENABLE_CLIENTS)
+    return (!p_ops->session_has_pending_op[sess_id]) && is_client_req_active(sess_id, pull_ptr[sess_id], t_id);
+  else
+    return (!p_ops->session_has_pending_op[sess_id]);
+}
+
 // Increment the per-request counters
 static inline void increment_per_req_counters(uint8_t opcode, uint16_t t_id)
 {
@@ -2249,6 +2310,7 @@ static inline void clean_up_on_KVS_miss(struct trace_op *op, struct pending_ops 
     if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
     p_ops->session_has_pending_op[session_id] = false;
     p_ops->all_sessions_stalled = false;
+    signal_completion_to_client(op->session_id, op->index_to_req_array, t_id);
     t_stats[t_id].cache_hits_per_thread--;
     if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
         latency_info->measured_req_flag != NO_REQ &&
@@ -2395,40 +2457,38 @@ set_w_session_id_and_index_to_req_array(struct pending_ops *p_ops, struct cache_
                                         struct read_info *r_info, const uint16_t t_id)
 {
   struct trace_op *op = (struct trace_op*) write;
-  if (source == FROM_TRACE) {
-
-    p_ops->w_session_id[w_ptr] = op->session_id;
-    if (ENABLE_CLIENTS) {
-      p_ops->w_index_to_req_array[w_ptr] = op->index_to_req_array;
-    }
-    return;
-  }
-  else if (source == FROM_COMMIT) {
-    struct rmw_local_entry* loc_entry = (struct rmw_local_entry*) write;
-    p_ops->w_session_id[w_ptr] = loc_entry->sess_id;
-    return;
-  }
-  else if (source != FROM_READ) { //source = FROM_WRITE || LIN_WRITE
-    if (write->opcode == OP_RELEASE_BIT_VECTOR) {
+  struct rmw_local_entry *loc_entry = (struct rmw_local_entry *) write;
+  switch (source) {
+    case FROM_TRACE:
+      p_ops->w_session_id[w_ptr] = op->session_id;
+      if (ENABLE_CLIENTS) {
+        p_ops->w_index_to_req_array[w_ptr] = op->index_to_req_array;
+      }
+      return;
+    case FROM_COMMIT:
+      p_ops->w_session_id[w_ptr] = loc_entry->sess_id;
+      return;
+    // source = FROM_READ: 2nd round of Acquires/Releases, 2nd round of out-of-epoch Writes
+    // This also includes Commits triggered by RMW-Acquires
+    case FROM_READ:   //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
+      p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
+      if (ENABLE_CLIENTS) {
+        p_ops->w_index_to_req_array[w_ptr] = p_ops->r_index_to_req_array[incoming_pull_ptr];
+      }
+      return;
+    case RELEASE_THIRD: //source = FROM_WRITE || LIN_WRITE
       if (ENABLE_ASSERTIONS) {
+        assert(write != NULL);
         uint16_t session_id = 0;
         memcpy(&session_id, write, SESSION_BYTES);
         assert(session_id == *(uint16_t *) write);
+        assert(write->opcode == OP_RELEASE_BIT_VECTOR);
       }
-      p_ops->w_session_id[w_ptr] =  *(uint16_t *)write;
-      return;
+      p_ops->w_session_id[w_ptr] = *(uint16_t *) write;
       //if (DEBUG_SESSIONS)
       //  cyan_printf("Wrkr: %u third round of release by session %u \n", t_id, p_ops->w_session_id[w_ptr]);
-    }
-  }
-  // source = FROM_READ: data reads/writes need not care about the session id as they are not blocking it
-  // This also includes Commits triggered by RMW-Acquires
-  else if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
-    p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
-    if (ENABLE_CLIENTS) {
-      p_ops->w_index_to_req_array[w_ptr] = p_ops->r_index_to_req_array[incoming_pull_ptr];
-    }
-    return;
+      return;
+    default: if (ENABLE_ASSERTIONS) assert(false);
   }
 
 }
@@ -2851,6 +2911,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   loc_entry->index_to_rmw = resp->rmw_entry;
   loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
   loc_entry->sess_id = prop->session_id;
+  loc_entry->index_to_req_array = prop->index_to_req_array;
   //loc_entry->accept_acks = 0;
   //loc_entry->accept_replies = 0;
   loc_entry->back_off_cntr = 0;
@@ -2938,6 +2999,7 @@ static inline void free_session(struct pending_ops *p_ops, uint16_t sess_id, boo
     assert(p_ops->session_has_pending_op[sess_id]);
   }
   if (VERIFY_PAXOS && allow_paxos_log) verify_paxos(loc_entry, t_id);
+  signal_completion_to_client(sess_id, loc_entry->index_to_req_array, t_id);
   p_ops->session_has_pending_op[sess_id] = false;
   p_ops->all_sessions_stalled = false;
 }
@@ -3481,6 +3543,8 @@ static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, s
   return false;
 }
 
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
@@ -3598,8 +3662,6 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
   const uint32_t r_ptr = p_ops->r_push_ptr;
   struct read_info *r_info = &p_ops->read_info[r_ptr];
   bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
-  //
-
   bool first_is_rmw = r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP;
   bool change_mes = inside_r_ptr > 0 && (first_is_rmw);
   if (change_mes) {
@@ -3644,7 +3706,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
 
   p_ops->r_state[r_ptr] = VALID;
   if (source == FROM_TRACE) {
-    if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
+    //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
       struct trace_op *tr_op = (struct trace_op *) op;
       p_ops->r_session_id[r_ptr] = tr_op->session_id;
       if (ENABLE_CLIENTS) {
@@ -3653,7 +3715,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
       //memcpy(&p_ops->r_session_id[r_ptr], op, SESSION_BYTES); // session id has to fit in 3 bytes
       // Query the conf to see if the machine has lost messages
       if (r_info->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id);
-    }
+   // }
   }
 
   // Increase the virtual size by 2 if the req is an acquire
@@ -3822,7 +3884,9 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
   uint16_t session_id = prop->session_id;
   if (resp->type == RMW_FAILURE) {
     //printf("Wrkr%u, sess %u, entry %u rmw_failing \n", t_id, session_id, resp->rmw_entry);
-    free_session(p_ops, session_id, false, t_id);
+    signal_completion_to_client(session_id, prop->index_to_req_array, t_id);
+    p_ops->session_has_pending_op[session_id] = false;
+    p_ops->all_sessions_stalled = false;
     return;
   }
   if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
@@ -3856,6 +3920,65 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
   else my_assert(false, "Wrong resp type in RMW");
 }
 
+// Fill the trace_op to be passed to the KVS. Returns whether the no more requests can be processed
+static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *ops, uint32_t *pull_ptr,
+                                 uint32_t trace_iter, struct trace_command *trace,
+                                 uint16_t op_i, int working_session, uint16_t *writes_num_, uint16_t *reads_num_,
+                                 struct session_dbg *ses_dbg,struct latency_flags *latency_info,
+                                 uint16_t t_id)
+{
+  uint8_t opcode;
+  struct key *key;
+  if (ENABLE_CLIENTS) {
+    opcode = req_array[working_session][pull_ptr[working_session]].opcode;
+    key = &req_array[working_session][pull_ptr[working_session]].key;
+    ops[op_i].index_to_req_array = pull_ptr[working_session];
+    if (ENABLE_ASSERTIONS) assert(is_client_req_active((uint32_t) working_session, pull_ptr[working_session], t_id));
+  }
+  else {
+    check_trace_req(p_ops, &trace[pull_ptr[working_session]], working_session, t_id);
+    opcode = trace[trace_iter].opcode;
+    key = (struct key *) &trace[trace_iter].key_hash;
+  }
+
+  uint16_t writes_num = *writes_num_, reads_num = *reads_num_;
+  bool is_update = (opcode == (uint8_t) CACHE_OP_PUT ||
+                  opcode == (uint8_t) OP_RELEASE);
+  bool is_rmw = opcode_is_rmw(opcode);
+  if (opcode_is_compare_rmw(opcode)) {
+    ops[op_i].argument_ptr = ops[op_i].value;
+  }
+  // Create some back pressure from the buffers, since the sessions may never be stalled
+  if (!EMULATE_ABD) {
+    if (opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
+    // A write (relaxed or release) can first trigger a read
+    reads_num += opcode == (uint8_t) OP_ACQUIRE ? 2 : 1;
+    if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE ||
+        p_ops->virt_r_size + reads_num >= MAX_ALLOWED_R_SIZE) {
+      //printf("breaking due to max allowed_r_size %u/%d \n", p_ops->virt_r_size + reads_num, MAX_ALLOWED_R_SIZE);
+      return true;
+    }
+  }
+  increment_per_req_counters(opcode, t_id);
+  memcpy(&ops[op_i].key, key, TRUE_KEY_SIZE);
+  ops[op_i].opcode = opcode;
+  ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
+  if (ops[op_i].opcode == OP_RELEASE ||
+      ops[op_i].opcode == OP_ACQUIRE || is_rmw) {
+    p_ops->session_has_pending_op[working_session] = true;
+  }
+  ops[op_i].session_id = (uint16_t) working_session;
+
+  if (ENABLE_ASSERTIONS && DEBUG_SESSIONS) ses_dbg->dbg_cnt[working_session] = 0;
+  if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
+
+  //if (pull_ptr[[working_session]] == 100000) yellow_printf("Working ses %u \n", working_session);
+  //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
+  *writes_num_ = writes_num, *reads_num_ = reads_num;
+  if (ENABLE_CLIENTS) MOD_ADD(pull_ptr[working_session], PER_SESSION_REQ_NUM);
+  debug_set_version_of_op_to_one(ops, op_i, opcode, t_id);
+  return false;
+}
 
 
 // Use this to r_rep the trace, propagate reqs to the cache and maintain their r_rep/write fifos
@@ -3962,114 +4085,64 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
 }
 
 
-
-
-
 //
-static inline void batch_from_client_to_cache(uint32_t *pull_ptr, uint16_t t_id,
-                                              struct trace_op *ops,
-                                              struct pending_ops *p_ops, struct cache_resp *resp,
-                                              struct latency_flags *latency_info,
-                                              struct session_dbg *ses_dbg)
+static inline uint32_t batch_requests_to_cache(uint32_t *pull_ptr, uint16_t t_id,
+                                               uint32_t trace_iter, struct trace_command *trace,
+                                               struct trace_op *ops,
+                                               struct pending_ops *p_ops, struct cache_resp *resp,
+                                               struct latency_flags *latency_info,
+                                               struct session_dbg *ses_dbg)
 {
-
   uint16_t writes_num = 0, reads_num = 0, op_i = 0;
-  bool is_update;
   int working_session = -1;
-  if (p_ops->all_sessions_stalled) {
+  if (!ENABLE_CLIENTS && p_ops->all_sessions_stalled) {
     if (ENABLE_ASSERTIONS) debug_all_sessions(ses_dbg, p_ops, t_id);
-    return;
+    return trace_iter;
   }
   for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
-    if (!p_ops->session_has_pending_op[i] && (req_array[i][pull_ptr[i]].state == ACTIVE_REQ)) { //buffer_state[i] == ACTIVE_REQ) {//
+    if (pull_request_from_this_session(p_ops, i, pull_ptr, t_id)) {
       working_session = i;
       break;
     }
     else if (ENABLE_ASSERTIONS) {
       debug_sessions(ses_dbg, p_ops, i, t_id);
-      //any_request_active(i, pull_ptr[i]);//assert(!any_request_active(i, pull_ptr[i]));
     }
   }
   //printf("working session = %d\n", working_session);
-  if (working_session == -1) return;
-  if (ENABLE_ASSERTIONS) assert(working_session != -1);
-
+  if (ENABLE_CLIENTS) {
+    if (working_session == -1) return trace_iter;
+  }
+  else if (ENABLE_ASSERTIONS ) assert(working_session != -1);
 
 
   //green_printf("op_i %d , pull_ptr %d, trace[pull_ptr[working_session]].opcode %d \n",
   // op_i, pull_ptr, trace[pull_ptr[working_session]].opcode);
   while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
-    //check_trace_req(p_ops, &trace[pull_ptr[working_session]], working_session, t_id);
-    uint8_t opcode = req_array[working_session][pull_ptr[working_session]].opcode;
-    struct key *key = &req_array[working_session][pull_ptr[working_session]].key;
-    ops[op_i].index_to_req_array = pull_ptr[working_session];
-    if (ENABLE_ASSERTIONS) assert(req_array[working_session][pull_ptr[working_session]].state == ACTIVE_REQ);
-    is_update = (opcode == (uint8_t) CACHE_OP_PUT ||
-                 opcode == (uint8_t) OP_RELEASE);
-    bool is_rmw = opcode_is_rmw(opcode);
-    if (opcode_is_compare_rmw(opcode)) {
-      ops[op_i].argument_ptr = ops[op_i].value;
-    }
-    // Create some back pressure from the buffers, since the sessions may never be stalled
-    if (!EMULATE_ABD) {
-      if (opcode == (uint8_t) CACHE_OP_PUT) writes_num++;
-      // A write (relaxed or release) can first trigger a read
-      reads_num += opcode == (uint8_t) OP_ACQUIRE ? 2 : 1;
-      if (p_ops->w_size + writes_num >= MAX_ALLOWED_W_SIZE ||
-          p_ops->virt_r_size + reads_num >= MAX_ALLOWED_R_SIZE) {
-        //printf("breaking due to max allowed_r_size %u/%d \n", p_ops->virt_r_size + reads_num, MAX_ALLOWED_R_SIZE);
-        break;
-      }
-    }
-    increment_per_req_counters(opcode, t_id);
-    memcpy(&ops[op_i].key, key, TRUE_KEY_SIZE);
-    ops[op_i].opcode = opcode;
-    ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
-    if (ops[op_i].opcode == OP_RELEASE || ops[op_i].opcode == OP_ACQUIRE
-        || is_rmw) {
-      p_ops->session_has_pending_op[working_session] = true;
-    }
-    ops[op_i].session_id = (uint16_t) working_session;
-
-    if (ENABLE_ASSERTIONS && DEBUG_SESSIONS) ses_dbg->dbg_cnt[working_session] = 0;
-    if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
-
-    //if (pull_ptr[[working_session]] == 100000) yellow_printf("Working ses %u \n", working_session);
-    //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
-    MOD_ADD(pull_ptr[working_session], PER_SESSION_REQ_NUM);
-    //cyan_printf("New pull ptr %u sess %u \n", pull_ptr[working_session], working_session);
-    while (p_ops->session_has_pending_op[working_session] ||
-           // buffer_state[working_session] != ACTIVE_REQ) {
-           req_array[working_session][pull_ptr[working_session]].state != ACTIVE_REQ) {
-      //red_printf("working sess %u, has pending op %u,  pull ptr %u, state %u \n", working_session,
-      //           p_ops->session_has_pending_op[working_session], pull_ptr[working_session],
-      //           req_array[working_session][pull_ptr[working_session]].state);
-      //assert(false);
+    if (fill_trace_op(p_ops, ops, pull_ptr, trace_iter, trace, op_i, working_session, &writes_num,
+                      &reads_num, ses_dbg, latency_info, t_id))
+      break;
+    // Find out next session to work on
+    while (!pull_request_from_this_session(p_ops, (uint16_t) working_session, pull_ptr, t_id)) {
       if (ENABLE_ASSERTIONS) debug_sessions(ses_dbg, p_ops, (uint32_t) working_session, t_id);
-      //assert(!any_request_active((uint16_t) working_session, pull_ptr[working_session]));
       working_session++;
       if (working_session == SESSIONS_PER_THREAD) {
-        //p_ops->all_sessions_stalled = true;
+        if (!ENABLE_CLIENTS) p_ops->all_sessions_stalled = true;
         break;
       }
-    }
-    //cyan_printf("thread %d  next working session %d total ops %d, opcode %u \n",
-    //            t_id, working_session, op_i, ops[op_i].opcode);
-    if (ENABLE_ASSERTIONS) {
-      assert(WRITE_RATIO > 0 || is_update == 0);
-      if (is_update) assert(ops[op_i].val_len > 0);
-      ops[op_i].ts.version = 1;
     }
     resp[op_i].type = EMPTY;
     op_i++;
-    //printf("%u \n",op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD);
+    if (!ENABLE_CLIENTS) {
+      trace_iter++;
+      if (trace[trace_iter].opcode == NOP) trace_iter = 0;
+    }
   }
 
   t_stats[t_id].cache_hits_per_thread += op_i;
   cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
   //cyan_printf("thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
   for (uint16_t i = 0; i < op_i; i++) {
-    atomic_store_explicit(&req_array[ops[i].session_id][ops[i].index_to_req_array].state, IN_PROGRESS_REQ, memory_order_relaxed);
+    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     //printf("%u %u \n", i, ops[i].opcode);
     check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
@@ -4081,22 +4154,14 @@ static inline void batch_from_client_to_cache(uint32_t *pull_ptr, uint16_t t_id,
     }
     // Local reads
     else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
-      if (ENABLE_ASSERTIONS) assert(ops[i].session_id < SESSIONS_PER_THREAD);
       signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
-      if (CLIENT_DEBUG)
-        green_printf("Releasing sess %u, op_i %u, ptr_to_req %u ptr %p pull_ptr %u \n", ops[i].session_id, i,
-                  ops[i].index_to_req_array, &req_array[ops[i].session_id][ops[i].index_to_req_array].state,
-                   pull_ptr[ops[i].session_id]);
-
     }
     // RMWS
     else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
-      if (ENABLE_CLIENTS) assert(false);
       insert_rmw(p_ops, &ops[i], &resp[i], t_id);
     }
-    // Relaxed Writes
+    // Writes
     else if (resp[i].type == CACHE_PUT_SUCCESS) {
-      //if (ENABLE_CLIENTS) assert(false);
       insert_write(p_ops, (struct cache_op *) &ops[i], FROM_TRACE, 0, t_id);
     }
     // CACHE_GET_SUCCESS: Acquires, out-of-epoch reads, CACHE_GET_TS_SUCCESS: Releases, out-of-epoch Writes
@@ -4105,6 +4170,7 @@ static inline void batch_from_client_to_cache(uint32_t *pull_ptr, uint16_t t_id,
       insert_read(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, t_id);
     }
   }
+  return trace_iter;
 }
 
 
@@ -6549,8 +6615,8 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
   MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
   p_ops->w_size--;
   if (ENABLE_ASSERTIONS && w_size == MAX_ALLOWED_W_SIZE) {
-    red_printf("Wrkr %u p_ops is full sized -- it still works w_size %u, "
-                 "Send failure state %u \n", t_id, w_size, send_bit_vector.state);
+    //red_printf("Wrkr %u p_ops is full sized -- it still works w_size %u, "
+    //            "Send failure state %u \n", t_id, w_size, send_bit_vector.state);
     bool found = false;
     for (uint8_t i = 0; i < MACHINE_NUM; i++) {
       if (send_bit_vector.bit_vec[i].bit != UP_STABLE) {
@@ -6601,7 +6667,6 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       p_ops->session_has_pending_op[sess_id] = false;
       p_ops->all_sessions_stalled = false;
     }
-
     // RELAXED WRITES SIGNALING COMPLETION TO THE CLIENT
     signal_completion_to_client(sess_id, p_ops->w_index_to_req_array[w_pull_ptr], t_id);
     // This case is tricky because in order to remove the release we must add another release

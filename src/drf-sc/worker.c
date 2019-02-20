@@ -126,7 +126,8 @@ void *worker(void *arg)
 
 	// TRACE
 	struct trace_command *trace;
-	trace_init((void **)&trace, t_id);
+  if (!ENABLE_CLIENTS)
+	  trace_init((void **)&trace, t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
@@ -240,9 +241,10 @@ void *worker(void *arg)
                                            p_ops, resp, &latency_info,
                                            ses_dbg);
     else
-      batch_from_client_to_cache(client_req_pull_ptr, t_id, ops,
-                                 p_ops, resp, &latency_info,
-                                 ses_dbg);
+      trace_iter = batch_requests_to_cache(client_req_pull_ptr, t_id,
+                                           trace_iter, trace, ops,
+                                           p_ops, resp, &latency_info,
+                                           ses_dbg);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

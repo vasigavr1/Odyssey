@@ -79,7 +79,7 @@ void mica_init(struct mica_kv *kv,
 	}
 
 	/* Alloc log */
-	// printf("mica: Allocting hash table log for instance %d\n", instance_id);
+//	printf("mica: Allocting hash table log for instance %d\n", instance_id);
 	int ht_log_key = MICA_LOG_SHM_KEY + instance_id;
 	kv->ht_log = (uint8_t *) hrd_malloc_socket(ht_log_key, log_cap, node_id);
 }
