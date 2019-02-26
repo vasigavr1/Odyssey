@@ -1136,6 +1136,7 @@ static inline void print_q_info(struct quorum_info *q_info)
 static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint32_t pull_ptr,
                                                  bool acq_second_round_to_flip_bit, bool insert_write_flag,
                                                  bool write_local_kvs, bool insert_commit_flag,
+                                                 bool signal_completion, bool signal_completion_after_kvs_write,
                                                  uint16_t t_id)
 {
   struct read_info *read_info = &p_ops->read_info[pull_ptr];
@@ -1143,22 +1144,32 @@ static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint
     if (acq_second_round_to_flip_bit) assert(p_ops->virt_r_size < MAX_ALLOWED_R_SIZE);
     check_state_with_allowed_flags(6, read_info->opcode, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
                                    CACHE_OP_GET, OP_RELEASE, CACHE_OP_PUT);
+    assert(!(signal_completion && signal_completion_after_kvs_write));
     if (read_info->is_rmw) {
       assert(read_info->opcode == OP_ACQUIRE);
       assert(!insert_write_flag);
       assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO > 0);
     }
     if (read_info->opcode == OP_ACQUIRE_FLIP_BIT)
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag);
-    if (read_info->opcode == CACHE_OP_GET) assert(epoch_id > 0);
-    if (read_info->opcode == CACHE_OP_GET)
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !insert_commit_flag);
+      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag &&
+             !signal_completion && !signal_completion_after_kvs_write);
+    if (read_info->opcode == CACHE_OP_GET) {
+      assert(epoch_id > 0);
+      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !insert_commit_flag &&
+             !signal_completion && signal_completion_after_kvs_write && write_local_kvs);
+    }
     if (read_info->opcode == OP_RELEASE)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs && !insert_commit_flag);
+      assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs && !insert_commit_flag &&
+             !signal_completion && !signal_completion_after_kvs_write);
     if (read_info->opcode == CACHE_OP_PUT)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs && !insert_commit_flag);
-    if (read_info->opcode == OP_ACQUIRE_FLIP_BIT)
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag);
+      assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs && !insert_commit_flag &&
+             !signal_completion && signal_completion_after_kvs_write);
+    if (read_info->opcode == OP_ACQUIRE) {
+      if (insert_write_flag || insert_commit_flag) assert(!signal_completion && !signal_completion_after_kvs_write);
+      else if (write_local_kvs) assert(signal_completion_after_kvs_write);
+      else assert(signal_completion);
+      if (insert_commit_flag) assert(read_info->is_rmw);
+    }
   }
   if (DEBUG_READS || DEBUG_TS)
     green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
@@ -2549,6 +2560,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops,
 static inline void set_flags_before_committing_a_read(struct read_info *read_info,
                                                       bool *acq_second_round_to_flip_bit, bool *insert_write_flag,
                                                       bool *write_local_kvs, bool *insert_commit_flag,
+                                                      bool *signal_completion, bool *signal_completion_after_kvs_write,
                                                       uint16_t t_id)
 {
 
@@ -2568,7 +2580,19 @@ static inline void set_flags_before_committing_a_read(struct read_info *read_inf
                        (read_info->opcode == CACHE_OP_PUT));  // out-of-epoch write
 
   (*acq_second_round_to_flip_bit) = read_info->fp_detected;
+
+
+  (*signal_completion) = (read_info->opcode == OP_ACQUIRE) && !(*insert_write_flag) &&
+                         !(*insert_commit_flag) && !(*write_local_kvs);
+
+  //all requests that will not be early signaled except: releases and acquires that actually have a second round
+  //That leaves: out-of-epoch writes/reads & acquires that want to write the KVS
+  (*signal_completion_after_kvs_write) = !(*signal_completion) &&
+                                         !((read_info->opcode == OP_ACQUIRE && acq_needs_second_round) ||
+                                           (read_info->opcode == OP_RELEASE));
+
 }
+
 
 // In case of an out-of-epoch write that found a bigger TS --NOT NEEDED
 static inline void rectify_version_of_w_mes(struct pending_ops *p_ops, struct read_info *r_info,
@@ -4166,6 +4190,7 @@ static inline uint32_t batch_requests_to_cache(uint32_t *pull_ptr, uint16_t t_id
     }
     // CACHE_GET_SUCCESS: Acquires, out-of-epoch reads, CACHE_GET_TS_SUCCESS: Releases, out-of-epoch Writes
     else {
+      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
       check_state_with_allowed_flags(3, resp[i].type, CACHE_GET_SUCCESS, CACHE_GET_TS_SUCCESS);
       insert_read(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, t_id);
     }
@@ -6428,6 +6453,12 @@ static inline void commit_reads(struct pending_ops *p_ops,
   // while the flag 'write_local_kvs' denotes whether we should commit to the local KVS
   bool insert_commit_flag;
 
+  // Signal completion before going to the KVS on an Acquire that needs not go to the KVS
+  bool signal_completion;
+  // Signal completion after going to the KVS on an Acquire that needs to go to the KVS but does not need to be sent out (!!),
+  // on any out-of epoch write, and an out-of-epoch read that needs to go to the KVS
+  bool signal_completion_after_kvs_write;
+
 
   /* Because it's possible for a read to insert another read i.e OP_ACQUIRE->OP_ACQUIRE_FLIP_BIT
    * we need to make sure that even if all requests do that, the fifo will have enough space to:
@@ -6439,9 +6470,11 @@ static inline void commit_reads(struct pending_ops *p_ops,
     struct read_info *read_info = &p_ops->read_info[pull_ptr];
     //set the flags for each read
     set_flags_before_committing_a_read(read_info, &acq_second_round_to_flip_bit, &insert_write_flag,
-                                       &write_local_kvs, &insert_commit_flag, t_id);
+                                       &write_local_kvs, &insert_commit_flag,
+                                       &signal_completion, &signal_completion_after_kvs_write, t_id);
     checks_when_committing_a_read(p_ops, pull_ptr, acq_second_round_to_flip_bit, insert_write_flag,
-                                   write_local_kvs, insert_commit_flag, t_id);
+                                  write_local_kvs, insert_commit_flag,
+                                  signal_completion, signal_completion_after_kvs_write, t_id);
 
     // Break condition: this read cannot be processed, and thus no subsequent read will be processed
     if (((insert_write_flag || insert_commit_flag) && (p_ops->w_size >= MAX_ALLOWED_W_SIZE)) ||
@@ -6461,7 +6494,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
       // so there is no need to do it here
     }
 
-    //INSERT WRITE: Reads that need to be converted to writes: second round of read/acquire
+    //INSERT WRITE: Reads that need to be converted to writes: second round of read/acquire or
+    // Writes whose first round is a read: out-of-epoch writes/releases
     if (insert_write_flag) {
       if (read_info->opcode == OP_RELEASE ||
           read_info->opcode == CACHE_OP_PUT) {
@@ -6503,12 +6537,20 @@ static inline void commit_reads(struct pending_ops *p_ops,
       }
       p_ops->session_has_pending_op[p_ops->r_session_id[pull_ptr]] = false;
       p_ops->all_sessions_stalled = false;
-      signal_completion_to_client(p_ops->r_session_id[pull_ptr],
-                                  p_ops->r_index_to_req_array[pull_ptr], t_id);
       if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
           latency_info->measured_req_flag == ACQUIRE &&
           p_ops->r_session_id[pull_ptr] == latency_info->measured_sess_id)
         report_latency(latency_info);
+    }
+
+    // COMPLETION: Signal completion for reads/acquires that need not write the local KVS or
+    // have a second write round (applicable only for acquires)
+    if (signal_completion)
+      signal_completion_to_client(p_ops->r_session_id[pull_ptr],
+                                  p_ops->r_index_to_req_array[pull_ptr], t_id);
+    else if (signal_completion_after_kvs_write) {
+      if (ENABLE_ASSERTIONS) assert(!read_info->complete_flag);
+        read_info->complete_flag = true;
     }
 
     // Clean-up code
@@ -6666,9 +6708,10 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       if (ENABLE_ASSERTIONS) assert(p_ops->session_has_pending_op[sess_id]);
       p_ops->session_has_pending_op[sess_id] = false;
       p_ops->all_sessions_stalled = false;
+      // Releases, and Acquires/RMW-Acquires that needed a "write" round complete here
+      signal_completion_to_client(sess_id, p_ops->w_index_to_req_array[w_pull_ptr], t_id);
     }
-    // RELAXED WRITES SIGNALING COMPLETION TO THE CLIENT
-    signal_completion_to_client(sess_id, p_ops->w_index_to_req_array[w_pull_ptr], t_id);
+
     // This case is tricky because in order to remove the release we must add another release
     // but if the queue was full that would deadlock, therefore we must remove the write before inserting
     // the second round of the release
@@ -6811,6 +6854,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
     p_ops->read_info[r_push_ptr].ts_to_read.m_id = prev_meta.m_id;
     p_ops->read_info[r_push_ptr].ts_to_read.version = prev_meta.version;
     p_ops->read_info[r_push_ptr].key = op->key;
+    p_ops->read_info[r_push_ptr].r_ptr = r_push_ptr;
     if (ENABLE_ASSERTIONS) op->ts.version = prev_meta.version;
     resp->type = CACHE_GET_SUCCESS;
     if (ENABLE_STAT_COUNTING && op->opcode == CACHE_OP_GET) {
@@ -6842,6 +6886,7 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     optik_unlock_decrement_version(&kv_ptr->key.meta);
     p_ops->read_info[r_push_ptr].opcode = op->opcode;
     p_ops->read_info[r_push_ptr].key = op->key;
+    p_ops->read_info[r_push_ptr].r_ptr = r_push_ptr;
     if (ENABLE_ASSERTIONS) op->ts.version = p_ops->read_info[r_push_ptr].ts_to_read.version;
     // Store the value to be written in the read_info to be used in the second round
     memcpy(p_ops->read_info[r_push_ptr].value, op->value, VALUE_SIZE);
@@ -6880,6 +6925,7 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
   p_ops->read_info[r_push_ptr].ts_to_read.version = prev_meta.version;
   p_ops->read_info[r_push_ptr].key = op->key;
   p_ops->read_info[r_push_ptr].opcode = op->opcode;
+  p_ops->read_info[r_push_ptr].r_ptr = r_push_ptr;
   // Store the value to be written in the read_info to be used in the second round
   memcpy(p_ops->read_info[r_push_ptr].value, op->value, VALUE_SIZE);
   MOD_ADD(r_push_ptr, PENDING_READS);
@@ -6993,9 +7039,10 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_
   memcpy(r_info->value, kv_ptr->value, VALUE_SIZE);
   optik_unlock_decrement_version(&kv_ptr->key.meta);
   if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
-  p_ops->read_info[r_push_ptr].key = op->key;
+  r_info->key = op->key;
   r_info->is_rmw = true;
   r_info->opcode = OP_ACQUIRE;
+  r_info->r_ptr = r_push_ptr;
   MOD_ADD(r_push_ptr, PENDING_READS);
   resp->type = CACHE_GET_SUCCESS;
   (*r_push_ptr_) =  r_push_ptr;

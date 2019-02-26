@@ -419,6 +419,13 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
       // printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
       op->opcode = 5;
     }
+    if (op->complete_flag) {
+      if (ENABLE_ASSERTIONS) assert(&p_ops->read_info[op->r_ptr] == op);
+      signal_completion_to_client(p_ops->r_session_id[op->r_ptr],
+                                  p_ops->r_index_to_req_array[op->r_ptr], t_id);
+      op->complete_flag = false;
+    }
+
   }
 
 }
@@ -472,16 +479,10 @@ inline void cache_isolated_op(int t_id, struct write *write)
                * may not contain the full MICA_MAX_VALUE value.
                */
       kv_ptr = (struct cache_op *) &cache.hash_table.ht_log[log_offset];
-
-      /* Small values (1--64 bytes) can span 2 cache lines */
-      //__builtin_prefetch(kv_ptr, 0, 0);
-      //__builtin_prefetch((uint8_t *) kv_ptr + 64, 0, 0);
-
       /* Detect if the head has wrapped around for this index entry */
       if(cache.hash_table.log_head - bkt_ptr->slots[j].offset >= cache.hash_table.log_cap) {
         kv_ptr = NULL;	/* If so, we mark it "not found" */
       }
-
       break;
     }
   }
@@ -495,7 +496,7 @@ inline void cache_isolated_op(int t_id, struct write *write)
       key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
         if (op->opcode != OP_RELEASE) {
-          red_printf("Wrkr %u: cache_isolated_op: wrong pcode : %d, m_id %u, val_len %u, version %u , \n",
+          red_printf("Wrkr %u: cache_isolated_op: wrong opcode : %d, m_id %u, val_len %u, version %u , \n",
                      t_id, op->opcode,  op->key.meta.m_id,
                      op->val_len, op->key.meta.version);
           assert(false);

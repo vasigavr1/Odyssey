@@ -720,6 +720,8 @@ struct read_info {
   bool fp_detected; //detected false positive
   uint16_t epoch_id;
   bool is_rmw;
+  bool complete_flag; // denotes whether completion must be signaled to the client
+  uint32_t r_ptr; // reverse ptr to the p_ops
   uint32_t log_no;
   struct rmw_id rmw_id;
 
