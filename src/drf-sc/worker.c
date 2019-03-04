@@ -148,7 +148,7 @@ void *worker(void *arg)
   // helper for polling writes: in a corner failure-realted case,
   // it may be that not all avaialble writes can be polled due to the unavailability of the acks
   uint32_t completed_but_not_polled_writes = 0;
-  uint32_t client_req_pull_ptr[SESSIONS_PER_THREAD] = {0};
+  //uint32_t client_req_pull_ptr[SESSIONS_PER_THREAD] = {0};
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
@@ -234,17 +234,17 @@ void *worker(void *arg)
     ------------------------------PROBE THE CACHE--------------------------------------
     ---------------------------------------------------------------------------*/
 
-    if (!ENABLE_CLIENTS)
+    //if (!ENABLE_CLIENTS)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
-		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
-                                           p_ops, resp, &latency_info,
-                                           ses_dbg);
-    else
-      trace_iter = batch_requests_to_cache(client_req_pull_ptr, t_id,
-                                           trace_iter, trace, ops,
-                                           p_ops, resp, &latency_info,
-                                           ses_dbg);
+		//trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
+                                           //p_ops, resp, &latency_info,
+                                          // ses_dbg);
+    //else
+    trace_iter = batch_requests_to_cache(t_id,
+                                         trace_iter, trace, ops,
+                                         p_ops, resp, &latency_info,
+                                         ses_dbg);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

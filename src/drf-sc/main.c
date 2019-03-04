@@ -22,8 +22,9 @@ atomic_uint_fast32_t next_rmw_entry_available;
 atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
-struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
-atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
+//struct client_op req_array[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+//atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
+struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 
 
 int main(int argc, char *argv[])
@@ -33,48 +34,13 @@ int main(int argc, char *argv[])
   static_assert_compile_parameters();
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
-	remote_IP = (char *) malloc(16 * sizeof(char));
-  dev_name = (char *) malloc(16 * sizeof(char));
-  atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
-  // This (sadly) seems to be the only way to initialize the locks
-  // in struct_bit_vector, i.e. the atomic_flags
-  memset(&send_bit_vector, 0, sizeof(struct bit_vector));
-  memset(conf_bit_vec, 0, MACHINE_NUM * sizeof(struct multiple_owner_bit));
-  for (i = 0; i < MACHINE_NUM; i++) {
-    conf_bit_vec[i].bit = UP_STABLE;
-    send_bit_vector.bit_vec[i].bit = UP_STABLE;
-	}
-  //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
-  send_bit_vector.state = UP_STABLE;
-  print_for_debug = false;
-	next_rmw_entry_available = 0;
-  memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
-	memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-	qps_are_set_up = false;
-	cache_init(0, WORKERS_PER_MACHINE);
-  //memset(buffer_state, 0, SESSIONS_PER_THREAD);
-  //req_array = calloc(PER_SESSION_REQ_NUM * SESSIONS_PER_THREAD,  sizeof(struct client_op));
-
+  init_globals();
 	/* Handle Inputs */
   handle_program_inputs(argc, argv);
 	assert(machine_id < MACHINE_NUM && machine_id >=0);
 	assert(!(is_roce == 1 && ENABLE_MULTICAST));
 
-	/* Latency Measurements initializations */
-#if MEASURE_LATENCY == 1
-	memset(&latency_count, 0, sizeof(struct latency_counters));
-	latency_count.hot_writes  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-  memset(latency_count.hot_writes, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
-	latency_count.hot_reads   = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-  memset(latency_count.hot_reads, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
-	latency_count.releases  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-  memset(latency_count.releases, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
-	latency_count.acquires = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
-  memset(latency_count.acquires, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
-#endif
-
-	/* Launch  threads */
-
+  /* Launch  threads */
 	num_threads = TOTAL_THREADS;
 	struct thread_params *param_arr = malloc(TOTAL_THREADS * sizeof(struct thread_params));
 	pthread_t *thread_arr = malloc(TOTAL_THREADS * sizeof(pthread_t));
@@ -100,7 +66,6 @@ int main(int argc, char *argv[])
 			spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
                     &attr, thread_arr, client, occupied_cores);
 		}
-
 	}
 
 	for(i = 0; i < num_threads; i++)

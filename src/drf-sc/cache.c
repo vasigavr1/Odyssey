@@ -425,7 +425,6 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
                                   p_ops->r_index_to_req_array[op->r_ptr], t_id);
       op->complete_flag = false;
     }
-
   }
 
 }

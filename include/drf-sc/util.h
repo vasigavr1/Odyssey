@@ -20,6 +20,7 @@
 extern uint64_t seed;
 void static_assert_compile_parameters();
 void print_parameters_in_the_start();
+void init_globals();
 void handle_program_inputs(int argc, char *argv[]);
 void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
                    cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,

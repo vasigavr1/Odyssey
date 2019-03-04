@@ -21,9 +21,9 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 24
 #define MACHINE_NUM 5
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 300 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 8
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -47,14 +47,14 @@
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
 // CLIENTS
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 1
+#define CLIENTS_PER_MACHINE_ 2
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
 
@@ -91,9 +91,8 @@
 /*-------------------------------------------------
 	-----------------CLIENT---------------------------
 --------------------------------------------------*/
-
+#define CLIENT_USE_TRACE 0
 #define PER_SESSION_REQ_NUM 50
-#define CLIENT_OP_SIZE 64 // TODO fix this
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -716,7 +715,8 @@ struct read_info {
   struct key key;
 	// the value read locally, a greater value received or
 	// in case of a 2-round write, the value to be written
-  uint8_t value[VALUE_SIZE];
+  uint8_t value[VALUE_SIZE]; // TODO: DEPRICATE THIS, AND USE JUST A PTR
+  uint8_t *value_to_read;
   bool fp_detected; //detected false positive
   uint16_t epoch_id;
   bool is_rmw;
@@ -810,8 +810,8 @@ struct rmw_local_entry {
   uint8_t opcode;
   uint8_t state;
   uint8_t helping_flag;
-  bool killable;
-  bool rmw_is_successful;
+  bool killable; // can the RMW (if CAS) be killed early
+  bool rmw_is_successful; // was the RMW (if CAS) sucessful
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   uint8_t *compare_val; //for CAS
@@ -941,7 +941,10 @@ struct trace_op {
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
   uint8_t val_len;
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
-  uint8_t* argument_ptr; //ptr to argument:compare value for CAS/  addition argument for F&A
+  uint8_t *value_to_write;
+  uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
+  bool *rmw_is_successful; // points to interface bool
+  uint8_t* argument_ptr; //TODO DEPRICATE ptr to argument:compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
 }__attribute__((__packed__));
 
@@ -950,19 +953,38 @@ struct trace_op {
 #define IN_PROGRESS_REQ 2 // worker has picked up the req
 #define COMPLETED_REQ 3 // wroker has completed the req
 
-
-#define PADDING_BYTES_CLIENT_OP (64 - ((4 + TRUE_KEY_SIZE + VALUE_SIZE) % 64))
+#define RAW_CLIENT_OP_SIZE (4 + TRUE_KEY_SIZE + VALUE_SIZE + VALUE_SIZE)
+#define PADDING_BYTES_CLIENT_OP (64 - ((RAW_CLIENT_OP_SIZE) % 64))
+#define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
 struct client_op {
   atomic_uint_fast8_t state;
   uint8_t opcode;
+  bool rmw_is_successful;
   struct key key;
-  uint8_t value[VALUE_SIZE];
+  uint8_t value_to_read[VALUE_SIZE];
+  uint8_t value_to_write[VALUE_SIZE];
   uint8_t padding[PADDING_BYTES_CLIENT_OP];
 };
 
+#define IF_CLT_PTRS_SIZE (4 * SESSIONS_PER_THREAD) //  4* because client needs 2 ptrs (pull/push) that are 2 bytes each
+#define IF_WRKR_PTRS_SIZE (2 * SESSIONS_PER_THREAD) // 2* because client needs 1 ptr (pull) that is 2 bytes
+#define PADDING_IF_CLT_PTRS (64 - ((IF_CLT_PTRS_SIZE) % 64))
+#define PADDING_IF_WRKR_PTRS (64 - ((IF_WRKR_PTRS_SIZE) % 64))
+#define IF_PTRS_SIZE (IF_CLT_PTRS_SIZE + IF_WRKR_PTRS_SIZE + PADDING_IF_CLT_PTRS + PADDING_IF_WRKR_PTRS))
+#define INTERFACE_SIZE ((SESSIONS_PER_THREAD * PER_SESSION_REQ_NUM * CLIENT_OP_SIZE) + (IF_PTRS_SIZE)
 
-extern struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
-extern atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
+// wrkr-client interface
+struct wrk_clt_if {
+  struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+  uint16_t clt_push_ptr[SESSIONS_PER_THREAD];
+  uint16_t clt_pull_ptr[SESSIONS_PER_THREAD];
+  uint8_t clt_ptr_padding[PADDING_IF_CLT_PTRS];
+  uint16_t wrkr_pull_ptr[SESSIONS_PER_THREAD];
+  uint8_t wrkr_ptr_padding[PADDING_IF_WRKR_PTRS];
+}__attribute__ ((aligned (64)));
+
+extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
+
 
 // Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines

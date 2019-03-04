@@ -88,10 +88,23 @@ void static_assert_compile_parameters()
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 
   // CLIENT
-//  printf(" \n \n %u  %u \n \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
+//  printf("Client op  %u  %u \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
+//  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
   static_assert(sizeof(struct client_op) == CLIENT_OP_SIZE, "");
   static_assert(sizeof(struct client_op) % 64 == 0, "");
+  static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
+  static_assert(sizeof(struct wrk_clt_if) == INTERFACE_SIZE, "");
+  for (uint16_t i = 0; i < WORKERS_PER_MACHINE; i++) {
+    bool is_interface_aligned = (uint64_t) &interface % 64 == 0;
+    bool same_cl =  ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] / 64) ==
+                    ((uint64_t)&interface[i].wrkr_pull_ptr[0] / 64);
+    //long ptr_dif = &interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] -
+    //                   &interface[i].wrkr_pull_ptr[0];
+    //printf("%d %lu %lu\n", same_cl, ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1]/ 64), ((uint64_t)&interface[i].wrkr_pull_ptr[0]/64));
+    assert(!same_cl);
+    assert(is_interface_aligned);
+  }
 
 }
 
@@ -126,6 +139,53 @@ void print_parameters_in_the_start()
   yellow_printf("Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
   green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
+}
+
+void init_globals()
+{
+  uint32_t i = 0;
+  remote_IP = (char *) malloc(16 * sizeof(char));
+  dev_name = (char *) malloc(16 * sizeof(char));
+  atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
+  // This (sadly) seems to be the only way to initialize the locks
+  // in struct_bit_vector, i.e. the atomic_flags
+  memset(&send_bit_vector, 0, sizeof(struct bit_vector));
+  memset(conf_bit_vec, 0, MACHINE_NUM * sizeof(struct multiple_owner_bit));
+  for (i = 0; i < MACHINE_NUM; i++) {
+    conf_bit_vec[i].bit = UP_STABLE;
+    send_bit_vector.bit_vec[i].bit = UP_STABLE;
+  }
+  //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
+  send_bit_vector.state = UP_STABLE;
+  print_for_debug = false;
+  next_rmw_entry_available = 0;
+  memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
+  memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+  qps_are_set_up = false;
+  cache_init(0, WORKERS_PER_MACHINE);
+
+  for (uint16_t w_i = 0; w_i < WORKERS_PER_MACHINE; w_i++) {
+    for (uint16_t s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
+      interface[w_i].clt_pull_ptr[s_i] = 0;
+      interface[w_i].clt_push_ptr[s_i] = 0;
+      interface[w_i].wrkr_pull_ptr[s_i] = 0;
+      for (uint16_t r_i = 0; r_i < PER_SESSION_REQ_NUM; r_i++)
+        interface[w_i].req_array[s_i][r_i].state = INVALID_REQ;
+    }
+  }
+  /* Latency Measurements initializations */
+#if MEASURE_LATENCY == 1
+  memset(&latency_count, 0, sizeof(struct latency_counters));
+	latency_count.hot_writes  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.hot_writes, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+	latency_count.hot_reads   = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.hot_reads, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+	latency_count.releases  = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.releases, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+	latency_count.acquires = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
+  memset(latency_count.acquires, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
+#endif
+
 }
 
 void handle_program_inputs(int argc, char *argv[])
@@ -173,7 +233,7 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
                    cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,
                    void *(*__start_routine) (void *), bool *occupied_cores)
 {
-  param_arr[t_id].id = t_id;
+  param_arr[t_id].id = t_id < WORKERS_PER_MACHINE ? t_id : t_id - WORKERS_PER_MACHINE;
   int core = pin_thread(t_id); // + 8 + t_id * 20;
   yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
   CPU_ZERO(pinned_hw_threads);
@@ -447,7 +507,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
   }
 
-  if (t_id  == 0) {
+  if (t_id == 0) {
     cyan_printf("UNIFORM TRACE \n");
     printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%, "
              "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d \n",

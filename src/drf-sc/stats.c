@@ -11,11 +11,11 @@ void *print_stats(void* no_arg) {
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 16 : 16;
   struct thread_stats *curr_c_stats, *prev_c_stats;
-  curr_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
-  prev_c_stats = (struct thread_stats *) malloc(num_threads * sizeof(struct thread_stats));
+  curr_c_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+  prev_c_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
   struct stats all_stats;
   sleep(4);
-  memcpy(prev_c_stats, (void *) t_stats, num_threads * (sizeof(struct thread_stats)));
+  memcpy(prev_c_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
@@ -23,7 +23,7 @@ void *print_stats(void* no_arg) {
     clock_gettime(CLOCK_REALTIME, &end);
     double seconds = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) / 1000000001;
     start = end;
-    memcpy(curr_c_stats, (void *) t_stats, num_threads * (sizeof(struct thread_stats)));
+    memcpy(curr_c_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
 //        memcpy(curr_w_stats, (void*) f_stats, FOLLOWERS_PER_MACHINE * (sizeof(struct follower_stats)));
     all_clients_cache_hits = 0;
     print_count++;
@@ -88,7 +88,7 @@ void *print_stats(void* no_arg) {
 
     }
 
-    memcpy(prev_c_stats, curr_c_stats, num_threads * (sizeof(struct thread_stats)));
+    memcpy(prev_c_stats, curr_c_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
     total_throughput = (all_clients_cache_hits) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
     green_printf("%u %.2f %.2f\n", print_count, total_throughput,  (total_cancelled_rmws / (double) total_rmws));
@@ -96,7 +96,7 @@ void *print_stats(void* no_arg) {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
 
-    for (i = 0; i < num_threads; i++) {
+    for (i = 0; i < WORKERS_PER_MACHINE; i++) {
       cyan_printf("T%d: ", i);
       yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s, "
                     "RMWS: %.2f/s, P/S %.2f/s, A/S %.2f/s, C/S %.2f/s ",
