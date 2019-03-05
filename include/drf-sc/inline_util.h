@@ -2286,6 +2286,28 @@ static inline bool any_request_active(uint16_t sess_id, uint32_t req_array_i, ui
   return false;
 }
 
+//
+static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_entry, uint16_t t_id)
+{
+  struct client_op* cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
+  switch (loc_entry->opcode) {
+    case FETCH_AND_ADD:
+      memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+      cl_op->rmw_is_successful = true;
+      //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
+      break;
+    case COMPARE_AND_SWAP_WEAK:
+    case COMPARE_AND_SWAP_STRONG:
+      cl_op->rmw_is_successful = loc_entry->rmw_is_successful;
+      if (!loc_entry->rmw_is_successful)
+        memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+      break;
+    default:
+      if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
+
 // Returns ture if it's valid to pull a request for that session
 static inline bool pull_request_from_this_session(struct pending_ops *p_ops, uint16_t sess_id,
                                                   uint16_t t_id)
@@ -3026,6 +3048,7 @@ static inline void free_session(struct pending_ops *p_ops, uint16_t sess_id, boo
     assert(p_ops->session_has_pending_op[sess_id]);
   }
   //TODO WRITE here all the pointers to the interface
+  fill_req_array_when_after_rmw(loc_entry, t_id);
   if (VERIFY_PAXOS && allow_paxos_log) verify_paxos(loc_entry, t_id);
   signal_completion_to_client(sess_id, loc_entry->index_to_req_array, t_id);
   p_ops->session_has_pending_op[sess_id] = false;

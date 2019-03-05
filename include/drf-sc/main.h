@@ -811,7 +811,7 @@ struct rmw_local_entry {
   uint8_t state;
   uint8_t helping_flag;
   bool killable; // can the RMW (if CAS) be killed early
-  bool rmw_is_successful; // was the RMW (if CAS) sucessful
+  bool rmw_is_successful; // was the RMW (if CAS) successful
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   uint8_t *compare_val; //for CAS
