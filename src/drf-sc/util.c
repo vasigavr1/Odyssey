@@ -84,7 +84,7 @@ void static_assert_compile_parameters()
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
 #endif
-  static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8 + 4, "");
+  //static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8 + 4, "");
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 
   // CLIENT
@@ -687,8 +687,10 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctr
       get_qps_from_all_other_machines(global_id, cb);
       assert(!qps_are_set_up);
       // Spawn a thread that prints the stats
-      if (spawn_stats_thread() != 0)
+      if (!CLIENT_UI) {
+        if (spawn_stats_thread() != 0)
           red_printf("Stats thread was not successfully spawned \n");
+      }
       atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
     }
     else {

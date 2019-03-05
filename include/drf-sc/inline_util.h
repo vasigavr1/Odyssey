@@ -2289,23 +2289,40 @@ static inline bool any_request_active(uint16_t sess_id, uint32_t req_array_i, ui
 //
 static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_entry, uint16_t t_id)
 {
-  struct client_op* cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
-  switch (loc_entry->opcode) {
-    case FETCH_AND_ADD:
-      memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-      cl_op->rmw_is_successful = true;
-      //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
-      break;
-    case COMPARE_AND_SWAP_WEAK:
-    case COMPARE_AND_SWAP_STRONG:
-      cl_op->rmw_is_successful = loc_entry->rmw_is_successful;
-      if (!loc_entry->rmw_is_successful)
+  if (ENABLE_CLIENTS) {
+    struct client_op *cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
+    switch (loc_entry->opcode) {
+      case FETCH_AND_ADD:
         memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-      break;
-    default:
-      if (ENABLE_ASSERTIONS) assert(false);
+        cl_op->rmw_is_successful = true;
+        //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
+        break;
+      case COMPARE_AND_SWAP_WEAK:
+      case COMPARE_AND_SWAP_STRONG:
+        cl_op->rmw_is_successful = loc_entry->rmw_is_successful;
+        if (!loc_entry->rmw_is_successful)
+          memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+        break;
+      default:
+        if (ENABLE_ASSERTIONS) assert(false);
+    }
   }
 }
+
+static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* value_to_read,
+                                                    uint32_t req_array_i, uint16_t t_id)
+{
+  if (ENABLE_CLIENTS) {
+    if (ENABLE_ASSERTIONS) {
+      assert(value_to_read != NULL);
+      check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+    }
+    struct client_op *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
+    cl_op->rmw_is_successful = false;
+    memcpy(cl_op->value_to_read, value_to_read, (size_t) RMW_VALUE_SIZE);
+  }
+}
+
 
 
 // Returns ture if it's valid to pull a request for that session
@@ -2951,9 +2968,9 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
 {
   loc_entry->opcode = prop->opcode;
   if (opcode_is_compare_rmw(prop->opcode))
-    memcpy(loc_entry->value_to_write, prop->value, (size_t) RMW_VALUE_SIZE);
+    memcpy(loc_entry->value_to_write, prop->value_to_write, (size_t) RMW_VALUE_SIZE);
   loc_entry->killable = prop->opcode == COMPARE_AND_SWAP_WEAK;
-  loc_entry->compare_val = prop->argument_ptr;
+  loc_entry->compare_val = prop->value_to_read;
   loc_entry->rmw_is_successful = false;
   memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
@@ -3594,7 +3611,22 @@ static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, s
   return false;
 }
 
+// returns true if the RMW can be failed before allocating a local entry
+static inline bool does_rmw_fail_early(struct trace_op *op, struct cache_op *kv_ptr,
+                                       struct cache_resp *resp, uint16_t t_id)
+{
+  if (op->opcode == COMPARE_AND_SWAP_WEAK &&
+     rmw_compare_fails(op->opcode, op->value_to_read,
+                       &kv_ptr->value[RMW_BYTE_OFFSET], t_id)) {
+    red_printf("CAS fails returns val %u/%u \n", kv_ptr->value[RMW_BYTE_OFFSET], op->value_to_read[0]);
 
+    fill_req_array_on_rmw_early_fail(op->session_id, &kv_ptr->value[RMW_BYTE_OFFSET],
+                                     op->index_to_req_array, t_id);
+    resp->type = RMW_FAILURE;
+    return true;
+  }
+  else return  false;
+}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
@@ -4014,17 +4046,19 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
                     opcode == (uint8_t) OP_RELEASE);
   bool is_rmw = opcode_is_rmw(opcode);
   bool is_read = !is_update && !is_rmw;
+  if (ENABLE_ASSERTIONS) assert(is_read || is_update || is_rmw);
 
-  if (ENABLE_CLIENTS) { // set up the value ptrs
-    if (is_update || is_rmw) op->value_to_write = value_to_write;
-    if (is_read || is_rmw ) {
-      op->value_to_write = value_to_write;
-      op->value_to_read = value_to_read;
-    }
+ // if (ENABLE_CLIENTS) { // set up the value ptrs
+  if (is_update || is_rmw) op->value_to_write = value_to_write;
+  if (is_read || is_rmw ) {
+    op->value_to_write = value_to_write;
+    op->value_to_read = value_to_read;
   }
-  //if (opcode_is_compare_rmw(opcode)) {
-  //  op->argument_ptr = op->value;
   //}
+  //if (opcode_is_compare_rmw(opcode)) {
+    //op->argument_ptr = op->value;
+    //op->rmw_is_successful
+ // }
   increment_per_req_counters(opcode, t_id);
   memcpy(&op->key, key, TRUE_KEY_SIZE);
   op->opcode = opcode;
@@ -6993,14 +7027,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
 
   // if it's the first RMW
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-    if (op->opcode == COMPARE_AND_SWAP_WEAK &&
-        rmw_compare_fails(op->opcode, op->argument_ptr,
-                          &kv_ptr->value[RMW_BYTE_OFFSET], t_id)) {
-      memcpy(op->value_to_read, &kv_ptr->value[RMW_BYTE_OFFSET], (size_t) RMW_VALUE_SIZE);
-      *op->rmw_is_successful = false;
-      resp->type = RMW_FAILURE;
-    }
-    else {
+    if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
       // sess_id is stored in the first bytes of op
       uint32_t new_log_no = 1;
       new_version = kv_ptr->key.meta.version + 1;
@@ -7022,12 +7049,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     check_log_nos_of_glob_entry(&rmw.entry[entry], "cache_batch_op_trace", t_id);
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     if (glob_entry->state == INVALID_RMW) {
-      if (op->opcode == COMPARE_AND_SWAP_WEAK &&
-        rmw_compare_fails(op->opcode, op->argument_ptr,
-                          &kv_ptr->value[RMW_BYTE_OFFSET], t_id)) {
-        resp->type = RMW_FAILURE;
-      }
-      else {
+      if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
         new_version = MAX((kv_ptr->key.meta.version + 1), glob_entry->new_ts.version);
         // remember that key is locked and thus this entry is also locked
         activate_RMW_entry(PROPOSED, new_version, glob_entry, op->opcode,

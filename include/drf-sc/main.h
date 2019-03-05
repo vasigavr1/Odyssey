@@ -21,7 +21,7 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 24
+#define WORKERS_PER_MACHINE 2
 #define MACHINE_NUM 5
 #define WRITE_RATIO 300 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 8
@@ -54,7 +54,7 @@
 
 // CLIENTS
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 2
+#define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
 
@@ -92,6 +92,7 @@
 	-----------------CLIENT---------------------------
 --------------------------------------------------*/
 #define CLIENT_USE_TRACE 0
+#define CLIENT_UI 1
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
@@ -933,6 +934,7 @@ struct fifo {
 
 };
 
+#define TRACE_OP_SIZE 18 + VALUE_SIZE  + 8 + 4
 struct trace_op {
   uint16_t session_id;
   uint8_t unused;
@@ -943,8 +945,8 @@ struct trace_op {
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
   uint8_t *value_to_write;
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
-  bool *rmw_is_successful; // points to interface bool
-  uint8_t* argument_ptr; //TODO DEPRICATE ptr to argument:compare value for CAS/  addition argument for F&A
+  //bool *rmw_is_successful; // points to interface bool
+  //uint8_t* argument_ptr; //TODO DEPRICATE ptr to argument:compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
 }__attribute__((__packed__));
 
@@ -961,8 +963,8 @@ struct client_op {
   uint8_t opcode;
   bool rmw_is_successful;
   struct key key;
-  uint8_t value_to_read[VALUE_SIZE];
-  uint8_t value_to_write[VALUE_SIZE];
+  uint8_t value_to_read[VALUE_SIZE]; // expected val for CAS
+  uint8_t value_to_write[VALUE_SIZE]; // desired Val for CAS
   uint8_t padding[PADDING_BYTES_CLIENT_OP];
 };
 
