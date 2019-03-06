@@ -88,6 +88,8 @@ void static_assert_compile_parameters()
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 
   // CLIENT
+  static_assert(CLIENT_USE_TRACE + CLIENT_UI + CLIENT_TEST_CASES == 1,
+                "open exactly one of these options");
 //  printf("Client op  %u  %u \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
 //  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");

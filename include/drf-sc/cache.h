@@ -29,6 +29,7 @@
 #define COMPARE_AND_SWAP_STRONG 97
 #define COMPARE_AND_SWAP_WEAK 98
 #define FETCH_AND_ADD 99
+#define RMW_PLAIN_WRITE 100 // writes to rmwable keys get translated to this op
 
 
 // when inserting the commit use this OP and change it to COMMIT_OP

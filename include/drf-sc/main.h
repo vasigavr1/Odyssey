@@ -93,6 +93,7 @@
 --------------------------------------------------*/
 #define CLIENT_USE_TRACE 0
 #define CLIENT_UI 1
+#define CLIENT_TEST_CASES 0
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
@@ -716,7 +717,7 @@ struct read_info {
   struct key key;
 	// the value read locally, a greater value received or
 	// in case of a 2-round write, the value to be written
-  uint8_t value[VALUE_SIZE]; // TODO: DEPRICATE THIS, AND USE JUST A PTR
+  uint8_t value[VALUE_SIZE]; //
   uint8_t *value_to_read;
   bool fp_detected; //detected false positive
   uint16_t epoch_id;
