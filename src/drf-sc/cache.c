@@ -431,7 +431,9 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
                                   p_ops->r_index_to_req_array[op->r_ptr], t_id);
       op->complete_flag = false;
     }
-    else if (ENABLE_ASSERTIONS) assert(op->opcode == UPDATE_EPOCH_OP_GET);
+    else if (ENABLE_ASSERTIONS)
+      check_state_with_allowed_flags(3, op->opcode, UPDATE_EPOCH_OP_GET,
+                                     OP_ACQUIRE, OP_RELEASE);
   }
 
 }

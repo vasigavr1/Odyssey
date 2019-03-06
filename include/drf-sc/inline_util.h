@@ -2977,7 +2977,10 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   if (opcode_is_compare_rmw(prop->opcode) || prop->opcode == RMW_PLAIN_WRITE)
     memcpy(loc_entry->value_to_write, prop->value_to_write, (size_t) RMW_VALUE_SIZE);
   loc_entry->killable = prop->opcode == COMPARE_AND_SWAP_WEAK;
-  loc_entry->compare_val = prop->value_to_read;
+  if (opcode_is_compare_rmw(prop->opcode))
+    loc_entry->compare_val = prop->value_to_read; //expected value
+  else if (prop->opcode == FETCH_AND_ADD)
+    loc_entry->compare_val = prop->value_to_write; // value to be added
   loc_entry->rmw_is_successful = false;
   memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
@@ -3564,7 +3567,7 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
      break;
    case FETCH_AND_ADD:
      memcpy(loc_entry->value_to_read, &kv_pair->value[RMW_BYTE_OFFSET], (size_t) RMW_VALUE_SIZE);
-     *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + 1;
+     *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + (*(uint64_t *)loc_entry->compare_val);
      //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
      break;
    case COMPARE_AND_SWAP_WEAK:
@@ -3627,7 +3630,7 @@ static inline bool does_rmw_fail_early(struct trace_op *op, struct cache_op *kv_
   if (op->opcode == COMPARE_AND_SWAP_WEAK &&
      rmw_compare_fails(op->opcode, op->value_to_read,
                        &kv_ptr->value[RMW_BYTE_OFFSET], t_id)) {
-    red_printf("CAS fails returns val %u/%u \n", kv_ptr->value[RMW_BYTE_OFFSET], op->value_to_read[0]);
+    //red_printf("CAS fails returns val %u/%u \n", kv_ptr->value[RMW_BYTE_OFFSET], op->value_to_read[0]);
 
     fill_req_array_on_rmw_early_fail(op->session_id, &kv_ptr->value[RMW_BYTE_OFFSET],
                                      op->index_to_req_array, t_id);
@@ -6570,8 +6573,9 @@ static inline void commit_reads(struct pending_ops *p_ops,
     if (write_local_kvs) {
       // if a read did not see a larger ts it should only change the epoch
       if (read_info->opcode == CACHE_OP_GET &&
-        (!read_info->seen_larger_ts))
+        (!read_info->seen_larger_ts)) {
         read_info->opcode = UPDATE_EPOCH_OP_GET;
+      }
       p_ops->ptrs_to_r_ops[writes_for_cache] = (struct read *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
       // An out-of-epoch write will get its TS set when inserting a write,
@@ -6630,8 +6634,8 @@ static inline void commit_reads(struct pending_ops *p_ops,
     // COMPLETION: Signal completion for reads/acquires that need not write the local KVS or
     // have a second write round (applicable only for acquires)
     if (signal_completion || read_info->opcode == UPDATE_EPOCH_OP_GET) {
-      printf("Completing opcode %u read_info val %u, copied over val %u \n",
-      read_info->opcode, read_info->value[0], read_info->value_to_read[0]);
+      //printf("Completing opcode %u read_info val %u, copied over val %u \n",
+      //read_info->opcode, read_info->value[0], read_info->value_to_read[0]);
       signal_completion_to_client(p_ops->r_session_id[pull_ptr],
                                   p_ops->r_index_to_req_array[pull_ptr], t_id);
     }
@@ -6935,7 +6939,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
       debug_stalling_on_lock(&debug_cntr, "trace read/acquire", t_id);
       //memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr->value, VALUE_SIZE);
       memcpy(op->value_to_read, kv_ptr->value, VALUE_SIZE);
-      printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
+      //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr->key.meta));
   }
   // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
@@ -7022,7 +7026,7 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
   p_ops->read_info[r_push_ptr].opcode = op->opcode;
   p_ops->read_info[r_push_ptr].r_ptr = r_push_ptr;
   // Store the value to be written in the read_info to be used in the second round
-  memcpy(p_ops->read_info[r_push_ptr].value, op->value, VALUE_SIZE);
+  memcpy(p_ops->read_info[r_push_ptr].value, op->value_to_write, VALUE_SIZE);
   MOD_ADD(r_push_ptr, PENDING_READS);
   resp->type = CACHE_GET_TS_SUCCESS;
   (*r_push_ptr_) =  r_push_ptr;

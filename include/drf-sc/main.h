@@ -92,8 +92,8 @@
 	-----------------CLIENT---------------------------
 --------------------------------------------------*/
 #define CLIENT_USE_TRACE 0
-#define CLIENT_UI 1
-#define CLIENT_TEST_CASES 0
+#define CLIENT_UI 0
+#define CLIENT_TEST_CASES 1
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
