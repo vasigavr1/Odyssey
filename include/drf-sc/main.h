@@ -78,6 +78,7 @@
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
   if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
+#define FIND_PADDING(size) ((64 - (size % 64)) % 64)
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
@@ -94,6 +95,8 @@
 #define CLIENT_USE_TRACE 0
 #define CLIENT_UI 0
 #define CLIENT_TEST_CASES 1
+#define BLOCKING_TEST_CASE 0
+#define ASYNC_TEST_CASE 1
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
@@ -946,8 +949,6 @@ struct trace_op {
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
   uint8_t *value_to_write;
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
-  //bool *rmw_is_successful; // points to interface bool
-  //uint8_t* argument_ptr; //TODO DEPRICATE ptr to argument:compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
 }__attribute__((__packed__));
 
@@ -956,23 +957,23 @@ struct trace_op {
 #define IN_PROGRESS_REQ 2 // worker has picked up the req
 #define COMPLETED_REQ 3 // wroker has completed the req
 
-#define RAW_CLIENT_OP_SIZE (4 + TRUE_KEY_SIZE + VALUE_SIZE + VALUE_SIZE)
-#define PADDING_BYTES_CLIENT_OP (64 - ((RAW_CLIENT_OP_SIZE) % 64))
+#define RAW_CLIENT_OP_SIZE (8 + TRUE_KEY_SIZE + VALUE_SIZE + 8 + 8)
+#define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
 #define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
 struct client_op {
   atomic_uint_fast8_t state;
   uint8_t opcode;
-  bool rmw_is_successful;
+  bool* rmw_is_successful;
   struct key key;
-  uint8_t value_to_read[VALUE_SIZE]; // expected val for CAS
+  uint8_t *value_to_read;//[VALUE_SIZE]; // expected val for CAS
   uint8_t value_to_write[VALUE_SIZE]; // desired Val for CAS
   uint8_t padding[PADDING_BYTES_CLIENT_OP];
 };
 
 #define IF_CLT_PTRS_SIZE (4 * SESSIONS_PER_THREAD) //  4* because client needs 2 ptrs (pull/push) that are 2 bytes each
 #define IF_WRKR_PTRS_SIZE (2 * SESSIONS_PER_THREAD) // 2* because client needs 1 ptr (pull) that is 2 bytes
-#define PADDING_IF_CLT_PTRS (64 - ((IF_CLT_PTRS_SIZE) % 64))
-#define PADDING_IF_WRKR_PTRS (64 - ((IF_WRKR_PTRS_SIZE) % 64))
+#define PADDING_IF_CLT_PTRS (FIND_PADDING(IF_CLT_PTRS_SIZE))
+#define PADDING_IF_WRKR_PTRS (FIND_PADDING(IF_WRKR_PTRS_SIZE))
 #define IF_PTRS_SIZE (IF_CLT_PTRS_SIZE + IF_WRKR_PTRS_SIZE + PADDING_IF_CLT_PTRS + PADDING_IF_WRKR_PTRS))
 #define INTERFACE_SIZE ((SESSIONS_PER_THREAD * PER_SESSION_REQ_NUM * CLIENT_OP_SIZE) + (IF_PTRS_SIZE)
 
@@ -988,6 +989,8 @@ struct wrk_clt_if {
 
 extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 
+extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
+extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
 // Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines

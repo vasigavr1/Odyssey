@@ -2299,12 +2299,12 @@ static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_ent
         break;
       case FETCH_AND_ADD:
         memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-        cl_op->rmw_is_successful = true;
+        //*cl_op->rmw_is_successful = true; // that will segfault, no bool pointer is passed in the FAA
         //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
         break;
       case COMPARE_AND_SWAP_WEAK:
       case COMPARE_AND_SWAP_STRONG:
-        cl_op->rmw_is_successful = loc_entry->rmw_is_successful;
+        *(cl_op->rmw_is_successful) = loc_entry->rmw_is_successful;
         if (!loc_entry->rmw_is_successful)
           memcpy(cl_op->value_to_read, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
         break;
@@ -2323,7 +2323,7 @@ static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* v
       check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
     }
     struct client_op *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
-    cl_op->rmw_is_successful = false;
+    *(cl_op->rmw_is_successful) = false;
     memcpy(cl_op->value_to_read, value_to_read, (size_t) RMW_VALUE_SIZE);
   }
 }
@@ -6938,6 +6938,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
       prev_meta = kv_ptr->key.meta;
       debug_stalling_on_lock(&debug_cntr, "trace read/acquire", t_id);
       //memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr->value, VALUE_SIZE);
+      if (ENABLE_ASSERTIONS) assert(op->value_to_read != NULL);
       memcpy(op->value_to_read, kv_ptr->value, VALUE_SIZE);
       //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     } while (!optik_is_same_version_and_valid(prev_meta, kv_ptr->key.meta));

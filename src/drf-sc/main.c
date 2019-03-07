@@ -25,6 +25,8 @@ FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 //struct client_op req_array[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
 //atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
 struct wrk_clt_if interface[WORKERS_PER_MACHINE];
+uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
+uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
 
 int main(int argc, char *argv[])

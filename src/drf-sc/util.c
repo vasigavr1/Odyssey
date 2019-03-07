@@ -165,12 +165,15 @@ void init_globals()
   memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
   qps_are_set_up = false;
   cache_init(0, WORKERS_PER_MACHINE);
-
+  uint16_t per_machine_s_i = 0;
   for (uint16_t w_i = 0; w_i < WORKERS_PER_MACHINE; w_i++) {
     for (uint16_t s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
       interface[w_i].clt_pull_ptr[s_i] = 0;
       interface[w_i].clt_push_ptr[s_i] = 0;
       interface[w_i].wrkr_pull_ptr[s_i] = 0;
+      last_pulled_req[per_machine_s_i] = 0;
+      last_pushed_req[per_machine_s_i] = 0;
+      per_machine_s_i++;
       for (uint16_t r_i = 0; r_i < PER_SESSION_REQ_NUM; r_i++)
         interface[w_i].req_array[s_i][r_i].state = INVALID_REQ;
     }

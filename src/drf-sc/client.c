@@ -12,6 +12,8 @@
 #define RELEASE_BLOCKING 4
 #define CAS_BLOCKING 5
 #define FAA_BLOCKING 6
+// RETURN CODES
+#define NO_SLOT_TO_ISSUE_REQUEST 0
 #define ERROR_NO_SLOTS_FOR_BLOCKING_FUNCTION (-1)
 #define ERROR_PUSH_PULL_PTR_MUST_MATCH (-2)
 #define ERROR_SESSION_T0O_BIG (-3)
@@ -20,6 +22,11 @@
 #define ERROR_NULL_READ_VALUE_PTR (-6)
 #define ERROR_NULL_WRITE_VALUE_PTR (-7)
 #define ERROR_WRONG_REQ_TYPE (-8)
+
+
+/* --------------------------------------------------------------------------------------
+ * ----------------------------------TRACE-----------------------------------------------
+ * --------------------------------------------------------------------------------------*/
 
 // Use a trace - can be either manufactured or from text
 static inline  uint32_t  send_reqs_from_trace(uint16_t worker_num, uint16_t first_worker,
@@ -74,6 +81,11 @@ static inline  uint32_t  send_reqs_from_trace(uint16_t worker_num, uint16_t firs
   return trace_ptr;
 }
 
+
+/* --------------------------------------------------------------------------------------
+ * ----------------------------------API UTILITY-----------------------------------------------
+ * --------------------------------------------------------------------------------------*/
+
 //
 static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * value_to_read,
                                uint8_t * value_to_write,  uint8_t opcode) {
@@ -103,15 +115,18 @@ static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * v
 
 //
 static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint8_t type,
-                                  uint8_t *value_to_read, uint8_t *value_to_write, bool weak)
+                                  uint8_t *value_to_read, uint8_t *value_to_write,
+                                  bool *cas_result, bool weak)
 
 {
   uint8_t  *expected_val = value_to_read, *desired_val = value_to_write;
   switch (type) {
     case RLXD_READ_BLOCKING:
+      cl_op->value_to_read = value_to_read;
       cl_op->opcode = (uint8_t) CACHE_OP_GET;
       break;
     case ACQUIRE_BLOCKING:
+      cl_op->value_to_read = value_to_read;
       cl_op->opcode = (uint8_t) OP_ACQUIRE;
       break;
     case RLXD_WRITE_BLOCKING:
@@ -125,11 +140,14 @@ static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint
     case CAS_BLOCKING:
       cl_op->opcode = (uint8_t) (weak ? COMPARE_AND_SWAP_WEAK : COMPARE_AND_SWAP_STRONG);
       memcpy(cl_op->value_to_write, desired_val, (size_t) RMW_VALUE_SIZE);
-      memcpy(cl_op->value_to_read, expected_val, (size_t) RMW_VALUE_SIZE);
+      cl_op->value_to_read = expected_val;
+      cl_op->rmw_is_successful = cas_result;
+      //memcpy(cl_op->value_to_read, expected_val, (size_t) RMW_VALUE_SIZE);
       break;
     case FAA_BLOCKING:
       cl_op->opcode = (uint8_t) FETCH_AND_ADD;
-      memcpy(cl_op->value_to_read, value_to_read, (size_t) RMW_VALUE_SIZE);
+      cl_op->value_to_read = value_to_read;
+      //memcpy(cl_op->value_to_read, value_to_read, (size_t) RMW_VALUE_SIZE);
       memcpy(cl_op->value_to_write, value_to_write, (size_t) RMW_VALUE_SIZE);
       break;
     default : assert(false);
@@ -138,7 +156,7 @@ static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint
   memcpy(&cl_op->key, &key_hash, TRUE_KEY_SIZE);
 }
 
-// fill the replies
+// fill the replies // TODO Probably needs to be DEPRICATED
 static inline void fill_return_values(struct client_op *cl_op, uint8_t type, uint8_t *value_to_read,
                                  bool *cas_result)
 {
@@ -146,25 +164,71 @@ static inline void fill_return_values(struct client_op *cl_op, uint8_t type, uin
   switch (type) {
     case RLXD_READ_BLOCKING:
     case ACQUIRE_BLOCKING:
-      memcpy(value_to_read, cl_op->value_to_read, VALUE_SIZE);
+      //memcpy(value_to_read, cl_op->value_to_read, VALUE_SIZE);
       break;
     case RLXD_WRITE_BLOCKING:
     case RELEASE_BLOCKING:
       // nothing to do
       break;
     case CAS_BLOCKING:
-      *cas_result = cl_op->rmw_is_successful;
-      if (!cl_op->rmw_is_successful)
-        memcpy(expected_val, cl_op->value_to_read, (size_t) RMW_VALUE_SIZE);
+      //*cas_result = cl_op->rmw_is_successful;
+      //if (!cl_op->rmw_is_successful)
+      //  memcpy(expected_val, cl_op->value_to_read, (size_t) RMW_VALUE_SIZE);
       break;
     case FAA_BLOCKING:
-      memcpy(value_to_read, cl_op->value_to_read, (size_t) RMW_VALUE_SIZE);
+      //memcpy(value_to_read, cl_op->value_to_read, (size_t) RMW_VALUE_SIZE);
       break;
     default : assert(false);
   }
 }
 
 
+/* ----------------------------------POLLING API-----------------------------------------------*/
+
+//
+static inline uint64_t poll(uint16_t session_id)
+{
+  uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
+  uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
+  uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
+  while (interface[wrkr].req_array[s_i][pull_ptr].state == COMPLETED_REQ) {
+    // get the result
+    if (CLIENT_DEBUG)
+      green_printf("Client  pulling req from worker %u for session %u, slot %u\n",
+                    wrkr, s_i, pull_ptr);
+    atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
+    MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
+    last_pulled_req[session_id]++; // no races across clients
+  }
+  return last_pulled_req[session_id];
+}
+
+// Blocking call
+static inline void poll_all_reqs(uint16_t session_id)
+{
+  while(poll(session_id) < last_pushed_req[session_id]);
+}
+
+// returns whether it managed to poll a request
+static inline bool poll_a_req_async(uint16_t session_id, uint64_t target)
+{
+  return poll(session_id) >= target;
+}
+
+// returns after it managed to poll a request
+static inline void poll_a_req_blocking(uint16_t session_id, uint64_t target)
+{
+  while (poll(session_id) < target);
+}
+
+// Blocks until it can poll one request. Useful when you need to issue a request
+static inline void poll_one_req_blocking(uint16_t session_id)
+{
+  uint64_t largest_polled = last_pulled_req[session_id];
+  while (poll(session_id) <= largest_polled);
+}
+
+/* ----------------------------------SYNC & ASYNC-----------------------------------------------*/
 //
 static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
                                   uint8_t *value_to_write, bool *cas_result, bool rmw_is_weak,
@@ -176,32 +240,166 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
   uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
   uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
 
-  if (interface[wrkr].clt_push_ptr[s_i] != interface[wrkr].clt_pull_ptr[s_i])
-    return ERROR_PUSH_PULL_PTR_MUST_MATCH;
+  //if (interface[wrkr].clt_push_ptr[s_i] != interface[wrkr].clt_pull_ptr[s_i])
+  //  return ERROR_PUSH_PULL_PTR_MUST_MATCH;
 
   // let's poll for the slot first
   if (interface[wrkr].req_array[s_i][push_ptr].state != INVALID_REQ) {
-    printf("Deadlock: calling a blocking function, without slots \n");
-    return ERROR_NO_SLOTS_FOR_BLOCKING_FUNCTION;
+    //printf("Deadlock: calling a blocking function, without slots \n");
+    poll_all_reqs(session_id);
+    //return ERROR_NO_SLOTS_FOR_BLOCKING_FUNCTION;
     //assert(false);
+  }
+  //assert(interface[wrkr].clt_push_ptr[s_i] == interface[wrkr].clt_pull_ptr[s_i]);
+  // Issuing the request
+  struct client_op *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
+  fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, cas_result, rmw_is_weak);
+
+  // Implicit assumption: other client threads are not racing for this slot
+  atomic_store_explicit(&cl_op->state, ACTIVE_REQ, memory_order_release);
+  MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+  last_pushed_req[session_id]++;
+
+  // Polling for completion
+  poll_all_reqs(session_id);
+
+  if (ENABLE_ASSERTIONS)
+    assert(interface[wrkr].clt_push_ptr[s_i] == interface[wrkr].clt_pull_ptr[s_i]);
+  return return_int;
+}
+
+//
+static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
+                               uint8_t *value_to_write, bool *cas_result, bool rmw_is_weak,
+                               bool strong,
+                               uint16_t session_id, uint8_t type)
+{
+  int return_int = check_inputs(session_id, key_id, value_to_read, value_to_write, type);
+  if (return_int < 0) return return_int;
+
+  uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
+  uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
+  uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
+
+  // let's poll for the slot first
+  if (interface[wrkr].req_array[s_i][push_ptr].state != INVALID_REQ) {
+    // try to do some polling
+    poll(session_id);
+    if (interface[wrkr].req_array[s_i][push_ptr].state != INVALID_REQ) {
+      if (strong) {
+        poll_one_req_blocking(session_id);
+        assert(interface[wrkr].req_array[s_i][push_ptr].state == INVALID_REQ);
+      }
+      else  return NO_SLOT_TO_ISSUE_REQUEST;
+    }
   }
   // Issuing the request
   struct client_op *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
-  fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, rmw_is_weak);
+  fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, cas_result, rmw_is_weak);
 
+  // Implicit assumption: other client threads are not racing for this slot
   atomic_store_explicit(&cl_op->state, ACTIVE_REQ, memory_order_release);
   MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
-
-  // Polling for completion
-  uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
-  cl_op = &interface[wrkr].req_array[s_i][pull_ptr]; // this is the same as above
-  while (cl_op->state != COMPLETED_REQ);
-  atomic_store_explicit(&cl_op->state, INVALID_REQ, memory_order_relaxed);
-
-  fill_return_values(cl_op, type, value_to_read, cas_result);
-  MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
-  return return_int;
+  last_pushed_req[session_id]++;
+  return (int)last_pushed_req[session_id];
 }
+
+
+/* --------------------------------------------------------------------------------------
+ * ----------------------------------ASYNC API----------------------------------------
+ * --------------------------------------------------------------------------------------*/
+
+//
+static inline int async_read_strong(uint32_t key_id, uint8_t *value_to_read,
+                                    uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, NULL, NULL, false, true, session_id, RLXD_READ_BLOCKING);
+}
+
+//
+static inline int async_write_strong(uint32_t key_id, uint8_t *value_to_write,
+                                     uint16_t session_id)
+{
+
+  return access_async((uint32_t) key_id, NULL, value_to_write, NULL, false, true, session_id, RLXD_WRITE_BLOCKING);
+}
+
+//
+static inline int async_acquire_strong(uint32_t key_id, uint8_t *value_to_read,
+                                       uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, NULL, NULL, false, true, session_id, ACQUIRE_BLOCKING);
+}
+
+//
+static inline int async_release_strong(uint32_t key_id, uint8_t *value_to_write,
+                                       uint16_t session_id)
+{
+
+  return access_async((uint32_t) key_id, NULL, value_to_write, NULL, false, true, session_id, RELEASE_BLOCKING);
+}
+
+//
+static inline int async_cas_strong(uint32_t key_id, uint8_t *expected_val,
+                                   uint8_t *desired_val, bool *cas_result, bool rmw_is_weak,
+                                   uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, expected_val, desired_val, cas_result, rmw_is_weak, true, session_id, CAS_BLOCKING);
+}
+
+//
+static inline int async_faa_strong(uint32_t key_id, uint8_t *value_to_read,
+                                   uint8_t *argument_val, uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, argument_val, NULL, false, true, session_id, FAA_BLOCKING);
+}
+/*------------------------WEAK------------------------------------------------------*/
+
+//
+static inline int async_read_weak(uint32_t key_id, uint8_t *value_to_read,
+                                  uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, NULL, NULL, false, false, session_id, RLXD_READ_BLOCKING);
+}
+
+//
+static inline int async_write_weak(uint32_t key_id, uint8_t *value_to_write,
+                                   uint16_t session_id)
+{
+
+  return access_async((uint32_t) key_id, NULL, value_to_write, NULL, false, false, session_id, RLXD_WRITE_BLOCKING);
+}
+
+//
+static inline int async_acquire_weak(uint32_t key_id, uint8_t *value_to_read,
+                                     uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, NULL, NULL, false, false, session_id, ACQUIRE_BLOCKING);
+}
+
+//
+static inline int async_release_weak(uint32_t key_id, uint8_t *value_to_write,
+                                     uint16_t session_id)
+{
+
+  return access_async((uint32_t) key_id, NULL, value_to_write, NULL, false, false, session_id, RELEASE_BLOCKING);
+}
+
+//
+static inline int async_cas_weak(uint32_t key_id, uint8_t *expected_val,
+                                 uint8_t *desired_val, bool *cas_result, bool rmw_is_weak,
+                                 uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, expected_val, desired_val, cas_result, rmw_is_weak, false, session_id, CAS_BLOCKING);
+}
+
+//
+static inline int async_faa_weak(uint32_t key_id, uint8_t *value_to_read,
+                                 uint8_t *argument_val, uint16_t session_id)
+{
+  return access_async((uint32_t) key_id, value_to_read, argument_val, NULL, false, false, session_id, FAA_BLOCKING);
+}
+
 
 
 /* --------------------------------------------------------------------------------------
@@ -348,6 +546,150 @@ static inline void user_interface()
   }
 }
 
+#define RELAXED_WRITES 5
+static inline void rel_acq_circular_blocking() {
+  int i = 0;
+  uint8_t expected_val[VALUE_SIZE] = {0};
+  uint8_t desired_val[VALUE_SIZE] = {0};
+  uint8_t value[VALUE_SIZE] = {0};
+  int key_id = 0;
+  int expected_int, desired_int;
+  uint16_t session_id = 0;
+  bool cas_result;
+  sleep(3);
+  uint32_t flag_offset = 2 * NUM_OF_RMW_KEYS + (MACHINE_NUM * 100);
+  uint32_t key_flags[MACHINE_NUM];
+  for (i = 0; i < MACHINE_NUM; i++) key_flags[i] = flag_offset + i;
+  uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS);
+  uint16_t relaxed_writes = 5;
+
+  // machine 0 kicks things off
+  if (machine_id == 0) {
+    for (i = 0; i < relaxed_writes; i++) {
+      desired_val[0] = (uint8_t) (10 * machine_id + i);
+      blocking_write(key_offset + i, desired_val, session_id);
+      yellow_printf("Writing key %u, iteration %u, value %u \n", key_offset + i, i, desired_val[0]);
+    }
+    desired_val[0] = 1;
+    blocking_release(key_flags[machine_id], desired_val, session_id);
+  }
+
+  uint8_t prev_machine_id = (uint8_t) ((MACHINE_NUM + machine_id - 1) % MACHINE_NUM);
+  while (true) {
+    // First acquire the previous machine flag
+    yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
+                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+    do {
+      int ret = blocking_acquire(key_flags[prev_machine_id], value, session_id);
+      assert(ret > 0);
+    } while (value[0] != 1);
+
+    yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
+                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+    // Then read all values to make sure they are what they are supposed to be
+    for (i = 0; i < relaxed_writes; i++) {
+      blocking_read(key_offset + i, value, session_id);
+      cyan_printf("Reading key %u, iteration %u, value %u \n", key_offset + i, i, value[0]);
+      assert(value[0] == 10 * prev_machine_id + i);
+    }
+
+    // Write the same values but with different values
+    for (i = 0; i < relaxed_writes; i++) {
+      desired_val[0] = (uint8_t) (10 * machine_id + i);
+      blocking_write(key_offset + i, desired_val, session_id);
+    }
+
+    // reset the flag of the previous machine
+    desired_val[0] = 0;
+    blocking_write(key_flags[prev_machine_id], desired_val, session_id);
+
+    // release your flag
+    desired_val[0] = 1;
+    yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
+    blocking_release(key_flags[machine_id], desired_val, session_id);
+  }
+}
+
+static inline void rel_acq_circular_async() {
+  int i = 0;
+  uint8_t expected_val[VALUE_SIZE] = {0};
+  uint8_t desired_val[VALUE_SIZE] = {0};
+  uint8_t value[RELAXED_WRITES][VALUE_SIZE] = {0};
+  int key_id = 0;
+  int expected_int, desired_int;
+  uint16_t session_id = 0;
+  bool cas_result;
+  sleep(3);
+  uint32_t flag_offset = 2 * NUM_OF_RMW_KEYS + (MACHINE_NUM * 100);
+  uint32_t key_flags[MACHINE_NUM];
+  for (i = 0; i < MACHINE_NUM; i++) key_flags[i] = flag_offset + i;
+  //uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS);
+  uint8_t prev_machine_id = (uint8_t) ((MACHINE_NUM + machine_id - 1) % MACHINE_NUM);
+  // Write keys depending on my machine_id
+  //uint32_t write_key_offset = (uint32_t) (NUM_OF_RMW_KEYS + machine_id * RELAXED_WRITES);
+  //uint32_t read_key_offset = (uint32_t) (NUM_OF_RMW_KEYS + prev_machine_id * RELAXED_WRITES);
+  uint32_t write_key_offset = (uint32_t) (NUM_OF_RMW_KEYS);
+  uint32_t read_key_offset = write_key_offset;
+  uint16_t relaxed_writes = RELAXED_WRITES;
+  uint64_t last_issued_req = 0;
+  int ret;
+
+  // machine 0 kicks things off
+  if (machine_id == 0) {
+    for (i = 0; i < relaxed_writes; i++) {
+      desired_val[0] = (uint8_t) (10 * machine_id + i);
+      async_write_strong(write_key_offset + i, desired_val, session_id);
+      yellow_printf("Writing key %u, iteration %u, value %u \n", write_key_offset + i, i, desired_val[0]);
+    }
+    desired_val[0] = 1;
+    async_release_strong(key_flags[machine_id], desired_val, session_id);
+  }
+  while (true) {
+    // First acquire the previous machine flag
+    yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
+                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+    do {
+      ret = blocking_acquire(key_flags[prev_machine_id], value[0], session_id);
+      assert(ret >= 0);
+    } while (value[0][0] != 1);
+
+    yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
+                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+
+
+    // Issue asynchronous reads
+    for (i = 0; i < relaxed_writes; i++) {
+      last_issued_req = (uint64_t) async_read_strong(read_key_offset + i, value[i], session_id);
+    }
+
+
+    // Write different values but with different values
+    for (i = 0; i < relaxed_writes; i++) {
+      desired_val[0] = (uint8_t) (10 * machine_id + i);
+      ret = async_write_strong(write_key_offset + i, desired_val, session_id);
+      assert(ret > 0);
+    }
+
+    // reset the flag of the previous machine
+    desired_val[0] = 0;
+    ret = async_write_strong(key_flags[prev_machine_id], desired_val, session_id);
+    assert(ret > 0);
+
+    // release your flag
+    desired_val[0] = 1;
+    yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
+    ret = async_release_strong(key_flags[machine_id], desired_val, session_id);
+    assert(ret > 0);
+
+    // Do the actual reads
+    poll_a_req_blocking(session_id, last_issued_req);
+    for (i = 0; i < relaxed_writes; i++) {
+      cyan_printf("Reading key %u, iteration %u, value %u \n", read_key_offset + i, i, value[i][0]);
+      assert(value[i][0] == 10 * prev_machine_id + i);
+    }
+
+  }
+}
 
 
 /* --------------------------------------------------------------------------------------
@@ -377,69 +719,10 @@ void *client(void *arg) {
       user_interface();
     }
     else if (CLIENT_TEST_CASES) {
-      int i = 0;
-      uint8_t expected_val[VALUE_SIZE] = {0};
-      uint8_t desired_val[VALUE_SIZE] = {0};
-      uint8_t value[VALUE_SIZE] = {0};
-      int key_id = 0;
-      int expected_int, desired_int;
-      uint16_t session_id = 0;
-      bool cas_result;
-      sleep(3);
-      uint32_t flag_offset = 2 * NUM_OF_RMW_KEYS + (MACHINE_NUM * 100);
-      uint32_t key_flags[MACHINE_NUM];
-      for (i = 0; i < MACHINE_NUM; i++) key_flags[i] = flag_offset + i;
-      uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS);
-      uint16_t relaxed_writes = 5;
+      if (BLOCKING_TEST_CASE) rel_acq_circular_blocking();
+      else if (ASYNC_TEST_CASE) rel_acq_circular_async();
 
-      // machine 0 kicks things off
-      if (machine_id == 0) {
-          for (i = 0; i < relaxed_writes; i++) {
-            desired_val[0] = (uint8_t) (10 * machine_id + i);
-            blocking_write(key_offset + i, desired_val, session_id);
-            yellow_printf("Writing key %u, iteration %u, value %u \n", key_offset + i, i, desired_val[0]);
-          }
-        desired_val[0] = 1;
-        blocking_release(key_flags[machine_id], desired_val, session_id);
-      }
-
-      uint8_t prev_machine_id = (uint8_t) ((MACHINE_NUM + machine_id -1) % MACHINE_NUM);
-      while(true) {
-        // First acquire the previous machine flag
-        yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
-                      machine_id, key_flags[prev_machine_id], prev_machine_id);
-        do {
-          int ret = blocking_acquire(key_flags[prev_machine_id], value, session_id);
-          assert(ret > 0);
-        } while(value[0] != 1);
-
-        yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
-                      machine_id, key_flags[prev_machine_id], prev_machine_id);
-        // Then read all values to make sure they are what they are supposed to be
-        for (i = 0; i < relaxed_writes; i++) {
-          blocking_read(key_offset + i, value, session_id);
-          cyan_printf("Reading key %u, iteration %u, value %u \n", key_offset + i, i, value[0]);
-          assert(value[0] == 10 * prev_machine_id + i);
-        }
-
-        // Write the same values but with different values
-        for (i = 0; i < relaxed_writes; i++) {
-          desired_val[0] = (uint8_t) (10 * machine_id + i);
-          blocking_write(key_offset + i, desired_val, session_id);
-        }
-
-        // reset the flag of the previous machine
-        desired_val[0] = 0;
-        blocking_write(key_flags[prev_machine_id], value, session_id);
-
-        // release your flag
-        desired_val[0] = 1;
-        yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
-        blocking_release(key_flags[machine_id], desired_val, session_id);
-
-      }
     }
-
     else assert(false);
   } // while(true) loop
 }
