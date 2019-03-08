@@ -56,7 +56,7 @@
 /* Request sizes */
 #define KEY_SIZE 16
 #define TRUE_KEY_SIZE 8 // the key that is actually used by MICA
-#define GRH_SIZE 40 // GLobal Routing Header
+#define GRH_SIZE 40 // Global Routing Header
 
 #define HUGE_PAGE_SIZE 2097152
 #define LEVERAGE_TLB_COALESCING 1

@@ -163,6 +163,7 @@ void init_globals()
   next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
   memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+  memset((struct client_stats*) c_stats, 0, CLIENTS_PER_MACHINE * sizeof(struct client_stats));
   qps_are_set_up = false;
   cache_init(0, WORKERS_PER_MACHINE);
   uint16_t per_machine_s_i = 0;
@@ -981,10 +982,12 @@ void set_up_credits(uint16_t credits[][MACHINE_NUM])
 // If reading CAS rmws out of the trace, CASes that compare against 0 succeed the rest fail
 void randomize_op_values(struct trace_op *ops, uint16_t t_id)
 {
-  for (uint16_t i = 0; i < MAX_OP_BATCH; i++) {
-    if (rand() % 1000 < RMW_CAS_CANCEL_RATIO)
-      memset(ops[i].value, 1, VALUE_SIZE);
-    else memset(ops[i].value, 0, VALUE_SIZE);
+  if (!ENABLE_CLIENTS) {
+    for (uint16_t i = 0; i < MAX_OP_BATCH; i++) {
+      if (rand() % 1000 < RMW_CAS_CANCEL_RATIO)
+        memset(ops[i].value, 1, VALUE_SIZE);
+      else memset(ops[i].value, 0, VALUE_SIZE);
+    }
   }
 }
 

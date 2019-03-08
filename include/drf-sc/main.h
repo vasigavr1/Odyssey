@@ -21,10 +21,10 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 2
+#define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
 #define WRITE_RATIO 300 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 8
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -45,15 +45,15 @@
 #define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 100 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
 // CLIENTS
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -96,7 +96,9 @@
 #define CLIENT_UI 0
 #define CLIENT_TEST_CASES 1
 #define BLOCKING_TEST_CASE 0
-#define ASYNC_TEST_CASE 1
+#define ASYNC_TEST_CASE 0
+#define TREIBER_BLOCKING 0
+#define TREIBER_ASYNC 1
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
@@ -141,9 +143,9 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 10000
-#define TRACE_ONLY_CAS 1
-#define TRACE_ONLY_FA 0
+#define NUM_OF_RMW_KEYS 100000
+#define TRACE_ONLY_CAS 0
+#define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
 #define TRACE_CAS_RATIO 500 // out of a 1000
 #define ENABLE_CAS_CANCELLING 1
@@ -728,6 +730,7 @@ struct read_info {
   bool complete_flag; // denotes whether completion must be signaled to the client
   uint32_t r_ptr; // reverse ptr to the p_ops
   uint32_t log_no;
+  uint32_t val_len;
   struct rmw_id rmw_id;
 
   // when a data out-of-epoch write is inserted in a write message,
@@ -820,6 +823,7 @@ struct rmw_local_entry {
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   uint8_t *compare_val; //for CAS
+  uint32_t rmw_val_len;
   struct rmw_id rmw_id; // this is implicitly the l_id
   struct rmw_id last_registered_rmw_id;
   struct rmw_rep_info rmw_reps;
@@ -938,18 +942,19 @@ struct fifo {
 
 };
 
-#define TRACE_OP_SIZE 18 + VALUE_SIZE  + 8 + 4
+//#define TRACE_OP_SIZE (18 + VALUE_SIZE  + 8 + 4)
 struct trace_op {
   uint16_t session_id;
   uint8_t unused;
   struct network_ts_tuple ts;
   struct key key;	/* This must be the 1st field and 16B aligned */
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
-  uint8_t val_len;
+  uint8_t val_len; // this represents the maximum value len
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
   uint8_t *value_to_write;
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
+  uint32_t real_val_len; // this is the value length the client is interested in
 }__attribute__((__packed__));
 
 #define INVALID_REQ 0 // entry not being used
@@ -963,6 +968,7 @@ struct trace_op {
 struct client_op {
   atomic_uint_fast8_t state;
   uint8_t opcode;
+  uint32_t val_len;
   bool* rmw_is_successful;
   struct key key;
   uint8_t *value_to_read;//[VALUE_SIZE]; // expected val for CAS
@@ -1055,7 +1061,10 @@ struct thread_stats { // 2 cache lines
 	//long long unused[3]; // padding to avoid false sharing
 };
 
-
+struct client_stats {
+  uint64_t treiber_pushes;
+  uint64_t treiber_pops;
+};
 #define UP_STABLE 0
 #define DOWN_STABLE 1
 #define DOWN_TRANSIENT_OWNED 2
@@ -1104,6 +1113,7 @@ extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern atomic_bool qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
+extern struct client_stats c_stats[CLIENTS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast16_t epoch_id;
 extern const uint16_t machine_bit_id[16];

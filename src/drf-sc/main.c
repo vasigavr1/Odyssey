@@ -6,6 +6,7 @@
 //Global Vars
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
+struct client_stats c_stats[CLIENTS_PER_MACHINE];
 struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 
 struct bit_vector send_bit_vector;

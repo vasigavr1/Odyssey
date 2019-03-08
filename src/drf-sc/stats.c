@@ -10,12 +10,18 @@ void *print_stats(void* no_arg) {
   double total_throughput = 0;
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 16 : 16;
-  struct thread_stats *curr_c_stats, *prev_c_stats;
-  curr_c_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-  prev_c_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+  struct thread_stats curr_w_stats[WORKERS_PER_MACHINE], prev_w_stats[WORKERS_PER_MACHINE];
+  //curr_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+  //prev_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
+
+  struct client_stats curr_c_stats[WORKERS_PER_MACHINE], prev_c_stats[WORKERS_PER_MACHINE];
+//  curr_c_stats = (struct client_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct client_stats));
+//  prev_c_stats = (struct client_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct client_stats));
+
   struct stats all_stats;
   sleep(4);
-  memcpy(prev_c_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+  memcpy(prev_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+  memcpy(prev_c_stats, (void *) c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
@@ -23,7 +29,8 @@ void *print_stats(void* no_arg) {
     clock_gettime(CLOCK_REALTIME, &end);
     double seconds = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) / 1000000001;
     start = end;
-    memcpy(curr_c_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+    memcpy(curr_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+    memcpy(curr_c_stats, (void *) c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
 //        memcpy(curr_w_stats, (void*) f_stats, FOLLOWERS_PER_MACHINE * (sizeof(struct follower_stats)));
     all_clients_cache_hits = 0;
     print_count++;
@@ -38,60 +45,71 @@ void *print_stats(void* no_arg) {
     uint64_t total_cancelled_rmws =  0, total_rmws = 0;
     for (i = 0; i < WORKERS_PER_MACHINE; i++) {
 
-      all_clients_cache_hits += curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread;
-      total_cancelled_rmws += curr_c_stats[i].cancelled_rmws - prev_c_stats[i].cancelled_rmws;
-      total_rmws += curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed;
+      all_clients_cache_hits += curr_w_stats[i].cache_hits_per_thread - prev_w_stats[i].cache_hits_per_thread;
+      total_cancelled_rmws += curr_w_stats[i].cancelled_rmws - prev_w_stats[i].cancelled_rmws;
+      total_rmws += curr_w_stats[i].rmws_completed - prev_w_stats[i].rmws_completed;
       all_stats.cache_hits_per_thread[i] =
-        (curr_c_stats[i].cache_hits_per_thread - prev_c_stats[i].cache_hits_per_thread) / seconds;
+        (curr_w_stats[i].cache_hits_per_thread - prev_w_stats[i].cache_hits_per_thread) / seconds;
 
 
 
-      all_stats.stalled_ack[i] = (curr_c_stats[i].stalled_ack - prev_c_stats[i].stalled_ack) / seconds;
+      all_stats.stalled_ack[i] = (curr_w_stats[i].stalled_ack - prev_w_stats[i].stalled_ack) / seconds;
       all_stats.stalled_r_rep[i] =
-        (curr_c_stats[i].stalled_r_rep - prev_c_stats[i].stalled_r_rep) / seconds;
-      all_stats.reads_sent[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) / (seconds);
-      all_stats.rmws_completed[i] = (curr_c_stats[i].rmws_completed - prev_c_stats[i].rmws_completed) / (seconds);
-      all_stats.proposes_sent[i] = (curr_c_stats[i].proposes_sent - prev_c_stats[i].proposes_sent) / (seconds);
-      all_stats.accepts_sent[i] = (curr_c_stats[i].accepts_sent - prev_c_stats[i].accepts_sent) / (seconds);
-      all_stats.commits_sent[i] = (curr_c_stats[i].commits_sent - prev_c_stats[i].commits_sent) / (seconds);
+        (curr_w_stats[i].stalled_r_rep - prev_w_stats[i].stalled_r_rep) / seconds;
+      all_stats.reads_sent[i] = (curr_w_stats[i].reads_sent - prev_w_stats[i].reads_sent) / (seconds);
+      all_stats.rmws_completed[i] = (curr_w_stats[i].rmws_completed - prev_w_stats[i].rmws_completed) / (seconds);
+      all_stats.proposes_sent[i] = (curr_w_stats[i].proposes_sent - prev_w_stats[i].proposes_sent) / (seconds);
+      all_stats.accepts_sent[i] = (curr_w_stats[i].accepts_sent - prev_w_stats[i].accepts_sent) / (seconds);
+      all_stats.commits_sent[i] = (curr_w_stats[i].commits_sent - prev_w_stats[i].commits_sent) / (seconds);
 
-      all_stats.quorum_reads_per_thread[i] = (curr_c_stats[i].quorum_reads - prev_c_stats[i].quorum_reads) / (seconds);
+      all_stats.quorum_reads_per_thread[i] = (curr_w_stats[i].quorum_reads - prev_w_stats[i].quorum_reads) / (seconds);
 
-      all_stats.writes_sent[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) / (seconds);
-      all_stats.r_reps_sent[i] = (curr_c_stats[i].r_reps_sent - prev_c_stats[i].r_reps_sent) / seconds;
-      all_stats.acks_sent[i] = (curr_c_stats[i].acks_sent - prev_c_stats[i].acks_sent) / seconds;
-      all_stats.received_writes[i] = (curr_c_stats[i].received_writes - prev_c_stats[i].received_writes) / seconds;
-      all_stats.received_reads[i] = (curr_c_stats[i].received_reads - prev_c_stats[i].received_reads) / seconds;
-      all_stats.received_r_reps[i] = (curr_c_stats[i].received_r_reps - prev_c_stats[i].received_r_reps) / seconds;
-      all_stats.received_acks[i] = (curr_c_stats[i].received_acks - prev_c_stats[i].received_acks) / seconds;
+      all_stats.writes_sent[i] = (curr_w_stats[i].writes_sent - prev_w_stats[i].writes_sent) / (seconds);
+      all_stats.r_reps_sent[i] = (curr_w_stats[i].r_reps_sent - prev_w_stats[i].r_reps_sent) / seconds;
+      all_stats.acks_sent[i] = (curr_w_stats[i].acks_sent - prev_w_stats[i].acks_sent) / seconds;
+      all_stats.received_writes[i] = (curr_w_stats[i].received_writes - prev_w_stats[i].received_writes) / seconds;
+      all_stats.received_reads[i] = (curr_w_stats[i].received_reads - prev_w_stats[i].received_reads) / seconds;
+      all_stats.received_r_reps[i] = (curr_w_stats[i].received_r_reps - prev_w_stats[i].received_r_reps) / seconds;
+      all_stats.received_acks[i] = (curr_w_stats[i].received_acks - prev_w_stats[i].received_acks) / seconds;
 
-      all_stats.ack_batch_size[i] = (curr_c_stats[i].acks_sent - prev_c_stats[i].acks_sent) /
-                                    (double) (curr_c_stats[i].acks_sent_mes_num -
-                                              prev_c_stats[i].acks_sent_mes_num);
-      all_stats.write_batch_size[i] = (curr_c_stats[i].writes_sent - prev_c_stats[i].writes_sent) /
-                                    (double) (curr_c_stats[i].writes_sent_mes_num -
-                                              prev_c_stats[i].writes_sent_mes_num);
-      all_stats.r_batch_size[i] = (curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent) /
-                                      (double) (curr_c_stats[i].reads_sent_mes_num -
-                                                prev_c_stats[i].reads_sent_mes_num);
-      all_stats.r_rep_batch_size[i] = (curr_c_stats[i].r_reps_sent - prev_c_stats[i].r_reps_sent) /
-                                      (double) (curr_c_stats[i].r_reps_sent_mes_num -
-                                                prev_c_stats[i].r_reps_sent_mes_num);
-      all_stats.failed_rem_write[i] = (curr_c_stats[i].failed_rem_writes - prev_c_stats[i].failed_rem_writes) /
-                                  (double) (curr_c_stats[i].received_writes -
-                                            prev_c_stats[i].received_writes);
+      all_stats.ack_batch_size[i] = (curr_w_stats[i].acks_sent - prev_w_stats[i].acks_sent) /
+                                    (double) (curr_w_stats[i].acks_sent_mes_num -
+                                              prev_w_stats[i].acks_sent_mes_num);
+      all_stats.write_batch_size[i] = (curr_w_stats[i].writes_sent - prev_w_stats[i].writes_sent) /
+                                    (double) (curr_w_stats[i].writes_sent_mes_num -
+                                              prev_w_stats[i].writes_sent_mes_num);
+      all_stats.r_batch_size[i] = (curr_w_stats[i].reads_sent - prev_w_stats[i].reads_sent) /
+                                      (double) (curr_w_stats[i].reads_sent_mes_num -
+                                                prev_w_stats[i].reads_sent_mes_num);
+      all_stats.r_rep_batch_size[i] = (curr_w_stats[i].r_reps_sent - prev_w_stats[i].r_reps_sent) /
+                                      (double) (curr_w_stats[i].r_reps_sent_mes_num -
+                                                prev_w_stats[i].r_reps_sent_mes_num);
+      all_stats.failed_rem_write[i] = (curr_w_stats[i].failed_rem_writes - prev_w_stats[i].failed_rem_writes) /
+                                  (double) (curr_w_stats[i].received_writes -
+                                            prev_w_stats[i].received_writes);
 
-      uint64_t curr_true_read_sent = curr_c_stats[i].reads_sent - curr_c_stats[i].releases_per_thread; // TODO this does not account for out-of-epoch writes
-      uint64_t prev_true_read_sent = prev_c_stats[i].reads_sent - prev_c_stats[i].releases_per_thread;
-      all_stats.reads_that_become_writes[i] = (curr_c_stats[i].read_to_write - prev_c_stats[i].read_to_write) /
-                                              (double)((curr_c_stats[i].reads_sent - prev_c_stats[i].reads_sent));
+      uint64_t curr_true_read_sent = curr_w_stats[i].reads_sent - curr_w_stats[i].releases_per_thread; // TODO this does not account for out-of-epoch writes
+      uint64_t prev_true_read_sent = prev_w_stats[i].reads_sent - prev_w_stats[i].releases_per_thread;
+      all_stats.reads_that_become_writes[i] = (curr_w_stats[i].read_to_write - prev_w_stats[i].read_to_write) /
+                                              (double)((curr_w_stats[i].reads_sent - prev_w_stats[i].reads_sent));
 
     }
 
-    memcpy(prev_c_stats, curr_c_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+    uint64_t all_client_treiber_pushes = 0, all_client_treiber_pops = 0;
+    for (i = 0; i < CLIENTS_PER_MACHINE; i++) {
+      all_client_treiber_pushes += curr_c_stats[i].treiber_pushes - prev_c_stats[i].treiber_pushes;
+      all_client_treiber_pops += curr_c_stats[i].treiber_pops - prev_c_stats[i].treiber_pops;
+    }
+
+    memcpy(prev_w_stats, curr_w_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
+    memcpy(prev_c_stats, curr_c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
     total_throughput = (all_clients_cache_hits) / seconds;
+    double total_treiber_pushes = (all_client_treiber_pushes) / seconds;
+    double total_treiber_pops = (all_client_treiber_pops) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f %.2f\n", print_count, total_throughput,  (total_cancelled_rmws / (double) total_rmws));
+    green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f\n", print_count, total_throughput,
+                 (total_cancelled_rmws / (double) total_rmws),
+                 total_treiber_pushes, total_treiber_pops);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

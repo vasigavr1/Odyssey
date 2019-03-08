@@ -241,10 +241,10 @@ void *worker(void *arg)
                                            //p_ops, resp, &latency_info,
                                           // ses_dbg);
     //else
-    trace_iter = batch_requests_to_cache(t_id,
-                                         trace_iter, trace, ops,
-                                         p_ops, resp, &latency_info,
-                                         ses_dbg);
+    trace_iter = batch_requests_to_KVS(t_id,
+                                       trace_iter, trace, ops,
+                                       p_ops, resp, &latency_info,
+                                       ses_dbg);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

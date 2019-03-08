@@ -426,7 +426,7 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
     if (op->complete_flag) {
       if (ENABLE_ASSERTIONS) assert(&p_ops->read_info[op->r_ptr] == op);
       if (op->opcode == OP_ACQUIRE || op->opcode == CACHE_OP_GET)
-        memcpy(op->value_to_read, op->value, VALUE_SIZE);
+        memcpy(op->value_to_read, op->value, op->val_len);
       signal_completion_to_client(p_ops->r_session_id[op->r_ptr],
                                   p_ops->r_index_to_req_array[op->r_ptr], t_id);
       op->complete_flag = false;
