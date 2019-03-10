@@ -107,7 +107,7 @@
 // for the same RMW-id and TS, that means the proposer will never see this opcode because
 // it has already gathered prop reps quorum and sent accepts
 #define NO_OP_PROP_REP 40
-#define LOG_EQUAL 41 // for acquires onr rmws, the response is with respect to the log numbers
+#define LOG_EQUAL 41 // for acquires on rmws, the response is with respect to the log numbers
 
 
 // this offset is added to the read reply opcode

@@ -39,12 +39,14 @@ void static_assert_compile_parameters()
 
 
   // PROPOSES
-  static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
+  //static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
   static_assert(PROP_SIZE == sizeof(struct propose), "");
-  static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
+  //static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
   static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
   static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
     " buffer allocated for a read message");
+
+  static_assert(R_MES_SIZE >= PROP_MESSAGE_SIZE, "");
 
   static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
   static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MESSAGE_SIZE, "");
@@ -61,7 +63,7 @@ void static_assert_compile_parameters()
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
   static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
   static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
-  static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
+  //static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
   static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
   static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
   static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
@@ -788,6 +790,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   }
 
   (*p_ops)->ptrs_to_r_headers = (struct r_message **) malloc(MAX_INCOMING_R * sizeof(struct r_message *));
+  (*p_ops)->coalesce_r_rep = (bool *) malloc(MAX_INCOMING_R * sizeof(bool));
   // PTRS to W_OPS
   (*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
   // PTRS to R_OPS

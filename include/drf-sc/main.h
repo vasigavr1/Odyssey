@@ -29,10 +29,11 @@
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 7
-#define MAX_R_COALESCE 12
-#define W_CREDITS 10
-#define MAX_W_COALESCE 12
+#define R_CREDITS 15
+#define MAX_R_COALESCE 14
+#define MAX_PROP_COALESCE 5
+#define W_CREDITS 8
+#define MAX_W_COALESCE 8
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
@@ -45,7 +46,7 @@
 #define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 200// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -234,7 +235,7 @@
 // Proposes
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-#define MAX_PROP_COALESCE 1
+
 
 #define PROP_MES_HEADER 2 // coalesce_num , m_id
 #define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
@@ -863,6 +864,7 @@ struct pending_ops {
   struct write **ptrs_to_local_w; // used for the first phase of release
   uint8_t *overwritten_values;
   struct r_message **ptrs_to_r_headers;
+  bool *coalesce_r_rep;
 //  struct read_payload *r_payloads;
   struct read_info *read_info;
   struct r_rep_fifo *r_rep_fifo;

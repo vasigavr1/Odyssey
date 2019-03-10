@@ -292,7 +292,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + op_i) % max_op_size];
     if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
       insert_r_rep(p_ops, p_ops->ptrs_to_r_headers[op_i]->l_id, t_id,
-                   p_ops->ptrs_to_r_headers[op_i]->m_id, op->opcode);
+                   p_ops->ptrs_to_r_headers[op_i]->m_id,
+                   p_ops->coalesce_r_rep[op_i], op->opcode);
       continue;
     }
     if(kv_ptr[op_i] != NULL) {
