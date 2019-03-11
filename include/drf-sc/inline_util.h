@@ -2899,25 +2899,6 @@ static inline int search_prop_entries_with_l_id(struct prop_info *prop_info, uin
 
 }
 
-// If the prop/accept reply contains many replies move to the next message
-// according to the current message
-static inline void move_ptr_to_next_rmw_reply(uint16_t *byte_ptr, uint8_t opcode)
-{
-  if (opcode == RMW_ACK || (opcode == RMW_ACK + FALSE_POSITIVE_OFFSET) ||
-      opcode == LOG_TOO_HIGH || (opcode == LOG_TOO_HIGH + FALSE_POSITIVE_OFFSET) ||
-      opcode == NO_OP_PROP_REP || (opcode == NO_OP_PROP_REP + FALSE_POSITIVE_OFFSET))
-    (*byte_ptr)+= PROP_REP_SMALL_SIZE; // l_id and opcode
-  else if ((opcode == RMW_TS_STALE || (opcode == RMW_TS_STALE + FALSE_POSITIVE_OFFSET)) ||
-           (opcode == SEEN_HIGHER_PROP || (opcode == SEEN_HIGHER_PROP + FALSE_POSITIVE_OFFSET)) ||
-           (opcode == SEEN_HIGHER_ACC || (opcode == SEEN_HIGHER_ACC + FALSE_POSITIVE_OFFSET)))
-    (*byte_ptr) += PROP_REP_ONLY_TS_SIZE;
-  else if ((opcode == SEEN_LOWER_ACC) || (opcode == SEEN_LOWER_ACC + FALSE_POSITIVE_OFFSET))
-    (*byte_ptr) += PROP_REP_ACCEPTED_SIZE;
-  else if((opcode == RMW_ID_COMMITTED || (opcode == RMW_ID_COMMITTED + FALSE_POSITIVE_OFFSET)) ||
-          (opcode == LOG_TOO_SMALL || (opcode == LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET)))
-    (*byte_ptr) += PROP_REP_SIZE;
-  else if (ENABLE_ASSERTIONS) assert(false);
-}
 
 // When forging a write wr
 static inline uint32_t calculate_write_message_size(uint8_t opcode, uint8_t coalesce_num, uint16_t t_id)
@@ -3253,31 +3234,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
   }
 }
 
-//
-static inline void set_up_rmw_rep_message_size(struct pending_ops *p_ops, uint8_t opcode, uint16_t t_id)
-{
-  struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
-  uint16_t *size = &r_rep_fifo->message_sizes[r_rep_fifo->push_ptr];
-
-  check_state_with_allowed_flags(10, opcode, NO_OP_PROP_REP, RMW_ACK, RMW_TS_STALE,
-                                 SEEN_HIGHER_PROP, SEEN_LOWER_ACC, RMW_ID_COMMITTED,
-                                 LOG_TOO_SMALL, LOG_TOO_HIGH, SEEN_HIGHER_ACC);
-
-
-  if (opcode == RMW_ID_COMMITTED || opcode == LOG_TOO_SMALL)
-    *size += PROP_REP_SIZE;// PROP_REP_MESSAGE_SIZE;
-  else if (opcode == SEEN_LOWER_ACC)
-    *size += (PROP_REP_SIZE - LOG_NO_SIZE);
-  else if (opcode == RMW_TS_STALE || opcode == SEEN_HIGHER_PROP ||
-           opcode == SEEN_HIGHER_ACC)
-    *size += (PROP_REP_ONLY_TS_SIZE); //PROP_REP_MES_HEADER + 8 + 1 + TS_TUPLE_SIZE;
-  else if (opcode == RMW_ACK || opcode == LOG_TOO_HIGH ||
-           opcode == NO_OP_PROP_REP)
-    *size += (PROP_REP_SMALL_SIZE); //PROP_REP_MES_HEADER + 8 + 1;
-  else if (ENABLE_ASSERTIONS) assert(false);
-}
-
-
+// Give an opcode to get the size of the messages, only propose/accept reps so far
 static inline uint16_t get_size_from_opcode(uint8_t opcode)
 {
   check_state_with_allowed_flags(10, opcode, NO_OP_PROP_REP, RMW_ACK, RMW_TS_STALE,
@@ -3286,8 +3243,9 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
   switch(opcode) {
     case RMW_ID_COMMITTED:
     case LOG_TOO_SMALL:
-    case SEEN_LOWER_ACC:
       return PROP_REP_SIZE;
+    case SEEN_LOWER_ACC:
+      return PROP_REP_ACCEPTED_SIZE;
     case RMW_TS_STALE:
     case SEEN_HIGHER_PROP:
     case SEEN_HIGHER_ACC:
@@ -7324,7 +7282,8 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",
             kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, acc_rep->opcode);
-  set_up_rmw_rep_message_size(p_ops, acc_rep->opcode, t_id);
+  //set_up_rmw_rep_message_size(p_ops, acc_rep->opcode, t_id);
+  p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(acc_rep->opcode);
   finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) acc_rep, acc->opcode, acc_m_id, t_id);
 
 }
