@@ -800,6 +800,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
 
 
+
   for (i = 0; i < W_FIFO_SIZE; i++) {
     (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
     for (j = 0; j < MAX_W_COALESCE; j++){
@@ -810,6 +811,8 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   for (i = 0; i < R_FIFO_SIZE; i++) {
     (*p_ops)->r_fifo->r_message[i].m_id = (uint8_t) machine_id;
   }
+  (*p_ops)->r_fifo->info[0].message_size = R_MES_HEADER;
+
   for (i = 0; i < R_REP_FIFO_SIZE; i++) {
     (*p_ops)->r_rep_fifo->r_rep_message[i].m_id = (uint8_t) machine_id;
   }

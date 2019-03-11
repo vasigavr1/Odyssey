@@ -345,27 +345,6 @@ static inline uint8_t sum_of_reps(struct rmw_rep_info* rmw_reps)
          rmw_reps->log_too_high;
 }
 
-static inline bool r_rep_has_big_size(uint8_t opcode)
-{
-  return opcode == TS_GREATER || (opcode == TS_GREATER + FALSE_POSITIVE_OFFSET);
-}
-
-static inline bool r_rep_has_rmw_acq_size(uint8_t opcode)
-{
-  return opcode == LOG_TOO_SMALL || (opcode == LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET);
-}
-
-static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
-{
-  if (r_rep_has_rmw_acq_size(opcode))
-    return RMW_ACQ_REP_SIZE;
-  else if (r_rep_has_big_size(opcode))
-    return R_REP_SIZE;
-  else if (opcode == TS_GREATER_TS_ONLY)
-    return R_REP_ONLY_TS_SIZE;
-  else return 1;
-}
-
 static inline bool
 optik_is_same_version_and_valid_netw_ts_meta(struct network_ts_tuple v1, volatile cache_meta v2)
 {
@@ -1048,7 +1027,8 @@ static inline void print_and_check_mes_when_polling_r_reps(struct r_rep_message 
                                                            uint32_t index, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    check_state_with_allowed_flags(5, r_rep_mes->opcode, READ_REPLY, PROP_REPLY, ACCEPT_REPLY, RMW_ACQ_REPLY);
+    check_state_with_allowed_flags(6, r_rep_mes->opcode, READ_REPLY, PROP_REPLY, ACCEPT_REPLY,
+                                   READ_PROP_REPLY);
     my_assert(r_rep_mes->m_id < MACHINE_NUM, "Received r_rep with m_id >= Machine_NUM");
     my_assert(r_rep_mes->coalesce_num > 0, "Received r_rep with coalesce num = 0");
   }
@@ -1359,73 +1339,26 @@ static inline void check_r_rep_l_id(uint64_t l_id, uint8_t r_rep_num, uint64_t p
   }
 }
 
-// spin waiting for the r_rep
-static inline void wait_until_the_entire_r_rep(struct r_rep_big *stuck_r_rep,
-                                               struct r_rep_message_ud_req *r_rep_buf,
-                                               uint16_t r_rep_i, uint32_t r_rep_pull_ptr,
-                                               struct pending_ops *p_ops, uint16_t stuck_byte_ptr,
-                                               uint16_t t_id)
-{
-  uint32_t debug_cntr = 0;
-  while (stuck_r_rep->opcode < TS_SMALLER || stuck_r_rep->opcode > TS_GREATER) {
-    if (ENABLE_ASSERTIONS) {
-      assert(false);
-      debug_cntr++;
-      if (debug_cntr == M_512_) {
-        red_printf("Wrkr %d stuck waiting for a r_rep_mes to come, stuck opcode %u, stuck byte_ptr %u, r_rep_i %u, stuck ptr %lu  \n",
-                   t_id, stuck_r_rep->opcode, stuck_byte_ptr, r_rep_i, stuck_r_rep);
-        r_rep_pull_ptr = (r_rep_pull_ptr - 1) % R_REP_BUF_SLOTS;
-        volatile struct r_rep_message *r_rep_mes = &r_rep_buf[r_rep_pull_ptr].r_rep_mes;
-        uint64_t l_id = r_rep_mes->l_id;
-        uint8_t message_opc = r_rep_mes->opcode;
-        cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st r_rep_mes opcode: %u, l_id %lu, expected l_id %lu\n",
-                    t_id, r_rep_pull_ptr, message_opc, r_rep_mes->opcode, l_id, p_ops->local_r_id);
-
-        uint16_t byte_ptr = R_REP_MES_HEADER;
-        for (uint16_t i = 0; i < r_rep_mes->coalesce_num; i++) {
-          struct r_rep_big *r_rep = (struct r_rep_big *) (((void *) r_rep_mes) + byte_ptr);
-          yellow_printf("R_rep %u/%u, opcode %u, byte_ptr %u , ptr %lu/%lu\n", i, r_rep_mes->coalesce_num, r_rep->opcode, byte_ptr,
-                        r_rep, stuck_r_rep);
-          if (r_rep->opcode == TS_GREATER) byte_ptr += R_REP_SIZE;
-          else if (r_rep->opcode == TS_GREATER_TS_ONLY) byte_ptr += R_REP_ONLY_TS_SIZE;
-          else byte_ptr++;
-        }
-        for (int i = 0; i < R_REP_BUF_SLOTS; ++i) {
-          if (r_rep_buf[i].r_rep_mes.opcode == READ_REPLY) {
-            green_printf("GOOD OPCODE in index %d, l_id %u \n", i, r_rep_buf[i].r_rep_mes.l_id);
-          } else
-            red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i,
-                       r_rep_buf[i].r_rep_mes.l_id,
-                       r_rep_buf[i].r_rep_mes.m_id);
-        }
-        print_wrkr_stats(t_id);
-        debug_cntr = 0;
-      }
-    }
-  }
-}
 
 static inline void check_a_polled_r_rep(struct r_rep_big *r_rep,
-                                        struct r_rep_message_ud_req *r_rep_buf,
-                                        uint16_t r_rep_i, uint32_t r_rep_pull_ptr,
-                                        struct pending_ops *p_ops, uint16_t byte_ptr,
-                                        uint8_t r_rep_num,
+                                        struct r_rep_message *r_rep_mes,
+                                        uint16_t r_rep_i, uint8_t r_rep_num,
                                         uint16_t t_id) {
   if (ENABLE_ASSERTIONS) {
     uint8_t opcode = r_rep->opcode;
-   // if (opcode > LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+    if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
     //check_state_with_allowed_flags(8, opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
-     //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
-    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > LOG_EQUAL) &&
+    //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
+    check_state_with_allowed_flags(3, r_rep_mes->opcode, READ_REPLY, READ_PROP_REPLY);
+    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > ACQ_LOG_EQUAL) &&
         (r_rep->opcode < TS_SMALLER + FALSE_POSITIVE_OFFSET ||
-         r_rep->opcode > LOG_EQUAL + FALSE_POSITIVE_OFFSET)) {
+         r_rep->opcode > ACQ_LOG_EQUAL + FALSE_POSITIVE_OFFSET)) {
       red_printf("Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, r_rep_i, r_rep_num);
       assert(false);
-      wait_until_the_entire_r_rep(r_rep, r_rep_buf, r_rep_i,
-                                  r_rep_pull_ptr, p_ops, byte_ptr, t_id);
     }
   }
 }
+
 
 
 // Check when inserting a read
@@ -1452,7 +1385,7 @@ static inline void check_previous_read_lid(uint8_t source, uint8_t opcode, uint6
 
 // Check when inserting a read
 static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t r_ptr, uint8_t source, struct r_message *r_mes,
-                                            struct read_info *r_info, uint32_t r_mes_ptr, uint8_t inside_r_ptr, uint16_t t_id)
+                                            struct read_info *r_info, uint32_t r_mes_ptr, struct read *read, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     if (p_ops->r_state[r_ptr] != INVALID)
@@ -1461,7 +1394,7 @@ static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t 
                  t_stats[t_id].cache_hits_per_thread, p_ops->r_size);
     //printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
     assert(p_ops->r_state[r_ptr] == INVALID);
-    struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
+    //struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
 //    if (read->opcode == 0) red_printf("R_mes_ptr %u, inside_r_ptr %u, first read opcode %u source %u \n",
 //      r_mes_ptr, inside_r_ptr, r_mes[r_mes_ptr].read[0].opcode);
     check_state_with_allowed_flags(5, read->opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
@@ -1836,29 +1769,24 @@ static inline void check_local_commit_from_rep(struct rmw_entry *glob_entry, str
 }
 
 static inline void check_when_polling_for_reads(struct r_message *r_mes, uint32_t index,
-                                                uint32_t polled_reads, bool is_propose, uint16_t t_id)
+                                                uint32_t polled_reads, uint16_t t_id)
 {
   uint8_t r_num = r_mes->coalesce_num;
   if (ENABLE_ASSERTIONS) {
-    struct prop_message *p_mes = (struct prop_message *)r_mes;
+    //struct prop_message *p_mes = (struct prop_message *)r_mes;
+    struct read *read = &r_mes->read[0];
+    struct propose *prop =(struct propose *)&r_mes->read[0];
     assert(r_mes->coalesce_num > 0);
-    if (!is_propose)
-      check_state_with_allowed_flags(5, r_mes->read[r_mes->coalesce_num - 1].opcode,
-                                     CACHE_OP_GET_TS, OP_ACQUIRE, CACHE_OP_GET, OP_ACQUIRE_FLIP_BIT);
-    else {
-      check_state_with_allowed_flags(2, p_mes->prop[p_mes->coalesce_num - 1].opcode,
-                                     PROPOSE_OP);
-    }
     if (DEBUG_READ_REPS)
       printf("Worker %u sees a read Opcode %d at offset %d, l_id %lu  \n", t_id,
-             r_mes->read[0].opcode, index, r_mes->l_id);
+             read->opcode, index, r_mes->l_id);
     else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
-      struct prop_message *prop_mes = (struct prop_message *) r_mes;
+      //struct prop_message *prop_mes = (struct prop_message *) r_mes;
       cyan_printf("Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
                     "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
-                  t_id, prop_mes->m_id, prop_mes->prop[0].opcode, index, prop_mes->prop[0].t_rmw_id,
-                  prop_mes->prop[0].glob_sess_id, prop_mes->prop[0].log_no,
-                  prop_mes->coalesce_num, prop_mes->prop[0].ts.version);
+                  t_id, r_mes->m_id, prop->opcode, index, prop->t_rmw_id,
+                  prop->glob_sess_id, prop->log_no,
+                  r_mes->coalesce_num, prop->ts.version);
     }
     if (polled_reads + r_num > MAX_INCOMING_R) assert(false);
   }
@@ -2015,7 +1943,7 @@ static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t
 
 
 // 3. Query the conf bit vector for the local bit when starting an acquire
-//    if some remote release has raised the bit, then incrase epoch id and flip the bit
+//    if some remote release has raised the bit, then increase epoch id and flip the bit
 static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id)
 {
   if (unlikely(conf_bit_vec[machine_id].bit == DOWN_STABLE)) {
@@ -3234,13 +3162,43 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
   }
 }
 
+static inline bool opcode_is_rmw_rep(uint8_t opcode)
+{
+  return (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP);
+}
+
+static inline bool r_rep_has_big_size(uint8_t opcode)
+{
+  return opcode == TS_GREATER || (opcode == TS_GREATER + FALSE_POSITIVE_OFFSET);
+}
+
+static inline bool r_rep_has_rmw_acq_size(uint8_t opcode)
+{
+  return opcode == ACQ_LOG_TOO_SMALL || (opcode == ACQ_LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET);
+}
+
+static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
+{
+  if (r_rep_has_rmw_acq_size(opcode))
+    return RMW_ACQ_REP_SIZE;
+  else if (r_rep_has_big_size(opcode))
+    return R_REP_SIZE;
+  else if (opcode == TS_GREATER_TS_ONLY)
+    return R_REP_ONLY_TS_SIZE;
+  else return 1;
+}
+
 // Give an opcode to get the size of the messages, only propose/accept reps so far
 static inline uint16_t get_size_from_opcode(uint8_t opcode)
 {
+  if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+
   check_state_with_allowed_flags(10, opcode, NO_OP_PROP_REP, RMW_ACK, RMW_TS_STALE,
                                  SEEN_HIGHER_PROP, SEEN_LOWER_ACC, RMW_ID_COMMITTED,
-                                 LOG_TOO_SMALL, LOG_TOO_HIGH, SEEN_HIGHER_ACC);
+                                 LOG_TOO_SMALL, LOG_TOO_HIGH, SEEN_HIGHER_ACC, ACQ_LOG_TOO_HIGH,
+                                 ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
   switch(opcode) {
+    // ----RMWS-----
     case RMW_ID_COMMITTED:
     case LOG_TOO_SMALL:
       return PROP_REP_SIZE;
@@ -3254,6 +3212,20 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
     case LOG_TOO_HIGH:
     case NO_OP_PROP_REP:
       return PROP_REP_SMALL_SIZE;
+    //---- RMW ACQUIRES--------
+    case ACQ_LOG_TOO_HIGH:
+    case ACQ_LOG_EQUAL:
+      return R_REP_SMALL_SIZE;
+    case ACQ_LOG_TOO_SMALL:
+      return RMW_ACQ_REP_SIZE;
+    // -----REGULAR READS/ACQUIRES----
+    case TS_SMALLER:
+    case TS_EQUAL:
+      return R_REP_SMALL_SIZE;
+    case TS_GREATER:
+      return R_REP_SIZE;
+    case TS_GREATER_TS_ONLY:
+      return R_REP_ONLY_TS_SIZE;
     default: if (ENABLE_ASSERTIONS) assert(false);
   }
 }
@@ -3265,11 +3237,12 @@ static inline void set_up_rmw_acq_rep_message_size(struct pending_ops *p_ops,
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
 
-  check_state_with_allowed_flags(7, opcode, LOG_TOO_SMALL, LOG_TOO_HIGH, LOG_EQUAL,
-                                 LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET, LOG_TOO_HIGH + FALSE_POSITIVE_OFFSET,
-                                 LOG_EQUAL + FALSE_POSITIVE_OFFSET);
+  check_state_with_allowed_flags(7, opcode, ACQ_LOG_TOO_SMALL, ACQ_LOG_TOO_HIGH, ACQ_LOG_EQUAL,
+                                 ACQ_LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET,
+                                 ACQ_LOG_TOO_HIGH + FALSE_POSITIVE_OFFSET,
+                                 ACQ_LOG_EQUAL + FALSE_POSITIVE_OFFSET);
 
-  if (opcode == LOG_TOO_SMALL)
+  if (opcode == ACQ_LOG_TOO_SMALL)
     r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (RMW_ACQ_REP_SIZE - R_REP_SMALL_SIZE);
 }
 
@@ -3439,12 +3412,12 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
                                                                    uint16_t t_id)
 {
   // Check for acquires that detected a false positive
-  if (unlikely(r_rep->opcode > LOG_EQUAL)) {
+  if (unlikely(r_rep->opcode > ACQ_LOG_EQUAL)) {
     read_info->fp_detected = true;
     if (DEBUG_QUORUM) yellow_printf("Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
     r_rep->opcode -= FALSE_POSITIVE_OFFSET;
     check_state_with_allowed_flags(8, r_rep->opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
-                                   LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
+                                   ACQ_LOG_TOO_HIGH, ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
     if (ENABLE_ASSERTIONS) {
       assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
       assert(read_info->opcode == OP_ACQUIRE);
@@ -3452,7 +3425,7 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
   }
   if (ENABLE_ASSERTIONS) {
     if (r_rep->opcode > TS_GREATER) {
-      check_state_with_allowed_flags(4, r_rep->opcode, LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
+      check_state_with_allowed_flags(4, r_rep->opcode, ACQ_LOG_TOO_HIGH, ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
       assert(read_info->is_rmw);
       assert(read_info->opcode == OP_ACQUIRE);
     }
@@ -3510,7 +3483,7 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, st
                                                  uint16_t t_id)
 {
   detect_false_positives_on_read_info_bookkeeping((struct r_rep_big *) acq_rep, read_info, t_id);
-  if (acq_rep->opcode == LOG_TOO_SMALL) {
+  if (acq_rep->opcode == ACQ_LOG_TOO_SMALL) {
     if (!read_info->seen_larger_ts) { // If this is the first "Greater" ts
       if (ENABLE_ASSERTIONS) assert(read_info->log_no < acq_rep->log_no);
       read_info->log_no = acq_rep->log_no;
@@ -3537,12 +3510,12 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, st
       // Nothing to do if the already stored ts is greater than the incoming
     }
   }
-  else if (acq_rep->opcode == LOG_EQUAL) {
+  else if (acq_rep->opcode == ACQ_LOG_EQUAL) {
     if (!read_info->seen_larger_ts)  // If it has not seen a "greater ts"
       read_info->times_seen_ts++;
     // Nothing to do if the already stored ts is greater than the incoming
   }
-  else if (acq_rep->opcode == LOG_TOO_HIGH) { // Nothing to do if the already stored ts is greater than the incoming
+  else if (acq_rep->opcode == ACQ_LOG_TOO_HIGH) { // Nothing to do if the already stored ts is greater than the incoming
 
   }
   // assert(read_info->rep_num == 0);
@@ -3635,34 +3608,90 @@ static inline bool does_rmw_fail_early(struct trace_op *op, struct cache_op *kv_
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
+
+static inline uint16_t get_read_size_from_opcode(uint8_t opcode) {
+  check_state_with_allowed_flags(8, opcode, OP_RELEASE, OP_ACQUIRE, CACHE_OP_PUT,
+                                 CACHE_OP_GET, OP_ACQUIRE_FLIP_BIT, CACHE_OP_GET_TS,
+                                 PROPOSE_OP);
+  switch(opcode) {
+    case OP_RELEASE:
+    case OP_ACQUIRE:
+    case CACHE_OP_PUT:
+    case CACHE_OP_GET:
+    case OP_ACQUIRE_FLIP_BIT:
+    case CACHE_OP_GET_TS:
+      return R_SIZE;
+    case PROPOSE_OP:
+      return PROP_SIZE;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
+//
+static inline void reset_read_message(struct pending_ops *p_ops)
+{
+  MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+  uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
+  struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_ptr];
+  struct fifo_mes_metadata * info = &p_ops->r_fifo->info[r_mes_ptr];
+
+  r_mes->l_id = 0;
+  r_mes->coalesce_num = 0;
+  info->message_size = (uint16_t) R_MES_HEADER;
+  info->reads_num = 0;
+}
+
+
+static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
+                              uint16_t t_id)
+{
+  bool is_propose = opcode == PROPOSE_OP;
+  const uint32_t r_ptr = p_ops->r_push_ptr;
+  //struct r_message *r_mes = p_ops->r_fifo->r_message;
+  uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
+  struct fifo_mes_metadata *info = &p_ops->r_fifo->info[r_mes_ptr];
+  uint16_t new_size = get_read_size_from_opcode(opcode);
+  bool new_message = (info->message_size + new_size) > R_MES_SIZE;
+
+  if (new_message) {
+    reset_read_message(p_ops);
+  }
+
+  r_mes_ptr = p_ops->r_fifo->push_ptr;
+  info = &p_ops->r_fifo->info[r_mes_ptr];
+  struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_ptr];
+
+  // Set up the backwards pointers to be able to change
+  // the state of requests, after broadcasting
+  if (!is_propose) {
+   if (info->reads_num == 0) {
+     info->backward_ptr = r_ptr;
+     r_mes->l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
+     if(r_mes->l_id == 0) printf("it's zero\n");
+   }
+   info->reads_num++;
+  }
+  r_mes->coalesce_num++;
+
+  uint32_t inside_r_ptr = info->message_size;
+  info->message_size += new_size;
+  return (void *) (((void *)r_mes) + inside_r_ptr);
+}
+
+
 // RMWs hijack the read fifo, to send propose broadcasts to all
 static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
                                             uint16_t t_id)
 {
   if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
     check_loc_entry_metadata_is_reset(loc_entry, "insert_prop_to_read_fifo", t_id);
-  struct r_message *r_mes = p_ops->r_fifo->r_message;
+  struct propose *prop = (struct propose*) get_r_ptr(p_ops, PROPOSE_OP, t_id);
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
-  uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
-  bool fresh_mess = inside_r_ptr == 0;
-  bool coalesce = fresh_mess || r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP;
-  //coalescing is disabled
-  //if (ENABLE_ASSERTIONS) assert(MAX_PROP_COALESCE == 1);
-
-  // create a new message if the propose cannot be coalesced
-//  if (!fresh_mess) {
-  if (!coalesce){
-    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
-    r_mes_ptr = p_ops->r_fifo->push_ptr;
-    inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
-  }
-
+  struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_ptr];
   if (DEBUG_RMW)
     green_printf("Worker: %u, inserting an rmw in r_mes_ptr %u and inside ptr %u \n",
-                 t_id, r_mes_ptr, inside_r_ptr);
-  struct prop_message *p_mes = (struct prop_message *) &r_mes[r_mes_ptr];
-  struct propose *prop = &p_mes->prop[inside_r_ptr];
+                 t_id, r_mes_ptr, r_mes->coalesce_num);
+//  struct propose *prop = &p_mes->prop[inside_r_ptr];
   assign_ts_to_netw_ts(&prop->ts, &loc_entry->new_ts);
   memcpy(&prop->key, (void *)&loc_entry->key, TRUE_KEY_SIZE);
   prop->opcode = PROPOSE_OP;
@@ -3674,18 +3703,84 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
   // Query the conf to see if the machine has lost messages
   //on_starting_an_acquire_query_the_conf(t_id); // TODO specify failure semantics of propose
   p_ops->r_fifo->bcast_size++;
-  p_mes->coalesce_num++;
+
   if (ENABLE_ASSERTIONS) {
     check_version(prop->ts.version, "insert_prop_to_read_fifo");
     assert(r_mes[r_mes_ptr].coalesce_num > 0);
-    assert(p_mes->prop[0].opcode == PROPOSE_OP);
-    assert(p_mes->prop[inside_r_ptr].opcode == PROPOSE_OP);
-    assert(p_mes->m_id == (uint8_t) machine_id);
+    assert(r_mes->m_id == (uint8_t) machine_id);
   }
-  if (p_mes->coalesce_num == MAX_PROP_COALESCE) {
-    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
+  if (ENABLE_STAT_COUNTING) t_stats[t_id].proposes_sent++;
+}
+
+
+// Worker inserts a new local read to the read fifo it maintains -- Typically for Acquire
+// but can also be the first round of an out-of-epoch write/release or an out-of-epoch read-- BUT NOT A PROPOSE!
+static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
+                               uint8_t source, uint16_t t_id)
+{
+  check_state_with_allowed_flags(3, source, FROM_TRACE, FROM_ACQUIRE);
+  const uint32_t r_ptr = p_ops->r_push_ptr;
+  struct read_info *r_info = &p_ops->read_info[r_ptr];
+  bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
+
+  struct read *read = (struct read*) get_r_ptr(p_ops, r_info->opcode, t_id);
+
+  // this means that the purpose of the read is solely to flip remote bits
+  if (source == FROM_ACQUIRE) {
+    // overload the key with local_r_id
+    memcpy(&read->key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
+    read->opcode = OP_ACQUIRE_FLIP_BIT;
+    r_info->opcode = OP_ACQUIRE_FLIP_BIT;
+    if (DEBUG_BIT_VECS)
+      cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
+                  t_id, read->opcode, *(uint64_t *)&read->key);
   }
+  else { // FROM TRACE: out of epoch reads/writes, acquires and releases
+    if (is_rmw_acquire) read->ts.version = r_info->log_no;
+    else assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
+    read->key = r_info->key;
+    r_info->epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
+    uint8_t opcode = r_info->opcode;
+    read->opcode = (opcode == OP_RELEASE || opcode == CACHE_OP_PUT) ?
+                   (uint8_t) CACHE_OP_GET_TS : opcode;
+  }
+
+  uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
+  struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_ptr];
+
+  if (DEBUG_READS)
+    green_printf("Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u opcode %u \n",
+                 t_id, r_mes_ptr, r_mes->coalesce_num, read->opcode);
+  check_read_state_and_key(p_ops, r_ptr, source, r_mes, r_info, r_mes_ptr, read, t_id);
+
+  p_ops->r_state[r_ptr] = VALID;
+  if (source == FROM_TRACE) {
+    //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
+      struct trace_op *tr_op = (struct trace_op *) op;
+      p_ops->r_session_id[r_ptr] = tr_op->session_id;
+      if (ENABLE_CLIENTS) {
+        p_ops->r_index_to_req_array[r_ptr] = tr_op->index_to_req_array;
+      }
+      //memcpy(&p_ops->r_session_id[r_ptr], op, SESSION_BYTES); // session id has to fit in 3 bytes
+      // Query the conf to see if the machine has lost messages
+      if (r_info->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id);
+   // }
+  }
+
+  // Increase the virtual size by 2 if the req is an acquire
+  p_ops->virt_r_size+= r_info->opcode == OP_ACQUIRE ? 2 : 1;
+  p_ops->r_size++;
+  p_ops->r_fifo->bcast_size++;
+
+  check_read_fifo_metadata(p_ops, r_mes, t_id);
+  MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
+
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].reads_sent ++;
+    if (r_mes->coalesce_num == 1) t_stats[t_id].reads_sent_mes_num++;
+  }
+
+
 }
 
 // Insert accepts to the write fifo
@@ -3739,88 +3834,6 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   }
 }
 
-// Worker inserts a new local read to the read fifo it maintains -- Typically for Acquire
-// but can also be the first round of an out-of-epoch write/release or an out-of-epoch read-- BUT NOT A PROPOSE!
-static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
-                               uint8_t source, uint16_t t_id)
-{
-  my_assert(source == FROM_TRACE || source == FROM_ACQUIRE, "The flag in inserting reads is wrong");
-  // cache_op * read should only be accessed if flag == FROM TRACE
-  struct r_message *r_mes = p_ops->r_fifo->r_message;
-  uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
-  uint8_t inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
-  const uint32_t r_ptr = p_ops->r_push_ptr;
-  struct read_info *r_info = &p_ops->read_info[r_ptr];
-  bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
-  bool first_is_rmw = r_mes[r_mes_ptr].read[0].opcode == PROPOSE_OP;
-  bool change_mes = inside_r_ptr > 0 && (first_is_rmw);
-
-  if (change_mes) {
-    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
-    r_mes_ptr = p_ops->r_fifo->push_ptr;
-    inside_r_ptr = r_mes[r_mes_ptr].coalesce_num;
-  }
-
-  struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
-  // this means that the purpose of the read is solely to flip remote bits
-  if (source == FROM_ACQUIRE) {
-    // overload the key with local_r_id
-    memcpy(&read->key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
-    read->opcode = OP_ACQUIRE_FLIP_BIT;
-    r_info->opcode = OP_ACQUIRE_FLIP_BIT;
-    if (DEBUG_BIT_VECS)
-      cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
-                  t_id, read->opcode, *(uint64_t *)&read->key);
-  }
-  else { // FROM TRACE: out of epoch reads/writes, acquires and releases
-    if (is_rmw_acquire) read->ts.version = r_info->log_no;
-    else assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
-    read->key = r_info->key;
-    r_info->epoch_id = (uint16_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
-    uint8_t opcode = r_info->opcode;
-    read->opcode = (opcode == OP_RELEASE || opcode == CACHE_OP_PUT) ?
-                   (uint8_t) CACHE_OP_GET_TS : opcode;
-  }
-  if (DEBUG_READS)
-    green_printf("Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u opcode %u \n",
-                 t_id, r_mes_ptr, inside_r_ptr, read->opcode);
-  if (inside_r_ptr == 0) {
-    p_ops->r_fifo->backward_ptrs[r_mes_ptr] = r_ptr;
-    uint64_t message_l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
-    check_previous_read_lid(source, r_info->opcode, message_l_id, r_mes, r_mes_ptr, t_id);
-    // printf("message_lid %lu, local_rid %lu, p_ops r_size %u \n", message_l_id, p_ops->local_r_id, p_ops->r_size);
-    r_mes[r_mes_ptr].l_id = message_l_id;
-  }
-
-  check_read_state_and_key(p_ops, r_ptr, source, r_mes, r_info, r_mes_ptr, inside_r_ptr, t_id);
-
-  p_ops->r_state[r_ptr] = VALID;
-  if (source == FROM_TRACE) {
-    //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
-      struct trace_op *tr_op = (struct trace_op *) op;
-      p_ops->r_session_id[r_ptr] = tr_op->session_id;
-      if (ENABLE_CLIENTS) {
-        p_ops->r_index_to_req_array[r_ptr] = tr_op->index_to_req_array;
-      }
-      //memcpy(&p_ops->r_session_id[r_ptr], op, SESSION_BYTES); // session id has to fit in 3 bytes
-      // Query the conf to see if the machine has lost messages
-      if (r_info->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id);
-   // }
-  }
-
-  // Increase the virtual size by 2 if the req is an acquire
-  p_ops->virt_r_size+= r_info->opcode == OP_ACQUIRE ? 2 : 1;
-  p_ops->r_size++;
-  p_ops->r_fifo->bcast_size++;
-  r_mes[r_mes_ptr].coalesce_num++;
-  check_read_fifo_metadata(p_ops, &r_mes[r_mes_ptr], t_id);
-  MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
-  if (r_mes[r_mes_ptr].coalesce_num == MAX_R_COALESCE) {
-    MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-    r_mes[p_ops->r_fifo->push_ptr].coalesce_num = 0;
-  }
-}
 
 // Insert a new local or remote write to the pending writes
 static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
@@ -3887,19 +3900,22 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
 
 // setup a new r_rep entry
 static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
-                                      struct r_rep_message *r_rep_mes, uint8_t read_opcode, bool is_rmw)
+                                      uint8_t read_opcode, bool is_rmw)
 {
+  MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE);
+  uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
+  struct r_rep_message *r_rep_mes = &r_rep_fifo->r_rep_message[r_rep_mes_ptr];
   r_rep_mes->coalesce_num = 0;
   r_rep_fifo->mes_size++;
   if (read_opcode == PROPOSE_OP) r_rep_mes->opcode = PROP_REPLY;
   else if (read_opcode == ACCEPT_OP) r_rep_mes->opcode = ACCEPT_REPLY;
-  else r_rep_mes->opcode = READ_REPLY;
+  else {
+    r_rep_mes->opcode = READ_REPLY;
+    r_rep_mes->l_id = l_id;
+  }
+
   r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr] = rem_m_id;
-  r_rep_mes->l_id = l_id;
-  if (is_rmw)
-    r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] = PROP_REP_MES_HEADER;
-  else
-    r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] = R_REP_MES_HEADER; // ok for rmws
+  r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] = R_REP_MES_HEADER; // ok for rmws
 }
 
 // Get a pointer to the read reply that will be sent, typically before going to the kvs,
@@ -3911,31 +3927,31 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
   check_state_with_allowed_flags(8, read_opcode, CACHE_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
                                  PROPOSE_OP, ACCEPT_OP, OP_ACQUIRE_FP, CACHE_OP_GET_TS);
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
-  struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
+  //struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
   bool is_propose = read_opcode == PROPOSE_OP, is_accept = read_opcode == ACCEPT_OP;
   bool is_rmw = (is_propose || is_accept);
-  bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
+  bool is_read_rep = !is_propose && !is_accept;
+  //bool current_message_is_r_rep = r_rep_mes[r_rep_fifo->push_ptr].opcode == READ_REPLY;
   /* A reply message corresponds to exactly one read message
   * to avoid reasoning about l_ids, credits and so on */
 
-  // TODO COMMENTS BELOW ARE DEPRICATED
-
-  /* If the r_rep has a different recipient or different l_id then create a new message
-   * Because the criterion to advance the push ptr is on creating a new message,
-   * the pull ptr has to start from 1 (because we start by incrementing the push pointer).
-   * Update: because rmw proposes have different lids, that can coincidentally match with read lids
-   * the criterion is extended:
-   * create a new rep on an rmw & create a new on a read if the current is not a read*/
-  //if ((rem_m_id != r_rep_fifo->rem_m_id[r_rep_fifo->push_ptr])   ||
-  //    (l_id != r_rep_mes[r_rep_fifo->push_ptr].l_id) ||
-  //    (is_rmw) || ((!is_rmw) && (!current_message_is_r_rep)))
   if (!coalesce){
-    MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE); // Keep this here: push ptr is used calling the function below
-    set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, &r_rep_mes[r_rep_fifo->push_ptr], read_opcode, is_rmw);
+    set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, read_opcode, is_rmw);
     //cyan_printf("Wrkr %u Creating a new read_reply message opcode: %u/%u at push_ptr %u\n",
     //           t_id, r_rep_mes[r_rep_fifo->push_ptr].opcode, read_opcode, r_rep_fifo->push_ptr);
   }
   uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
+  struct r_rep_message *r_rep_mes = &r_rep_fifo->r_rep_message[r_rep_mes_ptr];
+  if (coalesce) {
+    if (is_read_rep && r_rep_mes->opcode == PROPOSE_OP) {
+      r_rep_mes->opcode = READ_PROP_REPLY;
+      r_rep_mes->l_id = l_id;
+    }
+    else if (is_propose && r_rep_mes->opcode == READ_REPLY)
+      r_rep_mes->opcode = READ_PROP_REPLY;
+    if (ENABLE_ASSERTIONS) assert(!is_accept);
+  }
+
   uint32_t inside_r_rep_ptr = r_rep_fifo->message_sizes[r_rep_fifo->push_ptr]; // This pointer is in bytes
   if (!is_rmw) r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += R_REP_SMALL_SIZE;
   return (struct r_rep_big *) (((void *)&r_rep_mes[r_rep_mes_ptr]) + inside_r_rep_ptr);
@@ -5130,44 +5146,75 @@ static inline void handle_accept_reply(struct pending_ops *p_ops, struct rmw_rep
   }
 }
 
+
+
+static inline void handle_single_rmw_rep(struct pending_ops *p_ops, struct rmw_rep_last_committed *rep,
+                                         struct rmw_rep_message *rep_mes, uint16_t byte_ptr,
+                                         bool is_accept, uint16_t r_rep_i, uint16_t t_id)
+{
+  struct prop_info *prop_info = p_ops->prop_info;
+  if (ENABLE_ASSERTIONS) {
+    if (!(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP)) {
+      printf("Rep_i %u, current opcode %u first opcode: %u, byte_ptr %u \n",
+             r_rep_i, rep->opcode, rep_mes->rmw_rep[0].opcode, byte_ptr);
+    }
+    assert(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP);
+    if (prop_info->l_id <= rep->l_id)
+      red_printf("Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
+                 t_id, r_rep_i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
+
+    assert(prop_info->l_id > rep->l_id);
+  }
+  int entry_i = search_prop_entries_with_l_id(prop_info, (uint8_t) (is_accept ? ACCEPTED : PROPOSED),
+                                              rep->l_id);
+  if (entry_i == -1) return;
+  struct rmw_local_entry *loc_entry = &prop_info->entry[entry_i];
+  // if there are more replies move the byte_ptr with respect to the current rep
+  //if (i < rep_num - 1) move_ptr_to_next_rmw_reply(&byte_ptr, rep->opcode);
+  if (unlikely(rep->opcode) > NO_OP_PROP_REP) rep->opcode -= FALSE_POSITIVE_OFFSET;
+  if (!is_accept) handle_propose_reply(p_ops, rep_mes, rep, loc_entry, t_id);
+  else handle_accept_reply(p_ops, rep_mes, rep, loc_entry, t_id);
+}
+
 // Handle read replies that refer to RMWs (either replies to accepts or proposes)
 static inline void handle_rmw_rep_replies(struct pending_ops *p_ops, struct r_rep_message *r_rep_mes,
-                                          bool is_accept, uint16_t t_id) {
+                                          bool is_accept, uint16_t t_id)
+{
   struct rmw_rep_message *rep_mes = (struct rmw_rep_message *) r_rep_mes;
-
   struct prop_info *prop_info = p_ops->prop_info;
   uint8_t rep_num = rep_mes->coalesce_num;
 
   //if (ENABLE_ASSERTIONS) assert(rep_num == 1);
 
   uint16_t byte_ptr = PROP_REP_MES_HEADER; // same for both accepts and replies
-  for (uint16_t i = 0; i < rep_num; i++) {
+  for (uint16_t r_rep_i = 0; r_rep_i < rep_num; r_rep_i++) {
     // First attempt to find the entry the response is for
     struct rmw_rep_last_committed *rep = (struct rmw_rep_last_committed *) (((void *) rep_mes) + byte_ptr);
-    if (ENABLE_ASSERTIONS) {
-      if (!(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP)) {
-        printf("Rep_i %u, current opcode %u first opcode: %u, byte_ptr %u \n",
-               i, rep->opcode, rep_mes->rmw_rep[0].opcode, byte_ptr);
-      }
-      assert(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP);
-      if (prop_info->l_id <= rep->l_id)
-        red_printf("Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
-                   t_id, i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
-
-        assert(prop_info->l_id > rep->l_id);
-    }
-    int entry_i = search_prop_entries_with_l_id(prop_info, (uint8_t) (is_accept ? ACCEPTED : PROPOSED),
-                                                rep->l_id);
-    if (entry_i == -1) continue;
-    struct rmw_local_entry *loc_entry = &prop_info->entry[entry_i];
-    // if there are more replies move the byte_ptr with respect to the current rep
-    //if (i < rep_num - 1) move_ptr_to_next_rmw_reply(&byte_ptr, rep->opcode);
-    if (unlikely(rep->opcode) > NO_OP_PROP_REP) rep->opcode -= FALSE_POSITIVE_OFFSET;
-    byte_ptr+=get_size_from_opcode(rep->opcode);
-
-    if (!is_accept) handle_propose_reply(p_ops, rep_mes, rep, loc_entry, t_id);
-    else handle_accept_reply(p_ops, rep_mes, rep, loc_entry, t_id);
+    handle_single_rmw_rep(p_ops, rep, rep_mes, byte_ptr, is_accept, r_rep_i, t_id);
+//    if (ENABLE_ASSERTIONS) {
+//      if (!(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP)) {
+//        printf("Rep_i %u, current opcode %u first opcode: %u, byte_ptr %u \n",
+//               i, rep->opcode, rep_mes->rmw_rep[0].opcode, byte_ptr);
+//      }
+//      assert(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP);
+//      if (prop_info->l_id <= rep->l_id)
+//        red_printf("Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
+//                   t_id, i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
+//
+//        assert(prop_info->l_id > rep->l_id);
+//    }
+//    int entry_i = search_prop_entries_with_l_id(prop_info, (uint8_t) (is_accept ? ACCEPTED : PROPOSED),
+//                                                rep->l_id);
+//    if (entry_i == -1) continue;
+//    struct rmw_local_entry *loc_entry = &prop_info->entry[entry_i];
+//    // if there are more replies move the byte_ptr with respect to the current rep
+//    //if (i < rep_num - 1) move_ptr_to_next_rmw_reply(&byte_ptr, rep->opcode);
+//    if (unlikely(rep->opcode) > NO_OP_PROP_REP) rep->opcode -= FALSE_POSITIVE_OFFSET;
+//    if (!is_accept) handle_propose_reply(p_ops, rep_mes, rep, loc_entry, t_id);
+//    else handle_accept_reply(p_ops, rep_mes, rep, loc_entry, t_id);
+    byte_ptr += get_size_from_opcode(rep->opcode);
   }
+
   r_rep_mes->opcode = INVALID_OPCODE;
 }
 
@@ -6108,12 +6155,17 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   uint16_t i;
   struct ibv_wc signal_send_wc;
   struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_i];
-  uint32_t backward_ptr = p_ops->r_fifo->backward_ptrs[r_mes_i];
+  struct fifo_mes_metadata *info = &p_ops->r_fifo->info[r_mes_i];
+
+  //uint32_t backward_ptr = p_ops->r_fifo->backward_ptrs[r_mes_i];
+  //bool is_propose = r_mes->read[0].opcode == PROPOSE_OP;
+  //uint16_t header_size = (uint16_t) R_MES_HEADER; //(is_propose ? PROP_MES_HEADER : R_MES_HEADER);
+  //uint16_t size_of_struct = (uint16_t) (is_propose ? PROP_SIZE : R_SIZE);
+
   uint16_t coalesce_num = r_mes->coalesce_num;
-  bool is_propose = r_mes->read[0].opcode == PROPOSE_OP;
-  uint16_t header_size = (uint16_t) (is_propose ? PROP_MES_HEADER : R_MES_HEADER);
-  uint16_t size_of_struct = (uint16_t) (is_propose ? PROP_SIZE : R_SIZE);
-  send_sgl[br_i].length = header_size + coalesce_num * size_of_struct;
+  bool has_reads = info->reads_num > 0;
+  bool all_reads = info->reads_num == r_mes->coalesce_num;
+  send_sgl[br_i].length = info->message_size;//   header_size + coalesce_num * size_of_struct;
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) r_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
@@ -6122,11 +6174,11 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
     assert(send_sgl[br_i].length <= R_MES_SIZE);
   }
 
-  if (DEBUG_READS && !is_propose)
+  if (DEBUG_READS && all_reads)
     green_printf("Wrkr %d : I BROADCAST a read message %d of %u reads with mes_size %u, with credits: %d, lid: %u  \n",
                  t_id, r_mes->read[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id);
-  else if (DEBUG_RMW && is_propose) {
+  else if (DEBUG_RMW) {
     struct prop_message *prop_mes = (struct prop_message *) r_mes;
   green_printf("Wrkr %d : I BROADCAST a propose message %d of %u props with mes_size %u, with credits: %d, lid: %u, "
                  "rmw_id %u, glob_sess id %u, log_no %u, version %u \n",
@@ -6135,13 +6187,13 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
                prop_mes->prop[0].t_rmw_id, prop_mes->prop[0].glob_sess_id,
                prop_mes->prop[0].log_no, prop_mes->prop[0].ts.version);
   }
-  if (!is_propose) {
-    for (i = 0; i < coalesce_num; i++) {
-      p_ops->r_state[(backward_ptr + i) % PENDING_READS] = SENT;
+  if (has_reads) {
+    for (i = 0; i < info->reads_num; i++) {
+      p_ops->r_state[(info->backward_ptr + i) % PENDING_READS] = SENT;
       if (DEBUG_READS)
         yellow_printf("Read %d/%u, message mes_size %d, version %u \n", i, coalesce_num,
                       send_sgl[br_i].length, r_mes->read[i].ts.version);
-      if (ENABLE_ASSERTIONS) {
+      if (ENABLE_ASSERTIONS && all_reads) {
         check_state_with_allowed_flags(5, r_mes->read[i].opcode, CACHE_OP_GET, CACHE_OP_GET_TS,
                                        OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
       }
@@ -6175,7 +6227,8 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 {
   //  printf("Worker %d bcasting reads \n", g_id);
   uint8_t vc = R_VC;
-  uint16_t reads_sent = 0, br_i = 0, mes_sent = 0, available_credits = 0;
+  //uint16_t reads_sent = 0,
+  uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
 
   if (p_ops->r_fifo->bcast_size > 0) {
@@ -6193,30 +6246,24 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
     forge_r_wr(bcast_pull_ptr, p_ops, q_info, cb, r_send_sgl, r_send_wr, r_br_tx, br_i, credits, vc, t_id);
     br_i++;
     uint8_t coalesce_num = p_ops->r_fifo->r_message[bcast_pull_ptr].coalesce_num;
-    bool is_propose = p_ops->r_fifo->r_message[bcast_pull_ptr].read[0].opcode == PROPOSE_OP;
+    //bool is_propose = p_ops->r_fifo->r_message[bcast_pull_ptr].read[0].opcode == PROPOSE_OP;
     if (ENABLE_ASSERTIONS) {
       assert( p_ops->r_fifo->bcast_size >= coalesce_num);
       (*outstanding_reads) += coalesce_num;
     }
-    if (ENABLE_STAT_COUNTING) {
-      if (is_propose) t_stats[t_id].proposes_sent++;
-      else {
-        t_stats[t_id].reads_sent += coalesce_num;
-        t_stats[t_id].reads_sent_mes_num++;
-      }
-    }
     p_ops->r_fifo->bcast_size -= coalesce_num;
     // This message has been sent, do not add other reads to it!
     // this is tricky because proposes leave half-filled messages, make sure this is the last message to bcast
-    if (p_ops->r_fifo->bcast_size == 0) {
-      uint8_t max_coalesce = (uint8_t) (is_propose ? MAX_PROP_COALESCE : MAX_R_COALESCE);
-      if (coalesce_num < max_coalesce) {
+    //if (p_ops->r_fifo->bcast_size == 0) {
+      //uint8_t max_coalesce = (uint8_t) (is_propose ? MAX_PROP_COALESCE : MAX_R_COALESCE);
+      //if (coalesce_num < max_coalesce) {
         //yellow_printf("Broadcasting r_rep with coalesce num %u \n", coalesce_num);
-        MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-        p_ops->r_fifo->r_message[p_ops->r_fifo->push_ptr].coalesce_num = 0;
-      }
-    }
-    reads_sent += coalesce_num;
+       // MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+        //p_ops->r_fifo->r_message[p_ops->r_fifo->push_ptr].coalesce_num = 0;
+      //}
+    //}
+    if (p_ops->r_fifo->bcast_size == 0) reset_read_message(p_ops);
+    //reads_sent += coalesce_num;
     mes_sent++;
     MOD_ADD(bcast_pull_ptr, R_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
@@ -6322,17 +6369,16 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
   // Start polling
   while (polled_messages < completed_messages) {
     struct r_message *r_mes = (struct r_message*) &incoming_rs[index].r_mes;
-    struct prop_message *prop_mes = (struct prop_message*) &incoming_rs[index].r_mes;
-    bool is_propose = prop_mes->prop[0].opcode == PROPOSE_OP;
-    check_when_polling_for_reads(r_mes, index, polled_reads, is_propose, t_id);
+    check_when_polling_for_reads(r_mes, index, polled_reads, t_id);
     uint8_t r_num = r_mes->coalesce_num;
+    uint16_t byte_ptr = R_MES_HEADER;
     for (uint16_t i = 0; i < r_num; i++) {
-      struct read *read = &r_mes->read[i];
-      struct propose *prop = &prop_mes->prop[i];
+      struct read *read = (struct read*)(((void *) r_mes) + byte_ptr);
+      bool is_propose = read->opcode == PROPOSE_OP;
       if (is_propose) {
+        struct propose *prop = (struct propose *) read;
         check_state_with_allowed_flags(2, prop->opcode, PROPOSE_OP);
-        p_ops->ptrs_to_r_ops[polled_reads] = (struct read *) (((void *) prop) + 5); //align with the cache op
-        p_ops->ptrs_to_r_headers[polled_reads] = (struct r_message *) prop_mes;
+        p_ops->ptrs_to_r_ops[polled_reads] = (struct read *) (((void *) prop) -3); //TODO align with the cache op
       }
       else {
         check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
@@ -6343,10 +6389,12 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
           raise_conf_bit_iff_owned(t_id, *(uint64_t *) &read->key, (uint16_t) r_mes->m_id);
 
         p_ops->ptrs_to_r_ops[polled_reads] = (struct read *) (((void *) read) - 3); //align with the cache op
-        p_ops->ptrs_to_r_headers[polled_reads] = r_mes;
+
       }
+      p_ops->ptrs_to_r_headers[polled_reads] = r_mes;
       p_ops->coalesce_r_rep[polled_reads] = i > 0;
       polled_reads++;
+      byte_ptr += get_read_size_from_opcode(read->opcode);
     }
 
     if (ENABLE_ASSERTIONS) incoming_rs[index].r_mes.coalesce_num = 0;
@@ -6497,28 +6545,32 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     uint16_t byte_ptr = R_REP_MES_HEADER;
     for (uint16_t i = 0; i < r_rep_num; i++) {
       struct r_rep_big *r_rep = (struct r_rep_big *)(((void *) r_rep_mes) + byte_ptr);
-      check_a_polled_r_rep(r_rep, (struct r_rep_message_ud_req *) incoming_r_reps, i,
-                           index, p_ops, byte_ptr, r_rep_num, t_id);
-      byte_ptr += r_rep_size_based_on_opcode(r_rep->opcode);
-      if (pull_lid >= l_id) {
-        if (l_id + i < pull_lid) continue;
-      }
-      struct read_info *read_info = &p_ops->read_info[r_ptr];
-      if (DEBUG_READ_REPS)
-        yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
-                      i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
-      if (read_info->is_rmw) {
-        rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id); }
-      else { read_info_bookkeeping(r_rep, read_info, t_id); }
-      if (read_info->rep_num >= REMOTE_QUORUM) {
-        p_ops->r_state[r_ptr] = READY;
-        if (ENABLE_ASSERTIONS) {
-          (*outstanding_reads)--;
-          assert(read_info->rep_num <= REM_MACH_NUM);
+      check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
+      byte_ptr += get_size_from_opcode(r_rep->opcode);
+      bool is_rmw_rep = opcode_is_rmw_rep(r_rep->opcode);
+
+      if (!is_rmw_rep) {
+        if (pull_lid >= l_id) {
+          if (l_id + i < pull_lid) continue;
         }
+        struct read_info *read_info = &p_ops->read_info[r_ptr];
+        if (DEBUG_READ_REPS)
+          yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
+                        i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
+        if (read_info->is_rmw) {
+          rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id);
+        } else { read_info_bookkeeping(r_rep, read_info, t_id); }
+        if (read_info->rep_num >= REMOTE_QUORUM) {
+          p_ops->r_state[r_ptr] = READY;
+          if (ENABLE_ASSERTIONS) {
+            (*outstanding_reads)--;
+            assert(read_info->rep_num <= REM_MACH_NUM);
+          }
+        }
+        MOD_ADD(r_ptr, PENDING_READS);
+        r_rep->opcode = INVALID_OPCODE;
       }
-      MOD_ADD(r_ptr, PENDING_READS);
-      r_rep->opcode = INVALID_OPCODE;
+      else handle_single_rmw_rep(p_ops, r_rep, r_rep_mes, byte_ptr, is_accept, i, t_id);
     }
     if (ENABLE_STAT_COUNTING) {
       if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_r_reps_received[r_rep_mes->m_id] += r_rep_num;
@@ -7238,8 +7290,7 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
   uint32_t entry;
   struct rmw_rep_last_committed *acc_rep =
     (struct rmw_rep_last_committed *) get_r_rep_ptr(p_ops, l_id, acc_m_id, op->opcode, false, t_id);
-  //acc_rep = (struct rmw_rep_last_committed *) ((void *)acc_rep - 8);
-
+  acc_rep->l_id =l_id;
 
   if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u from m_id %u "
                                 "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
@@ -7376,7 +7427,6 @@ static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_p
                                                     p_ops->coalesce_r_rep[op_i], t_id);
   prop_rep->l_id = prop->l_id;
 
-    //prop_rep = (struct rmw_rep_last_committed *) ((void *)prop_rep - 8); //??
   optik_lock(&kv_ptr->key.meta);
   //check_for_same_ts_as_already_proposed(kv_ptr[I], prop, t_id);
   // 1. check if it has been committed
@@ -7435,7 +7485,7 @@ static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *
 
   uint32_t acq_log_no = op->key.meta.version;
   optik_lock(&kv_ptr->key.meta);
-  acq_rep->opcode = LOG_EQUAL;
+  acq_rep->opcode = ACQ_LOG_EQUAL;
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
     if (acq_log_no > 0) acq_rep->opcode = LOG_TOO_HIGH;
   }
@@ -7445,7 +7495,7 @@ static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *
     check_keys_with_one_cache_op((struct key *) &op->key.bkt, kv_ptr, entry);
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     if (glob_entry->last_committed_log_no > acq_log_no) {
-      acq_rep->opcode = LOG_TOO_SMALL;
+      acq_rep->opcode = ACQ_LOG_TOO_SMALL;
       acq_rep->rmw_id = glob_entry->last_registered_rmw_id.id;
       acq_rep->glob_sess_id = glob_entry->last_committed_rmw_id.glob_sess_id;
       memcpy(acq_rep->value, &kv_ptr->value[RMW_BYTE_OFFSET], (size_t) RMW_VALUE_SIZE);
@@ -7454,7 +7504,7 @@ static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *
       acq_rep->ts.m_id = kv_ptr->key.meta.m_id;
     }
     else if (glob_entry->last_committed_log_no < acq_log_no) {
-      acq_rep->opcode = LOG_TOO_HIGH;
+      acq_rep->opcode = ACQ_LOG_TOO_HIGH;
     }
   }
   optik_unlock_decrement_version(&kv_ptr->key.meta);

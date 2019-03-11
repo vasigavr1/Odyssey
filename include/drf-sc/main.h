@@ -46,7 +46,7 @@
 #define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 200// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -243,7 +243,7 @@
 
 // Propose replies
 #define MAX_PROP_REP_COALESCE (MAX_PROP_COALESCE)
-#define PROP_REP_MES_HEADER 3 // coalesce_num , m_id, opcode
+#define PROP_REP_MES_HEADER (3 + 8)// coalesce_num , m_id, opcode, l_id
 #define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_MESSAGE_SIZE (PROP_REP_MES_HEADER + (MAX_PROP_REP_COALESCE * PROP_REP_SIZE))
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
@@ -259,7 +259,7 @@
 
 // ACCEPT REPLIES
 #define MAX_ACC_REP_COALESCE (MAX_ACC_COALESCE)
-#define ACC_REP_MES_HEADER 3 // coalesce_num , m_id, opcode
+#define ACC_REP_MES_HEADER (3 + 8) // coalesce_num , m_id, opcode
 #define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define ACC_REP_MESSAGE_SIZE (ACC_REP_MES_HEADER + (MAX_ACC_REP_COALESCE * ACC_REP_SIZE))
 #define ACC_REP_SMALL_SIZE 9 // lid and opcode
@@ -597,13 +597,13 @@ struct r_message {
 
 //
 struct propose {
-  uint64_t l_id ;
   struct network_ts_tuple ts;
   struct key key;
   uint8_t opcode;
   uint64_t t_rmw_id;
   uint16_t glob_sess_id;
   uint32_t log_no;
+  uint64_t l_id; // the l_id of the rmw local_entry
 } __attribute__((__packed__));
 
 struct prop_message {
@@ -619,14 +619,22 @@ struct r_message_ud_req {
   struct r_message r_mes;
 };
 
+
+struct fifo_mes_metadata {
+  uint16_t reads_num; // all non propose messages count as reads
+  uint16_t message_size;
+  uint32_t backward_ptr;
+  bool sent;
+};
+
+
 //
 struct read_fifo {
   struct r_message *r_message;
   uint32_t push_ptr;
-  //uint32_t pull_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of reads not messages!
-  //uint32_t size;
+  struct fifo_mes_metadata info[R_FIFO_SIZE];
   uint32_t backward_ptrs[R_FIFO_SIZE];
 };
 
@@ -682,13 +690,14 @@ struct r_rep_message_ud_req {
 // Reply with the last committed RMW if the
 // proposal/accept had a low log number or has already been committed
 struct rmw_rep_last_committed {
-  uint64_t l_id ; // the l_id of the rmw local_entry
+
   uint8_t opcode;
   struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
   uint16_t glob_sess_id; //accepted  OR last committed
   uint32_t log_no; // last committed only
+  uint64_t l_id ; // the l_id of the rmw local_entry
 } __attribute__((__packed__));
 
 //
@@ -696,8 +705,9 @@ struct rmw_rep_message {
   uint8_t coalesce_num;
   uint8_t m_id;
   uint8_t opcode;
+  uint64_t l_id ;
   struct rmw_rep_last_committed rmw_rep[MAX_PROP_REP_COALESCE];
-};
+}__attribute__((__packed__));
 
 
 struct r_rep_fifo {

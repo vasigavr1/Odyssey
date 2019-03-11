@@ -87,10 +87,10 @@
 // READ_REPLIES
 #define INVALID_OPCODE 5 // meaningless opcode to help with debugging
 // an r_rep message can be a reply to a read or a prop or an accept
-#define RMW_ACQ_REPLY 24
 #define ACCEPT_REPLY 25
-#define PROP_REPLY 26
-#define READ_REPLY 27
+#define PROP_REPLY 26 // Contains only prop reps
+#define READ_REPLY 27 // Contains only read reps
+#define READ_PROP_REPLY 127 // Contains read and prop reps
 #define TS_SMALLER 28
 #define TS_EQUAL 29
 #define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
@@ -107,8 +107,10 @@
 // for the same RMW-id and TS, that means the proposer will never see this opcode because
 // it has already gathered prop reps quorum and sent accepts
 #define NO_OP_PROP_REP 40
-#define LOG_EQUAL 41 // for acquires on rmws, the response is with respect to the log numbers
-
+#define ACQ_LOG_TOO_SMALL 41
+#define ACQ_LOG_TOO_HIGH 42
+#define LOG_EQUAL 43
+#define ACQ_LOG_EQUAL 43 // for acquires on rmws, the response is with respect to the log numbers
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
