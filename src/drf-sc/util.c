@@ -42,10 +42,10 @@ void static_assert_compile_parameters()
   //static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
   static_assert(PROP_SIZE == sizeof(struct propose), "");
   //static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
-  static_assert(PROP_MESSAGE_SIZE == sizeof(struct prop_message), "");
   static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
     " buffer allocated for a read message");
 
+  static_assert(MAX_PROP_COALESCE > 0, "Please increase MAX_R_COALESCE");
   static_assert(R_MES_SIZE >= PROP_MESSAGE_SIZE, "");
 
   static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
@@ -119,6 +119,9 @@ void print_parameters_in_the_start()
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
                sizeof (struct read_info));
+  green_printf("PROPOSE COALESCE %d SEND/REP %d/%d \n", MAX_PROP_COALESCE, MAX_PROP_SEND_COALESCE, MAX_PROP_REP_COALESCE);
+
+
   cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
               sizeof(struct ack_message), ACK_SIZE,
               sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);

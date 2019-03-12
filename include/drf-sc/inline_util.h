@@ -3542,6 +3542,42 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, st
   read_info->rep_num++;
 }
 
+//When polling read replies, handle a reply to read, acquire, readts, rmw acquire-- return true to continue to next rep
+static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_, uint64_t l_id, uint64_t pull_lid,
+                                       struct pending_ops *p_ops, int read_i, uint16_t r_rep_i,
+                                       uint32_t *outstanding_reads, uint16_t t_id)
+{
+  uint32_t r_ptr = *r_ptr_;
+  if (p_ops->r_size == 0) return true;
+  check_r_rep_l_id(l_id, (uint8_t) read_i, pull_lid, p_ops->r_size, t_id);
+  if (pull_lid >= l_id) {
+    if (l_id + read_i < pull_lid) return true;
+  }
+  struct read_info *read_info = &p_ops->read_info[r_ptr];
+  if (DEBUG_READ_REPS)
+    yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
+                  r_rep_i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
+  if (read_info->is_rmw) {
+    rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id);
+  }
+  else {
+    read_info_bookkeeping(r_rep, read_info, t_id);
+  }
+  if (read_info->rep_num >= REMOTE_QUORUM) {
+    //yellow_printf("%u r_ptr becomes ready, l_id %u,   \n", r_ptr, l_id);
+    p_ops->r_state[r_ptr] = READY;
+    if (ENABLE_ASSERTIONS) {
+      (*outstanding_reads)--;
+      assert(read_info->rep_num <= REM_MACH_NUM);
+    }
+  }
+  MOD_ADD(r_ptr, PENDING_READS);
+  r_rep->opcode = INVALID_OPCODE;
+  *r_ptr_ = r_ptr;
+  return false;
+}
+
+
 // Perform the operation of the RMW and store the result in the local entry, call on locally accepting
 static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_entry,
                                                     struct cache_op *kv_pair,
@@ -6150,16 +6186,10 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   struct ibv_wc signal_send_wc;
   struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_i];
   struct fifo_mes_metadata *info = &p_ops->r_fifo->info[r_mes_i];
-
-  //uint32_t backward_ptr = p_ops->r_fifo->backward_ptrs[r_mes_i];
-  //bool is_propose = r_mes->read[0].opcode == PROPOSE_OP;
-  //uint16_t header_size = (uint16_t) R_MES_HEADER; //(is_propose ? PROP_MES_HEADER : R_MES_HEADER);
-  //uint16_t size_of_struct = (uint16_t) (is_propose ? PROP_SIZE : R_SIZE);
-
   uint16_t coalesce_num = r_mes->coalesce_num;
   bool has_reads = info->reads_num > 0;
   bool all_reads = info->reads_num == r_mes->coalesce_num;
-  send_sgl[br_i].length = info->message_size;//   header_size + coalesce_num * size_of_struct;
+  send_sgl[br_i].length = info->message_size;
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) r_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
@@ -6173,13 +6203,14 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
                  t_id, r_mes->read[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id);
   else if (DEBUG_RMW) {
-    struct prop_message *prop_mes = (struct prop_message *) r_mes;
+    //struct prop_message *prop_mes = (struct prop_message *) r_mes;
+    struct propose *prop = (struct propose *) &r_mes->read[0];
   green_printf("Wrkr %d : I BROADCAST a propose message %d of %u props with mes_size %u, with credits: %d, lid: %u, "
                  "rmw_id %u, glob_sess id %u, log_no %u, version %u \n",
-               t_id, r_mes->read[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
+               t_id, prop->opcode, coalesce_num, send_sgl[br_i].length,
                credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id,
-               prop_mes->prop[0].t_rmw_id, prop_mes->prop[0].glob_sess_id,
-               prop_mes->prop[0].log_no, prop_mes->prop[0].ts.version);
+               prop->t_rmw_id, prop->glob_sess_id,
+               prop->log_no, prop->ts.version);
   }
   if (has_reads) {
     for (i = 0; i < info->reads_num; i++) {
@@ -6541,28 +6572,8 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
       //       t_id, i, r_rep_num, r_rep->opcode, is_rmw_rep);
       if (!is_rmw_rep) {
         read_i++;
-        if (p_ops->r_size == 0) continue;
-        check_r_rep_l_id(l_id, (uint8_t) read_i, pull_lid, p_ops->r_size, t_id);
-        if (pull_lid >= l_id) {
-          if (l_id + read_i < pull_lid) continue;
-        }
-        struct read_info *read_info = &p_ops->read_info[r_ptr];
-        if (DEBUG_READ_REPS)
-          yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
-                        i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
-        if (read_info->is_rmw) {
-          rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id);
-        } else { read_info_bookkeeping(r_rep, read_info, t_id); }
-        if (read_info->rep_num >= REMOTE_QUORUM) {
-          //yellow_printf("%u r_ptr becomes ready, l_id %u,   \n", r_ptr, l_id);
-          p_ops->r_state[r_ptr] = READY;
-          if (ENABLE_ASSERTIONS) {
-            (*outstanding_reads)--;
-            assert(read_info->rep_num <= REM_MACH_NUM);
-          }
-        }
-        MOD_ADD(r_ptr, PENDING_READS);
-        r_rep->opcode = INVALID_OPCODE;
+        if (handle_single_r_rep(r_rep, &r_ptr, l_id, pull_lid, p_ops, read_i, i, outstanding_reads, t_id))
+          continue;
       }
       else handle_single_rmw_rep(p_ops, (struct rmw_rep_last_committed *) r_rep,
         (struct rmw_rep_message *) r_rep_mes, byte_ptr, is_accept, i, t_id);

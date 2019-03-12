@@ -29,9 +29,9 @@
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 15
-#define MAX_R_COALESCE 14
-#define W_CREDITS 8
+#define R_CREDITS 8
+#define MAX_R_COALESCE 20
+#define W_CREDITS 12
 #define MAX_W_COALESCE 8
 #define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
@@ -143,7 +143,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 1000
+#define NUM_OF_RMW_KEYS 10000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -234,21 +234,26 @@
 // Proposes
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-#define MAX_PROP_COALESCE 5
 
-#define PROP_MES_HEADER 2 // coalesce_num , m_id
+
+#define PROP_MES_HEADER (R_MES_HEADER) // coalesce_num , m_id
 #define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
-#define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
 
 // Propose replies
-#define MAX_PROP_REP_COALESCE (MAX_PROP_COALESCE)
+
 #define PROP_REP_MES_HEADER (3 + 8)// coalesce_num , m_id, opcode, l_id
 #define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-#define PROP_REP_MESSAGE_SIZE (PROP_REP_MES_HEADER + (MAX_PROP_REP_COALESCE * PROP_REP_SIZE))
+#define MAX_PROP_REP_COALESCE ((MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE) / PROP_REP_SIZE)
+#define MAX_PROP_SEND_COALESCE ((R_SIZE * MAX_R_COALESCE) / PROP_SIZE)
+#define MAX_PROP_COALESCE MIN(MAX_PROP_SEND_COALESCE, MAX_PROP_REP_COALESCE)
+
+#define PROP_REP_MESSAGE_SIZE (PROP_REP_MES_HEADER + (MAX_PROP_COALESCE * PROP_REP_SIZE))
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
 #define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
 #define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
 
+
+#define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
 
 // ACCEPTS
 #define MAX_ACC_COALESCE 1
@@ -605,12 +610,6 @@ struct propose {
   uint64_t l_id; // the l_id of the rmw local_entry
 } __attribute__((__packed__));
 
-struct prop_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  struct propose prop[MAX_PROP_COALESCE];
-};
-
 
 //
 struct r_message_ud_req {
@@ -704,7 +703,7 @@ struct rmw_rep_message {
   uint8_t m_id;
   uint8_t opcode;
   uint64_t l_id ;
-  struct rmw_rep_last_committed rmw_rep[MAX_PROP_REP_COALESCE];
+  struct rmw_rep_last_committed rmw_rep[MAX_PROP_COALESCE];
 }__attribute__((__packed__));
 
 
