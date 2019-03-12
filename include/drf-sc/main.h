@@ -21,9 +21,9 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 25
+#define WORKERS_PER_MACHINE 24
 #define MACHINE_NUM 5
-#define WRITE_RATIO 300 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -31,10 +31,9 @@
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 15
 #define MAX_R_COALESCE 14
-#define MAX_PROP_COALESCE 5
 #define W_CREDITS 8
 #define MAX_W_COALESCE 8
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
@@ -43,10 +42,10 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -144,7 +143,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 100000
+#define NUM_OF_RMW_KEYS 1000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -235,7 +234,7 @@
 // Proposes
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-
+#define MAX_PROP_COALESCE 5
 
 #define PROP_MES_HEADER 2 // coalesce_num , m_id
 #define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
@@ -690,14 +689,13 @@ struct r_rep_message_ud_req {
 // Reply with the last committed RMW if the
 // proposal/accept had a low log number or has already been committed
 struct rmw_rep_last_committed {
-
   uint8_t opcode;
+  uint64_t l_id; // the l_id of the rmw local_entry
   struct network_ts_tuple ts;
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
   uint16_t glob_sess_id; //accepted  OR last committed
   uint32_t log_no; // last committed only
-  uint64_t l_id ; // the l_id of the rmw local_entry
 } __attribute__((__packed__));
 
 //
