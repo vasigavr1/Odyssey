@@ -43,6 +43,7 @@
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // The sender sends this opcode to flip a bit it owns after an acquire detected a failure
 #define OP_ACQUIRE_FLIP_BIT 107
+#define NO_OP_RELEASE 9 // on a coalesced Release which detected failure, but is behind an OP_RELEASE_BIT_VECTOR
 #define OP_RELEASE 109
 #define OP_ACQUIRE 110
 // The receiver renames the opcode of an OP_ACQUIRE  to this to recognize

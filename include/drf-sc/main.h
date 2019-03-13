@@ -21,7 +21,7 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 24
+#define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -33,7 +33,7 @@
 #define MAX_R_COALESCE 20
 #define W_CREDITS 12
 #define MAX_W_COALESCE 8
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
@@ -369,7 +369,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -417,13 +417,17 @@ struct remote_qp {
 #define SENT_PUT 4 // typical writes
 #define SENT_RELEASE 5 // Release or second round of acquire!!
 #define SENT_BIT_VECTOR 6
-#define SENT_COMMIT 7 // For commits
-#define SENT_RMW_ACQ_COMMIT 8
-#define READY_PUT 9
-#define READY_COMMIT 10
-#define READY_RMW_ACQ_COMMIT 11
-#define READY_RELEASE 12 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 13
+// Coalesced release that detected failure,
+// but is behind other release that carries the bit vector
+#define SENT_NO_OP_RELEASE 7
+#define SENT_COMMIT 8 // For commits
+#define SENT_RMW_ACQ_COMMIT 9
+#define READY_PUT 10
+#define READY_COMMIT 11
+#define READY_RMW_ACQ_COMMIT 12
+#define READY_RELEASE 13 // Release or second round of acquire!!
+#define READY_BIT_VECTOR 14
+#define READY_NO_OP_RELEASE 15
 
 
 // Possible write sources
@@ -654,7 +658,7 @@ struct write_fifo {
   uint32_t bcast_size; // number of writes not messages!
   struct w_mes_info info[W_FIFO_SIZE];
   //uint32_t size;
-  uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
+  //uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
 
 // Sent when the timestamps are equal or smaller

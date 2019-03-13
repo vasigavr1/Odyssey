@@ -811,6 +811,8 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
       (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
     }
   }
+  (*p_ops)->w_fifo->info[0].message_size = W_MES_HEADER;
+
   for (i = 0; i < R_FIFO_SIZE; i++) {
     (*p_ops)->r_fifo->r_message[i].m_id = (uint8_t) machine_id;
   }
