@@ -45,7 +45,7 @@
 #define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 00// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -320,7 +320,7 @@
 
 // The w_fifo needs to have a safety slot that cannot be touched
 // such that the fifo push ptr can never coincide with its pull ptr
-// zeroing its w_num, as such we take care to allow
+// zeroing its coalesce_num, as such we take care to allow
 // one fewer pending write than slots in the w_ifo
 #define MAX_ALLOWED_W_SIZE (PENDING_WRITES - 1)
 #define R_FIFO_SIZE (PENDING_READS + LOCAL_PROP_NUM) // Proposes use the read fifo
@@ -533,14 +533,13 @@ struct write {
 
 struct w_message {
   uint8_t m_id;
-  uint8_t w_num;
+  uint8_t coalesce_num;
   uint64_t l_id ;
   struct write write[MAX_W_COALESCE];
 } __attribute__((__packed__));
 
 
 struct accept {
-  uint64_t l_id ;
 	struct network_ts_tuple ts;
   struct key key ;
 	uint8_t opcode;
@@ -549,7 +548,8 @@ struct accept {
   uint64_t t_rmw_id ;
   uint16_t glob_sess_id ; // this is useful when helping
   uint32_t log_no ;
-  struct net_rmw_id last_registered_rmw_id ;
+  struct net_rmw_id last_registered_rmw_id;
+  uint64_t l_id;
 } __attribute__((__packed__));
 
 struct accept_message {
@@ -618,10 +618,20 @@ struct r_message_ud_req {
 };
 
 
-struct fifo_mes_metadata {
+struct r_mes_info {
   uint16_t reads_num; // all non propose messages count as reads
   uint16_t message_size;
   uint32_t backward_ptr;
+  bool sent;
+};
+
+struct w_mes_info {
+  uint16_t writes_num; // all non-accept messages: releases, writes, or commits
+  uint16_t message_size;
+  uint32_t backward_ptr;
+  bool is_release;
+  // message contains releases, writes, or commits, and thus has a valid l_id
+  bool valid_header_l_id;
   bool sent;
 };
 
@@ -632,18 +642,18 @@ struct read_fifo {
   uint32_t push_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of reads not messages!
-  struct fifo_mes_metadata info[R_FIFO_SIZE];
-  uint32_t backward_ptrs[R_FIFO_SIZE];
+  struct r_mes_info info[R_FIFO_SIZE];
+  //uint32_t backward_ptrs[R_FIFO_SIZE];
 };
 
 //
 struct write_fifo {
   struct w_message *w_message;
   uint32_t push_ptr;
-  //uint32_t pull_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of writes not messages!
-  uint32_t size;
+  struct w_mes_info info[W_FIFO_SIZE];
+  //uint32_t size;
   uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
 

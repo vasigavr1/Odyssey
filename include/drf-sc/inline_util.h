@@ -878,32 +878,29 @@ static inline void debug_and_count_stats_when_broadcasting_writes
 
 // Perform some basic checks when inserting a write to a fresh message
 static inline void debug_checks_when_inserting_a_write
-  (const uint8_t source, const uint8_t inside_w_ptr, const uint32_t w_mes_ptr,
-   struct w_message *w_mes, const uint64_t message_l_id,
-   struct pending_ops *p_ops, const uint32_t w_ptr, const uint16_t t_id)
+  (const uint8_t source, struct write *write, const uint32_t w_mes_ptr,
+   const uint64_t message_l_id, struct pending_ops *p_ops,
+   const uint32_t w_ptr, const uint16_t t_id)
 {
+
   if (ENABLE_ASSERTIONS) {
-
-
-    // In a fresh message check that the lid is consistent with the previous message
-    if (inside_w_ptr == 0) {
-      if (message_l_id > MAX_W_COALESCE) {
-        uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
-        bool prev_mes_is_accept = w_mes[prev_w_mes_ptr].write[0].opcode == ACCEPT_OP;
-        uint64_t prev_l_id = w_mes[prev_w_mes_ptr].l_id;
-        uint8_t prev_coalesce = w_mes[prev_w_mes_ptr].w_num;
-        if (!prev_mes_is_accept && message_l_id != prev_l_id + prev_coalesce) {
-          red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
-                     t_id, message_l_id, prev_l_id, prev_coalesce);
-        }
+    w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
+    if (message_l_id > MAX_W_COALESCE && info->valid_header_l_id) {
+      uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
+      bool prev_mes_valid_l_id = p_ops->w_fifo->info[prev_w_mes_ptr].valid_header_l_id;
+      struct w_message *prev_w_mes = &p_ops->w_fifo->w_message[prev_w_mes_ptr];
+      uint64_t prev_l_id = prev_w_mes[prev_w_mes_ptr].l_id;
+      uint8_t prev_coalesce = prev_w_mes[prev_w_mes_ptr].coalesce_num;
+      if (!prev_mes_valid_l_id && message_l_id != prev_l_id + prev_coalesce) { // TODO: wrong with accepts
+        red_printf("Worker %u: Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
+                   t_id, message_l_id, prev_l_id, prev_coalesce);
       }
     }
-
     // Check the versions
-    assert (w_mes[w_mes_ptr].write[inside_w_ptr].version < B_4_EXACT);
-    if (w_mes[w_mes_ptr].write[inside_w_ptr].version % 2 != 0) {
+    assert (write->version < B_4_EXACT);
+    if (write->version % 2 != 0) {
       red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
-                 w_mes[w_mes_ptr].write[inside_w_ptr].version, source);
+                 write->version, source);
       assert (false);
     }
     // Check that the buffer is not occupied
@@ -922,56 +919,48 @@ static inline void debug_checks_when_inserting_a_write
 }
 
 // When forging a write (which the accept hijack)
-static inline void checks_when_forging_an_accept(struct accept_message *acc_mes, struct ibv_sge *send_sgl,
-                                                 uint16_t br_i, uint8_t coalesce_num, uint16_t t_id)
+static inline void checks_when_forging_an_accept(struct accept* acc, struct ibv_sge *send_sgl,
+                                                 uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id)
 {
-  assert(coalesce_num <= MAX_ACC_COALESCE);
-  assert(coalesce_num > 0);
-  for (uint8_t  i = 0; i < coalesce_num; i++) {
-    if (DEBUG_RMW)
-      printf("Worker: %u, Accept %d, val-len %u, message w_size %d\n", t_id, i, acc_mes->acc[i].val_len,
-             send_sgl[br_i].length);
-    if (ENABLE_ASSERTIONS) {
-      assert(acc_mes->acc[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(acc_mes->acc[i].opcode == ACCEPT_OP);
-    }
+  if (ENABLE_ASSERTIONS) {
+    assert(coalesce_num > 0);
+      if (DEBUG_RMW)
+        printf("Worker: %u, Accept in position %d, val-len %u, message w_size %d\n", t_id, w_i, acc->val_len,
+               send_sgl[br_i].length);
+        assert(acc->val_len == VALUE_SIZE >> SHIFT_BITS);
+        assert(acc->opcode == ACCEPT_OP);
   }
 }
 
 // When forging a write (which the accept hijack)
-static inline void checks_when_forging_a_commit(struct commit_message *com_mes, struct ibv_sge *send_sgl,
-                                                 uint16_t br_i, uint8_t coalesce_num, uint16_t t_id)
+static inline void checks_when_forging_a_commit(struct commit *com, struct ibv_sge *send_sgl,
+                                                 uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id)
 {
-  assert(coalesce_num <= MAX_COM_COALESCE);
-  assert(coalesce_num > 0);
-  for (uint8_t  i = 0; i < coalesce_num; i++) {
+  if (ENABLE_ASSERTIONS) {
+    assert(coalesce_num > 0);
     if (DEBUG_RMW)
-      printf("Worker: %u, Commit %d, val-len %u, message w_size %d\n", t_id, i, com_mes->com[i].val_len,
+      printf("Worker: %u, Commit %d, val-len %u, message w_size %d\n", t_id, w_i, com->val_len,
              send_sgl[br_i].length);
-    if (ENABLE_ASSERTIONS) {
-      assert(com_mes->com[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(com_mes->com[i].opcode == COMMIT_OP || com_mes->com[i].opcode == RMW_ACQ_COMMIT_OP);
-    }
+    assert(com->val_len == VALUE_SIZE >> SHIFT_BITS);
+    assert(com->opcode == COMMIT_OP || com->opcode == RMW_ACQ_COMMIT_OP);
   }
 }
 
 
-static inline void checks_when_forging_a_write(struct w_message *w_mes, struct ibv_sge *send_sgl,
-                                               uint16_t br_i, uint8_t coalesce_num, uint16_t t_id)
-{
-  for (uint8_t  i = 0; i < coalesce_num; i++) {
-    if (DEBUG_WRITES)
-      printf("Worker: %u, Write %d, val-len %u, message w_size %d\n", t_id, i, w_mes->write[i].val_len,
-             send_sgl[br_i].length);
-    if (ENABLE_ASSERTIONS) {
-      assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(w_mes->write[i].opcode == CACHE_OP_PUT ||
-             w_mes->write[i].opcode == OP_RELEASE ||
-             w_mes->write[i].opcode == OP_ACQUIRE ||
-             w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND);
-      //assert(w_mes->write[i].m_id == machine_id); // not true because reads get converted to writes with random m_ids
-    }
+static inline void checks_when_forging_a_write(struct write* write, struct ibv_sge *send_sgl,
+                                               uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id) {
+
+  if (DEBUG_WRITES)
+    printf("Worker: %u, Write %d, val-len %u, message w_size %d\n", t_id, w_i, write->val_len,
+           send_sgl[br_i].length);
+  if (ENABLE_ASSERTIONS) {
+    assert(write->val_len == VALUE_SIZE >> SHIFT_BITS);
+    check_state_with_allowed_flags(5, write->opcode, CACHE_OP_PUT, OP_RELEASE,
+                                   OP_ACQUIRE, OP_RELEASE_SECOND_ROUND);
+    if (write->opcode == OP_RELEASE_SECOND_ROUND)
+      if (DEBUG_QUORUM) green_printf("Thread %u Changing the op of the second round of a release \n", t_id);
   }
+
 }
 
 
@@ -1186,31 +1175,31 @@ static inline void check_the_polled_write_message(struct w_message *w_mes,
 {
   if (ENABLE_ASSERTIONS) {
     assert(w_mes->m_id < MACHINE_NUM);
-    assert(w_mes->w_num <= MAX_W_COALESCE);
+    assert(w_mes->coalesce_num <= MAX_W_COALESCE);
     uint32_t debug_cntr = 0;
-    if (w_mes->w_num == 0) {
-      red_printf("Wrkr %u received a write with w_num %u, op %u from machine %u with lid %lu \n",
-                 t_id, w_mes->w_num, w_mes->write[0].opcode, w_mes->m_id, w_mes->l_id);
+    if (w_mes->coalesce_num == 0) {
+      red_printf("Wrkr %u received a write with coalesce_num %u, op %u from machine %u with lid %lu \n",
+                 t_id, w_mes->coalesce_num, w_mes->write[0].opcode, w_mes->m_id, w_mes->l_id);
       assert(false);
     }
-    while (w_mes->write[w_mes->w_num - 1].opcode != CACHE_OP_PUT) {
-      if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE) return;
-      if (w_mes->write[w_mes->w_num - 1].opcode == OP_ACQUIRE) return;
-      if (w_mes->write[w_mes->w_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
-      if (w_mes->write[w_mes->w_num - 1].opcode == ACCEPT_OP) return;
-      if (w_mes->write[w_mes->w_num - 1].opcode == COMMIT_OP) return;
+    while (w_mes->write[w_mes->coalesce_num - 1].opcode != CACHE_OP_PUT) {
+      if (w_mes->write[w_mes->coalesce_num - 1].opcode == OP_RELEASE) return;
+      if (w_mes->write[w_mes->coalesce_num - 1].opcode == OP_ACQUIRE) return;
+      if (w_mes->write[w_mes->coalesce_num - 1].opcode == OP_RELEASE_BIT_VECTOR) return;
+      if (w_mes->write[w_mes->coalesce_num - 1].opcode == ACCEPT_OP) return;
+      if (w_mes->write[w_mes->coalesce_num - 1].opcode == COMMIT_OP) return;
       if (ENABLE_ASSERTIONS) {
         assert(false);
         debug_cntr++;
         if (debug_cntr == B_4_) {
           red_printf("Wrkr %d stuck waiting for a write to come index %u coalesce id %u\n",
-                     t_id, index, w_mes->w_num - 1);
+                     t_id, index, w_mes->coalesce_num - 1);
           print_wrkr_stats(t_id);
           debug_cntr = 0;
         }
       }
     }
-    if (polled_writes + w_mes->w_num > MAX_INCOMING_W) {
+    if (polled_writes + w_mes->coalesce_num > MAX_INCOMING_W) {
       assert(false);
     }
   }
@@ -1267,12 +1256,12 @@ static inline void count_stats_on_receiving_w_mes_reset_w_num(struct w_message *
     t_stats[t_id].received_writes += w_num;
     t_stats[t_id].received_writes_mes_num++;
   }
-  if (ENABLE_ASSERTIONS) w_mes->w_num = 0;
+  if (ENABLE_ASSERTIONS) w_mes->coalesce_num = 0;
 }
 
 static inline void check_accept_mes(struct accept_message *acc_mes)
 {
-  assert(acc_mes->acc_num == 0); // the w_num gets reset after polling a write
+  assert(acc_mes->acc_num == 0); // the coalesce_num gets reset after polling a write
   assert(acc_mes->m_id < MACHINE_NUM);
   assert(acc_mes->acc[0].opcode == ACCEPT_OP);
 }
@@ -2336,10 +2325,10 @@ static inline void register_committed_global_sess_id (uint16_t glob_sess_id, uin
 
 
 // Fill a write message with a commit
-static inline void fill_commit_message_from_l_entry(struct commit_message *com_mes, struct rmw_local_entry *loc_entry,
+static inline void fill_commit_message_from_l_entry(struct commit *com, struct rmw_local_entry *loc_entry,
                                                     uint16_t t_id)
 {
-  struct commit *com = &com_mes->com[0];
+  //struct commit *com = &com_mes->com[0];
   com->ts.m_id = loc_entry->new_ts.m_id;
   com->ts.version = loc_entry->new_ts.version;
   memcpy(&com->key, &loc_entry->key, TRUE_KEY_SIZE);
@@ -2355,10 +2344,9 @@ static inline void fill_commit_message_from_l_entry(struct commit_message *com_m
 }
 
 // Fill a write message with a commit from read info, after an rmw acquire
-static inline void fill_commit_message_from_r_info(struct commit_message* com_mes,
+static inline void fill_commit_message_from_r_info(struct commit *com,
                                                    struct read_info* r_info, uint16_t t_id)
 {
-  struct commit *com = &com_mes->com[0];
   com->ts.m_id = r_info->ts_to_read.m_id;
   com->ts.version = r_info->ts_to_read.version;
   memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);
@@ -2373,79 +2361,8 @@ static inline void fill_commit_message_from_r_info(struct commit_message* com_me
   }
 }
 
-// Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
-static inline void write_bookkeeping_in_insertion_based_on_source
-                  (struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
-                   const uint32_t incoming_pull_ptr, uint8_t *inside_w_ptr_, uint32_t *w_mes_ptr_,
-                   struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
-{
-  my_assert(*inside_w_ptr_ < MAX_W_COALESCE, "Inside pointer must not point to the last message");
-  uint8_t inside_w_ptr = *inside_w_ptr_;
-  uint32_t w_mes_ptr = *w_mes_ptr_;
-  my_assert(source <= FROM_COMMIT, "When inserting a write source is too high. Have you enabled lin writes?");
 
-  if (source == FROM_TRACE) {
-    struct trace_op *tr_op = (struct trace_op *) write;
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].version, (void *) &write->key.meta.version,
-           4 + TRUE_KEY_SIZE + 2);
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, tr_op->value_to_write, tr_op->real_val_len);
-    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = (uint8_t) machine_id;
-  }
-  else if (unlikely(source == RELEASE_THIRD)) { // Second round of a release
-    memcpy(&w_mes[w_mes_ptr].write[inside_w_ptr].m_id, (void *) &write->key.meta.m_id, W_SIZE);
-    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = OP_RELEASE_SECOND_ROUND;
-    //if (DEBUG_SESSIONS)
-     // cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
-     //             t_id, write->opcode, w_mes[w_mes_ptr].write[inside_w_ptr].opcode, inside_w_ptr, w_mes_ptr);
-    if (ENABLE_ASSERTIONS) assert (w_mes[w_mes_ptr].write[inside_w_ptr].m_id == (uint8_t) machine_id);
-    if (DEBUG_QUORUM) {
-      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
-      print_true_key(&w_mes[w_mes_ptr].write[inside_w_ptr].key);
-    }
-  }
-  else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_rmw)) {
-    // always use a new slot for the commit
-    if (inside_w_ptr > 0) {
-      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-      w_mes_ptr = p_ops->w_fifo->push_ptr;
-      w_mes[w_mes_ptr].w_num = 0;
-      inside_w_ptr = 0;
-    }
-    if (source == FROM_READ)
-      fill_commit_message_from_r_info((struct commit_message *) &w_mes[w_mes_ptr], r_info, t_id);
-    else fill_commit_message_from_l_entry((struct commit_message *) &w_mes[w_mes_ptr],
-                                          (struct rmw_local_entry *) write,  t_id);
-  }
-  else { //source = FROM_READ: 2nd round of read/write/acquire/release
-    // if the write is a release put it on a new message to
-    // guarantee it is not batched with writes from the same session
-    if (r_info->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
-      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-      w_mes_ptr = p_ops->w_fifo->push_ptr;
-      w_mes[w_mes_ptr].w_num = 0;
-      inside_w_ptr = 0;
-    }
-    w_mes[w_mes_ptr].write[inside_w_ptr].m_id = r_info->ts_to_read.m_id;
-    w_mes[w_mes_ptr].write[inside_w_ptr].version = r_info->ts_to_read.version;
-    w_mes[w_mes_ptr].write[inside_w_ptr].key = r_info->key;
-    memcpy(w_mes[w_mes_ptr].write[inside_w_ptr].value, r_info->value, r_info->val_len);
-    w_mes[w_mes_ptr].write[inside_w_ptr].opcode = r_info->opcode;
-    w_mes[w_mes_ptr].write[inside_w_ptr].val_len = VALUE_SIZE >> SHIFT_BITS;
-    if (ENABLE_ASSERTIONS) {
-      assert(!r_info->is_rmw);
-      assert(source == FROM_READ);
-      if (!(r_info->opcode == CACHE_OP_PUT ||
-            r_info->opcode == OP_RELEASE ||
-            r_info->opcode == OP_ACQUIRE))
-        red_printf("Wrkr %u Wrong opcode %u in the read_info when inserting a read \n",
-                   t_id, r_info->opcode);
-    }
-  }
-  // Make sure the pointed values are correct
-  (*inside_w_ptr_) = inside_w_ptr;
-  (*w_mes_ptr_) = w_mes_ptr;
 
-}
 
 static inline void
 set_w_session_id_and_index_to_req_array(struct pending_ops *p_ops, struct cache_op *write,
@@ -2516,29 +2433,67 @@ static inline void add_failure_to_release(struct pending_ops *p_ops,
   }
 }
 
+// Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
+static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
+  check_state_with_allowed_flags(7, opcode, OP_RELEASE, CACHE_OP_PUT, ACCEPT_OP,
+                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR);
+  switch(opcode) {
+    case OP_RELEASE:
+    case CACHE_OP_PUT:
+      return W_SIZE;
+    case ACCEPT_OP:
+      return ACCEPT_SIZE;
+    case COMMIT_OP:
+    case RMW_ACQ_COMMIT_OP:
+      return COMMIT_SIZE;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
 // When forging a write
 static inline void set_w_state_for_each_write(struct pending_ops *p_ops,
                                               struct w_message *w_mes, uint32_t backward_ptr,
-                                              uint8_t coalesce_num, uint16_t t_id)
+                                              uint8_t coalesce_num, struct ibv_sge *send_sgl,
+                                              uint16_t br_i, uint16_t t_id)
 {
+  uint16_t byte_ptr = W_MES_HEADER;
+  uint8_t write_i = 0; // count number of non-accept messages
   for (uint8_t i = 0; i < coalesce_num; i++) {
-    if (unlikely(w_mes->write[i].opcode == OP_RELEASE_SECOND_ROUND)) {
-      if (DEBUG_QUORUM) green_printf("Thread %u Changing the op of the second round of a release \n", t_id);
-      w_mes->write[i].opcode = OP_RELEASE;
+    struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
+    byte_ptr += get_write_size_from_opcode(write->opcode);
+    uint8_t *w_state = &p_ops->w_state[(backward_ptr + write_i) % PENDING_WRITES];
+    switch (write->opcode) {
+      case ACCEPT_OP:
+        checks_when_forging_an_accept((struct accept *) write, send_sgl, br_i, i, coalesce_num, t_id);
+        break;
+      case CACHE_OP_PUT:
+        checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        *w_state = SENT_PUT;
+        break;
+      case  COMMIT_OP:
+        checks_when_forging_a_commit((struct commit*) write, send_sgl, br_i, i, coalesce_num, t_id);
+        *w_state = SENT_COMMIT;
+        break;
+      case RMW_ACQ_COMMIT_OP:
+        *w_state = SENT_RMW_ACQ_COMMIT;
+        write->opcode = COMMIT_OP;
+        break;
+      case OP_RELEASE_SECOND_ROUND:
+        checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        write->opcode = OP_RELEASE;
+        break;
+      case OP_RELEASE_BIT_VECTOR:
+        checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        *w_state = SENT_BIT_VECTOR;
+        break;
+      case OP_RELEASE:
+      case OP_ACQUIRE:
+        checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        *w_state = SENT_RELEASE;
+      default: if (ENABLE_ASSERTIONS) assert(false);
     }
-    uint8_t w_state;
-    if (w_mes->write[i].opcode == COMMIT_OP) w_state = SENT_COMMIT;
-    else if (w_mes->write[i].opcode == RMW_ACQ_COMMIT_OP) {
-      w_state = SENT_RMW_ACQ_COMMIT;
-      w_mes->write[i].opcode = COMMIT_OP;
-    }
-    else if (w_mes->write[i].opcode == CACHE_OP_PUT) w_state = SENT_PUT;
-    else if (unlikely(w_mes->write[i].opcode == OP_RELEASE_BIT_VECTOR))
-      w_state = SENT_BIT_VECTOR;
-
-    else w_state = SENT_RELEASE; // Release or second round of acquire!!
-    if (ENABLE_ASSERTIONS) if (w_state == OP_RELEASE_BIT_VECTOR) assert(i == 0);
-    p_ops->w_state[(backward_ptr + i) % PENDING_WRITES] = w_state;
+    if (write->opcode != ACCEPT_OP) write_i++;
+    if (ENABLE_ASSERTIONS) if (*w_state == SENT_BIT_VECTOR) assert(i == 0);
   }
 }
 
@@ -3359,7 +3314,7 @@ static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
   if (ENABLE_ASSERTIONS && ack->opcode != CACHE_OP_ACK) {
     if(unlikely(ack->local_id) + ack->ack_num != l_id) {
       red_printf("Wrkr %u: Adding to existing ack for machine %u  with l_id %lu, "
-                   "ack_num %u with new l_id %lu, w_num %u, opcode %u\n", t_id, m_id,
+                   "ack_num %u with new l_id %lu, coalesce_num %u, opcode %u\n", t_id, m_id,
                  ack->local_id, ack->ack_num, l_id, w_num, ack->opcode);
       //assert(false);
       return false;
@@ -3690,7 +3645,7 @@ static inline void reset_read_message(struct pending_ops *p_ops)
   MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_ptr];
-  struct fifo_mes_metadata * info = &p_ops->r_fifo->info[r_mes_ptr];
+  struct r_mes_info * info = &p_ops->r_fifo->info[r_mes_ptr];
 
   r_mes->l_id = 0;
   r_mes->coalesce_num = 0;
@@ -3703,10 +3658,8 @@ static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
                               uint16_t t_id)
 {
   bool is_propose = opcode == PROPOSE_OP;
-  const uint32_t r_ptr = p_ops->r_push_ptr;
-  //struct r_message *r_mes = p_ops->r_fifo->r_message;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
-  struct fifo_mes_metadata *info = &p_ops->r_fifo->info[r_mes_ptr];
+  struct r_mes_info *info = &p_ops->r_fifo->info[r_mes_ptr];
   uint16_t new_size = get_read_size_from_opcode(opcode);
   bool new_message = (info->message_size + new_size) > R_MES_SIZE;
 
@@ -3722,7 +3675,7 @@ static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
   // the state of requests, after broadcasting
   if (!is_propose) {
    if (info->reads_num == 0) {
-     info->backward_ptr = r_ptr;
+     info->backward_ptr = p_ops->r_push_ptr;
      r_mes->l_id = (uint64_t) (p_ops->local_r_id + p_ops->r_size);
    }
    info->reads_num++;
@@ -3849,7 +3802,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED);
   struct w_message *w_mes = p_ops->w_fifo->w_message;
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
-  uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
+  uint8_t inside_w_ptr = w_mes[w_mes_ptr].coalesce_num;
 
   if (DEBUG_RMW) {
     yellow_printf("Wrkr %u Inserting an accept, bcast size %u, "
@@ -3863,7 +3816,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   if (inside_w_ptr > 0) {
     MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
     w_mes_ptr = p_ops->w_fifo->push_ptr;
-    w_mes[w_mes_ptr].w_num = 0;
+    w_mes[w_mes_ptr].coalesce_num = 0;
     inside_w_ptr = 0;
   }
   struct accept_message *acc_mes = (struct accept_message *) &w_mes[w_mes_ptr];
@@ -3879,41 +3832,164 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   acc->log_no = loc_entry->log_no;
 
   p_ops->w_fifo->bcast_size++;
-  w_mes[w_mes_ptr].w_num++;
+  w_mes[w_mes_ptr].coalesce_num++;
   if (ENABLE_ASSERTIONS) {
-    assert(w_mes[w_mes_ptr].w_num == 1);
+    assert(w_mes[w_mes_ptr].coalesce_num == 1);
     assert(acc->l_id < p_ops->prop_info->l_id);
   }
-  if (w_mes[w_mes_ptr].w_num == MAX_ACC_COALESCE) {
+  if (w_mes[w_mes_ptr].coalesce_num == MAX_ACC_COALESCE) {
     MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
     if (ENABLE_ASSERTIONS) assert(p_ops->w_fifo->push_ptr != p_ops->w_fifo->bcast_pull_ptr);
-    w_mes[p_ops->w_fifo->push_ptr].w_num = 0;
+    w_mes[p_ops->w_fifo->push_ptr].coalesce_num = 0;
   }
 }
 
 
+
+
+
+
+
+// Set up a fresh write message to coalesce requests -- Accepts, commits, writes, releases
+static inline void reset_write_message(struct pending_ops *p_ops)
+{
+  MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+  uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
+  struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
+  struct w_mes_info * info = &p_ops->w_fifo->info[w_mes_ptr];
+
+  w_mes->l_id = 0;
+  w_mes->coalesce_num = 0;
+  info->message_size = (uint16_t) W_MES_HEADER;
+  info->writes_num = 0;
+  info->is_release = false;
+  info->valid_header_l_id = false;
+}
+
+// Return a pointer, where the next request can be created -- Proposes, reads, acquires
+static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
+                              uint16_t t_id)
+{
+  check_state_with_allowed_flags(7, opcode, OP_RELEASE, CACHE_OP_PUT, ACCEPT_OP,
+                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR);
+  bool is_accept = opcode == ACCEPT_OP;
+  bool is_release = opcode == OP_RELEASE;
+  //bool is_write = opcode == CACHE_OP_PUT;
+  uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
+  struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
+  uint16_t new_size = get_write_size_from_opcode(opcode);
+  bool new_message = ((info->message_size + new_size) > W_MES_SIZE) ||
+                     opcode == OP_RELEASE; // TODO relax this
+
+  if (new_message) {
+    reset_write_message(p_ops);
+  }
+
+  w_mes_ptr = p_ops->w_fifo->push_ptr;
+  info = &p_ops->w_fifo->info[w_mes_ptr];
+  struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
+  if (is_release) info->is_release = true;
+  // Set up the backwards pointers to be able to change
+  // the state of requests, after broadcasting
+  if (!is_accept) {
+    if (!info->valid_header_l_id) {
+      info->valid_header_l_id = true;
+      info->backward_ptr = p_ops->w_push_ptr;
+      w_mes->l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
+    }
+    info->writes_num++;
+  }
+  w_mes->coalesce_num++;
+  uint32_t inside_w_ptr = info->message_size;
+  info->message_size += new_size;
+  return (void *) (((void *)w_mes) + inside_w_ptr);
+}
+
+
+// Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
+static inline void write_bookkeeping_in_insertion_based_on_source
+  (struct pending_ops *p_ops, struct write * write, struct cache_op *op,
+   const uint8_t source, const uint32_t incoming_pull_ptr,
+   struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
+{
+  //my_assert(*inside_w_ptr_ < MAX_W_COALESCE, "Inside pointer must not point to the last message");
+  //uint8_t inside_w_ptr = *inside_w_ptr_;
+  //uint32_t w_mes_ptr = *w_mes_ptr_;
+  my_assert(source <= FROM_COMMIT, "When inserting a write source is too high. Have you enabled lin writes?");
+
+  if (source == FROM_TRACE) {
+    struct trace_op *tr_op = (struct trace_op *) op;
+    memcpy(&write->version, (void *) &op->key.meta.version, 4 + TRUE_KEY_SIZE + 2);
+    memcpy(write->value, tr_op->value_to_write, tr_op->real_val_len);
+    write->m_id = (uint8_t) machine_id;
+  }
+  else if (unlikely(source == RELEASE_THIRD)) { // Second round of a release
+    memcpy(&write->m_id, (void *) &op->key.meta.m_id, W_SIZE);
+    write->opcode = OP_RELEASE_SECOND_ROUND;
+    //if (DEBUG_SESSIONS)
+    // cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
+    //             t_id, op->opcode, w_mes[w_mes_ptr].write[inside_w_ptr].opcode, inside_w_ptr, w_mes_ptr);
+    if (ENABLE_ASSERTIONS) assert (write->m_id == (uint8_t) machine_id);
+    if (DEBUG_QUORUM) {
+      printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
+      print_true_key(&write->key);
+    }
+  }
+  else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_rmw)) {
+    // always use a new slot for the commit
+//    if (inside_w_ptr > 0) {
+//      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+//      w_mes_ptr = p_ops->w_fifo->push_ptr;
+//      w_mes[w_mes_ptr].coalesce_num = 0;
+//      inside_w_ptr = 0;
+//    }
+    if (source == FROM_READ)
+      fill_commit_message_from_r_info((struct commit *) write, r_info, t_id);
+    else fill_commit_message_from_l_entry((struct commit *) write,
+                                          (struct rmw_local_entry *) op,  t_id);
+  }
+  else { //source = FROM_READ: 2nd round of read/write/acquire/release
+    // if the write is a release put it on a new message to
+    // guarantee it is not batched with writes from the same session
+//    if (r_info->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
+//      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+//      w_mes_ptr = p_ops->w_fifo->push_ptr;
+//      w_mes[w_mes_ptr].coalesce_num = 0;
+//      inside_w_ptr = 0;
+//    }
+    write->m_id = r_info->ts_to_read.m_id;
+    write->version = r_info->ts_to_read.version;
+    write->key = r_info->key;
+    memcpy(write->value, r_info->value, r_info->val_len);
+    write->opcode = r_info->opcode;
+    write->val_len = VALUE_SIZE >> SHIFT_BITS;
+    if (ENABLE_ASSERTIONS) {
+      assert(!r_info->is_rmw);
+      assert(source == FROM_READ);
+      check_state_with_allowed_flags(4, r_info->opcode, CACHE_OP_PUT, OP_RELEASE, OP_ACQUIRE);
+    }
+  }
+  // Make sure the pointed values are correct
+//  (*inside_w_ptr_) = inside_w_ptr;
+//  (*w_mes_ptr_) = w_mes_ptr;
+}
+
+
 // Insert a new local or remote write to the pending writes
-static inline void insert_write(struct pending_ops *p_ops, struct cache_op *write, const uint8_t source,
+static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, const uint8_t source,
                                 const uint32_t incoming_pull_ptr, uint16_t t_id)
 {
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
-  struct w_message *w_mes = p_ops->w_fifo->w_message;
-  uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
-  uint8_t inside_w_ptr = w_mes[w_mes_ptr].w_num;
-  uint32_t w_ptr = p_ops->w_push_ptr;
-  uint64_t message_l_id = 0;
 
-  bool last_mes_is_rmw = inside_w_ptr > 0 &&
-                         (w_mes[w_mes_ptr].write[0].opcode == ACCEPT_OP ||
-                          w_mes[w_mes_ptr].write[0].opcode == COMMIT_OP ||
-                          w_mes[w_mes_ptr].write[0].opcode == RMW_ACQ_COMMIT_OP);
-  if (ENABLE_RMWS && last_mes_is_rmw) { // Do not coalesce a write with an accept or commit
-    MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-    w_mes_ptr = p_ops->w_fifo->push_ptr;
-    w_mes[w_mes_ptr].w_num = 0;
-    inside_w_ptr = 0;
-  }
+  uint8_t opcode = source == FROM_READ ? r_info->opcode : op->opcode;
+  struct write *write = (struct write *)get_w_ptr(p_ops, opcode, t_id);
+
+  uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
+  struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
+  uint32_t w_ptr = p_ops->w_push_ptr;
+
+
   //printf("Insert a write %u \n", *(uint32_t *)write);
   if (DEBUG_READS && source == FROM_READ) {
     yellow_printf("Wrkr %u Inserting a write as a second round of read/write w_size %u/%d, bcast size %u, "
@@ -3924,35 +4000,22 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *writ
                   w_mes->l_id, p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
   }
 
-  write_bookkeeping_in_insertion_based_on_source(p_ops, write, source, incoming_pull_ptr,
-                                                 &inside_w_ptr, &w_mes_ptr, w_mes, r_info, t_id);
-  my_assert(inside_w_ptr < MAX_W_COALESCE, "After bookkeeping: Inside pointer must not point to the last message");
-  if (inside_w_ptr == 0) {
-    p_ops->w_fifo->backward_ptrs[w_mes_ptr] = w_ptr;
-    message_l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
-    //printf("message_lid %lu, local_wid %lu, p_ops w_size %u \n", message_l_id, p_ops->local_w_id, p_ops->w_size);
-    w_mes[w_mes_ptr].l_id = message_l_id;
-    w_mes[w_mes_ptr].m_id = (uint8_t) machine_id;
-  }
+  write_bookkeeping_in_insertion_based_on_source(p_ops, write, op, source, incoming_pull_ptr,
+                                                 w_mes, r_info, t_id);
+
   if (ENABLE_ASSERTIONS)
-    debug_checks_when_inserting_a_write(source, inside_w_ptr, w_mes_ptr, w_mes,
-                                        message_l_id, p_ops, w_ptr, t_id);
+    debug_checks_when_inserting_a_write(source, write, w_mes_ptr,
+                                        w_mes->l_id, p_ops, w_ptr, t_id);
   p_ops->w_state[w_ptr] = VALID;
-  set_w_session_id_and_index_to_req_array(p_ops, write, source, w_ptr, incoming_pull_ptr, r_info, t_id);
+  set_w_session_id_and_index_to_req_array(p_ops, op, source, w_ptr, incoming_pull_ptr, r_info, t_id);
 
   if (ENABLE_ASSERTIONS) {
     if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
-    assert(w_mes[w_mes_ptr].write[0].opcode != ACCEPT_OP);
   }
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
-  w_mes[w_mes_ptr].w_num++;
-  if (w_mes[w_mes_ptr].w_num == MAX_W_COALESCE) {
-    MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-    if (ENABLE_ASSERTIONS) assert(p_ops->w_fifo->push_ptr != p_ops->w_fifo->bcast_pull_ptr);
-    w_mes[p_ops->w_fifo->push_ptr].w_num = 0;
-  }
+  w_mes->coalesce_num++;
 }
 
 // setup a new r_rep entry
@@ -6035,20 +6098,18 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
                               uint8_t vc, uint16_t t_id) {
   struct ibv_wc signal_send_wc;
   struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_i];
-  uint32_t backward_ptr = p_ops->w_fifo->backward_ptrs[w_mes_i];
-  uint8_t coalesce_num = w_mes->w_num;
-  bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
-  bool is_commit = w_mes->write[0].opcode == COMMIT_OP || w_mes->write[0].opcode == RMW_ACQ_COMMIT_OP;
-  send_sgl[br_i].length = calculate_write_message_size(w_mes->write[0].opcode, coalesce_num, t_id);
+  struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_i];
+  uint8_t coalesce_num = w_mes->coalesce_num;
+  bool has_writes = info->writes_num > 0;
+  bool all_writes = info->writes_num == w_mes->coalesce_num;
+  uint32_t backward_ptr = info->backward_ptr;
+
+  //bool is_accept = w_mes->write[0].opcode == ACCEPT_OP;
+  //bool is_commit = w_mes->write[0].opcode == COMMIT_OP || w_mes->write[0].opcode == RMW_ACQ_COMMIT_OP;
+  send_sgl[br_i].length = info->message_size;//calculate_write_message_size(w_mes->write[0].opcode, coalesce_num, t_id);
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) w_mes;
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
-
-  if (ENABLE_ASSERTIONS) {
-    if (is_accept) checks_when_forging_an_accept((struct accept_message *) w_mes, send_sgl, br_i,coalesce_num, t_id);
-    else if (is_commit) checks_when_forging_a_commit((struct commit_message *) w_mes, send_sgl, br_i,coalesce_num, t_id);
-    else checks_when_forging_a_write(w_mes, send_sgl, br_i, coalesce_num, t_id);
-  }
 
   // Check if the release needs to send the vector bit_vec to get quoromized
   if (unlikely (!EMULATE_ABD && w_mes->write[0].opcode == OP_RELEASE &&
@@ -6060,23 +6121,22 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
     cache_isolated_op(t_id, &w_mes->write[0]);
   }
 
-  // Set the w_state for each write
-  if (!is_accept)
-    set_w_state_for_each_write(p_ops, w_mes, backward_ptr, coalesce_num, t_id);
+  // Set the w_state for each write and perform checks
+  set_w_state_for_each_write(p_ops, w_mes, backward_ptr, coalesce_num, send_sgl, br_i, t_id);
 
-  if (DEBUG_WRITES && !is_accept)
+  if (DEBUG_WRITES)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u, with credits: %d, lid: %u  \n",
-                 t_id, w_mes->write[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
+                 t_id, w_mes->write[0].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], w_mes->l_id);
 
-  if (DEBUG_RMW && (is_accept || is_commit)) {
-    struct accept_message *acc_mes = (struct accept_message *) w_mes;
-    green_printf("Wrkr %d : I BROADCAST a%s message %d of %u accepts with mes_size %u, with credits: %d, lid: %u , "
+  if (DEBUG_RMW) {
+    struct accept *acc = (struct accept *) &w_mes->write[0];
+    green_printf("Wrkr %d : I BROADCAST a message %d of %u accepts with mes_size %u, with credits: %d, lid: %u , "
                    "rmw_id %u, glob_sess id %u, log_no %u, version %u  \n",
-                 t_id, is_accept ? "n accept" : " commit", acc_mes->acc[coalesce_num - 1].opcode, coalesce_num,
-                 send_sgl[br_i].length,  credits[vc][(machine_id + 1) % MACHINE_NUM], acc_mes->acc[0].l_id,
-                 acc_mes->acc[0].t_rmw_id, acc_mes->acc[0].glob_sess_id,
-                 acc_mes->acc[0].log_no, acc_mes->acc[0].ts.version);
+                 t_id, acc->opcode, coalesce_num,
+                 send_sgl[br_i].length,  credits[vc][(machine_id + 1) % MACHINE_NUM], acc->l_id,
+                 acc->t_rmw_id, acc->glob_sess_id,
+                 acc->log_no, acc->ts.version);
   }
 
   // Do a Signaled Send every W_BCAST_SS_BATCH broadcasts (W_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
@@ -6137,21 +6197,12 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     // Create the broadcast messages
     forge_w_wr(bcast_pull_ptr, p_ops, q_info, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
     br_i++;
-    uint8_t coalesce_num = p_ops->w_fifo->w_message[bcast_pull_ptr].w_num;
+    uint8_t coalesce_num = p_ops->w_fifo->w_message[bcast_pull_ptr].coalesce_num;
     debug_and_count_stats_when_broadcasting_writes(p_ops, bcast_pull_ptr, coalesce_num,
                                                    t_id, expected_next_l_id, br_i, outstanding_writes);
     p_ops->w_fifo->bcast_size -= coalesce_num;
     // This message has been sent, do not add other writes to it!
-    // this is tricky because releases leave half-filled messages, make sure this is the last message to bcast
-    if (p_ops->w_fifo->bcast_size == 0) {
-      uint8_t max_coalesce = (uint8_t) (p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == ACCEPT_OP ?
-                             MAX_ACC_COALESCE : MAX_W_COALESCE);
-      if (coalesce_num < max_coalesce) {
-        //yellow_printf("Broadcasting write with coalesce num %u \n", coalesce_num);
-        MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-        p_ops->w_fifo->w_message[p_ops->w_fifo->push_ptr].w_num = 0;
-      }
-    }
+    if (p_ops->w_fifo->bcast_size == 0) reset_write_message(p_ops);
     mes_sent++;
     MOD_ADD(bcast_pull_ptr, W_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
@@ -6185,7 +6236,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   uint16_t i;
   struct ibv_wc signal_send_wc;
   struct r_message *r_mes = &p_ops->r_fifo->r_message[r_mes_i];
-  struct fifo_mes_metadata *info = &p_ops->r_fifo->info[r_mes_i];
+  struct r_mes_info *info = &p_ops->r_fifo->info[r_mes_i];
   uint16_t coalesce_num = r_mes->coalesce_num;
   bool has_reads = info->reads_num > 0;
   bool all_reads = info->reads_num == r_mes->coalesce_num;
@@ -6277,16 +6328,6 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
       (*outstanding_reads) += coalesce_num;
     }
     p_ops->r_fifo->bcast_size -= coalesce_num;
-    // This message has been sent, do not add other reads to it!
-    // this is tricky because proposes leave half-filled messages, make sure this is the last message to bcast
-    //if (p_ops->r_fifo->bcast_size == 0) {
-      //uint8_t max_coalesce = (uint8_t) (is_propose ? MAX_PROP_COALESCE : MAX_R_COALESCE);
-      //if (coalesce_num < max_coalesce) {
-        //yellow_printf("Broadcasting r_rep with coalesce num %u \n", coalesce_num);
-       // MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
-        //p_ops->r_fifo->r_message[p_ops->r_fifo->push_ptr].coalesce_num = 0;
-      //}
-    //}
     if (p_ops->r_fifo->bcast_size == 0) reset_read_message(p_ops);
     //reads_sent += coalesce_num;
     mes_sent++;
@@ -6311,17 +6352,12 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 //------------------------------ POLLLING------- -----------------------------
 //---------------------------------------------------------------------------*/
 
-
-// Poll for the write broadcasts
-static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws,
-                                   uint32_t *pull_ptr, struct pending_ops *p_ops,
-                                   struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                   struct recv_info *w_recv_info, struct ack_message *acks,
-                                   uint32_t *completed_but_not_polled_writes,
-                                   uint16_t t_id)
+static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
+                                                             struct recv_info *w_recv_info, struct ack_message *acks,
+                                                             uint32_t *completed_but_not_polled_writes,
+                                                             uint16_t t_id)
 {
-  uint32_t polled_messages = 0, polled_writes = 0;
-  int completed_messages =  ibv_poll_cq(w_recv_cq, W_BUF_SLOTS, w_recv_wc);
+  int completed_messages = ibv_poll_cq(w_recv_cq, W_BUF_SLOTS, w_recv_wc);
   if (DEBUG_RECEIVES) {
     w_recv_info->posted_recvs -= completed_messages;
     if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
@@ -6337,18 +6373,34 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     completed_messages += (*completed_but_not_polled_writes);
     (*completed_but_not_polled_writes) = 0;
   }
+  if (ENABLE_ASSERTIONS && completed_messages > 0) {
+    for (int i = 0; i < MACHINE_NUM; i++)
+      assert(acks[i].opcode == CACHE_OP_ACK);
+  }
+  return completed_messages;
+}
+
+// Poll for the write broadcasts
+static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws,
+                                   uint32_t *pull_ptr, struct pending_ops *p_ops,
+                                   struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
+                                   struct recv_info *w_recv_info, struct ack_message *acks,
+                                   uint32_t *completed_but_not_polled_writes,
+                                   uint16_t t_id)
+{
+
+  uint32_t polled_messages = 0, polled_writes = 0;
+  int completed_messages =
+    find_how_many_write_messages_can_be_polled(w_recv_cq, w_recv_wc, w_recv_info,
+                                               acks, completed_but_not_polled_writes, t_id);
   if (completed_messages <= 0) return;
   uint32_t index = *pull_ptr;
-
-  for (int i =0; i < MACHINE_NUM; i++)
-    assert(acks[i].opcode == CACHE_OP_ACK);
-
   // Start polling
   while (polled_messages < completed_messages) {
     struct w_message *w_mes = (struct w_message*) &incoming_ws[index].w_mes;
     check_the_polled_write_message(w_mes, index, polled_writes, t_id);
     print_polled_write_message_info(w_mes, index, t_id);
-    uint8_t w_num = w_mes->w_num;
+    uint8_t w_num = w_mes->coalesce_num;
     bool is_accept = w_mes->write[0].opcode == ACCEPT_OP; // could be write/accept/commit/release
     if (!is_accept) {
       if (!ack_bookkeeping(&acks[w_mes->m_id], w_num, w_mes->l_id, w_mes->m_id, t_id)) {
