@@ -143,6 +143,7 @@ void *worker(void *arg)
     ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
     memset(ses_dbg, 0, sizeof(struct session_dbg));
   }
+  uint16_t last_session = 0;
   uint32_t outstanding_writes = 0, outstanding_reads = 0;
   uint64_t debug_lids = 0;
   // helper for polling writes: in a corner failure-realted case,
@@ -244,7 +245,7 @@ void *worker(void *arg)
     trace_iter = batch_requests_to_KVS(t_id,
                                        trace_iter, trace, ops,
                                        p_ops, resp, &latency_info,
-                                       ses_dbg);
+                                       ses_dbg, &last_session);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

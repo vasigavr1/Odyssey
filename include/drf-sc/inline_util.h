@@ -2386,7 +2386,7 @@ set_w_session_id_and_index_to_req_array(struct pending_ops *p_ops, struct cache_
       return;
     // source = FROM_READ: 2nd round of Acquires/Releases, 2nd round of out-of-epoch Writes
     // This also includes Commits triggered by RMW-Acquires
-    case FROM_READ:   //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
+    case FROM_READ:
       p_ops->w_session_id[w_ptr] = p_ops->r_session_id[incoming_pull_ptr];
       if (ENABLE_CLIENTS) {
         p_ops->w_index_to_req_array[w_ptr] = p_ops->r_index_to_req_array[incoming_pull_ptr];
@@ -2411,29 +2411,36 @@ set_w_session_id_and_index_to_req_array(struct pending_ops *p_ops, struct cache_
 }
 
 // When forging a write
-static inline void add_failure_to_release(struct pending_ops *p_ops,
-                                          struct w_message *w_mes, uint32_t backward_ptr,
+static inline bool add_failure_to_release(struct pending_ops *p_ops,
+                                          struct w_message *w_mes,
+                                          struct w_mes_info *info,
+                                          uint32_t backward_ptr,
                                           uint16_t t_id)
 {
   uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
   create_bit_vector(bit_vector_to_send, t_id);
   if (*(uint16_t *) bit_vector_to_send > 0) {
+    struct write *write = (((void *)w_mes) + info->first_release_byte_ptr);
+    uint64_t l_id = w_mes->l_id + info->first_release_l_id_offset;
+    backward_ptr = (backward_ptr + info->first_release_l_id_offset) % PENDING_WRITES;
     // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
-    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], w_mes->write[0].value,
+    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], write->value,
            SEND_CONF_VEC_SIZE);
-    memcpy(w_mes->write[0].value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
+    memcpy(write->value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
     // l_d can be used raw, because Release is guaranteed to be the first message
-    take_ownership_of_send_bits(t_id, w_mes->l_id);
+    take_ownership_of_send_bits(t_id, l_id);
     if (DEBUG_QUORUM)
-      green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id, *(uint16_t *) bit_vector_to_send);
-    w_mes->write[0].opcode = OP_RELEASE_BIT_VECTOR;
-    p_ops->ptrs_to_local_w[backward_ptr] = &w_mes->write[0];
+      green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
+                   *(uint16_t *) bit_vector_to_send);
+    write->opcode = OP_RELEASE_BIT_VECTOR;
+    p_ops->ptrs_to_local_w[backward_ptr] = write;
     //if (DEBUG_SESSIONS)
     //  cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
     //             t_id, p_ops->w_session_id[backward_ptr],
     //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
-
+    return true;
   }
+  return false;
 }
 
 // Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
@@ -2458,6 +2465,7 @@ static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
   }
 }
 
+
 // When forging a write
 static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct w_mes_info *info,
                                               struct w_message *w_mes, uint32_t backward_ptr,
@@ -2465,11 +2473,12 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
                                               uint16_t br_i, uint16_t t_id)
 {
   uint16_t byte_ptr = W_MES_HEADER;
-  bool failure= false;
+  bool failure = false;
+
   if (unlikely (!EMULATE_ABD && info->is_release &&
                 send_bit_vector.state == DOWN_STABLE)) {
-    add_failure_to_release(p_ops, w_mes, backward_ptr, t_id);
-    failure = true;
+    if (add_failure_to_release(p_ops, w_mes, info, backward_ptr, t_id))
+      failure = true;
   }
   for (uint8_t i = 0; i < coalesce_num; i++) {
     struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
@@ -2512,8 +2521,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
           p_ops->ptrs_to_local_w[backward_ptr] = write;
           break;
         }
-        else
-        cache_isolated_op(t_id, write);
+        else cache_isolated_op(t_id, write);
       case OP_ACQUIRE:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
         *w_state = SENT_RELEASE;
@@ -2521,7 +2529,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
       default: if (ENABLE_ASSERTIONS) assert(false);
     }
     if (write->opcode != ACCEPT_OP) MOD_ADD(backward_ptr, PENDING_WRITES);
-    if (ENABLE_ASSERTIONS) if (*w_state == SENT_BIT_VECTOR) assert(i == 0);
+
   }
 }
 
@@ -3794,16 +3802,13 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
   //green_printf("%u r_ptr becomes valid, size %u/%u \n", r_ptr, p_ops->r_size, p_ops->virt_r_size);
   p_ops->r_state[r_ptr] = VALID;
   if (source == FROM_TRACE) {
-    //if (r_info->opcode == OP_ACQUIRE || r_info->opcode == OP_RELEASE) {
       struct trace_op *tr_op = (struct trace_op *) op;
       p_ops->r_session_id[r_ptr] = tr_op->session_id;
       if (ENABLE_CLIENTS) {
         p_ops->r_index_to_req_array[r_ptr] = tr_op->index_to_req_array;
       }
-      //memcpy(&p_ops->r_session_id[r_ptr], op, SESSION_BYTES); // session id has to fit in 3 bytes
       // Query the conf to see if the machine has lost messages
       if (r_info->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id);
-   // }
   }
 
   // Increase the virtual size by 2 if the req is an acquire
@@ -3895,33 +3900,64 @@ static inline void reset_write_message(struct pending_ops *p_ops)
   info->valid_header_l_id = false;
 }
 
+
+// Find out if a release can be coalesced
+static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w_mes,
+                                    uint16_t session_id, uint16_t t_id)
+{
+  /* release cannot be coalesced when
+   * -- A write from the same session exists already in the message
+   **/
+  //if (w_mes->coalesce_num == 0) return true;
+  for (uint8_t i = 0; i < w_mes->coalesce_num; i++) {
+    if (session_id == info->per_message_sess_id[i]) {
+//      printf("Wrkr %u release is of session %u, which exists in write %u/%u \n",
+//             t_id,session_id, i, w_mes->coalesce_num);
+      return false;
+    }
+  }
+//  green_printf("Wrkr %u release is of session %u, and can be coalesced at %u \n",
+//         t_id, session_id, w_mes->coalesce_num);
+  return true;
+
+}
+
 // Return a pointer, where the next request can be created -- Proposes, reads, acquires
 static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
-                              uint16_t t_id)
+                              uint16_t session_id, uint16_t t_id)
 {
   check_state_with_allowed_flags(9, opcode, OP_RELEASE, CACHE_OP_PUT, ACCEPT_OP,
                                  COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR, NO_OP_RELEASE,
                                  OP_ACQUIRE);
+  if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
+
   bool is_accept = opcode == ACCEPT_OP;
   bool is_release = opcode == OP_RELEASE;
-  //bool is_write = opcode == CACHE_OP_PUT;
+
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
+  struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
   uint16_t new_size = get_write_size_from_opcode(opcode);
-
-  bool new_message_because_of_release = p_ops->w_fifo->w_message[w_mes_ptr].coalesce_num > 0 &&
-                              is_release && !info->is_release;
+  bool new_message_because_of_release;
+  if (is_release) new_message_because_of_release = !coalesce_release(info, w_mes, session_id, t_id);
+  else new_message_because_of_release = false;
+//  bool new_message_because_of_release =
+//    is_release ? (!coalesce_release(info, w_mes, session_id, t_id)) : false;
   bool new_message = ((info->message_size + new_size) > W_MES_SIZE) ||
-                      new_message_because_of_release; // TODO relax this
+                      new_message_because_of_release;
 
   if (new_message) {
     reset_write_message(p_ops);
+    w_mes_ptr = p_ops->w_fifo->push_ptr;
+    info = &p_ops->w_fifo->info[w_mes_ptr];
+    w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
   }
 
-  w_mes_ptr = p_ops->w_fifo->push_ptr;
-  info = &p_ops->w_fifo->info[w_mes_ptr];
-  struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
-  if (is_release) info->is_release = true;
+  if (is_release && !info->is_release) {
+    info->first_release_byte_ptr = info->message_size;
+    info->is_release = true;
+    info->first_release_l_id_offset = info->writes_num;
+  }
   // Set up the backwards pointers to be able to change
   // the state of requests, after broadcasting
   if (!is_accept) {
@@ -3932,6 +3968,8 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
     }
     info->writes_num++;
   }
+
+  info->per_message_sess_id[w_mes->coalesce_num] = session_id;
   w_mes->coalesce_num++;
   uint32_t inside_w_ptr = info->message_size;
   info->message_size += new_size;
@@ -3945,9 +3983,6 @@ static inline void write_bookkeeping_in_insertion_based_on_source
    const uint8_t source, const uint32_t incoming_pull_ptr,
    struct w_message *w_mes, struct read_info *r_info, const uint16_t t_id)
 {
-  //my_assert(*inside_w_ptr_ < MAX_W_COALESCE, "Inside pointer must not point to the last message");
-  //uint8_t inside_w_ptr = *inside_w_ptr_;
-  //uint32_t w_mes_ptr = *w_mes_ptr_;
   my_assert(source <= FROM_COMMIT, "When inserting a write source is too high. Have you enabled lin writes?");
 
   if (source == FROM_TRACE) {
@@ -3970,26 +4005,12 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   }
   else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_rmw)) {
     // always use a new slot for the commit
-//    if (inside_w_ptr > 0) {
-//      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-//      w_mes_ptr = p_ops->w_fifo->push_ptr;
-//      w_mes[w_mes_ptr].coalesce_num = 0;
-//      inside_w_ptr = 0;
-//    }
     if (source == FROM_READ)
       fill_commit_message_from_r_info((struct commit *) write, r_info, t_id);
     else fill_commit_message_from_l_entry((struct commit *) write,
                                           (struct rmw_local_entry *) op,  t_id);
   }
   else { //source = FROM_READ: 2nd round of read/write/acquire/release
-    // if the write is a release put it on a new message to
-    // guarantee it is not batched with writes from the same session
-//    if (r_info->opcode == OP_RELEASE && inside_w_ptr > 0 && !EMULATE_ABD) {
-//      MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
-//      w_mes_ptr = p_ops->w_fifo->push_ptr;
-//      w_mes[w_mes_ptr].coalesce_num = 0;
-//      inside_w_ptr = 0;
-//    }
     write->m_id = r_info->ts_to_read.m_id;
     write->version = r_info->ts_to_read.version;
     write->key = r_info->key;
@@ -4003,8 +4024,6 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     }
   }
   // Make sure the pointed values are correct
-//  (*inside_w_ptr_) = inside_w_ptr;
-//  (*w_mes_ptr_) = w_mes_ptr;
 }
 
 
@@ -4014,13 +4033,16 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
 {
   struct read_info *r_info = NULL;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
+  uint32_t w_ptr = p_ops->w_push_ptr;
 
+  set_w_session_id_and_index_to_req_array(p_ops, op, source, w_ptr, incoming_pull_ptr, r_info, t_id);
   uint8_t opcode = source == FROM_READ ? r_info->opcode : op->opcode;
-  struct write *write = (struct write *) get_w_ptr(p_ops, opcode, t_id);
+  struct write *write = (struct write *)
+    get_w_ptr(p_ops, opcode, (uint16_t)p_ops->w_session_id[w_ptr], t_id);
 
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   struct w_message *w_mes = &p_ops->w_fifo->w_message[w_mes_ptr];
-  uint32_t w_ptr = p_ops->w_push_ptr;
+
 
 
   //printf("Insert a write %u \n", *(uint32_t *)write);
@@ -4040,7 +4062,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
     debug_checks_when_inserting_a_write(source, write, w_mes_ptr,
                                         w_mes->l_id, p_ops, w_ptr, t_id);
   p_ops->w_state[w_ptr] = VALID;
-  set_w_session_id_and_index_to_req_array(p_ops, op, source, w_ptr, incoming_pull_ptr, r_info, t_id);
+
 
   if (ENABLE_ASSERTIONS) {
     if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
@@ -4377,21 +4399,22 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
                                              struct trace_op *ops,
                                              struct pending_ops *p_ops, struct cache_resp *resp,
                                              struct latency_flags *latency_info,
-                                             struct session_dbg *ses_dbg)
+                                             struct session_dbg *ses_dbg, uint16_t *last_session_)
 {
-  uint16_t writes_num = 0, reads_num = 0, op_i = 0;
+  uint16_t writes_num = 0, reads_num = 0, op_i = 0, last_session = *last_session_;
   int working_session = -1;
   if (!ENABLE_CLIENTS && p_ops->all_sessions_stalled) {
     if (ENABLE_ASSERTIONS) debug_all_sessions(ses_dbg, p_ops, t_id);
     return trace_iter;
   }
   for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
-    if (pull_request_from_this_session(p_ops, i, t_id)) {
-      working_session = i;
+    uint16_t sess_i = (uint16_t)((last_session + i) % SESSIONS_PER_THREAD);
+    if (pull_request_from_this_session(p_ops, sess_i, t_id)) {
+      working_session = sess_i;
       break;
     }
     else if (ENABLE_ASSERTIONS) {
-      debug_sessions(ses_dbg, p_ops, i, t_id);
+      debug_sessions(ses_dbg, p_ops, sess_i, t_id);
     }
   }
   //printf("working session = %d\n", working_session);
@@ -4422,6 +4445,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
       if (trace[trace_iter].opcode == NOP) trace_iter = 0;
     }
   }
+  *last_session_ = (uint16_t) working_session;
 
   t_stats[t_id].cache_hits_per_thread += op_i;
   cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
@@ -6198,7 +6222,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
   bool is_release;
   if (p_ops->w_fifo->bcast_size > 0) {
-    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE && (!EMULATE_ABD);
+    is_release = p_ops->w_fifo->info[bcast_pull_ptr].is_release && (!EMULATE_ABD);
     uint16_t min_credits = is_release ? (uint16_t) W_CREDITS : (uint16_t)1;
     if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
                              &available_credits, r_send_wr, w_send_wr, min_credits, credit_debug_cnt, t_id))
@@ -6209,7 +6233,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
   if (ENABLE_ASSERTIONS) assert(available_credits <= W_CREDITS);
 
   while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
-    is_release = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == OP_RELEASE && (!EMULATE_ABD);
+    is_release = p_ops->w_fifo->info[bcast_pull_ptr].is_release && (!EMULATE_ABD);
     if (is_release) {
       if (mes_sent > 0 || available_credits < W_CREDITS) {
         break;

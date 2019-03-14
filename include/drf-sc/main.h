@@ -23,16 +23,16 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
-#define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 80
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 8
+#define R_CREDITS 12
 #define MAX_R_COALESCE 20
 #define W_CREDITS 12
-#define MAX_W_COALESCE 8
+#define MAX_W_COALESCE 20
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
@@ -42,7 +42,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 00// this is out of 1000, e.g. 10 means 1%
@@ -369,7 +369,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -630,10 +630,14 @@ struct r_mes_info {
 };
 
 struct w_mes_info {
-  uint16_t writes_num; // all non-accept messages: releases, writes, or commits
+  uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
+  uint16_t per_message_sess_id[MAX_W_COALESCE];
   uint32_t backward_ptr;
   bool is_release;
+  uint16_t first_release_byte_ptr;
+  uint8_t first_release_l_id_offset;
+
   // message contains releases, writes, or commits, and thus has a valid l_id
   bool valid_header_l_id;
   bool sent;
