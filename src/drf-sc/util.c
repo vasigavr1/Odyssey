@@ -69,7 +69,7 @@ void static_assert_compile_parameters()
   static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
 
   // COMMITS
-  static_assert(MAX_COM_COALESCE == 1, "");
+  //static_assert(MAX_COM_COALESCE == 1, "");
   static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
   static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
   static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
