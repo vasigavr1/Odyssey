@@ -38,6 +38,7 @@
 #define RMW_ACQ_COMMIT_OP 101
 #define COMMIT_OP 102
 #define ACCEPT_OP 103
+#define ACCEPT_OP_NO_CREDITS 13 // used only when creating an r_rep
 #define PROPOSE_OP 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
@@ -88,6 +89,7 @@
 // READ_REPLIES
 #define INVALID_OPCODE 5 // meaningless opcode to help with debugging
 // an r_rep message can be a reply to a read or a prop or an accept
+#define ACCEPT_REPLY_NO_CREDITS 24
 #define ACCEPT_REPLY 25
 #define PROP_REPLY 26 // Contains only prop reps
 #define READ_REPLY 27 // Contains only read reps
@@ -110,13 +112,17 @@
 #define NO_OP_PROP_REP 40
 #define ACQ_LOG_TOO_SMALL 41
 #define ACQ_LOG_TOO_HIGH 42
-#define LOG_EQUAL 43
 #define ACQ_LOG_EQUAL 43 // for acquires on rmws, the response is with respect to the log numbers
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
 // previously considered to have failed
 #define FALSE_POSITIVE_OFFSET 20
+
+// WRITE MESSAGE OPCODE
+#define ONLY_WRITES 200 // could be write/accept/commit/release
+#define ONLY_ACCEPTS 201
+#define WRITES_AND_ACCEPTS 202
 
 
 #define KEY_HIT 220

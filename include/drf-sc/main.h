@@ -23,7 +23,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 80
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -42,7 +42,7 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 00// this is out of 1000, e.g. 10 means 1%
@@ -212,7 +212,7 @@
 
 #define WRITE_HEADER (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 2) // opcode + val_len
 #define W_SIZE (VALUE_SIZE + WRITE_HEADER)
-#define W_MES_HEADER (8 + 1 +1) // local id + m_id+ w_num
+#define W_MES_HEADER (8 + 1 + 1 + 1) // local id + m_id+ w_num + opcode
 #define W_MES_SIZE (W_MES_HEADER + (W_SIZE * MAX_W_COALESCE))
 #define W_RECV_SIZE (GRH_SIZE + W_MES_SIZE)
 #define W_ENABLE_INLINING ((W_MES_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
@@ -257,7 +257,7 @@
 
 // ACCEPTS
 #define MAX_ACC_COALESCE 1
-#define ACCEPT_MES_HEADER 2 // m_id , coalesce num,
+#define ACCEPT_MES_HEADER (W_MES_HEADER) //
 #define ACCEPT_SIZE (47 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
 #define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
 
@@ -369,7 +369,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -538,6 +538,7 @@ struct write {
 struct w_message {
   uint8_t m_id;
   uint8_t coalesce_num;
+  uint8_t opcode;
   uint64_t l_id ;
   struct write write[MAX_W_COALESCE];
 } __attribute__((__packed__));
@@ -558,9 +559,11 @@ struct accept {
 
 struct accept_message {
   uint8_t m_id;
-  uint8_t acc_num;
+  uint8_t coalesce_num;
+  uint8_t opcode;
+  uint64_t l_id ;
   struct accept acc[MAX_ACC_COALESCE];
-};
+}__attribute__((__packed__));
 
 
 struct w_message_ud_req {
@@ -883,12 +886,12 @@ struct pending_out_of_epoch_writes {
 struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
-  struct write **ptrs_to_w_ops; // used for remote writes
-  struct read **ptrs_to_r_ops; // used for remote reads
+  //struct write **ptrs_to_w_ops; // used for remote writes
+  void **ptrs_to_mes_ops; // used for remote reads
 
   struct write **ptrs_to_local_w; // used for the first phase of release
   uint8_t *overwritten_values;
-  struct r_message **ptrs_to_r_headers;
+  struct r_message **ptrs_to_mes_headers;
   bool *coalesce_r_rep;
 //  struct read_payload *r_payloads;
   struct read_info *read_info;

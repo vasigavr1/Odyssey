@@ -264,7 +264,7 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
                                  uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   uint16_t op_i;	/* I is batch index */
-  struct read **reads = p_ops->ptrs_to_r_ops;
+  struct read **reads = (struct read **) p_ops->ptrs_to_mes_ops;
 
   if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
   unsigned int bkt[MAX_INCOMING_R];
@@ -291,8 +291,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
   for(op_i = 0; op_i < op_num; op_i++) {
     struct cache_op *op = (struct cache_op*) reads[(pull_ptr + op_i) % max_op_size];
     if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
-      insert_r_rep(p_ops, p_ops->ptrs_to_r_headers[op_i]->l_id, t_id,
-                   p_ops->ptrs_to_r_headers[op_i]->m_id,
+      insert_r_rep(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id, t_id,
+                   p_ops->ptrs_to_mes_headers[op_i]->m_id,
                    p_ops->coalesce_r_rep[op_i], op->opcode);
       continue;
     }

@@ -54,8 +54,8 @@ void static_assert_compile_parameters()
 
   // ACCEPTS
   //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
-  static_assert(MAX_ACC_COALESCE == 1, "");
-  static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
+  //static_assert(MAX_ACC_COALESCE == 1, "");
+  //static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
   static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
   static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
@@ -792,12 +792,18 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
     (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) calloc(1, sizeof(struct rmw_local_entry));
   }
 
-  (*p_ops)->ptrs_to_r_headers = (struct r_message **) malloc(MAX_INCOMING_R * sizeof(struct r_message *));
-  (*p_ops)->coalesce_r_rep = (bool *) malloc(MAX_INCOMING_R * sizeof(bool));
+
+  uint32_t max_incoming_w_r = MAX(MAX_INCOMING_R, MAX_INCOMING_W);
+  (*p_ops)->ptrs_to_mes_headers =
+    (struct r_message **) malloc(max_incoming_w_r * sizeof(struct r_message *));
+  (*p_ops)->coalesce_r_rep =
+    (bool *) malloc(max_incoming_w_r* sizeof(bool));
+
+
   // PTRS to W_OPS
-  (*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
+  //(*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
   // PTRS to R_OPS
-  (*p_ops)->ptrs_to_r_ops = (struct read **) malloc(MAX_INCOMING_R * sizeof(struct read *));
+  (*p_ops)->ptrs_to_mes_ops = (void **) malloc(max_incoming_w_r * sizeof(struct read *));
   // PTRS to local ops to find the write after sending the first round of a release
   (*p_ops)->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
   (*p_ops)->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
