@@ -54,11 +54,12 @@ void static_assert_compile_parameters()
 
   // ACCEPTS
   //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
-  //static_assert(MAX_ACC_COALESCE == 1, "");
-  //static_assert(MAX_ACC_COALESCE == MAX_ACC_REP_COALESCE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
-  static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
-  static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
+  //static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
+  //static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
+  static_assert(MAX_ACC_COALESCE > 1, "");
+  static_assert(MAX_ACC_REP_COALESCE >= MAX_ACC_SEND_COALESCE, "");
+  static_assert(MAX_ACC_REP_COALESCE == MAX_PROP_REP_COALESCE, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
   static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
@@ -71,7 +72,7 @@ void static_assert_compile_parameters()
   // COMMITS
   //static_assert(MAX_COM_COALESCE == 1, "");
   static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
-  static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
+  //static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
   static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
 
   // RMW- ACQUIRES

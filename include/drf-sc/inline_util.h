@@ -1243,20 +1243,20 @@ static inline void print_polled_write_message_info(struct w_message *w_mes, uint
       printf("Worker %u sees a write Opcode %d at offset %d, l_id %lu  \n",
              t_id, w_mes->write[0].opcode, index, w_mes->l_id);
     else if (DEBUG_RMW && w_mes->write[0].opcode == ACCEPT_OP) {
-      struct accept_message *acc_mes = (struct accept_message *) w_mes;
+      struct accept *acc = (struct accept*) &w_mes->write[0];
       printf("Worker %u sees an Accept: opcode %d at offset %d, rmw_id %lu, "
                "glob_sess_id %u, log_no %u, coalesce_num %u \n",
-             t_id, acc_mes->acc[0].opcode, index, acc_mes->acc[0].t_rmw_id,
-             acc_mes->acc[0].glob_sess_id, acc_mes->acc[0].log_no,
-             acc_mes->coalesce_num);
+             t_id, acc->opcode, index, acc->t_rmw_id,
+             acc->glob_sess_id, acc->log_no,
+             w_mes->coalesce_num);
     }
     else if (DEBUG_RMW && w_mes->write[0].opcode == COMMIT_OP) {
-      struct commit_message *com_mes = (struct commit_message *) w_mes;
+      struct commit *com = (struct commit *) &w_mes->write[0];
       printf("Worker %u sees a Commit: opcode %d at offset %d, l_id %lu, "
                "glob_sess_id %u, log_no %u, coalesce_num %u \n",
-             t_id, com_mes->com[0].opcode, index, com_mes->com[0].t_rmw_id,
-             com_mes->com[0].glob_sess_id, com_mes->com[0].log_no,
-             com_mes->com_num);
+             t_id, com->opcode, index, com->t_rmw_id,
+             com->glob_sess_id, com->log_no,
+             w_mes->coalesce_num);
     }
   }
 }
@@ -1273,7 +1273,7 @@ static inline void count_stats_on_receiving_w_mes_reset_w_num(struct w_message *
   if (ENABLE_ASSERTIONS) w_mes->coalesce_num = 0;
 }
 
-static inline void check_accept_mes(struct accept_message *acc_mes)
+static inline void check_accept_mes(struct w_message *acc_mes)
 {
   if (ENABLE_ASSERTIONS) {
     check_state_with_allowed_flags(3, acc_mes->opcode, WRITES_AND_ACCEPTS,
@@ -4165,7 +4165,9 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
   }
 
   uint32_t inside_r_rep_ptr = r_rep_fifo->message_sizes[r_rep_fifo->push_ptr]; // This pointer is in bytes
+
   if (!is_rmw) r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += R_REP_SMALL_SIZE;
+  if (ENABLE_ASSERTIONS) assert(r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] < R_REP_SEND_SIZE);
   return (struct r_rep_big *) (((void *)r_rep_mes) + inside_r_rep_ptr);
 }
 
@@ -6252,7 +6254,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
                                     struct recv_info *r_rep_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes, uint64_t *expected_next_l_id)
 {
-  //  if (t_id == 1)  printf("Worker %d bcasting writes \n", t_id);
+  //  printf("Worker %d bcasting writes \n", t_id);
   uint8_t vc = W_VC;
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
@@ -6502,9 +6504,9 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
           p_ops->ptrs_to_mes_headers[running_writes_for_kvs] = (struct r_message *) w_mes;
           p_ops->coalesce_r_rep[running_writes_for_kvs] = accepts > 0;
         }
-        // TODO if accept add coalesce and header pointer like reads have
-        // if it;s not only accepts , writes will send back the credits so
-        // the r_rep must be tagged to not increase credits!
+        if (PRINT_LOGS && write->opcode == COMMIT_OP) {
+          p_ops->ptrs_to_mes_headers[running_writes_for_kvs] = (struct r_message *) w_mes;
+        }
         running_writes_for_kvs++;
       }
       if (write->opcode != ACCEPT_OP) writes_to_be_acked++;
@@ -6650,14 +6652,6 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   while (r_rep_fifo->total_size > 0) {
     struct r_rep_message *r_rep_mes = &r_rep_fifo->r_rep_message[pull_ptr];
-    if (r_rep_mes->opcode == ACCEPT_REPLY_NO_CREDITS) {
-      uint8_t coalesce_num = r_rep_mes->coalesce_num;
-      print_check_count_stats_when_sending_r_rep(r_rep_fifo, coalesce_num, mes_i, t_id);
-      r_rep_fifo->total_size -= coalesce_num;
-      r_rep_fifo->mes_size--;
-      MOD_ADD(pull_ptr, R_REP_FIFO_SIZE);
-      continue;
-    }
     // Create the r_rep messages
     forge_r_rep_wr(pull_ptr, mes_i, p_ops, cb, r_rep_send_sgl, r_rep_send_wr, r_rep_tx, t_id);
     uint8_t coalesce_num = r_rep_mes->coalesce_num;
@@ -6667,12 +6661,13 @@ static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *c
     //r_reps_sent += coalesce_num;
     if (r_rep_mes->opcode == ACCEPT_REPLY)
       accept_recvs_to_post++;
-    else read_recvs_to_post++;
+    else if (r_rep_mes->opcode != ACCEPT_REPLY_NO_CREDITS)
+      read_recvs_to_post++;
     MOD_ADD(pull_ptr, R_REP_FIFO_SIZE);
     mes_i++;
   }
   if (mes_i > 0) {
-    if (ENABLE_ASSERTIONS) assert(mes_i == accept_recvs_to_post + read_recvs_to_post);
+    //if (ENABLE_ASSERTIONS) assert(mes_i == accept_recvs_to_post + read_recvs_to_post);
     if (read_recvs_to_post > 0) {
       if (DEBUG_READ_REPS) printf("Wrkr %d posting %d read recvs\n", t_id,  read_recvs_to_post);
       post_recvs_with_recv_info(r_recv_info, read_recvs_to_post);
@@ -7429,7 +7424,8 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_
                                               struct cache_resp *resp, struct pending_ops *p_ops,
                                               uint32_t *r_push_ptr_, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO > 0);
+  if (ENABLE_ASSERTIONS)
+    assert((ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO) || ENABLE_CLIENTS > 0);
   //printf("rmw acquire\n");
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
@@ -7470,7 +7466,7 @@ static inline void KVS_from_trace_rmw_rlxd_read(struct trace_op *op, struct cach
                                                 struct cache_resp *resp, struct pending_ops *p_ops,
                                                 uint32_t *r_push_ptr_, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO > 0);
+
   //printf("rmw acquire\n");
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
@@ -7509,7 +7505,11 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
                                        uint16_t op_i, uint16_t t_id)
 {
   struct accept *acc =(struct accept *) (((void *)op) + 3); // the accept starts at an offset of 3 bytes
-  if (ENABLE_ASSERTIONS) assert(acc->ts.version > 0);
+  if (ENABLE_ASSERTIONS) {
+    assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
+           acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
+    assert(acc->ts.version > 0);
+  }
   // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
   //struct rmw_help_entry reply_rmw;
   uint64_t rmw_l_id = acc->t_rmw_id;
@@ -7517,10 +7517,8 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
   //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
   uint32_t log_no = acc->log_no;
   uint64_t l_id = acc->l_id;
-  assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
-            acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
-  //static_assert(MAX_ACC_COALESCE == 1, " ");
-  struct accept_message *acc_mes = (struct accept_message *) p_ops->ptrs_to_mes_headers[op_i];
+
+  struct w_message *acc_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
   if (ENABLE_ASSERTIONS) check_accept_mes(acc_mes);
   uint8_t acc_m_id = acc_mes->m_id;
   uint8_t opcode_for_r_rep = (uint8_t)
@@ -7593,7 +7591,7 @@ static inline void KVS_updates_commits(struct cache_op *op, struct cache_op *kv_
   uint64_t number_of_reqs;
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
   if (PRINT_LOGS) {
-    struct commit_message *com_mes = (struct commit_message *) (((void *)com) - COMMIT_MES_HEADER);
+    struct w_message *com_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
     uint8_t acc_m_id = com_mes->m_id;
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Com: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",
@@ -7729,7 +7727,7 @@ static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *
   optik_lock(&kv_ptr->key.meta);
   acq_rep->opcode = ACQ_LOG_EQUAL;
   if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-    if (acq_log_no > 0) acq_rep->opcode = LOG_TOO_HIGH;
+    if (acq_log_no > 0) acq_rep->opcode = ACQ_LOG_TOO_HIGH;
   }
   else {
     if (ENABLE_ASSERTIONS) assert(kv_ptr->opcode == KEY_HAS_BEEN_RMWED);

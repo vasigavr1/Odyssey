@@ -21,10 +21,10 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
-#define MACHINE_NUM 3
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 1
+#define WORKERS_PER_MACHINE 25
+#define MACHINE_NUM 5
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -42,11 +42,11 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 200// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 500 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
@@ -143,7 +143,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 10000
+#define NUM_OF_RMW_KEYS 100000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -256,20 +256,23 @@
 #define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
 
 // ACCEPTS
-#define MAX_ACC_COALESCE 1
+//#define MAX_ACC_COALESCE 1
 #define ACCEPT_MES_HEADER (W_MES_HEADER) //
 #define ACCEPT_SIZE (47 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
-#define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
+//#define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
 
 // ACCEPT REPLIES
-#define MAX_ACC_REP_COALESCE (MAX_ACC_COALESCE)
+//#define MAX_ACC_REP_COALESCE (MAX_ACC_COALESCE)
 #define ACC_REP_MES_HEADER (3 + 8) // coalesce_num , m_id, opcode
 #define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-#define ACC_REP_MESSAGE_SIZE (ACC_REP_MES_HEADER + (MAX_ACC_REP_COALESCE * ACC_REP_SIZE))
+//#define ACC_REP_MESSAGE_SIZE (ACC_REP_MES_HEADER + (MAX_ACC_REP_COALESCE * ACC_REP_SIZE))
 #define ACC_REP_SMALL_SIZE 9 // lid and opcode
 #define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
 #define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
 
+#define MAX_ACC_REP_COALESCE ((MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE) / ACC_REP_SIZE)
+#define MAX_ACC_SEND_COALESCE ((W_SIZE * MAX_W_COALESCE) / ACCEPT_SIZE)
+#define MAX_ACC_COALESCE MIN(MAX_ACC_SEND_COALESCE, MAX_ACC_REP_COALESCE)
 
 // COMMITS
 #define MAX_COM_COALESCE 1
@@ -522,7 +525,6 @@ struct ack_message {
 struct ack_message_ud_req {
 	uint8_t grh[GRH_SIZE];
   struct ack_message ack;
-
  };
 
 
@@ -533,14 +535,6 @@ struct write {
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
-} __attribute__((__packed__));
-
-struct w_message {
-  uint8_t m_id;
-  uint8_t coalesce_num;
-  uint8_t opcode;
-  uint64_t l_id ;
-  struct write write[MAX_W_COALESCE];
 } __attribute__((__packed__));
 
 
@@ -557,19 +551,7 @@ struct accept {
   uint64_t l_id;
 } __attribute__((__packed__));
 
-struct accept_message {
-  uint8_t m_id;
-  uint8_t coalesce_num;
-  uint8_t opcode;
-  uint64_t l_id ;
-  struct accept acc[MAX_ACC_COALESCE];
-}__attribute__((__packed__));
 
-
-struct w_message_ud_req {
-  uint8_t unused[GRH_SIZE];
-  struct w_message w_mes;
-};
 
 struct commit {
   struct network_ts_tuple ts;
@@ -582,29 +564,12 @@ struct commit {
   uint32_t log_no;
 } __attribute__((__packed__));
 
-struct commit_message {
-  uint8_t m_id;
-  uint8_t com_num;
-  uint64_t l_id; // local id of the write -- to facilitate the ack
-  struct commit com[MAX_ACC_COALESCE];
-} __attribute__((__packed__));
-
 //
 struct read {
   struct network_ts_tuple ts;
   struct key key;
   uint8_t opcode;
 } __attribute__((__packed__));
-
-//
-struct r_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  uint64_t l_id ;
-  struct read read[MAX_R_COALESCE];
-} __attribute__((__packed__));
-
-
 
 //
 struct propose {
@@ -618,11 +583,37 @@ struct propose {
 } __attribute__((__packed__));
 
 
+
+/*------- HEADERS---------------------- */
+
+struct w_message {
+	uint8_t m_id;
+	uint8_t coalesce_num;
+	uint8_t opcode;
+	uint64_t l_id ;
+	struct write write[MAX_W_COALESCE];
+} __attribute__((__packed__));
+
+//
+struct r_message {
+  uint8_t coalesce_num;
+  uint8_t m_id;
+  uint64_t l_id ;
+  struct read read[MAX_R_COALESCE];
+} __attribute__((__packed__));
+
+struct w_message_ud_req {
+  uint8_t unused[GRH_SIZE];
+  struct w_message w_mes;
+};
+
 //
 struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
   struct r_message r_mes;
 };
+
+
 
 
 struct r_mes_info {
