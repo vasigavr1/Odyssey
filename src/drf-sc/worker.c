@@ -144,11 +144,11 @@ void *worker(void *arg)
     memset(ses_dbg, 0, sizeof(struct session_dbg));
   }
   uint16_t last_session = 0;
-  uint32_t outstanding_writes = 0, outstanding_reads = 0;
+  uint32_t outstanding_writes = 0, outstanding_reads = 0, sizes_dbg_cntr;
   uint64_t debug_lids = 0;
   // helper for polling writes: in a corner failure-realted case,
   // it may be that not all avaialble writes can be polled due to the unavailability of the acks
-  uint32_t completed_but_not_polled_writes = 0;
+  uint32_t completed_but_not_polled_writes = 0, loop_counter = 0;
   //uint32_t client_req_pull_ptr[SESSIONS_PER_THREAD] = {0};
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
@@ -177,6 +177,12 @@ void *worker(void *arg)
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
       print_verbouse_debug_info(p_ops, t_id, credits);
     }
+
+//    loop_counter++;
+//    if (loop_counter == M_32) {
+//      printf("Wrkr %u is working \n", t_id);
+//      loop_counter = 0;
+//    }
 
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR WRITES--------------------------
@@ -228,8 +234,10 @@ void *worker(void *arg)
     ---------------------------------------------------------------------------*/
     // if (WRITE_RATIO > 0)
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
-              ack_recv_wc, ack_recv_info, &latency_info,
+              ack_recv_wc, ack_recv_info, q_info, &latency_info,
               t_id, waiting_dbg_counter, &outstanding_writes);
+
+    remove_writes(p_ops, &latency_info, t_id);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------
@@ -245,7 +253,7 @@ void *worker(void *arg)
     trace_iter = batch_requests_to_KVS(t_id,
                                        trace_iter, trace, ops,
                                        p_ops, resp, &latency_info,
-                                       ses_dbg, &last_session);
+                                       ses_dbg, &last_session, &sizes_dbg_cntr);
 
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------

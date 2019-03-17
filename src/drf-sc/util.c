@@ -30,7 +30,9 @@ void static_assert_compile_parameters()
   static_assert(sizeof(struct write) == W_SIZE, "");
   static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
-
+  // we want to have more write slots than credits such that we always know that if a machine fails
+  // the pressure will appear in the credits and not the write slots
+  static_assert(PENDING_WRITES > (W_CREDITS * MAX_W_COALESCE), " ");
 
   // RMWs
   static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
@@ -57,7 +59,7 @@ void static_assert_compile_parameters()
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
   //static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
   //static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
-  static_assert(MAX_ACC_COALESCE > 1, "");
+  static_assert(MAX_ACC_COALESCE >= 1, "");
   static_assert(MAX_ACC_REP_COALESCE >= MAX_ACC_SEND_COALESCE, "");
   static_assert(MAX_ACC_REP_COALESCE == MAX_PROP_REP_COALESCE, "");
 
@@ -159,7 +161,11 @@ void init_globals()
   // in struct_bit_vector, i.e. the atomic_flags
   memset(&send_bit_vector, 0, sizeof(struct bit_vector));
   memset(conf_bit_vec, 0, MACHINE_NUM * sizeof(struct multiple_owner_bit));
+  // EPOCH
+  //epoch.epoch_id = 0;
+  //epoch.all_machines = true;
   for (i = 0; i < MACHINE_NUM; i++) {
+    //epoch.per_machine_bit[i] = true;
     conf_bit_vec[i].bit = UP_STABLE;
     send_bit_vector.bit_vec[i].bit = UP_STABLE;
   }
@@ -185,6 +191,8 @@ void init_globals()
         interface[w_i].req_array[s_i][r_i].state = INVALID_REQ;
     }
   }
+
+
   /* Latency Measurements initializations */
 #if MEASURE_LATENCY == 1
   memset(&latency_count, 0, sizeof(struct latency_counters));
@@ -759,14 +767,14 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   uint32_t i, j;
   (*p_ops) = (struct pending_ops *) calloc(1, sizeof(struct pending_ops));
 
-  (*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
+  //(*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
   (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
-  (*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
+  //(*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
   (*p_ops)->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
   (*p_ops)->w_index_to_req_array = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
   (*p_ops)->r_index_to_req_array = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
-  (*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
-  (*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
+  //(*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
+  //(*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
   (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));
   (*p_ops)->p_ooe_writes =
     (struct pending_out_of_epoch_writes *) calloc(1, sizeof(struct pending_out_of_epoch_writes));
@@ -792,9 +800,12 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
     (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
     (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) calloc(1, sizeof(struct rmw_local_entry));
   }
+  (*p_ops)->sess_info = (struct sess_info *) calloc(SESSIONS_PER_THREAD, sizeof(struct sess_info));
+  (*p_ops)->w_meta = (struct per_write_meta *) calloc(pending_writes, sizeof(struct per_write_meta));
 
 
-  uint32_t max_incoming_w_r = MAX(MAX_INCOMING_R, MAX_INCOMING_W);
+
+   uint32_t max_incoming_w_r = MAX(MAX_INCOMING_R, MAX_INCOMING_W);
   (*p_ops)->ptrs_to_mes_headers =
     (struct r_message **) malloc(max_incoming_w_r * sizeof(struct r_message *));
   (*p_ops)->coalesce_r_rep =
@@ -810,7 +821,9 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
 
 
-
+  for (i = 0; i < SESSIONS_PER_THREAD; i++) {
+    (*p_ops)->sess_info[i].ready_to_release = true;
+  }
   for (i = 0; i < W_FIFO_SIZE; i++) {
     (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
     for (j = 0; j < MAX_W_COALESCE; j++){
@@ -831,7 +844,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   for (i = 0; i < pending_reads; i++)
     (*p_ops)->r_state[i] = INVALID;
   for (i = 0; i < pending_writes; i++) {
-    (*p_ops)->w_state[i] = INVALID;
+    (*p_ops)->w_meta[i].w_state = INVALID;
     (*p_ops)->ptrs_to_local_w[i] = NULL;
   }
 

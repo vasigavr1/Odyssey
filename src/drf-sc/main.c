@@ -29,6 +29,8 @@ struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
+//struct epoch_info epoch;
+
 
 int main(int argc, char *argv[])
 {

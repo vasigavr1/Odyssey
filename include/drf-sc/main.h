@@ -23,7 +23,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -31,23 +31,24 @@
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 12
 #define MAX_R_COALESCE 12
-#define W_CREDITS 12
-#define MAX_W_COALESCE 12
+#define W_CREDITS 3
+#define MAX_W_COALESCE 3
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+#define WRITE_FIFO_TIMEOUT M_16
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 200// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 500 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
@@ -318,7 +319,8 @@
 // that allows for reads to insert reads
 #define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
-#define PENDING_WRITES MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
+#define PENDING_WRITES_ MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
+#define PENDING_WRITES MAX((PENDING_WRITES_) , ((W_CREDITS * MAX_W_COALESCE) + 1))
 #define W_FIFO_SIZE (PENDING_WRITES + LOCAL_PROP_NUM) // Accepts use the write fifo
 
 // The w_fifo needs to have a safety slot that cannot be touched
@@ -372,7 +374,7 @@
 #define DEBUG_SESSIONS 0
 #define DEBUG_SESS_COUNTER 500000
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
@@ -627,6 +629,7 @@ struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
   uint16_t per_message_sess_id[MAX_W_COALESCE];
+  bool per_message_release_flag[MAX_W_COALESCE];
   uint32_t backward_ptr;
   bool is_release;
   uint16_t first_release_byte_ptr;
@@ -867,6 +870,34 @@ struct prop_info {
   uint64_t l_id; // highest l_id as of yet -- Starts from 1
 };
 
+struct sess_info {
+  bool stalled;
+  uint8_t acks_gathered;
+  bool ready_to_release;
+  uint32_t last_w_ptr;
+  uint32_t tot_unreleased_writes;
+  // live writes: writes that have not been acked-
+  // could be ooe-writes in their read phase
+  uint32_t live_writes;
+
+  uint8_t missing_num;
+  uint8_t missing_ids[REM_MACH_NUM];
+//
+//  uint8_t active_num;
+//  uint8_t active_ids[REM_MACH_NUM];
+
+};
+
+struct per_write_meta {
+  uint8_t w_state;
+  uint8_t acks_seen;
+  uint8_t acks_expected;
+  uint8_t expected_ids[REM_MACH_NUM];
+  bool seen_expected[REM_MACH_NUM];
+
+  uint32_t sess_id;
+};
+
 struct pending_out_of_epoch_writes {
   uint32_t size; //number of pending ooe writes
   uint32_t push_ptr;
@@ -890,29 +921,32 @@ struct pending_ops {
   struct prop_info *prop_info;
   //
   struct pending_out_of_epoch_writes *p_ooe_writes;
+  struct sess_info *sess_info;
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
-  uint32_t *w_session_id;
+  //uint32_t *w_session_id;
   uint32_t *w_index_to_req_array;
   uint32_t *r_index_to_req_array;
 
-  uint8_t *w_state;
+  //uint8_t *w_state;
   uint8_t *r_state;
   uint32_t w_push_ptr;
   uint32_t r_push_ptr;
   uint32_t w_pull_ptr;
   uint32_t r_pull_ptr;
-  uint32_t w_size;
+  uint32_t w_size; // number of writes in the pending writes (from trace, from reads etc)
   uint32_t r_size;
   // virtual read size: because acquires can result in one more read,
   // knowing the size of the read fifo is not enough to know if
   // you can add an element. Virtual read size captures this by
   // getting incremented by 2, every time an acquire is inserted
 	uint32_t virt_r_size;
-  uint32_t prop_size; // TODO add this if needed
-  uint8_t *acks_seen;
-  bool *session_has_pending_op;
+  //uint32_t prop_size; // TODO add this if needed
+  //uint8_t *acks_seen;
+  struct per_write_meta *w_meta;
+  uint32_t full_w_q_fifo;
+  //bool *session_has_pending_op;
   bool all_sessions_stalled;
 };
 
@@ -922,6 +956,10 @@ struct session_dbg {
 	//uint8_t is_release[SESSIONS_PER_THREAD];
 	//uint32_t request_id[SESSIONS_PER_THREAD];
 };
+
+
+
+
 
 // Global struct that holds the RMW information
 // Cannot be a FIFO because the incoming commit messages must be processed, such that
@@ -1142,6 +1180,15 @@ extern const uint16_t machine_bit_id[16];
 extern atomic_bool print_for_debug;
 extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
+
+//struct epoch_info{
+//  atomic_flag lock;
+//  uint16_t epoch_id;
+//  bool per_machine_bit[MACHINE_NUM];
+//  bool all_machines; // True if all machines are in touch with this machine
+//};
+
+//extern struct epoch_info epoch;
 
 
 struct thread_params {
