@@ -31,19 +31,19 @@
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 12
 #define MAX_R_COALESCE 12
-#define W_CREDITS 3
-#define MAX_W_COALESCE 3
+#define W_CREDITS 6
+#define MAX_W_COALESCE 12
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define WRITE_FIFO_TIMEOUT M_16
+#define WRITE_FIFO_TIMEOUT M_1
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
@@ -419,20 +419,22 @@ struct remote_qp {
 #define VALID 1
 #define SENT 2
 #define READY 3
-#define SENT_PUT 4 // typical writes
-#define SENT_RELEASE 5 // Release or second round of acquire!!
-#define SENT_BIT_VECTOR 6
+#define SENT_PUT 4 // typical writes -- ALL acks
+#define SENT_RELEASE 5 // Release  -- All acks
+#define SENT_ACQUIRE 6 //second round of acquire -- Quorum
+#define SENT_BIT_VECTOR 7 // -- Quorum
 // Coalesced release that detected failure,
 // but is behind other release that carries the bit vector
-#define SENT_NO_OP_RELEASE 7
-#define SENT_COMMIT 8 // For commits
-#define SENT_RMW_ACQ_COMMIT 9
-#define READY_PUT 10
-#define READY_COMMIT 11
-#define READY_RMW_ACQ_COMMIT 12
-#define READY_RELEASE 13 // Release or second round of acquire!!
-#define READY_BIT_VECTOR 14
-#define READY_NO_OP_RELEASE 15
+#define SENT_NO_OP_RELEASE 8 // -- Quorum
+#define SENT_COMMIT 9 // For commits -- All acks
+#define SENT_RMW_ACQ_COMMIT 10 // -- Quorum
+#define READY_PUT 11
+#define READY_COMMIT 12
+#define READY_RMW_ACQ_COMMIT 13
+#define READY_RELEASE 14 // Release
+#define READY_ACQUIRE 15 // second round of acquire
+#define READY_BIT_VECTOR 16
+#define READY_NO_OP_RELEASE 17
 
 
 // Possible write sources
@@ -622,8 +624,15 @@ struct r_mes_info {
   uint16_t reads_num; // all non propose messages count as reads
   uint16_t message_size;
   uint32_t backward_ptr;
-  bool sent;
 };
+
+
+#define UNUSED_BYTES_IN_REL_BIT_VEC (13 - SEND_CONF_VEC_SIZE)
+struct rel_bit_vec{
+  uint8_t bit_vector[SEND_CONF_VEC_SIZE];
+  uint8_t unused[UNUSED_BYTES_IN_REL_BIT_VEC];
+  uint8_t opcode;
+}__attribute__((__packed__));
 
 struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
@@ -872,9 +881,9 @@ struct prop_info {
 
 struct sess_info {
   bool stalled;
-  uint8_t acks_gathered;
+  //uint8_t acks_gathered;
   bool ready_to_release;
-  uint32_t last_w_ptr;
+  //uint32_t last_w_ptr;
   uint32_t tot_unreleased_writes;
   // live writes: writes that have not been acked-
   // could be ooe-writes in their read phase
@@ -1181,14 +1190,7 @@ extern atomic_bool print_for_debug;
 extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 
-//struct epoch_info{
-//  atomic_flag lock;
-//  uint16_t epoch_id;
-//  bool per_machine_bit[MACHINE_NUM];
-//  bool all_machines; // True if all machines are in touch with this machine
-//};
 
-//extern struct epoch_info epoch;
 
 
 struct thread_params {

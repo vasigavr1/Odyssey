@@ -2032,12 +2032,14 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
   atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
 
 
-  if (DEBUG_BIT_VECS && bit_gets_flipped) {
-    assert(conf_bit_vec[acq_m_id].bit == UP_STABLE);
-    green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
-                   "owned t_id %u, owned local_w_id %u\n",
-                 t_id, acq_m_id, conf_bit_vec[acq_m_id].bit, UP_STABLE,
-                 t_id, local_r_id);
+  if (DEBUG_BIT_VECS ) {
+    if (bit_gets_flipped) {
+      assert(conf_bit_vec[acq_m_id].bit == UP_STABLE);
+      green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
+                     "owned t_id %u, owned local_w_id %u\n",
+                   t_id, acq_m_id, conf_bit_vec[acq_m_id].bit, UP_STABLE,
+                   t_id, local_r_id);
+    }
   }
 
 }
@@ -2070,20 +2072,20 @@ static inline void set_send_and_conf_bit_after_detecting_failure(const uint16_t 
                   t_id, m_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
                   conf_bit_vec[m_id].bit);
 
-  if (send_bit_vector.bit_vec[m_id].bit != DOWN_STABLE) {
-    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
-    send_bit_vector.bit_vec[m_id].bit = DOWN_STABLE;
-    atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_release);
-  }
+//  if (send_bit_vector.bit_vec[m_id].bit != DOWN_STABLE) {
+//    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
+//    send_bit_vector.bit_vec[m_id].bit = DOWN_STABLE;
+//    atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_release);
+//  }
 
   // Do the exact same for the conf bit
   set_conf_bit_to_new_state(t_id, m_id, DOWN_STABLE);
-
-  if (send_bit_vector.state != DOWN_STABLE) {
-    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
-    send_bit_vector.state = DOWN_STABLE;
-    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
-  }
+//
+//  if (send_bit_vector.state != DOWN_STABLE) {
+//    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
+//    send_bit_vector.state = DOWN_STABLE;
+//    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
+//  }
   if (DEBUG_BIT_VECS)
     green_printf("Wrkr %u After: send bit %u, state %u, conf_bit %u \n",
                  t_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
@@ -2423,9 +2425,9 @@ set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct cache_o
   struct trace_op *op = (struct trace_op*) write;
   p_ops->w_meta[w_ptr].sess_id = sess_id;
   struct sess_info *sess_info = &p_ops->sess_info[sess_id];
-  if (opcode == CACHE_OP_PUT) {
-    sess_info->last_w_ptr = w_ptr;
-  }
+//  if (opcode == CACHE_OP_PUT) {
+//    sess_info->last_w_ptr = w_ptr;
+//  }
   if (ENABLE_CLIENTS) {
     switch (source) {
       case FROM_TRACE:
@@ -2439,6 +2441,8 @@ set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct cache_o
         }
         return;
       case FROM_COMMIT:
+        sess_info->live_writes++;
+        break;
       case RELEASE_THIRD: //source = FROM_WRITE || LIN_WRITE
         return;
       default: if (ENABLE_ASSERTIONS) assert(false);
@@ -2499,62 +2503,20 @@ static inline void write_bookkeeping_in_insertion_based_on_source
 
 
 
-// When forging a write
-static inline bool add_failure_to_release(struct pending_ops *p_ops,
-                                          struct w_message *w_mes,
-                                          struct w_mes_info *info,
-                                          uint32_t backward_ptr,
-                                          uint16_t t_id)
+
+/* --------------------SESSION INFO---------------------------------- */
+
+static inline void check_sess_info_after_completing_release
+  (struct sess_info *sess_info, uint16_t t_id)
 {
-  uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
-  create_bit_vector(bit_vector_to_send, t_id);
-  if (*(uint16_t *) bit_vector_to_send > 0) {
-    struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
-    uint64_t l_id = w_mes->l_id + info->first_release_l_id_offset;
-    backward_ptr = (backward_ptr + info->first_release_l_id_offset) % PENDING_WRITES;
-    // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
-    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], write->value,
-           SEND_CONF_VEC_SIZE);
-    memcpy(write->value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
-    // l_d can be used raw, because Release is guaranteed to be the first message
-    take_ownership_of_send_bits(t_id, l_id);
-    if (DEBUG_QUORUM)
-      green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
-                   *(uint16_t *) bit_vector_to_send);
-    write->opcode = OP_RELEASE_BIT_VECTOR;
-    p_ops->ptrs_to_local_w[backward_ptr] = write;
-    //if (DEBUG_SESSIONS)
-    //  cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
-    //             t_id, p_ops->w_session_id[backward_ptr],
-    //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
-    return true;
-  }
-  return false;
-}
-
-// Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
-static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
-  check_state_with_allowed_flags(10, opcode, OP_RELEASE, CACHE_OP_PUT, ACCEPT_OP,
-                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR,
-                                 OP_RELEASE_SECOND_ROUND, OP_ACQUIRE, NO_OP_RELEASE);
-  switch(opcode) {
-    case OP_RELEASE:
-    case OP_ACQUIRE:
-    case CACHE_OP_PUT:
-    case OP_RELEASE_BIT_VECTOR:
-    case OP_RELEASE_SECOND_ROUND:
-    case NO_OP_RELEASE:
-      return W_SIZE;
-    case ACCEPT_OP:
-      return ACCEPT_SIZE;
-    case COMMIT_OP:
-    case RMW_ACQ_COMMIT_OP:
-      return COMMIT_SIZE;
-    default: if (ENABLE_ASSERTIONS) assert(false);
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_info->stalled);
+    assert(sess_info->ready_to_release);
+    assert(sess_info->live_writes == 0);
   }
 }
 
-/* ---------------------------------------------------SESSION INFO--------------------------------------------------- */
+
 //
 static inline void update_sess_info_missing_ids_when_sending
   (struct pending_ops *p_ops, struct w_mes_info *info,
@@ -2586,25 +2548,34 @@ static inline void update_sess_info_with_fully_acked_write(struct pending_ops *p
   if (ENABLE_ASSERTIONS) assert(sess_info->live_writes > 0);
   sess_info->live_writes--;
   if (sess_info->live_writes == 0) {
-    if (ENABLE_ASSERTIONS) assert(sess_info->last_w_ptr == w_ptr);
+//    if (ENABLE_ASSERTIONS) assert(sess_info->last_w_ptr == w_ptr);
     sess_info->ready_to_release = true;
   }
 }
 
 static inline void update_sess_info_partially_acked_write(struct pending_ops *p_ops,
-                                                           uint32_t w_ptr, uint16_t t_id)
+                                                          uint32_t w_ptr, uint16_t t_id)
 {
   struct sess_info *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
   struct per_write_meta *w_meta = &p_ops->w_meta[w_ptr];
 
   // for each missing id
   if (ENABLE_ASSERTIONS) {
+    check_state_with_allowed_flags(4, w_meta->w_state, READY_PUT, READY_RELEASE, READY_COMMIT);
+    assert(w_meta->acks_seen >= REMOTE_QUORUM);
     assert(w_meta->acks_seen < w_meta->acks_expected);
     uint8_t dbg = 0;
     for (uint8_t j = 0; j < w_meta->acks_expected; j++) {
       if (!w_meta->seen_expected[j]) dbg++;
     }
-    assert(w_meta->acks_expected - w_meta->acks_seen == dbg);
+    if (w_meta->acks_expected - w_meta->acks_seen != dbg){
+      printf("Acks expected %u, acks_seen %u dbg %u \n",
+             w_meta->acks_expected, w_meta->acks_seen, dbg);
+      for (uint8_t j = 0; j < w_meta->acks_expected; j++) {
+        printf("seen expected %u, %d \n", j, w_meta->seen_expected[j]);
+      }
+      assert(false);
+    }
   }
   uint8_t missing_id_num = w_meta->acks_expected - w_meta->acks_seen;
 //  printf("Wrkr %u, write at ptr %u, state %u , expected acks %u seen acks %u \n",
@@ -2640,12 +2611,152 @@ static inline void update_sess_info_partially_acked_write(struct pending_ops *p_
   sess_info->live_writes--;
   if (sess_info->live_writes == 0) {
 
-    printf("Wrkr %u last w_ptr %u , current w_ptr %u\n", t_id, sess_info->last_w_ptr, w_ptr);
+    //printf("Wrkr %u last w_ptr %u , current w_ptr %u\n", t_id, sess_info->last_w_ptr, w_ptr);
     sess_info->ready_to_release = true;
   }
 }
 
 
+static inline void reset_sess_info_on_release(struct sess_info *sess_info,
+                                              struct quorum_info *q_info, uint16_t t_id)
+{
+  sess_info->missing_num = q_info->missing_num;
+  memcpy(sess_info->missing_ids, q_info->missing_ids, q_info->missing_num);
+  sess_info->live_writes = 1;
+  sess_info->ready_to_release = false;
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_info->stalled);
+  }
+}
+
+/* ----------------------------------------------------------------- */
+
+// When forging a write
+static inline bool add_failure_to_release_from_sess_id
+  (struct pending_ops *p_ops, struct w_message *w_mes,
+   struct w_mes_info *info, struct quorum_info *q_info,
+   uint32_t backward_ptr, uint16_t t_id)
+{
+
+  //uint8_t i, j;
+  bool bit_vec[MACHINE_NUM] = {0};
+  uint8_t failed_machine_num = 0 ;//q_info->missing_num;
+  // Find all machine ids that need to be included in the message
+  // Do not include the machines the release will not be sent to
+  {
+
+    // Then look at each release in the message sess_info
+    for (uint8_t w_i = 0; w_i < w_mes->coalesce_num; w_i++) {
+      if (!info->per_message_release_flag[w_i]) continue;
+      if (ENABLE_ASSERTIONS) assert(info->per_message_sess_id[w_i] <= SESSIONS_PER_THREAD);
+      struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+      for (uint8_t j = 0; j < sess_info->missing_num; j++) {
+        if (!bit_vec[sess_info->missing_ids[j]]) {
+          bit_vec[sess_info->missing_ids[j]] = true;
+          failed_machine_num++;
+        }
+      }
+      reset_sess_info_on_release(sess_info, q_info, t_id);
+    }
+    if (failed_machine_num == 0) return false;
+    if (ENABLE_ASSERTIONS) assert(failed_machine_num < MACHINE_NUM);
+  }
+
+
+  uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
+  {
+    uint64_t bit_vect = 0;
+    for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+      if (i == machine_id) continue;
+      if (bit_vec[i])
+        bit_vect = bit_vect | machine_bit_id[i];
+    }
+    if (ENABLE_ASSERTIONS) assert(bit_vect > 0);
+    memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
+  }
+
+  //create_bit_vector(bit_vector_to_send, t_id);
+  if (*(uint16_t *) bit_vector_to_send > 0) {
+    struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
+    //uint64_t l_id = w_mes->l_id + info->first_release_l_id_offset;
+    backward_ptr = (backward_ptr + info->first_release_l_id_offset) % PENDING_WRITES;
+    // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
+    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], write->value,
+           SEND_CONF_VEC_SIZE);
+    memcpy(write->value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
+    // l_d can be used raw, because Release is guaranteed to be the first message
+    //take_ownership_of_send_bits(t_id, l_id);
+    //if (DEBUG_QUORUM)
+    if (!bit_vec[MACHINE_THAT_SLEEPS])
+      green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
+                   *(uint16_t *) bit_vector_to_send);
+    write->opcode = OP_RELEASE_BIT_VECTOR;
+    p_ops->ptrs_to_local_w[backward_ptr] = write;
+    //if (DEBUG_SESSIONS)
+    //  cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
+    //             t_id, p_ops->w_session_id[backward_ptr],
+    //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
+    return true;
+  }
+  if (ENABLE_ASSERTIONS) assert(false);
+  return false;
+}
+
+
+//// When forging a write
+//static inline bool add_failure_to_release(struct pending_ops *p_ops,
+//                                          struct w_message *w_mes,
+//                                          struct w_mes_info *info,
+//                                          uint32_t backward_ptr,
+//                                          uint16_t t_id)
+//{
+//  uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
+//  create_bit_vector(bit_vector_to_send, t_id);
+//  if (*(uint16_t *) bit_vector_to_send > 0) {
+//    struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
+//    uint64_t l_id = w_mes->l_id + info->first_release_l_id_offset;
+//    backward_ptr = (backward_ptr + info->first_release_l_id_offset) % PENDING_WRITES;
+//    // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
+//    memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], write->value,
+//           SEND_CONF_VEC_SIZE);
+//    memcpy(write->value, &bit_vector_to_send, SEND_CONF_VEC_SIZE);
+//    // l_d can be used raw, because Release is guaranteed to be the first message
+//    take_ownership_of_send_bits(t_id, l_id);
+//    if (DEBUG_QUORUM)
+//      green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
+//                   *(uint16_t *) bit_vector_to_send);
+//    write->opcode = OP_RELEASE_BIT_VECTOR;
+//    p_ops->ptrs_to_local_w[backward_ptr] = write;
+//    //if (DEBUG_SESSIONS)
+//    //  cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
+//    //             t_id, p_ops->w_session_id[backward_ptr],
+//    //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
+//    return true;
+//  }
+//  return false;
+//}
+
+// Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
+static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
+  check_state_with_allowed_flags(10, opcode, OP_RELEASE, CACHE_OP_PUT, ACCEPT_OP,
+                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR,
+                                 OP_RELEASE_SECOND_ROUND, OP_ACQUIRE, NO_OP_RELEASE);
+  switch(opcode) {
+    case OP_RELEASE:
+    case OP_ACQUIRE:
+    case CACHE_OP_PUT:
+    case OP_RELEASE_BIT_VECTOR:
+    case OP_RELEASE_SECOND_ROUND:
+    case NO_OP_RELEASE:
+      return W_SIZE;
+    case ACCEPT_OP:
+      return ACCEPT_SIZE;
+    case COMMIT_OP:
+    case RMW_ACQ_COMMIT_OP:
+      return COMMIT_SIZE;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
 
 
 // When forging a write
@@ -2657,9 +2768,8 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
   uint16_t byte_ptr = W_MES_HEADER;
   bool failure = false;
 
-  if (unlikely (!EMULATE_ABD && info->is_release &&
-                send_bit_vector.state == DOWN_STABLE)) {
-    if (add_failure_to_release(p_ops, w_mes, info, backward_ptr, t_id))
+  if (!EMULATE_ABD && info->is_release ) {//&& send_bit_vector.state == DOWN_STABLE)) {
+    if (add_failure_to_release_from_sess_id(p_ops, w_mes, info, q_info, backward_ptr, t_id))
       failure = true;
   }
   for (uint8_t i = 0; i < coalesce_num; i++) {
@@ -2667,10 +2777,12 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     //printf("Write %u/%u opcode %u \n", i, coalesce_num, write->opcode);
     byte_ptr += get_write_size_from_opcode(write->opcode);
     //backward_ptr = (backward_ptr + write_i) % PENDING_WRITES;
-    uint8_t *w_state = &p_ops->w_meta[backward_ptr].w_state;
-    p_ops->w_meta[backward_ptr].acks_expected = write->opcode == CACHE_OP_PUT ?
+    struct per_write_meta *w_meta = &p_ops->w_meta[backward_ptr];
+    uint8_t *w_state = &w_meta->w_state;
+    w_meta->acks_expected = write->opcode == CACHE_OP_PUT ?
                                                 q_info->active_num : (uint8_t) REMOTE_QUORUM;
-    memcpy(p_ops->w_meta[backward_ptr].expected_ids, q_info->active_ids, q_info->active_num);
+    memcpy(w_meta->expected_ids, q_info->active_ids, q_info->active_num);
+
     switch (write->opcode) {
       case ACCEPT_OP:
         checks_when_forging_an_accept((struct accept *) write, send_sgl, br_i, i, coalesce_num, t_id);
@@ -2678,23 +2790,29 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
       case CACHE_OP_PUT:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
         update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
+        w_meta->acks_expected = q_info->active_num;
         *w_state = SENT_PUT;
         break;
       case  COMMIT_OP:
         checks_when_forging_a_commit((struct commit*) write, send_sgl, br_i, i, coalesce_num, t_id);
+        update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
+        w_meta->acks_expected = q_info->active_num;
         *w_state = SENT_COMMIT;
         break;
       case RMW_ACQ_COMMIT_OP:
         *w_state = SENT_RMW_ACQ_COMMIT;
         write->opcode = COMMIT_OP;
+        w_meta->acks_expected = (uint8_t) REMOTE_QUORUM;
         break;
       case OP_RELEASE_SECOND_ROUND:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
         write->opcode = OP_RELEASE;
         *w_state = SENT_RELEASE;
+        w_meta->acks_expected = q_info->active_num;
         cache_isolated_op(t_id, write);
         break;
       case OP_RELEASE_BIT_VECTOR:
+        w_meta->acks_expected = (uint8_t) REMOTE_QUORUM;
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
         *w_state = SENT_BIT_VECTOR;
         break;
@@ -2706,12 +2824,19 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
           //              t_id, i, coalesce_num, first_rel->opcode);
           *w_state = SENT_NO_OP_RELEASE;
           p_ops->ptrs_to_local_w[backward_ptr] = write;
+          w_meta->acks_expected = (uint8_t) REMOTE_QUORUM;
           break;
         }
-        else cache_isolated_op(t_id, write);
-      case OP_ACQUIRE:
+        // else
+        cache_isolated_op(t_id, write);
+        w_meta->acks_expected = q_info->active_num;
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
         *w_state = SENT_RELEASE;
+        break;
+      case OP_ACQUIRE:
+        checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        *w_state = SENT_ACQUIRE;
+        w_meta->acks_expected = (uint8_t) REMOTE_QUORUM;
         break;
       default: if (ENABLE_ASSERTIONS) assert(false);
     }
@@ -2723,6 +2848,10 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
 
   }
 }
+
+
+
+
 
 // When committing reads
 static inline void set_flags_before_committing_a_read(struct read_info *read_info,
@@ -4437,7 +4566,7 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   }
   op->real_val_len = real_val_len;
   if (opcode == CACHE_OP_PUT) {
-    p_ops->sess_info[working_session].tot_unreleased_writes++;
+    //p_ops->sess_info[working_session].tot_unreleased_writes++;
     p_ops->sess_info[working_session].live_writes++;
     p_ops->sess_info[working_session].ready_to_release = false;
   }
@@ -6173,7 +6302,8 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
       if (!DEBUG_BIT_VECS)
-       if (t_id == 0) cyan_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
+       if (t_id == 0)
+        cyan_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -6202,7 +6332,7 @@ static inline void revive_machine(struct quorum_info *q_info,
     assert(revived_mach_id < MACHINE_NUM);
     assert(revived_mach_id != machine_id);
     assert(q_info->missing_num > 0);
-    assert(q_info->send_vector[rm_id] == false);
+    assert(!q_info->send_vector[rm_id]);
   }
   // Fix the send vector and update the rest based on that,
   // because using the credits may not be reliable here
@@ -6306,7 +6436,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
     for (i = 0; i < q_info->missing_num; i++) {
       if (credits[W_VC][q_info->missing_ids[i]] == W_CREDITS &&
           credits[R_VC][q_info->missing_ids[i]] == R_CREDITS ) {
-        if (DEBUG_QUORUM)
+        //if (DEBUG_QUORUM)
           red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
         update_bcast_wr_links(q_info, r_send_wr, t_id);
@@ -6388,10 +6518,10 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
 
 
 
-static inline uint16_t min_credits_for_a_write(struct pending_ops *p_ops,
-                                              struct w_mes_info * info, struct w_message *w_mes) {
+static inline bool release_not_ready(struct pending_ops *p_ops,
+                                     struct w_mes_info *info, struct w_message *w_mes) {
   if (!info->is_release)
-    return 1;
+    return false; // not even a release
 
   //struct sess_info *sess_info = p_ops->sess_info;
   // We know the message contains releases. let's check their sessions!
@@ -6399,10 +6529,10 @@ static inline uint16_t min_credits_for_a_write(struct pending_ops *p_ops,
     if (info->per_message_release_flag[i]) {
       struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
       if (!sess_info->ready_to_release)
-        return W_CREDITS;
+        return true; // release is not ready yet
     }
   }
-  return 1;
+  return false; // release is ready
 
 }
 
@@ -6416,31 +6546,25 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
                                     struct recv_info *r_rep_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes, uint64_t *expected_next_l_id)
 {
-  //  printf("Worker %d bcasting writes \n", t_id);
+  //printf("Worker %d bcasting writes \n", t_id);
   uint8_t vc = W_VC;
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->w_fifo->bcast_pull_ptr;
-  bool is_release;
-  if (p_ops->w_fifo->bcast_size > 0) {
-    //is_release = p_ops->w_fifo->info[bcast_pull_ptr].is_release && (!EMULATE_ABD);
-    //uint16_t min_credits = is_release ? (uint16_t) W_CREDITS : (uint16_t) 1;
-    uint16_t min_credits = min_credits_for_a_write(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr],
-                                                   &p_ops->w_fifo->w_message[bcast_pull_ptr]);
-    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
-                             &available_credits, r_send_wr, w_send_wr, min_credits, credit_debug_cnt, t_id))
-      return;
-    //if (ENABLE_ASSERTIONS && is_release) assert(available_credits == W_CREDITS);
-  }
-  else return;
+  if (p_ops->w_fifo->bcast_size == 0) return;
+  if (release_not_ready(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr],
+                        &p_ops->w_fifo->w_message[bcast_pull_ptr]))
+    return;
+  if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+                           &available_credits, r_send_wr, w_send_wr,
+                           1, credit_debug_cnt, t_id))
+    return;
   if (ENABLE_ASSERTIONS) assert(available_credits <= W_CREDITS);
 
   while (p_ops->w_fifo->bcast_size > 0 && mes_sent < available_credits) {
-    is_release = p_ops->w_fifo->info[bcast_pull_ptr].is_release && (!EMULATE_ABD);
-    if (is_release && mes_sent > 0) {
-      if (min_credits_for_a_write(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr],
-                                  &p_ops->w_fifo->w_message[bcast_pull_ptr]) == W_CREDITS) {
-        break;
-      }
+    if (mes_sent >  0 &&
+      release_not_ready(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr],
+                        &p_ops->w_fifo->w_message[bcast_pull_ptr])) {
+      break;
     }
     if (DEBUG_WRITES)
       printf("Wrkr %d has %u write bcasts to send credits %d\n",t_id, p_ops->w_fifo->bcast_size, available_credits);
@@ -7210,6 +7334,57 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
   }
 }
 
+static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_ops, uint16_t t_id)
+{
+  struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
+
+  if (w_meta->w_state >= SENT_PUT && w_meta->acks_seen >= REMOTE_QUORUM) {
+    p_ops->full_w_q_fifo++;
+    //    if (t_id == 0 && p_ops->full_w_q_fifo > 100) printf("Wrkr %u incrementing write fifo timeout %u to "
+    //             "release partially acked writes \n", t_id, p_ops->full_w_q_fifo);
+    if (p_ops->full_w_q_fifo == WRITE_FIFO_TIMEOUT) {
+      //printf("Wrkr %u expires write fifo timeout and "
+       //        "releases partially acked writes \n", t_id);
+      p_ops->full_w_q_fifo = 0;
+      uint32_t w_pull_ptr = p_ops->w_pull_ptr;
+      for (uint32_t i = 0; i < p_ops->w_size; i++) {
+        w_meta = &p_ops->w_meta[w_pull_ptr];
+        if (w_meta->w_state >= SENT_PUT && w_meta->acks_seen >= REMOTE_QUORUM) {
+          bool update_sess_info = false;
+          switch(w_meta->w_state) {
+            case SENT_PUT:
+              w_meta->w_state = READY_PUT;
+              update_sess_info = true;
+              break;
+            case SENT_RELEASE:
+              w_meta->w_state = READY_RELEASE;
+              update_sess_info = true;
+              break;
+            case SENT_COMMIT:
+              update_sess_info = true;
+              act_on_quorum_of_commit_acks(p_ops, w_pull_ptr, t_id);
+              break;
+            case SENT_ACQUIRE:
+            case SENT_RMW_ACQ_COMMIT:
+            case SENT_BIT_VECTOR:
+            case SENT_NO_OP_RELEASE:
+              break;
+            default:
+              if (w_meta->w_state >= READY_PUT && w_meta->w_state <= READY_NO_OP_RELEASE)
+                break;
+              red_printf("Wrkr %u state %u, ptr %u \n", t_id, w_meta->w_state, w_pull_ptr);
+              assert(false);
+          }
+          if (update_sess_info)
+            update_sess_info_partially_acked_write(p_ops, w_pull_ptr, t_id);
+        }
+        else if (p_ops->w_meta[w_pull_ptr].w_state < SENT_PUT) { break; }
+        MOD_ADD(w_pull_ptr, PENDING_WRITES);
+      }
+    }
+  }
+}
+
 // Remove writes that have seen all acks
 static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags *latency_info,
                                  uint16_t t_id)
@@ -7217,32 +7392,28 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
   while(p_ops->w_meta[p_ops->w_pull_ptr].w_state >= READY_PUT) {
     p_ops->full_w_q_fifo = 0;
     uint32_t w_pull_ptr = p_ops->w_pull_ptr;
-    uint8_t w_state = p_ops->w_meta[p_ops->w_pull_ptr].w_state;
+    struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
+    uint8_t w_state = w_meta->w_state;
     if (ENABLE_ASSERTIONS && EMULATE_ABD)
-      assert(w_state == READY_RELEASE);
+      assert(w_state == READY_RELEASE || w_state == READY_ACQUIRE);
     //if (DEBUG_ACKS)
     //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
     //               g_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
     //if (t_id == 1) printf("Wrkr %u Clearing state %u ptr %u \n", t_id, w_state, p_ops->w_pull_ptr);
-    uint32_t sess_id = p_ops->w_meta[w_pull_ptr].sess_id;
+    uint32_t sess_id = w_meta->sess_id;
     if (ENABLE_ASSERTIONS) assert(sess_id < SESSIONS_PER_THREAD);
     struct sess_info *sess_info = &p_ops->sess_info[sess_id];
 
-    if (w_state == READY_RELEASE || w_state == READY_RMW_ACQ_COMMIT) {
+    if (w_state == READY_RELEASE || w_state == READY_RMW_ACQ_COMMIT ||
+        w_state == READY_ACQUIRE) {
       if (!sess_info->stalled)
         printf("state %u ptr %u \n", w_state, p_ops->w_pull_ptr);
-
       // Releases, and Acquires/RMW-Acquires that needed a "write" round complete here
       signal_completion_to_client(sess_id, p_ops->w_index_to_req_array[w_pull_ptr], t_id);
-      if (ENABLE_ASSERTIONS) {
-        assert(sess_info->stalled);
-        assert(sess_info->ready_to_release);
-        assert(sess_info->live_writes == 0);
-      }
+      if (w_state == READY_RELEASE)
+        check_sess_info_after_completing_release(sess_info, t_id);
       sess_info->stalled = false;
-      sess_info->tot_unreleased_writes = 0;
-      sess_info->acks_gathered = REM_MACH_NUM;
       p_ops->all_sessions_stalled = false;
     }
 
@@ -7253,40 +7424,17 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
       commit_first_round_of_release_and_spawn_the_second (p_ops, t_id);
     }
     else {
-      p_ops->w_meta[p_ops->w_pull_ptr].w_state = INVALID;
-      p_ops->w_meta[p_ops->w_pull_ptr].acks_seen = 0;
-      memset(p_ops->w_meta[p_ops->w_pull_ptr].seen_expected, 0, REM_MACH_NUM);
+      w_meta->w_state = INVALID;
+      w_meta->acks_seen = 0;
       p_ops->local_w_id++;
       MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
       p_ops->w_size--;
     }
+    memset(w_meta->seen_expected, 0, REM_MACH_NUM);
   } // while loop
 
-  uint32_t freed = 0;
-  if (p_ops->w_meta[p_ops->w_pull_ptr].w_state == SENT_PUT &&
-      p_ops->w_meta[p_ops->w_pull_ptr].acks_seen >= REMOTE_QUORUM) {
-    p_ops->full_w_q_fifo++;
-//    if (t_id == 0 && p_ops->full_w_q_fifo > 100) printf("Wrkr %u incrementing write fifo timeout %u to "
-//             "release partially acked writes \n", t_id, p_ops->full_w_q_fifo);
-    if (p_ops->full_w_q_fifo == WRITE_FIFO_TIMEOUT) {
-      //printf("Wrkr %u expires write fifo timeout and "
-       //        "releases partially acked writes \n", t_id);
-      p_ops->full_w_q_fifo = 0;
-      uint32_t w_pull_ptr = p_ops->w_pull_ptr;
-      for (uint32_t i = 0; i < p_ops->w_size; i++) {
-        if (p_ops->w_meta[w_pull_ptr].w_state == SENT_PUT &&
-            p_ops->w_meta[w_pull_ptr].acks_seen >= REMOTE_QUORUM) {
-          update_sess_info_partially_acked_write(p_ops, w_pull_ptr, t_id);
-          p_ops->w_meta[w_pull_ptr].w_state = READY_PUT;
-          freed++;
-        }
-        else if (p_ops->w_meta[w_pull_ptr].w_state < SENT_PUT) {break;}
-        MOD_ADD(w_pull_ptr, PENDING_WRITES);
-      }
-    }
-  }
-  //if (freed > 0) printf("Wrkr %u freed %u entries \n", t_id, freed);
-  check_after_removing_writes(p_ops, t_id);
+  attempt_to_free_partially_acked_write(p_ops, t_id);
+  // check_after_removing_writes(p_ops, t_id);
 }
 
 // Apply the acks that refer to stored writes
@@ -7322,6 +7470,14 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
           break;
         case SENT_RELEASE:
           p_ops->w_meta[ack_ptr].w_state = READY_RELEASE;
+          update_sess_info_with_fully_acked_write(p_ops, ack_ptr, t_id);
+          if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
+              latency_info->measured_req_flag != NO_REQ &&
+              p_ops->w_meta[ack_ptr].sess_id == latency_info->measured_sess_id)
+            report_latency(latency_info);
+          break;
+        case SENT_ACQUIRE:
+          p_ops->w_meta[ack_ptr].w_state = READY_ACQUIRE;
           if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
               latency_info->measured_req_flag != NO_REQ &&
               p_ops->w_meta[ack_ptr].sess_id == latency_info->measured_sess_id)
@@ -7329,13 +7485,14 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
           break;
         case SENT_COMMIT:
           act_on_quorum_of_commit_acks(p_ops, ack_ptr, t_id);
+          update_sess_info_with_fully_acked_write(p_ops, ack_ptr, t_id);
           break;
         case SENT_RMW_ACQ_COMMIT:
           p_ops->w_meta[ack_ptr].w_state = READY_RMW_ACQ_COMMIT;
           break;
         case SENT_BIT_VECTOR:
           p_ops->w_meta[ack_ptr].w_state = READY_BIT_VECTOR;
-          raise_send_bit_iff_owned(t_id, l_id + ack_i);
+          //raise_send_bit_iff_owned(t_id, l_id + ack_i);
           break;
         case SENT_NO_OP_RELEASE:
           p_ops->w_meta[ack_ptr].w_state = READY_NO_OP_RELEASE;

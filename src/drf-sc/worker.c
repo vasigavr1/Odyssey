@@ -179,8 +179,9 @@ void *worker(void *arg)
     }
 
 //    loop_counter++;
-//    if (loop_counter == M_32) {
-//      printf("Wrkr %u is working \n", t_id);
+//    if (loop_counter == M_1) {
+//      printf("Wrkr %u is working rectified keys %lu \n",
+//             t_id, t_stats[t_id].rectified_keys);
 //      loop_counter = 0;
 //    }
 
