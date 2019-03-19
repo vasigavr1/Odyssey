@@ -179,9 +179,12 @@ void *worker(void *arg)
     }
 
 //    loop_counter++;
-//    if (loop_counter == M_1) {
-//      printf("Wrkr %u is working rectified keys %lu \n",
-//             t_id, t_stats[t_id].rectified_keys);
+//    if (loop_counter == M_16) {
+//      //printf("Wrkr %u is working rectified keys %lu \n",
+//      //       t_id, t_stats[t_id].rectified_keys);
+//      if (t_id == 0) printf("Wrkr %u sleeping machine bit %u, q-reads %lu, epoch_id %u \n",
+//             t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+//             t_stats[t_id].quorum_reads, (uint16_t) epoch_id);
 //      loop_counter = 0;
 //    }
 

@@ -43,18 +43,18 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 200// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 500 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 0
+#define RMW_ACQUIRE_RATIO 300 // this is the ratio out of all RMWs and is out of 1000
+#define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 
 // CLIENTS
-#define ENABLE_CLIENTS 0
+#define ENABLE_CLIENTS 1
 #define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -420,21 +420,24 @@ struct remote_qp {
 #define SENT 2
 #define READY 3
 #define SENT_PUT 4 // typical writes -- ALL acks
-#define SENT_RELEASE 5 // Release  -- All acks
+#define SENT_RELEASE 5 // Release (could be the third round) -- All acks
 #define SENT_ACQUIRE 6 //second round of acquire -- Quorum
-#define SENT_BIT_VECTOR 7 // -- Quorum
+#define SENT_COMMIT 7 // For commits -- All acks
+#define SENT_RMW_ACQ_COMMIT 8 // -- Quorum
+#define SENT_BIT_VECTOR 9 // -- Quorum
 // Coalesced release that detected failure,
 // but is behind other release that carries the bit vector
-#define SENT_NO_OP_RELEASE 8 // -- Quorum
-#define SENT_COMMIT 9 // For commits -- All acks
-#define SENT_RMW_ACQ_COMMIT 10 // -- Quorum
-#define READY_PUT 11
-#define READY_COMMIT 12
-#define READY_RMW_ACQ_COMMIT 13
-#define READY_RELEASE 14 // Release
-#define READY_ACQUIRE 15 // second round of acquire
-#define READY_BIT_VECTOR 16
-#define READY_NO_OP_RELEASE 17
+#define SENT_NO_OP_RELEASE 10 // -- Quorum
+
+
+#define W_STATE_OFFSET 7
+#define READY_PUT (SENT_PUT + W_STATE_OFFSET)
+#define READY_RELEASE (SENT_RELEASE + W_STATE_OFFSET) // Release
+#define READY_ACQUIRE (SENT_ACQUIRE + W_STATE_OFFSET) // second round of acquire
+#define READY_COMMIT (SENT_COMMIT + W_STATE_OFFSET)
+#define READY_RMW_ACQ_COMMIT (SENT_RMW_ACQ_COMMIT + W_STATE_OFFSET)
+#define READY_BIT_VECTOR (SENT_BIT_VECTOR + W_STATE_OFFSET)
+#define READY_NO_OP_RELEASE (SENT_NO_OP_RELEASE + W_STATE_OFFSET)
 
 
 // Possible write sources
@@ -951,6 +954,7 @@ struct pending_ops {
   // you can add an element. Virtual read size captures this by
   // getting incremented by 2, every time an acquire is inserted
 	uint32_t virt_r_size;
+  uint32_t virt_w_size;  //
   //uint32_t prop_size; // TODO add this if needed
   //uint8_t *acks_seen;
   struct per_write_meta *w_meta;
