@@ -38,6 +38,7 @@
 #define RMW_ACQ_COMMIT_OP 101
 #define COMMIT_OP 102
 #define ACCEPT_OP 103
+#define ACCEPT_OP_BIT_VECTOR 203
 #define ACCEPT_OP_NO_CREDITS 13 // used only when creating an r_rep
 #define PROPOSE_OP 104
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector

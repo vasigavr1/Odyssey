@@ -47,14 +47,17 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 300 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
+#define ACCEPT_IS_RELEASE 1
+#define PUT_A_MACHINE_TO_SLEEP 1
+#define MACHINE_THAT_SLEEPS 1
 
 // CLIENTS
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -372,10 +375,8 @@
 #define DEBUG_RMW 0
 #define DEBUG_RECEIVES 0
 #define DEBUG_SESSIONS 0
-#define DEBUG_SESS_COUNTER 500000
+#define DEBUG_SESS_COUNTER M_16
 #define DEBUG_LOG 0
-#define PUT_A_MACHINE_TO_SLEEP 1
-#define MACHINE_THAT_SLEEPS 1
 #define ENABLE_INFO_DUMP_ON_STALL 0
 
 #define POLL_CQ_R 0
@@ -641,11 +642,16 @@ struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
   uint16_t per_message_sess_id[MAX_W_COALESCE];
+  //used when creating the failure bit vector
+  // and when checking to see if the session is ready to release
+  // can be used for both accepts and releases
   bool per_message_release_flag[MAX_W_COALESCE];
   uint32_t backward_ptr;
   bool is_release;
   uint16_t first_release_byte_ptr;
-  uint8_t first_release_l_id_offset;
+  //this can be used as an L_id offset, as there is a
+  // guarantee that there are no accepts behind it
+  uint8_t first_release_w_i;
 
   // message contains releases, writes, or commits, and thus has a valid l_id
   bool valid_header_l_id;
@@ -884,20 +890,14 @@ struct prop_info {
 
 struct sess_info {
   bool stalled;
-  //uint8_t acks_gathered;
   bool ready_to_release;
-  //uint32_t last_w_ptr;
-  uint32_t tot_unreleased_writes;
   // live writes: writes that have not been acked-
   // could be ooe-writes in their read phase
   uint32_t live_writes;
 
+  uint32_t writes_not_yet_inserted;
   uint8_t missing_num;
   uint8_t missing_ids[REM_MACH_NUM];
-//
-//  uint8_t active_num;
-//  uint8_t active_ids[REM_MACH_NUM];
-
 };
 
 struct per_write_meta {

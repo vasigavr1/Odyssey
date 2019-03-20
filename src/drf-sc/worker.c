@@ -137,7 +137,7 @@ void *worker(void *arg)
     .measured_sess_id = 0,
   };
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
-  uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0};
+  uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0}, release_rdy_dbg_cnt = 0;
   struct session_dbg *ses_dbg;
   if (DEBUG_SESSIONS) {
     ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
@@ -178,15 +178,16 @@ void *worker(void *arg)
       print_verbouse_debug_info(p_ops, t_id, credits);
     }
 
-//    loop_counter++;
-//    if (loop_counter == M_16) {
-//      //printf("Wrkr %u is working rectified keys %lu \n",
-//      //       t_id, t_stats[t_id].rectified_keys);
-//      if (t_id == 0) printf("Wrkr %u sleeping machine bit %u, q-reads %lu, epoch_id %u \n",
-//             t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
-//             t_stats[t_id].quorum_reads, (uint16_t) epoch_id);
-//      loop_counter = 0;
-//    }
+    loop_counter++;
+    if (loop_counter == M_16) {
+      //printf("Wrkr %u is working rectified keys %lu \n",
+      //       t_id, t_stats[t_id].rectified_keys);
+      if (t_id == 0) printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
+                              "epoch_id %u, reqs %lld \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+                            t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
+                            t_stats[t_id].cache_hits_per_thread);
+      loop_counter = 0;
+    }
 
     /* ---------------------------------------------------------------------------
 		------------------------------ POLL FOR WRITES--------------------------
@@ -272,7 +273,7 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     // Perform the write broadcasts
     //if (WRITE_RATIO > 0)
-    broadcast_writes(p_ops, q_info, credits, cb, credit_debug_cnt, time_out_cnt,
+    broadcast_writes(p_ops, q_info, credits, cb, &release_rdy_dbg_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                      ack_recv_info, r_rep_recv_info, t_id, &outstanding_writes, &debug_lids);
 	}
