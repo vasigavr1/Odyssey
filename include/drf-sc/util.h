@@ -30,12 +30,10 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
 ------------------------------STATS --------------------------------------
 ---------------------------------------------------------------------------*/
 struct stats {
-  double batch_size_per_thread[WORKERS_PER_MACHINE];
   double r_batch_size[WORKERS_PER_MACHINE];
   double r_rep_batch_size[WORKERS_PER_MACHINE];
   double ack_batch_size[WORKERS_PER_MACHINE];
   double write_batch_size[WORKERS_PER_MACHINE];
-	double stalled_gid[WORKERS_PER_MACHINE];
   double stalled_ack[WORKERS_PER_MACHINE];
   double stalled_r_rep[WORKERS_PER_MACHINE];
 	double failed_rem_write[WORKERS_PER_MACHINE];
@@ -59,6 +57,7 @@ struct stats {
   double cancelled_rmws[WORKERS_PER_MACHINE];
 
 	double reads_that_become_writes[WORKERS_PER_MACHINE];
+  //double zookeeper_writes[WORKERS_PER_MACHINE];
 };
 void dump_stats_2_file(struct stats* st);
 int spawn_stats_thread();

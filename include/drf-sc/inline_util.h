@@ -2835,9 +2835,9 @@ static inline void fill_reply_entry_with_committed_RMW (struct cache_op *kv_ptr,
   rep->log_no = rmw.entry[entry].last_committed_log_no;
   rep->rmw_id = rmw.entry[entry].last_committed_rmw_id.id;
   rep->glob_sess_id = rmw.entry[entry].last_committed_rmw_id.glob_sess_id;
-  if (rep->ts.version == 0)
-    yellow_printf("Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
-           t_id, rep->opcode, rep->log_no, rep->rmw_id, rep->glob_sess_id);
+  //if (rep->ts.version == 0)
+  //  yellow_printf("Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
+  //         t_id, rep->opcode, rep->log_no, rep->rmw_id, rep->glob_sess_id);
 }
 
 // Accepts contain the rmw-id of the last committed log no. Attempt to register it.
@@ -4631,16 +4631,18 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   for (uint16_t i = 0; i < op_i; i++) {
     signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     //printf("%u %u \n", i, ops[i].opcode);
-    check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
+
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == CACHE_MISS)  {
       green_printf("Cache_miss %u: bkt %u, server %u, tag %u \n", i,
                    ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
       assert(false);
       clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
+      continue;
     }
+    check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
-    else if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
+   if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
       signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // Writes
