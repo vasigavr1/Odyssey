@@ -1924,7 +1924,14 @@ static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16
  * 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
  *    bring that bit to UP_STABLE*/
 
+// Make sure we avoid aliasing between local_r_ids of regular reads and rmw-ids, when trying to own configuration bits
+static inline void tag_rmw_id_when_owning_a_conf_bit(uint8_t *rmw_id)
+{
+  if (ENABLE_ASSERTIONS) assert(rmw_id[7] == 0);
+  rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
+}
 
+// Call this after an acquire/propose have detected a failure
 static inline void increment_epoch_id (uint16_t req_epoch_id,  uint16_t t_id)
 {
   if (epoch_id <= req_epoch_id && epoch_id < 63000) // TODO remove this once epoch id is bigger than 2 bytes
@@ -1946,31 +1953,34 @@ static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t
 
 // 3. Query the conf bit vector for the local bit when starting an acquire
 //    if some remote release has raised the bit, then increase epoch id and flip the bit
-static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id, struct read_info *r_info)
+static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id, uint16_t req_epoch_id)
 {
   if (unlikely(conf_bit_vec[machine_id].bit == DOWN_STABLE)) {
-    increment_epoch_id(r_info->epoch_id, t_id);
+    increment_epoch_id(req_epoch_id, t_id);
     set_conf_bit_to_new_state(t_id, (uint16_t) machine_id, UP_STABLE);
     if (DEBUG_BIT_VECS)
       yellow_printf("Thread %u, acquire increases the epoch id "
-                      "as a remote release has notified the machine it has lost messages, new epoch id %u\n", t_id, epoch_id);
+                      "as a remote release has notified the machine "
+                      "it has lost messages, new epoch id %u\n", t_id, epoch_id);
   }
 }
 
 // 4. On receiving the first round of an Acquire bring the bit to DOWN_TRANSIENT_OWNED
 // and register the acquire's local_r_id as one of the bit's owners
-// Return the opcode an acquire should have going in to the cache
-// If it found no failure it should be OP_ACQUIRE
-// If it found a failure it should be OP_ACQUIRE_FP
-static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const uint64_t local_r_id,
-                                                const uint16_t acq_m_id)
+// Returns true if ownership of the conf bit has been successful
+static inline bool take_ownership_of_a_conf_bit(const uint64_t local_r_id, const uint16_t acq_m_id,
+                                                bool is_rmw, const uint16_t t_id)
 {
-  if (conf_bit_vec[acq_m_id].bit == UP_STABLE) return OP_ACQUIRE;
+  if (conf_bit_vec[acq_m_id].bit == UP_STABLE) return false;
   if (DEBUG_BIT_VECS)
     yellow_printf("Wrkr %u An acquire from machine %u  is looking to take ownership "
                     "of a bit: local_r_id %u \n", t_id, acq_m_id, local_r_id);
   bool owned_a_failure = false;
   // if it's down, own it, even if it is already owned
+  if (is_rmw) {
+    tag_rmw_id_when_owning_a_conf_bit((uint8_t *) &local_r_id);
+    if (ENABLE_ASSERTIONS) assert(local_r_id > B_512);
+  }
 
   while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
   if (conf_bit_vec[acq_m_id].bit != UP_STABLE) {
@@ -1991,13 +2001,13 @@ static inline uint8_t take_ownership_of_a_conf_bit(const uint16_t t_id, const ui
                    t_id, local_r_id, conf_bit_vec[acq_m_id].owners[t_id][ses_i]);
     }
   }
-  return  OP_ACQUIRE_FP;
+  return owned_a_failure;
 }
 
 // 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
 //    bring that bit to UP_STABLE
-static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t local_r_id,
-                                            const uint16_t acq_m_id)
+static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const uint16_t acq_m_id,
+                                            bool is_rmw, const uint16_t t_id)
 {
   if (DEBUG_BIT_VECS)
     yellow_printf("Wrkr %u An acquire from machine %u  is looking if it owns a failure local_r_id %u \n",
@@ -2007,6 +2017,14 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
   if (conf_bit_vec[acq_m_id].bit != DOWN_TRANSIENT_OWNED) {
     return;
   }
+
+  // add an offset to the id, to make sure rmw-ids cannot conflict with local_r_ids
+  if (is_rmw) {
+    tag_rmw_id_when_owning_a_conf_bit((uint8_t *) &local_r_id);
+    if (ENABLE_ASSERTIONS) assert(local_r_id > B_512);
+  }
+
+
   // Grab the lock
   while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
   if (conf_bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {
@@ -2036,27 +2054,8 @@ static inline void raise_conf_bit_iff_owned(const uint16_t t_id, const uint64_t 
 
 }
 
-/* ---------------------------------------------------------------------------
-//------------------------------ SEND BITS HANDLERS---------------------------------------
-//---------------------------------------------------------------------------*/
-/* 1. On Detecting a failure bring the corresponding machine's bit_vec to DOWN STABLE
- * 2. On Sending a Release containing a failure, convert the corresponding bits to
- *    Transient and give ownership if there is none
- * 3. On the Release quoromizing a failure transition the corresponding bit_vec to UP_STABLE
- *    iff the Release owns them
- * 4. Create the bit vector to be sent with the first round of a Release */
-
-/*
- * It may appear that the lock is not useful bit it is: to protect the t_id and local_w_id
- * if the bit was to be set to DOWN_TRANSIENT_OWNED by a mere CAS lock-free then when raising
- * an owned bit a CAS on the bit would have to be used then. But how can you be sure that you are
- * the owner and not someone else is not the owner with same local_w_id but has not yet changed the t_id?
- * Lock is used to protect owner_local_wid  and owner_t_id: there are other ways but this is the cleaner
- * */
-
-// 1. Detect a failure: Bring a given bit of send bit_vec to state DOWN_STABLE
-// this also calls the function to change the config_bit_vector
-static inline void set_send_and_conf_bit_after_detecting_failure(const uint16_t t_id, const uint16_t m_id)
+// Detect a failure: Bring a given bit of config_bit_vector to state DOWN_STABLE
+static inline void set_conf_bit_after_detecting_failure(const uint16_t t_id, const uint16_t m_id)
 {
   if (DEBUG_BIT_VECS)
     yellow_printf("Wrkr %u handles Send and conf bit vec after failure to machine %u,"
@@ -2064,115 +2063,11 @@ static inline void set_send_and_conf_bit_after_detecting_failure(const uint16_t 
                   t_id, m_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
                   conf_bit_vec[m_id].bit);
 
-//  if (send_bit_vector.bit_vec[m_id].bit != DOWN_STABLE) {
-//    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_acquire));
-//    send_bit_vector.bit_vec[m_id].bit = DOWN_STABLE;
-//    atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_id].lock, memory_order_release);
-//  }
-
-  // Do the exact same for the conf bit
   set_conf_bit_to_new_state(t_id, m_id, DOWN_STABLE);
-//
-//  if (send_bit_vector.state != DOWN_STABLE) {
-//    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
-//    send_bit_vector.state = DOWN_STABLE;
-//    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
-//  }
   if (DEBUG_BIT_VECS)
     green_printf("Wrkr %u After: send bit %u, state %u, conf_bit %u \n",
                  t_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
                  conf_bit_vec[m_id].bit);
-}
-
-//2. On Sending a Release containing a failure
-static inline void take_ownership_of_send_bits(const uint16_t t_id, const uint64_t local_w_id)
-{
-  if (DEBUG_BIT_VECS)
-    yellow_printf("Wrkr %u A release is looking to take ownership of failures local_w_id %u \n", t_id, local_w_id);
-  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
-    bool debug_flag = false;
-    // if it's down but not owned then own it
-    if (send_bit_vector.bit_vec[m_i].bit == DOWN_STABLE) {
-      while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_acquire));
-      if (send_bit_vector.bit_vec[m_i].bit == DOWN_STABLE) {
-        send_bit_vector.bit_vec[m_i].bit = DOWN_TRANSIENT_OWNED;
-        send_bit_vector.bit_vec[m_i].owner_t_id = t_id;
-        send_bit_vector.bit_vec[m_i].owner_local_wr_id = local_w_id;
-        if (DEBUG_BIT_VECS) debug_flag = true;
-      }
-      atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_release);
-    }
-    if (DEBUG_BIT_VECS && debug_flag)
-      green_printf("Wrkr %u got ownership of failure on m_id %u, bit %u  owned t_id %u, owned local_w_id %u \n",
-                   t_id, m_i, send_bit_vector.bit_vec[m_i].bit, send_bit_vector.bit_vec[m_i].owner_t_id,
-                   send_bit_vector.bit_vec[m_i].owner_local_wr_id);
-  }
-}
-
-// 3. After the frist round of a Release raise the bit_vec iff owned
-static inline void raise_send_bit_iff_owned(const uint16_t t_id, const uint64_t local_w_id)
-{
-  if (DEBUG_BIT_VECS)
-    yellow_printf("Wrkr %u A release is looking if it owns a failure local_w_id %u, total state %u \n",
-                  t_id, local_w_id, send_bit_vector.state);
-  bool there_are_failed_machines = false;
-  // First change the state  of the owned bits
-  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
-    bool debug_flag = false;
-    // Compare and Swap on the bit (DOWN_TRANSIENT_OWNED --> UP STABLE)
-    if (send_bit_vector.bit_vec[m_i].bit == DOWN_TRANSIENT_OWNED) { // if the bit_vec is owned
-      if (send_bit_vector.bit_vec[m_i].owner_local_wr_id == local_w_id &&
-          send_bit_vector.bit_vec[m_i].owner_t_id == t_id) { // if it is owned by me
-
-        // Grab the lock
-        while (!atomic_flag_test_and_set_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_acquire));
-          if (send_bit_vector.bit_vec[m_i].bit == DOWN_TRANSIENT_OWNED) { // Check again if the bit_vec is owned
-            if (send_bit_vector.bit_vec[m_i].owner_local_wr_id == local_w_id &&
-                send_bit_vector.bit_vec[m_i].owner_t_id == t_id) { // if it is owned by me
-              send_bit_vector.bit_vec[m_i].bit = UP_STABLE;
-              debug_flag = true;
-            }
-          }
-        atomic_flag_clear_explicit(&send_bit_vector.bit_vec[m_i].lock, memory_order_release);
-      }
-      if (DEBUG_BIT_VECS && debug_flag)
-        green_printf("Wrkr %u Release had ownership of failure on m_id %u, bit %u  owned t_id %u, owned local_w_id %u \n",
-                     t_id, m_i, send_bit_vector.bit_vec[m_i].bit, send_bit_vector.bit_vec[m_i].owner_t_id,
-                     send_bit_vector.bit_vec[m_i].owner_local_wr_id);
-    }
-    if (send_bit_vector.bit_vec[m_i].bit != UP_STABLE) there_are_failed_machines = true; // look out for any failed machines
-  }
-
-  if (!there_are_failed_machines && send_bit_vector.state != UP_STABLE) { // if no failed machines try to change state
-    bool debug_flag = false;
-    while (!atomic_flag_test_and_set_explicit(&send_bit_vector.state_lock, memory_order_acquire));
-    for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
-      if (send_bit_vector.bit_vec[m_i].bit != UP_STABLE) {
-        there_are_failed_machines = true;
-        break;
-      }
-    }
-    if (!there_are_failed_machines) {
-      send_bit_vector.state = UP_STABLE;
-      debug_flag = true;
-    }
-    atomic_flag_clear_explicit(&send_bit_vector.state_lock, memory_order_release);
-    if (DEBUG_BIT_VECS  && debug_flag)
-      yellow_printf("Wrkr %u Release local_w_id %u, raised the total state %u \n",
-                    t_id, local_w_id, send_bit_vector.state);
-  }
-}
-
-// 4. Create a bit_vec vector to be put inside the release
-static inline void create_bit_vector(uint8_t *bit_vector_to_send, uint16_t t_id)
-{
-  uint64_t bit_vect = 0;
-  for (uint16_t i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    if (send_bit_vector.bit_vec[i].bit != UP_STABLE)
-      bit_vect = bit_vect | machine_bit_id[i];
-  }
-  memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
 }
 
 
@@ -2807,7 +2702,6 @@ set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct cache_o
 }
 
 
-
 // Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
 static inline void write_bookkeeping_in_insertion_based_on_source
   (struct pending_ops *p_ops, struct write *write, struct cache_op *op,
@@ -2856,10 +2750,6 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   }
   // Make sure the pointed values are correct
 }
-
-
-
-
 
 
 // When committing reads
@@ -3201,6 +3091,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
     loc_entry->compare_val = prop->value_to_read; //expected value
   else if (prop->opcode == FETCH_AND_ADD)
     loc_entry->compare_val = prop->value_to_write; // value to be added
+  loc_entry->fp_detected = false;
   loc_entry->rmw_val_len = prop->real_val_len;
   loc_entry->rmw_is_successful = false;
   memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
@@ -3297,7 +3188,6 @@ static inline void free_session(struct pending_ops *p_ops, uint16_t sess_id, boo
     assert(loc_entry->state == INVALID_RMW);
     assert(p_ops->sess_info[sess_id].stalled);
   }
-  //TODO WRITE here all the pointers to the interface
   fill_req_array_when_after_rmw(loc_entry, t_id);
   if (VERIFY_PAXOS && allow_paxos_log) verify_paxos(loc_entry, t_id);
   signal_completion_to_client(sess_id, loc_entry->index_to_req_array, t_id);
@@ -3473,7 +3363,9 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
 
 static inline bool opcode_is_rmw_rep(uint8_t opcode)
 {
-  return (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP);
+  return (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP) ||
+         (opcode >= RMW_ACK + FALSE_POSITIVE_OFFSET &&
+          opcode <= NO_OP_PROP_REP + FALSE_POSITIVE_OFFSET);
 }
 
 static inline bool r_rep_has_big_size(uint8_t opcode)
@@ -3992,6 +3884,40 @@ static inline bool does_rmw_fail_early(struct trace_op *op, struct cache_op *kv_
   else return  false;
 }
 
+
+// When creating the accept message have it try to flip the remote bits,
+// if a false positive has been previously detected by a propose
+static inline void signal_conf_bit_flip_in_accept(struct rmw_local_entry *loc_entry,
+                                                  struct accept *acc,  uint16_t t_id)
+{
+  if (unlikely(loc_entry->fp_detected)) {
+    if (loc_entry->helping_flag == NOT_HELPING) {
+      uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->last_registered_rmw_id.id;
+      if (ENABLE_ASSERTIONS) assert(ptr_to_reged_rmw_id[7] == 0);
+      ptr_to_reged_rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
+      loc_entry->fp_detected = false;
+    }
+  }
+
+}
+
+// When receiving an accept, check if it is trying to raise  its configuration bit
+static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8_t acc_m_id,
+                                                       uint16_t t_id)
+{
+  if (unlikely(acc->last_registered_rmw_id.id > B_512)) {
+    uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->last_registered_rmw_id.id;
+    if (ptr_to_reged_rmw_id[7] == ACCEPT_FLIPS_BIT_OP) {
+      raise_conf_bit_iff_owned(acc->t_rmw_id, (uint16_t) acc_m_id, true, t_id);
+      ptr_to_reged_rmw_id[7] = 0;
+    }
+    else if (ENABLE_ASSERTIONS) assert(false);
+
+  }
+  if (ENABLE_ASSERTIONS) assert(acc->last_registered_rmw_id.id < B_4);
+}
+
+
 /* ---------------------------------------------------------------------------
 //------------------------------ TRACE---------------------------------------
 //---------------------------------------------------------------------------*/
@@ -4087,7 +4013,7 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
   prop->log_no = loc_entry->log_no;
 
   // Query the conf to see if the machine has lost messages
-  //on_starting_an_acquire_query_the_conf(t_id); // TODO specify failure semantics of propose
+  on_starting_an_acquire_query_the_conf(t_id, loc_entry->epoch_id);
   p_ops->r_fifo->bcast_size++;
 
   if (ENABLE_ASSERTIONS) {
@@ -4148,7 +4074,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
         p_ops->r_index_to_req_array[r_ptr] = tr_op->index_to_req_array;
       }
       // Query the conf to see if the machine has lost messages
-      if (r_info->opcode == OP_ACQUIRE) on_starting_an_acquire_query_the_conf(t_id, r_info);
+      if (r_info->opcode == OP_ACQUIRE)
+        on_starting_an_acquire_query_the_conf(t_id, r_info->epoch_id);
   }
 
   // Increase the virtual size by 2 if the req is an acquire
@@ -4302,6 +4229,9 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   memcpy(acc->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
   acc->log_no = loc_entry->log_no;
   acc->val_len = (uint8_t) loc_entry->rmw_val_len;
+  signal_conf_bit_flip_in_accept(loc_entry, acc, t_id);
+
+
 
   p_ops->w_fifo->bcast_size++;
   if (ENABLE_ASSERTIONS) {
@@ -4473,13 +4403,13 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
 
 //After filling the read reply do the final required bookkeeping
 static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_rep_big *rep,
-                                            uint8_t op_opcode, uint8_t rem_m_id, uint16_t t_id)
+                                            bool false_pos, uint8_t rem_m_id, uint16_t t_id)
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
   uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
 
-  if (op_opcode == OP_ACQUIRE_FP) {
+  if (false_pos) {
     if (DEBUG_QUORUM)
       yellow_printf("Worker %u Letting machine %u know that I believed it failed \n", t_id, rem_m_id);
     rep->opcode += FALSE_POSITIVE_OFFSET;
@@ -4500,7 +4430,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
  check_state_with_allowed_flags(2, read_opcode, OP_ACQUIRE_FLIP_BIT);
   struct r_rep_big *r_rep = get_r_rep_ptr(p_ops, l_id, rem_m_id, read_opcode, coalesce, t_id);
   r_rep->opcode = TS_EQUAL;
-  finish_r_rep_bookkeeping(p_ops, r_rep, 0, rem_m_id, t_id);
+  finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
 }
 
 
@@ -5582,11 +5512,11 @@ static inline void handle_single_rmw_rep(struct pending_ops *p_ops, struct rmw_r
 {
   struct prop_info *prop_info = p_ops->prop_info;
   if (ENABLE_ASSERTIONS) {
-    if (!(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP)) {
+    if (!opcode_is_rmw_rep(rep->opcode)) {
       printf("Rep_i %u, current opcode %u first opcode: %u, byte_ptr %u \n",
              r_rep_i, rep->opcode, rep_mes->rmw_rep[0].opcode, byte_ptr);
     }
-    assert(rep->opcode >= RMW_ACK && rep->opcode <= NO_OP_PROP_REP);
+    assert(opcode_is_rmw_rep(rep->opcode));
     if (prop_info->l_id <= rep->l_id)
       red_printf("Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
                  t_id, r_rep_i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
@@ -5598,7 +5528,11 @@ static inline void handle_single_rmw_rep(struct pending_ops *p_ops, struct rmw_r
                                               rep->l_id);
   if (entry_i == -1) return;
   struct rmw_local_entry *loc_entry = &prop_info->entry[entry_i];
-  if (unlikely(rep->opcode) > NO_OP_PROP_REP) rep->opcode -= FALSE_POSITIVE_OFFSET;
+  if (unlikely(rep->opcode) > NO_OP_PROP_REP) {
+    increment_epoch_id(loc_entry->epoch_id, t_id);
+    rep->opcode -= FALSE_POSITIVE_OFFSET;
+    loc_entry->fp_detected;
+  }
   if (!is_accept) handle_propose_reply(p_ops, rep_mes, rep, loc_entry, t_id);
   else handle_accept_reply(p_ops, rep_mes, rep, loc_entry, t_id);
 }
@@ -6247,7 +6181,7 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
-      set_send_and_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
+      set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
       //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
       if (!DEBUG_BIT_VECS)
@@ -6753,6 +6687,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
         if (write->opcode == ACCEPT_OP) {
           p_ops->ptrs_to_mes_headers[running_writes_for_kvs] = (struct r_message *) w_mes;
           p_ops->coalesce_r_rep[running_writes_for_kvs] = accepts > 0;
+          raise_conf_bit_if_accept_signals_it((struct accept *) write, w_mes->m_id, t_id);
         }
         if (PRINT_LOGS && write->opcode == COMMIT_OP) {
           p_ops->ptrs_to_mes_headers[running_writes_for_kvs] = (struct r_message *) w_mes;
@@ -6817,15 +6752,17 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
       if (is_propose) {
         struct propose *prop = (struct propose *) read;
         check_state_with_allowed_flags(2, prop->opcode, PROPOSE_OP);
-        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) prop) -3); //TODO align with the cache op
+        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) prop) -3); //align with the cache op
       }
       else {
         check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
-        if (read->opcode == OP_ACQUIRE)
-          read->opcode = take_ownership_of_a_conf_bit(t_id, r_mes->l_id + i,
-                                                      (uint16_t) r_mes->m_id);
+        if (read->opcode == OP_ACQUIRE) {
+          read->opcode =
+            take_ownership_of_a_conf_bit(r_mes->l_id + i, (uint16_t) r_mes->m_id, false, t_id) ?
+            (uint8_t) OP_ACQUIRE_FP : (uint8_t) OP_ACQUIRE;
+        }
         if (read->opcode == OP_ACQUIRE_FLIP_BIT)
-          raise_conf_bit_iff_owned(t_id, *(uint64_t *) &read->key, (uint16_t) r_mes->m_id);
+          raise_conf_bit_iff_owned(*(uint64_t *) &read->key, (uint16_t) r_mes->m_id, false, t_id);
 
         p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) read) - 3); //align with the cache op
 
@@ -7893,7 +7830,7 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
             kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, acc_rep->opcode);
   //set_up_rmw_rep_message_size(p_ops, acc_rep->opcode, t_id);
   p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(acc_rep->opcode);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) acc_rep, 0, acc_m_id, t_id);
+  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) acc_rep, false, acc_m_id, t_id);
 
 }
 
@@ -7943,7 +7880,7 @@ static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct cache_op *op
     }
   } while (!optik_is_same_version_and_valid_netw_ts_meta(r_rep->ts, kv_ptr->key.meta));
   set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->key.meta.m_id, false, t_id);
-  finish_r_rep_bookkeeping(p_ops, r_rep, op->opcode, rem_m_id, t_id);
+  finish_r_rep_bookkeeping(p_ops, r_rep, op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
   //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode leaves \n");
 
 }
@@ -7963,7 +7900,7 @@ static inline void KVS_reads_get_TS(struct cache_op *op, struct cache_op *kv_ptr
     r_rep->ts.version = kv_ptr->key.meta.version;
   } while (!optik_is_same_version_and_valid_netw_ts_meta(r_rep->ts, kv_ptr->key.meta));
   set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->key.meta.m_id, true, t_id);
-  finish_r_rep_bookkeeping(p_ops, r_rep, 0, rem_m_id, t_id);
+  finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
 }
 
 // Handle remote reads, acquires and acquires-fp
@@ -8028,12 +7965,13 @@ static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_p
               "version %u, m_id: %u, resp: %u \n",  kv_ptr->key.bkt, log_no, number_of_reqs, prop_m_id,
             rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, prop_rep->opcode);
   p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(prop_rep->opcode);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) prop_rep, 0, prop_m_id, t_id);
+  bool false_pos = take_ownership_of_a_conf_bit(rmw_l_id, prop_m_id, true, t_id);
+  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) prop_rep, false_pos, prop_m_id, t_id);
   struct rmw_rep_message *rmw_mes = (struct rmw_rep_message *) &p_ops->r_rep_fifo->r_rep_message[p_ops->r_rep_fifo->push_ptr];
 
 }
 
-// Handle remote reads, acquires and acquires-fp
+// Handle remote rmw-acquires and rmw-acquires-fp
 // (acquires-fp are acquires renamed by the receiver when a false positive is detected)
 static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *kv_ptr,
                                       struct pending_ops *p_ops, uint16_t op_i,
@@ -8070,7 +8008,8 @@ static inline void KVS_reads_rmw_acquires(struct cache_op *op, struct cache_op *
   }
   optik_unlock_decrement_version(&kv_ptr->key.meta);
   set_up_rmw_acq_rep_message_size(p_ops, acq_rep->opcode, t_id);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep, 0, rem_m_id, t_id);
+  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep,
+                           op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
 }
 
 

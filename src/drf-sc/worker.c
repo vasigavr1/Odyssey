@@ -149,7 +149,6 @@ void *worker(void *arg)
   // helper for polling writes: in a corner failure-realted case,
   // it may be that not all avaialble writes can be polled due to the unavailability of the acks
   uint32_t completed_but_not_polled_writes = 0, loop_counter = 0;
-  //uint32_t client_req_pull_ptr[SESSIONS_PER_THREAD] = {0};
 
 	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
   bool slept = false;
@@ -170,23 +169,24 @@ void *worker(void *arg)
       (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 100000) && (!slept)) {
       uint seconds = 15;
       if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
-      //exit(1);
       sleep(seconds); slept = true;
       yellow_printf("Worker %u is back\n", t_id);
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
       print_verbouse_debug_info(p_ops, t_id, credits);
     }
-
-    loop_counter++;
-    if (loop_counter == M_16) {
-      //printf("Wrkr %u is working rectified keys %lu \n",
-      //       t_id, t_stats[t_id].rectified_keys);
-      if (t_id == 0) printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
-                              "epoch_id %u, reqs %lld \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
-                            t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
-                            t_stats[t_id].cache_hits_per_thread);
-      loop_counter = 0;
+    if (ENABLE_ASSERTIONS) {
+      loop_counter++;
+      if (loop_counter == M_16) {
+        //printf("Wrkr %u is working rectified keys %lu \n",
+        //       t_id, t_stats[t_id].rectified_keys);
+        if (t_id == 0)
+          printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
+                   "epoch_id %u, reqs %lld \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+                 t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
+                 t_stats[t_id].cache_hits_per_thread);
+        loop_counter = 0;
+      }
     }
 
     /* ---------------------------------------------------------------------------
@@ -233,11 +233,9 @@ void *worker(void *arg)
     if (ENABLE_RMWS)
       inspect_rmws(p_ops, t_id);
 
-
     /* ---------------------------------------------------------------------------
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
-    // if (WRITE_RATIO > 0)
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
               ack_recv_wc, ack_recv_info, q_info, &latency_info,
               t_id, waiting_dbg_counter, &outstanding_writes);
@@ -248,13 +246,8 @@ void *worker(void *arg)
     ------------------------------PROBE THE CACHE--------------------------------------
     ---------------------------------------------------------------------------*/
 
-    //if (!ENABLE_CLIENTS)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate write/r_rep messages
-		//trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
-                                           //p_ops, resp, &latency_info,
-                                          // ses_dbg);
-    //else
     trace_iter = batch_requests_to_KVS(t_id,
                                        trace_iter, trace, ops,
                                        p_ops, resp, &latency_info,
@@ -272,7 +265,6 @@ void *worker(void *arg)
 		------------------------------BROADCAST WRITES--------------------------
 		---------------------------------------------------------------------------*/
     // Perform the write broadcasts
-    //if (WRITE_RATIO > 0)
     broadcast_writes(p_ops, q_info, credits, cb, &release_rdy_dbg_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                      ack_recv_info, r_rep_recv_info, t_id, &outstanding_writes, &debug_lids);

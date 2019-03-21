@@ -682,22 +682,22 @@ static inline void rel_acq_circular_async() {
     for (i = 0; i < relaxed_writes; i++) {
       desired_val[0] = (uint8_t) (10 * machine_id + i);
       async_write_strong(write_key_offset + i, desired_val, val_len, session_id);
-      yellow_printf("Writing key %u, iteration %u, value %u \n", write_key_offset + i, i, desired_val[0]);
+      //yellow_printf("Writing key %u, iteration %u, value %u \n", write_key_offset + i, i, desired_val[0]);
     }
     desired_val[0] = 1;
     async_release_strong(key_flags[machine_id], desired_val, val_len, session_id);
   }
   while (true) {
     // First acquire the previous machine flag
-    yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
-                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+    //yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
+    //              machine_id, key_flags[prev_machine_id], prev_machine_id);
     do {
       ret = blocking_acquire(key_flags[prev_machine_id], value[0], val_len, session_id);
       assert(ret >= 0);
     } while (value[0][0] != 1);
 
-    yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
-                  machine_id, key_flags[prev_machine_id], prev_machine_id);
+    //yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
+    //              machine_id, key_flags[prev_machine_id], prev_machine_id);
 
 
     // Issue asynchronous reads
@@ -720,14 +720,14 @@ static inline void rel_acq_circular_async() {
 
     // release your flag
     desired_val[0] = 1;
-    yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
+    //yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
     ret = async_release_strong(key_flags[machine_id], desired_val, val_len, session_id);
     assert(ret > 0);
 
     // Do the actual reads
     poll_a_req_blocking(session_id, last_issued_req);
     for (i = 0; i < relaxed_writes; i++) {
-      cyan_printf("Reading key %u, iteration %u, value %u \n", read_key_offset + i, i, value[i][0]);
+      //cyan_printf("Reading key %u, iteration %u, value %u \n", read_key_offset + i, i, value[i][0]);
       assert(value[i][0] == 10 * prev_machine_id + i);
     }
 

@@ -21,7 +21,7 @@
 
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 25
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -30,10 +30,10 @@
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 12
-#define MAX_R_COALESCE 12
+#define MAX_R_COALESCE 15
 #define W_CREDITS 6
-#define MAX_W_COALESCE 12
-#define ENABLE_ASSERTIONS 1
+#define MAX_W_COALESCE 15
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -46,14 +46,14 @@
 #define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 1
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 
 // CLIENTS
@@ -463,7 +463,7 @@ struct remote_qp {
 #define NOT_HELPING 0
 #define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
-#define PROPOSE_LOCALLY_ACCEPTED 3 // Needed ??
+#define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
 
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
@@ -545,17 +545,17 @@ struct write {
   uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__));
 
-
+#define ACCEPT_FLIPS_BIT_OP 128
 struct accept {
 	struct network_ts_tuple ts;
   struct key key ;
 	uint8_t opcode;
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id ;
+  uint64_t t_rmw_id ; // upper bits are overloaded to store the bit vector when detecting a failure
   uint16_t glob_sess_id ; // this is useful when helping
   uint32_t log_no ;
-  struct net_rmw_id last_registered_rmw_id;
+  struct net_rmw_id last_registered_rmw_id; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
   uint64_t l_id;
 } __attribute__((__packed__));
 
@@ -859,6 +859,7 @@ struct rmw_local_entry {
   uint8_t opcode;
   uint8_t state;
   uint8_t helping_flag;
+  bool fp_detected;
   bool killable; // can the RMW (if CAS) be killed early
   bool rmw_is_successful; // was the RMW (if CAS) successful
   uint8_t value_to_write[RMW_VALUE_SIZE];
