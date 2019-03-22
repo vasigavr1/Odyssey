@@ -30,7 +30,7 @@
 #define R_CREDITS 12
 #define W_CREDITS 10
 #define MAX_READ_SIZE 100 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
-#define MAX_WRITE_SIZE 4000 // in terms of bytes for Writes/Releases/Accepts/Commits
+#define MAX_WRITE_SIZE 1000 // in terms of bytes for Writes/Releases/Accepts/Commits
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
@@ -53,7 +53,7 @@
 #define ACCEPT_IS_RELEASE 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 3
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
@@ -203,8 +203,12 @@
 #define MAX_WRITE_COALESCE MAX_OF_3(W_COALESCE, COM_COALESCE, ACC_COALESCE)
 #define MAX_W_MES_SIZE MAX_OF_3(W_MES_SIZE, COM_MES_SIZE, ACC_MES_SIZE)
 #define MAX_MES_IN_WRITE (MAX_WRITE_COALESCE)
+
 #define W_SEND_SIZE MAX_W_MES_SIZE
-#define W_RECV_SIZE (GRH_SIZE + MAX_W_MES_SIZE)
+#define W_SEND_SIDE_PADDING FIND_PADDING(W_SEND_SIZE)
+#define ALIGNED_W_SEND_SIDE (W_SEND_SIZE + W_SEND_SIDE_PADDING)
+
+#define W_RECV_SIZE (GRH_SIZE + ALIGNED_W_SEND_SIDE)
 #define W_ENABLE_INLINING ((MAX_W_MES_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 #define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
 #define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
@@ -223,15 +227,19 @@
 #define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
 #define PROP_COALESCE (EFFECTIVE_MAX_R_SIZE / PROP_SIZE)
 #define PROP_MES_SIZE (R_MES_HEADER + (PROP_SIZE * PROP_COALESCE))
+
 // Combining reads + proposes
 #define R_SEND_SIZE MAX(R_MES_SIZE, PROP_MES_SIZE)
 #define MAX_READ_COALESCE MAX(R_COALESCE, PROP_COALESCE)
+
+#define R_SEND_SIDE_PADDING FIND_PADDING(R_SEND_SIZE)
+#define ALIGNED_R_SEND_SIDE (R_SEND_SIZE + R_SEND_SIDE_PADDING)
 
 #define MAX_RECV_R_WRS ((R_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
 #define MAX_INCOMING_R (MAX_RECV_R_WRS * MAX_READ_COALESCE)
 #define MAX_R_WRS (MESSAGES_IN_BCAST_BATCH)
 #define R_ENABLE_INLINING ((R_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
-#define R_RECV_SIZE (GRH_SIZE + R_SEND_SIZE)
+#define R_RECV_SIZE (GRH_SIZE + ALIGNED_R_SEND_SIDE)
 
 
 // READ REPLIES -- Replies to reads/acquires/proposes accepts
@@ -240,7 +248,7 @@
 #define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
 #define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
 #define R_REP_SMALL_SIZE (1)
-#define READ_REP_MES_SIZE (R_REP_MES_HEADER +(R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
+#define READ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
 // RMW_ACQUIRE
 #define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
 #define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
@@ -264,7 +272,9 @@
 
 #define MAX_REPS_IN_REP MAX_R_REP_COALESCE
 #define R_REP_SEND_SIZE MAX_R_REP_MES_SIZE
-#define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
+#define R_REP_SEND_SIDE_PADDING FIND_PADDING(R_REP_SEND_SIZE)
+#define ALIGNED_R_REP_SEND_SIDE (R_REP_SEND_SIZE + R_REP_SEND_SIDE_PADDING)
+#define R_REP_RECV_SIZE (GRH_SIZE + ALIGNED_R_REP_SEND_SIDE)
 
 #define R_REP_SLOTS_FOR_ACCEPTS (W_CREDITS * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
 #define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
@@ -609,13 +619,13 @@ struct r_message {
 
 struct w_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  uint8_t w_mes[W_SEND_SIZE];
+  uint8_t w_mes[ALIGNED_W_SEND_SIDE];
 };
 
 //
 struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  uint8_t r_mes[R_SEND_SIZE];
+  uint8_t r_mes[ALIGNED_R_SEND_SIDE];
 };
 
 
@@ -656,26 +666,6 @@ struct w_mes_info {
 };
 
 
-//
-struct read_fifo {
-  struct r_message *r_message;
-  uint32_t push_ptr;
-  uint32_t bcast_pull_ptr;
-  uint32_t bcast_size; // number of reads not messages!
-  struct r_mes_info info[R_FIFO_SIZE];
-  //uint32_t backward_ptrs[R_FIFO_SIZE];
-};
-
-//
-struct write_fifo {
-  struct w_message *w_message;
-  uint32_t push_ptr;
-  uint32_t bcast_pull_ptr;
-  uint32_t bcast_size; // number of writes not messages!
-  struct w_mes_info info[W_FIFO_SIZE];
-  //uint32_t size;
-  //uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
-};
 
 // Sent when the timestamps are equal or smaller
 struct r_rep_small {
@@ -710,7 +700,7 @@ struct r_rep_message {
 
 struct r_rep_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  uint8_t r_rep_mes[R_REP_SEND_SIZE];
+  uint8_t r_rep_mes[ALIGNED_R_REP_SEND_SIDE];
 };
 
 // Reply for both accepts and proposes
@@ -736,8 +726,44 @@ struct rmw_rep_message {
 }__attribute__((__packed__));
 
 
+struct r_message_template {
+  uint8_t unused[ALIGNED_R_SEND_SIDE];
+};
+
+//
+struct read_fifo {
+  struct r_message_template *r_message;
+  uint32_t push_ptr;
+  uint32_t bcast_pull_ptr;
+  uint32_t bcast_size; // number of reads not messages!
+  struct r_mes_info info[R_FIFO_SIZE];
+  //uint32_t backward_ptrs[R_FIFO_SIZE];
+};
+
+
+struct w_message_template {
+  uint8_t unused[ALIGNED_W_SEND_SIDE];
+};
+
+//
+struct write_fifo {
+  struct w_message_template *w_message;
+  uint32_t push_ptr;
+  uint32_t bcast_pull_ptr;
+  uint32_t bcast_size; // number of writes not messages!
+  struct w_mes_info info[W_FIFO_SIZE];
+  //uint32_t size;
+  //uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
+};
+
+
+struct r_rep_message_template {
+  uint8_t unused[ALIGNED_R_REP_SEND_SIDE];
+};
+
+
 struct r_rep_fifo {
-  struct r_rep_message *r_rep_message;
+  struct r_rep_message_template *r_rep_message;
   uint8_t *rem_m_id;
   uint16_t *message_sizes;
   uint32_t push_ptr;
@@ -917,6 +943,7 @@ struct pending_out_of_epoch_writes {
 struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
+  struct r_rep_fifo *r_rep_fifo;
   //struct write **ptrs_to_w_ops; // used for remote writes
   void **ptrs_to_mes_ops; // used for remote reads
 
@@ -926,7 +953,7 @@ struct pending_ops {
   bool *coalesce_r_rep;
 //  struct read_payload *r_payloads;
   struct read_info *read_info;
-  struct r_rep_fifo *r_rep_fifo;
+
   struct prop_info *prop_info;
   //
   struct pending_out_of_epoch_writes *p_ooe_writes;

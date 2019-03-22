@@ -106,9 +106,9 @@ void *worker(void *arg)
   void *r_fifo_buf = p_ops->r_fifo->r_message;
   void *w_fifo_buf = p_ops->w_fifo->w_message;
   void *r_rep_fifo_buf = (void *)p_ops->r_rep_fifo->r_rep_message;
-  set_up_mr(&r_mr, r_fifo_buf, R_ENABLE_INLINING, R_FIFO_SIZE * sizeof(struct r_message), cb);
-  set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, W_FIFO_SIZE * sizeof(struct w_message), cb);
-  set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, R_REP_FIFO_SIZE * sizeof(struct r_rep_message), cb);
+  set_up_mr(&r_mr, r_fifo_buf, R_ENABLE_INLINING, (uint32_t) R_FIFO_SIZE * ALIGNED_R_SEND_SIDE, cb);
+  set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, (uint32_t) W_FIFO_SIZE * ALIGNED_W_SEND_SIDE, cb);
+  set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, (uint32_t) R_REP_FIFO_SIZE * ALIGNED_R_REP_SEND_SIDE, cb);
 
   struct trace_op *ops = (struct trace_op *) calloc(MAX_OP_BATCH, sizeof(struct trace_op));
   randomize_op_values(ops, t_id);

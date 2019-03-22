@@ -1040,7 +1040,7 @@ void *client(void *arg) {
       }
       else if (TREIBER_ASYNC) {
         while (true) {
-          if (t_id % 2 == 0)
+          if (t_id % 1 == 0)
             treiber_push_multi_session(t_id);
           else {
             sleep(5);

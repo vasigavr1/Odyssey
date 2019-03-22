@@ -110,12 +110,16 @@ void static_assert_compile_parameters()
 
 void print_parameters_in_the_start()
 {
-  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu,"
+  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu/%d,"
                  "read info %llu\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
                sizeof (struct read_info));
-  green_printf("PROPOSE COALESCE %d \n", PROP_COALESCE);
+  green_printf("W_COALESCE %d, R_COALESCE %d, ACC_COALESCE %u, "
+                 "PROPOSE COALESCE %d, COM_COALESCE %d, MAX_WRITE_COALESCE %d,"
+                 "MAX_READ_COALESCE %d \n",
+               W_COALESCE, R_COALESCE, ACC_COALESCE, PROP_COALESCE, COM_COALESCE,
+               MAX_WRITE_COALESCE, MAX_READ_COALESCE);
 
 
   cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
@@ -127,7 +131,7 @@ void print_parameters_in_the_start()
                 sizeof(struct r_message_ud_req), R_RECV_SIZE);
   cyan_printf("Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
               sizeof(struct write), W_SIZE,
-              sizeof(struct w_message), W_MES_SIZE,
+              sizeof(struct w_message), W_SEND_SIZE,
               sizeof(struct w_message_ud_req), W_RECV_SIZE);
 
   green_printf("W INLINING %d, PENDING WRITES %d \n",
@@ -771,21 +775,28 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));
   (*p_ops)->p_ooe_writes =
     (struct pending_out_of_epoch_writes *) calloc(1, sizeof(struct pending_out_of_epoch_writes));
+
+
   // R_REP_FIFO
   (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) calloc(1, sizeof(struct r_rep_fifo));
-  (*p_ops)->r_rep_fifo->r_rep_message = (struct r_rep_message *) calloc(R_REP_FIFO_SIZE, sizeof(struct r_rep_message));
+  (*p_ops)->r_rep_fifo->r_rep_message =
+    (struct r_rep_message_template *) calloc((size_t)R_REP_FIFO_SIZE, (size_t)ALIGNED_R_REP_SEND_SIDE);
   (*p_ops)->r_rep_fifo->rem_m_id = (uint8_t *) malloc(R_REP_FIFO_SIZE * sizeof(uint8_t));
   (*p_ops)->r_rep_fifo->pull_ptr = 1;
   for (i= 0; i < R_REP_FIFO_SIZE; i++) (*p_ops)->r_rep_fifo->rem_m_id[i] = MACHINE_NUM;
-  (*p_ops)->r_rep_fifo->message_sizes = (uint16_t *) calloc(R_REP_FIFO_SIZE, sizeof(uint16_t));
+  (*p_ops)->r_rep_fifo->message_sizes = (uint16_t *) calloc((size_t) R_REP_FIFO_SIZE, sizeof(uint16_t));
+
   // W_FIFO
   (*p_ops)->w_fifo = (struct write_fifo *) calloc(1, sizeof(struct write_fifo));
   (*p_ops)->w_fifo->w_message =
-    (struct w_message *) calloc(W_FIFO_SIZE, sizeof(struct w_message));
+    (struct w_message_template *) calloc((size_t)W_FIFO_SIZE, (size_t) ALIGNED_W_SEND_SIDE);
+
   // R_FIFO
   (*p_ops)->r_fifo = (struct read_fifo *) calloc(1, sizeof(struct read_fifo));
   (*p_ops)->r_fifo->r_message =
-    (struct r_message *) calloc(R_FIFO_SIZE, sizeof(struct r_message));
+    (struct r_message_template *) calloc(R_FIFO_SIZE, (size_t) ALIGNED_R_SEND_SIDE);
+
+
   // PREP STRUCT
   (*p_ops)->prop_info = (struct prop_info *) calloc(1, sizeof(struct prop_info));
   (*p_ops)->prop_info->l_id = 1;
@@ -798,7 +809,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 
 
 
-   uint32_t max_incoming_w_r = MAX(MAX_INCOMING_R, MAX_INCOMING_W);
+   uint32_t max_incoming_w_r = (uint32_t) MAX(MAX_INCOMING_R, MAX_INCOMING_W);
   (*p_ops)->ptrs_to_mes_headers =
     (struct r_message **) malloc(max_incoming_w_r * sizeof(struct r_message *));
   (*p_ops)->coalesce_r_rep =
@@ -818,7 +829,8 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
     (*p_ops)->sess_info[i].ready_to_release = true;
   }
   for (i = 0; i < W_FIFO_SIZE; i++) {
-    (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
+    struct w_message *w_mes = (struct w_message *) &(*p_ops)->w_fifo->w_message[i];
+    w_mes->m_id = (uint8_t) machine_id;
 //    for (j = 0; j < MAX_W_COALESCE; j++){
 //      (*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
 //      (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
@@ -827,12 +839,15 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   (*p_ops)->w_fifo->info[0].message_size = W_MES_HEADER;
 
   for (i = 0; i < R_FIFO_SIZE; i++) {
-    (*p_ops)->r_fifo->r_message[i].m_id = (uint8_t) machine_id;
+    struct r_message *r_mes = (struct r_message *) &(*p_ops)->r_fifo->r_message[i];
+    r_mes->m_id= (uint8_t) machine_id;
   }
   (*p_ops)->r_fifo->info[0].message_size = R_MES_HEADER;
 
   for (i = 0; i < R_REP_FIFO_SIZE; i++) {
-    (*p_ops)->r_rep_fifo->r_rep_message[i].m_id = (uint8_t) machine_id;
+    struct rmw_rep_message *rmw_mes = (struct rmw_rep_message *) &(*p_ops)->r_rep_fifo->r_rep_message[i];
+    assert(((void *)rmw_mes - (void *)(*p_ops)->r_rep_fifo->r_rep_message) % ALIGNED_R_REP_SEND_SIDE == 0);
+    rmw_mes->m_id = (uint8_t) machine_id;
   }
   for (i = 0; i < pending_reads; i++)
     (*p_ops)->r_state[i] = INVALID;
