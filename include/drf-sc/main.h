@@ -18,22 +18,20 @@
 #define WORKER_HYPERTHREADING 0 // schedule two threads on the same core
 #define MAX_SERVER_PORTS 1 // better not change that
 
-
-
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 25
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 60
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 12
-#define MAX_R_COALESCE 15
 #define W_CREDITS 10
-#define MAX_W_COALESCE 15
-#define ENABLE_ASSERTIONS 0
+#define MAX_READ_SIZE 100 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
+#define MAX_WRITE_SIZE 4000 // in terms of bytes for Writes/Releases/Accepts/Commits
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -46,7 +44,7 @@
 #define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -55,44 +53,42 @@
 #define ACCEPT_IS_RELEASE 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
-
-// CLIENTS
 #define ENABLE_CLIENTS 1
 #define CLIENTS_PER_MACHINE_ 3
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
-#define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
 
+// HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
+#define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
 #define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
 #define SESSIONS_PER_MACHINE (WORKERS_PER_MACHINE * SESSIONS_PER_THREAD)
-#define SESSIONS_PER_CLIENT (SESSIONS_PER_MACHINE / CLIENTS_PER_MACHINE_)
+#define SESSIONS_PER_CLIENT_ (SESSIONS_PER_MACHINE / CLIENTS_PER_MACHINE_)
+#define SESSIONS_PER_CLIENT MAX(1, SESSIONS_PER_CLIENT_)
 #define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
-
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
-#define CACHE_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
-#define SESSION_BYTES 2 // session ids must fit in 3 bytes i.e.
+// Where to BIND the KVS
+#define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
-
-
+// PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
 #define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
 #define DUMP_STATS_2_FILE 0
+
+// MACROS
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
   if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
 #define FIND_PADDING(size) ((64 - (size % 64)) % 64)
+#define MAX_OF_3(x1, y1, x2) (MAX(x1, y1) > (x2) ? (MAX(x1, y1)) : (x2))
+#define MAX_OF_4(x1, y1, x2, y2) (MAX(x1, y1) > MAX(x2, y2) ? (MAX(x1, y1)) : (MAX(x2, y2)))
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
 --------------------------------------------------*/
-
 #define SKEW_EXPONENT_A 90 // representation divided by 100 (i.e. 99 means a = 0.99)
-#define DISABLE_CACHE 0
-#define LOAD_BALANCE 1 // Use a uniform access pattern
-
 
 /*-------------------------------------------------
 	-----------------CLIENT---------------------------
@@ -104,6 +100,7 @@
 #define ASYNC_TEST_CASE 0
 #define TREIBER_BLOCKING 0
 #define TREIBER_ASYNC 1
+#define TREIBER_WRITES_NUM 5
 #define PER_SESSION_REQ_NUM 50
 #define CLIENT_DEBUG 0
 
@@ -116,21 +113,12 @@
 #define MULTICAST_TESTING (ENABLE_MULTICAST == 1 ? MULTICAST_TESTING_ : 0)
 #define MCAST_QPS MACHINE_NUM
 
-
 #define MCAST_QP_NUM 2
 #define PREP_MCAST_QP 0
 #define COM_MCAST_QP 1 //
 #define MCAST_GROUPS_NUM 2
 
-// ------COMMON-------------------
-#define MAX_BCAST_BATCH (1) //how many broadcasts can fit in a batch
-#define MESSAGES_IN_BCAST (REM_MACH_NUM)
-#define MESSAGES_IN_BCAST_BATCH (MAX_BCAST_BATCH * MESSAGES_IN_BCAST) //must be smaller than the q_depth
-
-/* --------------------------------------------------------------------------------
- * -----------------------------ABD------------------------------------------------
- * --------------------------------------------------------------------------------
- * --------------------------------------------------------------------------------*/
+//ABD
 
 // ABD EMULATION
 #define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
@@ -157,136 +145,148 @@
 #define RMW_CAS_CANCEL_RATIO 400 // out of 1000
 #define USE_WEAK_CAS 1
 
-
+// QUEUE PAIRS
 #define QP_NUM 4
 #define R_QP_ID 0
 #define R_REP_QP_ID 1
 #define W_QP_ID 2
 #define ACK_QP_ID 3
-#define FC_QP_ID 4 // NOT USED!
 
+// QUORUM
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
 #define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1 ): REM_MACH_NUM)
+
+// IMPORTANT SIZES
 #define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
 #define RMW_BYTE_OFFSET 4 // the value starts 4 bytes in
-#define RMW_VALUE_SIZE (VALUE_SIZE - RMW_BYTE_OFFSET)
+#define RMW_VALUE_SIZE 24 // (VALUE_SIZE - RMW_BYTE_OFFSET)
+#define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
 #define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
 
+
+
+// ------COMMON-------------------
+#define MAX_BCAST_BATCH (1) //how many broadcasts can fit in a batch
+#define MESSAGES_IN_BCAST (REM_MACH_NUM)
+#define MESSAGES_IN_BCAST_BATCH (MAX_BCAST_BATCH * MESSAGES_IN_BCAST) //must be smaller than the q_depth
 // post some extra receives to avoid spurious out_of_buffer errors
 #define RECV_WR_SAFETY_MARGIN 2
 
-// READS
-#define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
+// WRITES: Releases, writes, accepts and commits -- all sizes in BYTES
+#define W_MES_HEADER (11) // local id + m_id+ w_num + opcode
+#define EFFECTIVE_MAX_W_SIZE (MAX_WRITE_SIZE - W_MES_HEADER) // all messages have the same header
+
+// Writes-Releases
+#define WRITE_HEADER (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 2) // opcode + val_len
+#define W_SIZE (VALUE_SIZE + WRITE_HEADER)
+#define W_COALESCE (EFFECTIVE_MAX_W_SIZE / W_SIZE)
+#define W_MES_SIZE (W_MES_HEADER + (W_SIZE * W_COALESCE))
+
+// ACCEPTS -- ACCEPT coalescing is derived from max write size. ACC reps are derived from accept coalescing
+#define ACCEPT_HEADER 47 //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
+#define ACCEPT_SIZE (ACCEPT_HEADER + RMW_VALUE_SIZE)
+#define ACC_COALESCE (EFFECTIVE_MAX_W_SIZE / ACCEPT_SIZE)
+#define ACC_MES_SIZE (W_MES_HEADER + (ACCEPT_SIZE * ACC_COALESCE))
+
+// COMMITS
+#define COMMIT_HEADER 29 //
+#define COMMIT_SIZE (COMMIT_HEADER + RMW_VALUE_SIZE)
+#define COM_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_SIZE)
+#define COM_MES_SIZE (W_MES_HEADER + (COMMIT_SIZE * COM_COALESCE))
+
+// COMBINED FROM Writes, Releases, Accepts, Commits
+#define MAX_WRITE_COALESCE MAX_OF_3(W_COALESCE, COM_COALESCE, ACC_COALESCE)
+#define MAX_W_MES_SIZE MAX_OF_3(W_MES_SIZE, COM_MES_SIZE, ACC_MES_SIZE)
+#define MAX_MES_IN_WRITE (MAX_WRITE_COALESCE)
+#define W_SEND_SIZE MAX_W_MES_SIZE
+#define W_RECV_SIZE (GRH_SIZE + MAX_W_MES_SIZE)
+#define W_ENABLE_INLINING ((MAX_W_MES_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
+#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
+#define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
+#define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_WRITE_COALESCE)
+
+
+// READS : Read,Acquires, RMW-Acquires, Proposes
 #define R_MES_HEADER (10) // local id + coalesce num + m_id
-#define R_MES_SIZE (R_MES_HEADER + (R_SIZE * MAX_R_COALESCE))
-#define R_RECV_SIZE (GRH_SIZE + R_MES_SIZE)
+#define EFFECTIVE_MAX_R_SIZE (MAX_READ_SIZE - R_MES_HEADER)
+
+// reads/acquires/rmw-acquire
+#define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
+#define R_COALESCE (EFFECTIVE_MAX_R_SIZE / R_SIZE)
+#define R_MES_SIZE (R_MES_HEADER + (R_SIZE * R_COALESCE))
+// proposes
+#define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
+#define PROP_COALESCE (EFFECTIVE_MAX_R_SIZE / PROP_SIZE)
+#define PROP_MES_SIZE (R_MES_HEADER + (PROP_SIZE * PROP_COALESCE))
+// Combining reads + proposes
+#define R_SEND_SIZE MAX(R_MES_SIZE, PROP_MES_SIZE)
+#define MAX_READ_COALESCE MAX(R_COALESCE, PROP_COALESCE)
 
 #define MAX_RECV_R_WRS ((R_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
-#define MAX_INCOMING_R (MAX_RECV_R_WRS * MAX_R_COALESCE)
+#define MAX_INCOMING_R (MAX_RECV_R_WRS * MAX_READ_COALESCE)
 #define MAX_R_WRS (MESSAGES_IN_BCAST_BATCH)
-#define R_SEND_SIZE (R_MES_SIZE)
 #define R_ENABLE_INLINING ((R_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
+#define R_RECV_SIZE (GRH_SIZE + R_SEND_SIZE)
 
-// READ REPLIES
-#define MAX_R_REP_COALESCE MAX_R_COALESCE
-#define R_REP_MES_HEADER (8 + 3) //l_id, coalesce_num, m_id, opcode // and credits
-#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
+
+// READ REPLIES -- Replies to reads/acquires/proposes accepts
+#define R_REP_MES_HEADER (11) //l_id 8 , coalesce_num 1, m_id 1, opcode 1 // and credits
+// Reads/acquires
 #define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
 #define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
 #define R_REP_SMALL_SIZE (1)
-#define R_REP_SEND_SIZE (R_REP_MES_HEADER + (MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE))
+#define READ_REP_MES_SIZE (R_REP_MES_HEADER +(R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
+// RMW_ACQUIRE
+#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
+#define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
+// PROPOSE REPLIES
+#define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define PROP_REP_SMALL_SIZE 9 // lid and opcode
+#define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
+#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
+#define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_SIZE)) //Message size of replies to proposes
+// ACCEPT REPLIES
+#define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define ACC_REP_SMALL_SIZE 9 // lid and opcode
+#define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
+#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
+#define ACC_REP_MES_SIZE (R_REP_MES_HEADER + (ACC_COALESCE * ACC_REP_SIZE)) //Message size of replies to accepts
+
+
+// COMBINE Reads, Acquires, RMW-acquires, Accepts , Propose
+#define MAX_R_REP_MES_SIZE MAX_OF_4(READ_REP_MES_SIZE, RMW_ACQ_REP_MES_SIZE, PROP_REP_MES_SIZE, ACC_REP_MES_SIZE)
+#define MAX_R_REP_COALESCE MAX_OF_3(R_COALESCE, PROP_COALESCE, ACC_COALESCE)
+
+#define MAX_REPS_IN_REP MAX_R_REP_COALESCE
+#define R_REP_SEND_SIZE MAX_R_REP_MES_SIZE
 #define R_REP_RECV_SIZE (GRH_SIZE + R_REP_SEND_SIZE)
+
 #define R_REP_SLOTS_FOR_ACCEPTS (W_CREDITS * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
 #define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
-#define R_REP_WRS_WITHOUT_ACCEPTS (R_CREDITS * REM_MACH_NUM * (CEILING(MAX_R_COALESCE, MAX_R_REP_COALESCE)))
+#define R_REP_WRS_WITHOUT_ACCEPTS (R_CREDITS * REM_MACH_NUM)
 #define MAX_R_REP_WRS (R_REP_WRS_WITHOUT_ACCEPTS + R_REP_SLOTS_FOR_ACCEPTS)
 
 #define R_REP_ENABLE_INLINING ((R_REP_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 #define R_REP_FIFO_SIZE (MAX_INCOMING_R + R_REP_SLOTS_FOR_ACCEPTS)
-//#define READ_INFO_SIZE (3 + TS_TUPLE_SIZE + TRUE_KEY_SIZE + VALUE_SIZE) // not correct
-
-// Writes
-#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
-#define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
-#define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_W_COALESCE)
-
-#define WRITE_HEADER (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 2) // opcode + val_len
-#define W_SIZE (VALUE_SIZE + WRITE_HEADER)
-#define W_MES_HEADER (8 + 1 + 1 + 1) // local id + m_id+ w_num + opcode
-#define W_MES_SIZE (W_MES_HEADER + (W_SIZE * MAX_W_COALESCE))
-#define W_RECV_SIZE (GRH_SIZE + W_MES_SIZE)
-#define W_ENABLE_INLINING ((W_MES_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 
 // Acks
 #define MAX_RECV_ACK_WRS (REM_MACH_NUM * W_CREDITS)
 #define MAX_ACK_WRS (MACHINE_NUM)
-#define ACK_SIZE 14 // bytes like everytinh else
+#define ACK_SIZE (14)
 #define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
 
-
 // RMWs
+#define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
+#define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
 #define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
 #define KEY_IS_NOT_RMWABLE 0
 #define KEY_HAS_NEVER_BEEN_RMWED 1
 #define KEY_HAS_BEEN_RMWED 2
-
-
-// Proposes
-#define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
-#define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-
-
-#define PROP_MES_HEADER (R_MES_HEADER) // coalesce_num , m_id
-#define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
-
-// Propose replies
-
-#define PROP_REP_MES_HEADER (3 + 8)// coalesce_num , m_id, opcode, l_id
-#define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-#define MAX_PROP_REP_COALESCE ((MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE) / PROP_REP_SIZE)
-#define MAX_PROP_SEND_COALESCE ((R_SIZE * MAX_R_COALESCE) / PROP_SIZE)
-#define MAX_PROP_COALESCE MIN(MAX_PROP_SEND_COALESCE, MAX_PROP_REP_COALESCE)
-
-#define PROP_REP_MESSAGE_SIZE (PROP_REP_MES_HEADER + (MAX_PROP_COALESCE * PROP_REP_SIZE))
-#define PROP_REP_SMALL_SIZE 9 // lid and opcode
-#define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
-
-
-#define PROP_MESSAGE_SIZE (PROP_MES_HEADER + (MAX_PROP_COALESCE * PROP_SIZE))
-
-// ACCEPTS
-//#define MAX_ACC_COALESCE 1
-#define ACCEPT_MES_HEADER (W_MES_HEADER) //
-#define ACCEPT_SIZE (47 + RMW_VALUE_SIZE) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1, rmw value
-//#define ACCEPT_MESSAGE_SIZE (ACCEPT_MES_HEADER + (MAX_ACC_COALESCE * ACCEPT_SIZE))
-
-// ACCEPT REPLIES
-//#define MAX_ACC_REP_COALESCE (MAX_ACC_COALESCE)
-#define ACC_REP_MES_HEADER (3 + 8) // coalesce_num , m_id, opcode
-#define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-//#define ACC_REP_MESSAGE_SIZE (ACC_REP_MES_HEADER + (MAX_ACC_REP_COALESCE * ACC_REP_SIZE))
-#define ACC_REP_SMALL_SIZE 9 // lid and opcode
-#define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
-
-#define MAX_ACC_REP_COALESCE ((MAX_R_REP_COALESCE * RMW_ACQ_REP_SIZE) / ACC_REP_SIZE)
-#define MAX_ACC_SEND_COALESCE ((W_SIZE * MAX_W_COALESCE) / ACCEPT_SIZE)
-#define MAX_ACC_COALESCE MIN(MAX_ACC_SEND_COALESCE, MAX_ACC_REP_COALESCE)
-
-// COMMITS
-#define MAX_COM_COALESCE 1
-#define COMMIT_MES_HEADER 10
-#define COMMIT_SIZE (29 + RMW_VALUE_SIZE)
-#define COMMIT_MESSAGE_SIZE (COMMIT_MES_HEADER + (MAX_COM_COALESCE * COMMIT_SIZE))
-
-
-#define RMW_WAIT_COUNTER M_256
 
 // RMW entry states for local and global entries
 #define INVALID_RMW 0
@@ -298,7 +298,6 @@
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
 #define TS_STALE_ON_REMOTE_KVS 8
-//#define BLOCK_FOR_HELP_COMMIT_ACKS 9 // help committing needs to gather acks
 
 
 #define VC_NUM 2
@@ -322,9 +321,8 @@
 #define TOTAL_BUF_SLOTS (R_BUF_SLOTS + R_REP_BUF_SLOTS + W_BUF_SLOTS + ACK_BUF_SLOTS)
 // that allows for reads to insert reads
 #define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
-#define EXTRA_WRITE_SLOTS 50 // to accommodate reads that become writes
 #define PENDING_WRITES_ MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
-#define PENDING_WRITES MAX((PENDING_WRITES_) , ((W_CREDITS * MAX_W_COALESCE) + 1))
+#define PENDING_WRITES MAX((PENDING_WRITES_) , ((W_CREDITS * MAX_MES_IN_WRITE) + 1))
 #define W_FIFO_SIZE (PENDING_WRITES + LOCAL_PROP_NUM) // Accepts use the write fifo
 
 // The w_fifo needs to have a safety slot that cannot be touched
@@ -357,8 +355,6 @@
 /*-------------------------------------------------
 -----------------DEBUGGING-------------------------
 --------------------------------------------------*/
-
-
 #define USE_A_SINGLE_KEY 0
 #define DEFAULT_SL 0 //default service level
 //It may be that ENABLE_ASSERTIONS  must be up for these to work
@@ -600,7 +596,7 @@ struct w_message {
 	uint8_t coalesce_num;
 	uint8_t opcode;
 	uint64_t l_id ;
-	struct write write[MAX_W_COALESCE];
+	struct write write[W_COALESCE];
 } __attribute__((__packed__));
 
 //
@@ -608,18 +604,18 @@ struct r_message {
   uint8_t coalesce_num;
   uint8_t m_id;
   uint64_t l_id ;
-  struct read read[MAX_R_COALESCE];
+  struct read read[R_COALESCE];
 } __attribute__((__packed__));
 
 struct w_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  struct w_message w_mes;
+  uint8_t w_mes[W_SEND_SIZE];
 };
 
 //
 struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  struct r_message r_mes;
+  uint8_t r_mes[R_SEND_SIZE];
 };
 
 
@@ -642,11 +638,11 @@ struct rel_bit_vec{
 struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
-  uint16_t per_message_sess_id[MAX_W_COALESCE];
+  uint16_t per_message_sess_id[MAX_MES_IN_WRITE];
   //used when creating the failure bit vector
   // and when checking to see if the session is ready to release
   // can be used for both accepts and releases
-  bool per_message_release_flag[MAX_W_COALESCE];
+  bool per_message_release_flag[MAX_MES_IN_WRITE];
   uint32_t backward_ptr;
   bool is_release;
   uint16_t first_release_byte_ptr;
@@ -686,7 +682,6 @@ struct r_rep_small {
   uint8_t opcode;
 };
 
-
 // Sent when you have a bigger ts_tuple
 struct r_rep_big {
   uint8_t opcode;
@@ -709,13 +704,13 @@ struct r_rep_message {
   uint8_t m_id;
   uint8_t opcode;
   uint64_t l_id;
-  struct rmw_acq_rep r_rep[MAX_R_REP_COALESCE];
+  struct r_rep_big r_rep[MAX_R_REP_COALESCE];
 } __attribute__((__packed__));
 
 
 struct r_rep_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  struct r_rep_message r_rep_mes;
+  uint8_t r_rep_mes[R_REP_SEND_SIZE];
 };
 
 // Reply for both accepts and proposes
@@ -737,7 +732,7 @@ struct rmw_rep_message {
   uint8_t m_id;
   uint8_t opcode;
   uint64_t l_id ;
-  struct rmw_rep_last_committed rmw_rep[MAX_PROP_COALESCE];
+  struct rmw_rep_last_committed rmw_rep[PROP_COALESCE];
 }__attribute__((__packed__));
 
 

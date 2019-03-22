@@ -39,7 +39,7 @@
 #define HRD_Q_DEPTH 0	/* Used only by wrappers we do not care about */
 
 #define USE_BIG_OBJECTS 0
-#define EXTRA_CACHE_LINES 16
+#define EXTRA_CACHE_LINES 4
 #define BASE_VALUE_SIZE 32
 #define SHIFT_BITS (USE_BIG_OBJECTS == 1 ? 3 : 0) // number of bits to shift left or right to calculate the value length
 #define HRD_DEFAULT_PSN 3185	/* PSN for all queues */ // starting Packet Sequence Number
@@ -51,7 +51,7 @@
 
 #define HRD_CONNECT_IB_ATOMICS 0
 #define HERD_LOG_CAP  (1024 * 1024 * 1024)
-#define VALUE_SIZE (USE_BIG_OBJECTS == 1 ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
+#define VALUE_SIZE (USE_BIG_OBJECTS? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
 
 /* Request sizes */
 #define KEY_SIZE 16

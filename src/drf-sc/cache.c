@@ -37,7 +37,7 @@ void cache_init(int cache_id, int num_threads) {
 	cache.meta = malloc(num_threads * sizeof(struct cache_meta_stats));
 	for(i = 0; i < num_threads; i++)
 		cache_meta_reset(&cache.meta[i]);
-	mica_init(&cache.hash_table, cache_id, CACHE_SOCKET, CACHE_NUM_BKTS, HERD_LOG_CAP);
+	mica_init(&cache.hash_table, cache_id, KVS_SOCKET, CACHE_NUM_BKTS, HERD_LOG_CAP);
 	cache_populate_fixed_len(&cache.hash_table, CACHE_NUM_KEYS, VALUE_SIZE);
 }
 

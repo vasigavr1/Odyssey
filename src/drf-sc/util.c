@@ -5,86 +5,79 @@ void static_assert_compile_parameters()
 
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
-  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
-  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
-  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
-  static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
-  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
-  static_assert(sizeof(struct read) == R_SIZE, "");
-  static_assert(SESSIONS_PER_THREAD < M_16, "");
-  static_assert(MAX_W_COALESCE < 256, "");
-  static_assert(MAX_R_COALESCE < 256, "");
-  static_assert(MAX_R_REP_COALESCE < 256, "");
+  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
+  static_assert(sizeof(cache_meta) == 8, "");
 
-  static_assert(MAX_R_REP_COALESCE == MAX_R_COALESCE, "");
+  static_assert(SESSIONS_PER_THREAD < K_64, "");
   static_assert(SESSIONS_PER_THREAD > 0, "");
-  //static_assert(MAX_OP_BATCH < CACHE_BATCH_SIZE, "");
   static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
   static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
-  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
-
   static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
   static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + RMW_BYTE_OFFSET), "RMW requires the value to be at least this many bytes");
+  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
 
+  // WRITES
+  static_assert(W_SEND_SIZE >= W_MES_SIZE &&
+                W_SEND_SIZE >= ACC_MES_SIZE &&
+                W_SEND_SIZE >= COM_MES_SIZE &&
+                W_SEND_SIZE <= MAX_WRITE_SIZE, "");
+  static_assert(W_SEND_SIZE < MTU, "");
+  // READS
+  static_assert(R_SEND_SIZE >= R_MES_SIZE &&
+                R_SEND_SIZE >= PROP_MES_SIZE &&
+                R_SEND_SIZE <= MAX_READ_SIZE, "");
+  static_assert(R_SEND_SIZE < MTU, "");
+  // R_REPS
+  static_assert(R_REP_SEND_SIZE >= PROP_REP_MES_SIZE &&
+                R_REP_SEND_SIZE >= ACC_REP_MES_SIZE &&
+                R_REP_SEND_SIZE >= READ_REP_MES_SIZE &&
+                R_REP_SEND_SIZE >= RMW_ACQ_REP_MES_SIZE, "");
+  static_assert(R_REP_SEND_SIZE < MTU, "");
+
+  // COALESCING
+  static_assert(MAX_WRITE_COALESCE < 256, "");
+  static_assert(MAX_READ_COALESCE < 256, "");
+  static_assert(MAX_REPS_IN_REP < 256, "");
+  static_assert(PROP_COALESCE > 0, "");
+  static_assert(R_COALESCE > 0, "");
+  static_assert(W_COALESCE > 0, "");
+  static_assert(ACC_COALESCE > 0, "");
+  static_assert(COM_COALESCE > 0, "");
+
+  // NETWORK STRUCTURES
+  static_assert(sizeof(struct read) == R_SIZE, "");
+  static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
   static_assert(sizeof(struct write) == W_SIZE, "");
-  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
+  static_assert(sizeof(struct propose) == PROP_SIZE, "");
+  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
+  static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MES_SIZE, "");
+  static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
+  static_assert(sizeof(struct rmw_acq_rep) == RMW_ACQ_REP_SIZE, "");
+  static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
+  // UD- REQS
+  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
+  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
+  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
+  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
+
   // we want to have more write slots than credits such that we always know that if a machine fails
   // the pressure will appear in the credits and not the write slots
-  static_assert(PENDING_WRITES > (W_CREDITS * MAX_W_COALESCE), " ");
-
+  static_assert(PENDING_WRITES > (W_CREDITS * MAX_MES_IN_WRITE), " ");
   // RMWs
   static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
-
   static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
-
-
-  // PROPOSES
-  //static_assert(MAX_R_COALESCE > 1, "given that a propose is bigger than a read");
-  static_assert(PROP_SIZE == sizeof(struct propose), "");
-  //static_assert(MAX_PROP_COALESCE == 1, "prop coalesce is disabled");
-  static_assert(PROP_MESSAGE_SIZE <= R_MES_SIZE, "the propose message must fit in the"
-    " buffer allocated for a read message");
-
-  static_assert(MAX_PROP_COALESCE > 0, "Please increase MAX_R_COALESCE");
-  static_assert(R_MES_SIZE >= PROP_MESSAGE_SIZE, "");
-
-  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
-  static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MESSAGE_SIZE, "");
-  static_assert(PROP_REP_MESSAGE_SIZE <= R_REP_SEND_SIZE, "");
-
-  // ACCEPTS
-  //printf ("net rmw_id size %u, accept size %u \n", sizeof(struct net_rmw_id), sizeof(struct accept));
-  static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
-  //static_assert(sizeof(struct accept_message) == ACCEPT_MESSAGE_SIZE, "");
-  //static_assert(ACCEPT_MESSAGE_SIZE < W_MES_SIZE, "");
-  static_assert(MAX_ACC_COALESCE >= 1, "");
-  static_assert(MAX_ACC_REP_COALESCE >= MAX_ACC_SEND_COALESCE, "");
-  static_assert(MAX_ACC_REP_COALESCE == MAX_PROP_REP_COALESCE, "");
+  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
-  static_assert(ACC_REP_MES_HEADER == PROP_REP_MES_HEADER, "");
   static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
-  //static_assert(ACC_REP_MESSAGE_SIZE == PROP_REP_MESSAGE_SIZE, "");
   static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
   static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
   static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
 
-  // COMMITS
-  //static_assert(MAX_COM_COALESCE == 1, "");
-  static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
-  //static_assert(sizeof(struct commit_message) == COMMIT_MESSAGE_SIZE, "");
-  static_assert(COMMIT_MESSAGE_SIZE < W_MES_SIZE, "");
-
-  // RMW- ACQUIRES
-  static_assert(sizeof(struct rmw_acq_rep) == RMW_ACQ_REP_SIZE, "");
 
 
-  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
-  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, "");
-  static_assert(sizeof(cache_meta) == 8, "");
-  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
   static_assert(!(VERIFY_PAXOS && PRINT_LOGS), "only one of those can be set");
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
@@ -122,7 +115,7 @@ void print_parameters_in_the_start()
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
                sizeof (struct read_info));
-  green_printf("PROPOSE COALESCE %d SEND/REP %d/%d \n", MAX_PROP_COALESCE, MAX_PROP_SEND_COALESCE, MAX_PROP_REP_COALESCE);
+  green_printf("PROPOSE COALESCE %d \n", PROP_COALESCE);
 
 
   cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
@@ -826,10 +819,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   }
   for (i = 0; i < W_FIFO_SIZE; i++) {
     (*p_ops)->w_fifo->w_message[i].m_id = (uint8_t) machine_id;
-    for (j = 0; j < MAX_W_COALESCE; j++){
-      (*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
-      (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
-    }
+//    for (j = 0; j < MAX_W_COALESCE; j++){
+//      (*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
+//      (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
+//    }
   }
   (*p_ops)->w_fifo->info[0].message_size = W_MES_HEADER;
 

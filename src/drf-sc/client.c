@@ -829,10 +829,11 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
 }
 
 #define INIT 0
+
+// TREIBER PULL STATES
 #define READ_TOP 1
-#define POLLED_TOP 2
-#define READ_FIRST 3
-#define POLLED_FIRST 4
+#define READ_FIRST 2
+
 
 static inline void treiber_pop_multi_session(uint16_t t_id)
 {
@@ -840,7 +841,6 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
   assert(sizeof(struct top) <= RMW_VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   uint16_t s_i = 0;
-  uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS + (NUM_OF_RMW_KEYS * machine_id));
   uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
   assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
   //uint32_t stack_ids[SESSIONS_PER_MACHINE];
@@ -892,9 +892,11 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
         else {
           assert(top[s_i].key_id > 0);
           if (ENABLE_ASSERTIONS) assert(top[s_i].key_id >= NUM_OF_RMW_KEYS);
-          last_req_id[s_i] =
-            (uint32_t) async_read_strong(top[s_i].key_id, (uint8_t *)&first_node[s_i],
-                                         sizeof(struct node), real_sess_i);
+          for (uint16_t i = 0; i < TREIBER_WRITES_NUM; i++) {
+            last_req_id[s_i] =
+              (uint32_t) async_read_strong(top[s_i].key_id + i, (uint8_t *) &first_node[s_i],
+                                           sizeof(struct node), real_sess_i);
+          }
           state[s_i] = READ_FIRST;
         }
         break;
@@ -930,7 +932,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
   struct node new_node[SESSIONS_PER_CLIENT];
   bool success[SESSIONS_PER_CLIENT] = {0};
   uint32_t last_req_id[SESSIONS_PER_CLIENT];
-
+  uint8_t state[SESSIONS_PER_CLIENT] = {0};
   uint32_t stack_id[SESSIONS_PER_CLIENT] = {0};
   uint32_t stack_id_cntr = (uint32_t) machine_id * 100;
   for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
@@ -944,43 +946,53 @@ static inline void treiber_push_multi_session(uint16_t t_id)
   //green_printf("Read top_key_id %u, points to key %u top counter %u\n",
   //              stack_id, top.key_id, top.counter);
   //uint32_t success_cntr = 0;
+  for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
+    uint16_t real_sess_i = sess_offset + s_i;
+    if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+    stack_id[s_i] = stack_id_cntr;
+    MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+    last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
+                                                    sizeof(struct top), real_sess_i);
+    state[s_i] = READ_TOP;
+  }
+  s_i = 0;
+  while(true) {
+    uint16_t real_sess_i = sess_offset + s_i;
+    switch (state[s_i]) {
+      case READ_TOP:
+        if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+        poll_a_req_blocking(real_sess_i, last_req_id[s_i]);
+        if (top[s_i].key_id != 0 && top[s_i].key_id < NUM_OF_RMW_KEYS) {
+          printf("Stack id %u points to key %u \n", stack_id[s_i], top[s_i].key_id);
+          assert(false);
+        }
+        if (success[s_i]) {
+          stack_id[s_i] = stack_id_cntr;
+          MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+          last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
+                                                          sizeof(struct top), real_sess_i);
+          success[s_i] = false;
+          c_stats[t_id].treiber_pushes++;
+          break;
+        }
+        new_node[s_i].next_key_id = top[s_i].key_id;
+        for (uint16_t i = 0; i < TREIBER_WRITES_NUM; i++) {
+          uint32_t key_to_write = key_offset + (s_i * TREIBER_WRITES_NUM) + i;
+          async_write_strong(key_to_write, (uint8_t *) &new_node[s_i],
+                             sizeof(struct node), real_sess_i);
+        }
 
-  do {
-    //success_cntr = 0;
-    for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
-      uint16_t real_sess_i = sess_offset + s_i;
-      if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
-      poll_a_req_blocking(real_sess_i, last_req_id[s_i]);
-      if (top[s_i].key_id != 0 && top[s_i].key_id < NUM_OF_RMW_KEYS) {
-        printf("Stack id %u points to key %u \n", stack_id[s_i], top[s_i].key_id);
-        assert(false);
-      }
-      if (success[s_i]) {
-        stack_id[s_i] = stack_id_cntr;
-        MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
-        last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
-                                                        sizeof(struct top), real_sess_i);
-        success[s_i] = false;
-        c_stats[t_id].treiber_pushes++;
-        continue;
-      }
-//      if (success[s_i]) {
-//        success_cntr++;
-//        continue;
-//      }
-      new_node[s_i].next_key_id = top[s_i].key_id;
-      async_write_strong(key_offset + s_i, (uint8_t *) &new_node[s_i],
-                         sizeof(struct node), real_sess_i);
-
-      new_top[s_i].counter = top[s_i].counter;
-      new_top[s_i].key_id = key_offset + s_i;
-      assert(new_top[s_i].key_id >= NUM_OF_RMW_KEYS);
-      last_req_id[s_i] = (uint32_t) async_cas_strong(stack_id[s_i], (uint8_t *) &top[s_i], (uint8_t *) &new_top[s_i],
-                                                     sizeof(struct top), &success[s_i], true, real_sess_i);
+        new_top[s_i].counter = top[s_i].counter;
+        new_top[s_i].key_id = key_offset + s_i;
+        assert(new_top[s_i].key_id >= NUM_OF_RMW_KEYS);
+        last_req_id[s_i] = (uint32_t) async_cas_strong(stack_id[s_i], (uint8_t *) &top[s_i], (uint8_t *) &new_top[s_i],
+                                                       sizeof(struct top), &success[s_i], true, real_sess_i);
+        break;
+      default: assert(false);
     }
-  } while(true);//(success_cntr < SESSIONS_PER_MACHINE);
+    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+  }
 
-  //printf("Completed %u pushes in %u stacks \n", SESSIONS_PER_MACHINE, SESSIONS_PER_MACHINE);
 }
 
 
