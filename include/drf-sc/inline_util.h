@@ -3944,18 +3944,25 @@ static inline void reset_read_message(struct pending_ops *p_ops)
   r_mes->l_id = 0;
   r_mes->coalesce_num = 0;
   info->message_size = (uint16_t) R_MES_HEADER;
+  info->max_rep_message_size = 0;
   info->reads_num = 0;
 }
 
 // Return a pointer, where the next request can be created -- Proposes, reads, acquires
 static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
-                              uint16_t t_id)
+                              bool is_rmw_acquire, uint16_t t_id)
 {
   bool is_propose = opcode == PROPOSE_OP;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_mes_info *info = &p_ops->r_fifo->info[r_mes_ptr];
   uint16_t new_size = get_read_size_from_opcode(opcode);
-  bool new_message = (info->message_size + new_size) > R_SEND_SIZE;
+  if (is_propose) info->max_rep_message_size += PROP_REP_SIZE;
+  else if (is_rmw_acquire) info->max_rep_message_size += RMW_ACQ_REP_SIZE;
+  else info->max_rep_message_size += R_REP_SIZE;
+
+  bool new_message_because_of_r_rep = info->max_rep_message_size > MTU;
+  bool new_message = (info->message_size + new_size) > R_SEND_SIZE ||
+            new_message_because_of_r_rep;
 
   if (new_message) {
     reset_read_message(p_ops);
@@ -3978,7 +3985,10 @@ static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
 
   uint32_t inside_r_ptr = info->message_size;
   info->message_size += new_size;
-  if (ENABLE_ASSERTIONS) assert(info->message_size <= R_SEND_SIZE);
+  if (ENABLE_ASSERTIONS) {
+    assert(info->message_size <= R_SEND_SIZE);
+    assert(info->max_rep_message_size <= MTU);
+  }
   return (void *) (((void *)r_mes) + inside_r_ptr);
 }
 
@@ -3989,7 +3999,7 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
 {
   if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
     check_loc_entry_metadata_is_reset(loc_entry, "insert_prop_to_read_fifo", t_id);
-  struct propose *prop = (struct propose*) get_r_ptr(p_ops, PROPOSE_OP, t_id);
+  struct propose *prop = (struct propose*) get_r_ptr(p_ops, PROPOSE_OP, false, t_id);
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_ptr];
   if (DEBUG_RMW)
@@ -4027,7 +4037,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
   struct read_info *r_info = &p_ops->read_info[r_ptr];
   bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
 
-  struct read *read = (struct read*) get_r_ptr(p_ops, r_info->opcode, t_id);
+  struct read *read = (struct read*) get_r_ptr(p_ops, r_info->opcode, is_rmw_acquire, t_id);
 
   // this means that the purpose of the read is solely to flip remote bits
   if (source == FROM_ACQUIRE) {
@@ -4101,6 +4111,7 @@ static inline void reset_write_message(struct pending_ops *p_ops)
   w_mes->l_id = 0;
   w_mes->coalesce_num = 0;
   info->message_size = (uint16_t) W_MES_HEADER;
+  info->max_rep_message_size = 0;
   info->writes_num = 0;
   info->is_release = false;
   info->valid_header_l_id = false;
@@ -4148,9 +4159,11 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
   bool new_message_because_of_release =
     release_or_acc ? (!coalesce_release(info, w_mes, session_id, t_id)) : false;
 
+  if (is_accept) info->max_rep_message_size += ACC_REP_SIZE;
+  bool new_message_because_of_r_rep = info->max_rep_message_size > MTU;
   bool new_message = ((info->message_size + new_size) > W_SEND_SIZE) ||
-                      new_message_because_of_release;// ||
-//                      new_message_because_of_accepts;
+                      new_message_because_of_release ||
+                      new_message_because_of_r_rep;
 
   if (ENABLE_ASSERTIONS && release_or_acc) {
     assert(p_ops->sess_info[session_id].writes_not_yet_inserted == 0);
@@ -6804,11 +6817,11 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, struc
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = (struct r_rep_message *) &r_rep_fifo->r_rep_message[r_rep_pull_ptr];
   uint8_t coalesce_num = r_rep_mes->coalesce_num;
-  struct rmw_rep_message *rmw_rep_mes = (struct rmw_rep_message *)r_rep_mes;
+  //struct rmw_rep_message *rmw_rep_mes = (struct rmw_rep_message *)r_rep_mes;
   //printf("%u\n", rmw_rep_mes->rmw_rep[0].opcode);
 
   send_sgl[mes_i].length = r_rep_fifo->message_sizes[r_rep_pull_ptr];
-  if (ENABLE_ASSERTIONS) assert(send_sgl[mes_i].length <= MAX_R_REP_MES_SIZE);
+  if (ENABLE_ASSERTIONS) assert(send_sgl[mes_i].length <= R_REP_SEND_SIZE);
   //printf("Forging a r_resp with size %u \n", send_sgl[mes_i].length);
   send_sgl[mes_i].addr = (uint64_t) (uintptr_t) r_rep_mes;
 

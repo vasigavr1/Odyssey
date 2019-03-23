@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 25
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -27,11 +27,11 @@
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 12
-#define W_CREDITS 10
-#define MAX_READ_SIZE 100 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
-#define MAX_WRITE_SIZE 1000 // in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define R_CREDITS 8
+#define W_CREDITS 8
+#define MAX_READ_SIZE 300 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
+#define MAX_WRITE_SIZE 1200 // in terms of bytes for Writes/Releases/Accepts/Commits
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -53,7 +53,7 @@
 #define ACCEPT_IS_RELEASE 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
-#define ENABLE_CLIENTS 0
+#define ENABLE_CLIENTS 1
 #define CLIENTS_PER_MACHINE_ 3
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
@@ -100,8 +100,8 @@
 #define ASYNC_TEST_CASE 0
 #define TREIBER_BLOCKING 0
 #define TREIBER_ASYNC 1
-#define TREIBER_WRITES_NUM 5
-#define PER_SESSION_REQ_NUM 50
+#define TREIBER_WRITES_NUM 2
+#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -136,7 +136,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 100000
+#define NUM_OF_RMW_KEYS 5000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -162,7 +162,7 @@
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
 #define RMW_BYTE_OFFSET 4 // the value starts 4 bytes in
-#define RMW_VALUE_SIZE 24 // (VALUE_SIZE - RMW_BYTE_OFFSET)
+#define RMW_VALUE_SIZE 16 // (VALUE_SIZE - RMW_BYTE_OFFSET)
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
@@ -268,10 +268,11 @@
 
 // COMBINE Reads, Acquires, RMW-acquires, Accepts , Propose
 #define MAX_R_REP_MES_SIZE MAX_OF_4(READ_REP_MES_SIZE, RMW_ACQ_REP_MES_SIZE, PROP_REP_MES_SIZE, ACC_REP_MES_SIZE)
-#define MAX_R_REP_COALESCE MAX_OF_3(R_COALESCE, PROP_COALESCE, ACC_COALESCE)
+#define R_REP_SEND_SIZE MIN(MAX_R_REP_MES_SIZE, MTU)
 
+#define MAX_R_REP_COALESCE MAX_OF_3(R_COALESCE, PROP_COALESCE, ACC_COALESCE)
 #define MAX_REPS_IN_REP MAX_R_REP_COALESCE
-#define R_REP_SEND_SIZE MAX_R_REP_MES_SIZE
+
 #define R_REP_SEND_SIDE_PADDING FIND_PADDING(R_REP_SEND_SIZE)
 #define ALIGNED_R_REP_SEND_SIDE (R_REP_SEND_SIZE + R_REP_SEND_SIDE_PADDING)
 #define R_REP_RECV_SIZE (GRH_SIZE + ALIGNED_R_REP_SEND_SIDE)
@@ -634,6 +635,7 @@ struct r_message_ud_req {
 struct r_mes_info {
   uint16_t reads_num; // all non propose messages count as reads
   uint16_t message_size;
+  uint16_t max_rep_message_size;
   uint32_t backward_ptr;
 };
 
@@ -648,6 +650,7 @@ struct rel_bit_vec{
 struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
+  uint16_t max_rep_message_size;
   uint16_t per_message_sess_id[MAX_MES_IN_WRITE];
   //used when creating the failure bit vector
   // and when checking to see if the session is ready to release

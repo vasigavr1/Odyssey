@@ -22,18 +22,18 @@ void static_assert_compile_parameters()
                 W_SEND_SIZE >= ACC_MES_SIZE &&
                 W_SEND_SIZE >= COM_MES_SIZE &&
                 W_SEND_SIZE <= MAX_WRITE_SIZE, "");
-  static_assert(W_SEND_SIZE < MTU, "");
+  static_assert(W_SEND_SIZE <= MTU, "");
   // READS
   static_assert(R_SEND_SIZE >= R_MES_SIZE &&
                 R_SEND_SIZE >= PROP_MES_SIZE &&
                 R_SEND_SIZE <= MAX_READ_SIZE, "");
-  static_assert(R_SEND_SIZE < MTU, "");
+  static_assert(R_SEND_SIZE <= MTU, "");
   // R_REPS
-  static_assert(R_REP_SEND_SIZE >= PROP_REP_MES_SIZE &&
-                R_REP_SEND_SIZE >= ACC_REP_MES_SIZE &&
-                R_REP_SEND_SIZE >= READ_REP_MES_SIZE &&
-                R_REP_SEND_SIZE >= RMW_ACQ_REP_MES_SIZE, "");
-  static_assert(R_REP_SEND_SIZE < MTU, "");
+//  static_assert(R_REP_SEND_SIZE >= PROP_REP_MES_SIZE &&
+//                R_REP_SEND_SIZE >= ACC_REP_MES_SIZE &&
+//                R_REP_SEND_SIZE >= READ_REP_MES_SIZE &&
+//                R_REP_SEND_SIZE >= RMW_ACQ_REP_MES_SIZE, "");
+  static_assert(R_REP_SEND_SIZE <= MTU, "");
 
   // COALESCING
   static_assert(MAX_WRITE_COALESCE < 256, "");
