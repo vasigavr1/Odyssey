@@ -41,10 +41,10 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 100// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -99,8 +99,11 @@
 #define BLOCKING_TEST_CASE 0
 #define ASYNC_TEST_CASE 0
 #define TREIBER_BLOCKING 0
-#define TREIBER_ASYNC 1
-#define TREIBER_WRITES_NUM 2
+#define TREIBER_ASYNC 0
+#define MSQ_ASYNC 1
+#define TREIBER_WRITES_NUM 1
+#define MS_WRITES_NUM 1
+
 #define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
 
@@ -136,7 +139,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 5000
+#define NUM_OF_RMW_KEYS 15000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
