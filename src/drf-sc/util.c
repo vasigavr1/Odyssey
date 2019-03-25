@@ -1023,7 +1023,9 @@ void randomize_op_values(struct trace_op *ops, uint16_t t_id)
 {
   if (!ENABLE_CLIENTS) {
     for (uint16_t i = 0; i < MAX_OP_BATCH; i++) {
-      if (rand() % 1000 < RMW_CAS_CANCEL_RATIO)
+      if (TRACE_ONLY_FA)
+        ops[i].value[0] = 1;
+      else if (rand() % 1000 < RMW_CAS_CANCEL_RATIO)
         memset(ops[i].value, 1, VALUE_SIZE);
       else memset(ops[i].value, 0, VALUE_SIZE);
     }

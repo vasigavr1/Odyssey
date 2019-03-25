@@ -1635,7 +1635,7 @@ static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id
     //  red_printf ("vale_to write/log no %u/%u",
      //             *(uint32_t *)loc_entry->value_to_write, committed_log_no );
     uint64_t val = *(uint64_t *)loc_entry->value_to_read;
-    assert(val == loc_entry->accepted_log_no - 1);
+    //assert(val == loc_entry->accepted_log_no - 1);
     fprintf(rmw_verify_fp[t_id], "%u %lu %u \n", loc_entry->key.bkt, val, loc_entry->accepted_log_no);
   }
 }
@@ -2066,23 +2066,31 @@ static inline void set_conf_bit_after_detecting_failure(const uint16_t t_id, con
 static inline void signal_completion_to_client(uint32_t sess_id,
                                                uint32_t req_array_i, uint16_t t_id)
 {
-  struct client_op * req_array = &interface[t_id].req_array[sess_id][req_array_i];
-  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-  if (ENABLE_CLIENTS)
-    atomic_store_explicit(&req_array->state, COMPLETED_REQ, memory_order_release);
-  if (CLIENT_DEBUG)
-    green_printf("Releasing sess %u, ptr_to_req %u ptr %p \n", sess_id,
-                 req_array_i, &req_array->state);
+  if (ENABLE_CLIENTS) {
+    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
+    check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+    check_state_with_allowed_flags(2, req_array->state, IN_PROGRESS_REQ);
+
+    atomic_store_explicit(&req_array->state, (uint8_t) COMPLETED_REQ, memory_order_release);
+    if (CLIENT_DEBUG)
+      green_printf("Releasing sess %u, ptr_to_req %u ptr %p \n", sess_id,
+                   req_array_i, &req_array->state);
+  }
 }
 
 // singal that the requuqest is being processed to tne client
 static inline void signal_in_progress_to_client(uint32_t sess_id,
                                                 uint32_t req_array_i, uint16_t t_id)
 {
-  struct client_op * req_array = &interface[t_id].req_array[sess_id][req_array_i];
-  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-  if (ENABLE_CLIENTS)
-    atomic_store_explicit(&req_array->state, IN_PROGRESS_REQ, memory_order_release);
+  if (ENABLE_CLIENTS) {
+    //printf("Wrkr %u sess %u signals in progress for  poll ptr %u for req at state %u \n", t_id,
+    //       sess_id, req_array_i,
+    //       interface[t_id].req_array[sess_id][sess_id].state);
+    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
+    check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+    check_state_with_allowed_flags(2, req_array->state, ACTIVE_REQ);
+    atomic_store_explicit(&req_array->state, (uint8_t) IN_PROGRESS_REQ, memory_order_release);
+  }
 }
 
 // Returns whether a certain request is active, i.e. if the client has issued a request in a slot
@@ -3803,6 +3811,7 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
    case FETCH_AND_ADD:
      memcpy(loc_entry->value_to_read, &kv_pair->value[RMW_BYTE_OFFSET], loc_entry->rmw_val_len);
      *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + (*(uint64_t *)loc_entry->compare_val);
+     if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS) assert((*(uint64_t *)loc_entry->compare_val == 1));
      //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
      break;
    case COMPARE_AND_SWAP_WEAK:
@@ -4514,6 +4523,10 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
     value_to_read = interface[t_id].req_array[working_session][pull_ptr].value_to_read;
     real_val_len = interface[t_id].req_array[working_session][pull_ptr].val_len;
     if (ENABLE_ASSERTIONS) assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
+    //printf("Wrkr %u sess %u saves poll ptr %u for req at state %u \n", t_id,
+    //       working_session,
+    //       op->index_to_req_array,
+    //       interface[t_id].req_array[working_session][ op->index_to_req_array].state);
   }
   else {
     check_trace_req(p_ops, &trace[trace_iter], working_session, t_id);
@@ -4579,7 +4592,11 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
   //yellow_printf("Wrkr %u, session %u, opcode %u \n", t_id, working_session, op->opcode);
   *writes_num_ = writes_num, *reads_num_ = reads_num;
-  if (ENABLE_CLIENTS) MOD_ADD(interface[t_id].wrkr_pull_ptr[working_session], PER_SESSION_REQ_NUM);
+  if (ENABLE_CLIENTS) {
+    signal_in_progress_to_client(op->session_id, op->index_to_req_array, t_id);
+    if (ENABLE_ASSERTIONS) assert(interface[t_id].wrkr_pull_ptr[working_session] == op->index_to_req_array);
+    MOD_ADD(interface[t_id].wrkr_pull_ptr[working_session], PER_SESSION_REQ_NUM);
+  }
   debug_set_version_of_op_to_one(op, opcode, t_id);
   return false;
 }
@@ -4644,7 +4661,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
   //cyan_printf("thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
   for (uint16_t i = 0; i < op_i; i++) {
-    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
+//    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     //printf("%u %u \n", i, ops[i].opcode);
 
     // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
@@ -4658,7 +4675,8 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
    if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
-      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
+     printf("Completing local read \n");
+     signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // Writes
     else if (resp[i].type == CACHE_PUT_SUCCESS) {

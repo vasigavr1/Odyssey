@@ -14,7 +14,7 @@ using namespace std;
 
 const uint word_entries = 3;
 const bool print_read_words = false;
-const uint keys_num = 1000;
+const uint keys_num = 15000;
 const uint max_log_no = 100000;
 const uint malignant_log_gap_threshold = 50;
 const bool print_array = false;
@@ -242,7 +242,7 @@ int main()
         if (key_map.find(word_val) == key_map.end()) { // key not found
           key_map.insert(make_pair(word_val, keys_encountered));
           index_to_key[keys_encountered] = word_val;
-          if (keys_encountered >= 1000) {
+          if (keys_encountered >= keys_num) {
             printf("Encountered %u keys, key bkt %lu in line %u: I consider this a file-related error "
                      "that has nothing to do with Paxos and move to the next file\n",
                    keys_encountered, word_val, lines_no);

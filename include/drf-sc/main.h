@@ -31,7 +31,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 1200 // in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -44,8 +44,8 @@
 #define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 000 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
@@ -54,7 +54,7 @@
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 3
+#define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
@@ -71,7 +71,7 @@
 
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 0
+#define EXIT_ON_PRINT 1
 #define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
@@ -892,7 +892,7 @@ struct rmw_local_entry {
   bool rmw_is_successful; // was the RMW (if CAS) successful
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
-  uint8_t *compare_val; //for CAS
+  uint8_t *compare_val; //for CAS- add value for FAA
   uint32_t rmw_val_len;
   struct rmw_id rmw_id; // this is implicitly the l_id
   struct rmw_id last_registered_rmw_id;
@@ -1062,7 +1062,7 @@ struct trace_op {
 #define INVALID_REQ 0 // entry not being used
 #define ACTIVE_REQ 1 // client has issued a reqs
 #define IN_PROGRESS_REQ 2 // worker has picked up the req
-#define COMPLETED_REQ 3 // wroker has completed the req
+#define COMPLETED_REQ 3 // worker has completed the req
 
 #define RAW_CLIENT_OP_SIZE (8 + TRUE_KEY_SIZE + VALUE_SIZE + 8 + 8)
 #define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))

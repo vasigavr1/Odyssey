@@ -72,7 +72,7 @@ static inline  uint32_t  send_reqs_from_trace(uint16_t worker_num, uint16_t firs
                         t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
         interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
         memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, TRUE_KEY_SIZE);
-        atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, ACTIVE_REQ, memory_order_release);
+        atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ, memory_order_release);
         MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
         trace_ptr++;
         if (trace[trace_ptr].opcode == NOP) trace_ptr = 0;
@@ -119,7 +119,11 @@ static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * v
  return 1;
 }
 
-
+static inline void check_push_pull_ptrs(uint16_t session_id)
+{
+  if (ENABLE_ASSERTIONS)
+    assert(last_pushed_req[session_id] - last_pulled_req[session_id] == PER_SESSION_REQ_NUM);
+}
 //
 static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint8_t type,
                                   uint8_t *value_to_read, uint8_t *value_to_write, uint32_t val_len,
@@ -199,12 +203,15 @@ static inline uint64_t poll(uint16_t session_id)
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
   uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
   uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
-  while (interface[wrkr].req_array[s_i][pull_ptr].state == COMPLETED_REQ) {
+  struct client_op *pull_clt_op = &interface[wrkr].req_array[s_i][pull_ptr];
+  struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][interface[wrkr].clt_push_ptr[s_i]];
+  while (pull_clt_op->state == COMPLETED_REQ) {
     // get the result
     if (CLIENT_DEBUG)
-      green_printf("Client  pulling req from worker %u for session %u, slot %u\n",
-                    wrkr, s_i, pull_ptr);
-    atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
+      green_printf("Client  pulling req from worker %u for session %u, slot %u, last_pulled %u \n",
+                    wrkr, s_i, pull_ptr, last_pulled_req[session_id]);
+    atomic_store_explicit(&pull_clt_op->state, (uint8_t) INVALID_REQ, memory_order_relaxed);
+    check_state_with_allowed_flags(2, push_clt_op->state, INVALID_REQ);
     MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
     last_pulled_req[session_id]++; // no races across clients
   }
@@ -235,6 +242,13 @@ static inline void poll_one_req_blocking(uint16_t session_id)
 {
   uint64_t largest_polled = last_pulled_req[session_id];
   while (poll(session_id) <= largest_polled);
+  if (ENABLE_ASSERTIONS) {
+    uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
+    uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
+    uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
+    struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
+    check_state_with_allowed_flags(2, push_clt_op->state, INVALID_REQ);
+  }
 }
 
 static inline bool is_polled(uint16_t session_id, uint64_t target)
@@ -269,7 +283,7 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
   fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, val_len, cas_result, rmw_is_weak);
 
   // Implicit assumption: other client threads are not racing for this slot
-  atomic_store_explicit(&cl_op->state, ACTIVE_REQ, memory_order_release);
+  atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
   MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
   last_pushed_req[session_id]++;
 
@@ -300,17 +314,20 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
   uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
   uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
+  struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
 
   // let's poll for the slot first
-  if (interface[wrkr].req_array[s_i][push_ptr].state != INVALID_REQ) {
+  if (push_clt_op->state != INVALID_REQ) {
+    check_push_pull_ptrs(session_id);
     // try to do some polling
     poll(session_id);
-    if (interface[wrkr].req_array[s_i][push_ptr].state != INVALID_REQ) {
+    if (push_clt_op->state != INVALID_REQ) {
+      //check_push_pull_ptrs(session_id);
       if (strong) {
         poll_one_req_blocking(session_id);
-        assert(interface[wrkr].req_array[s_i][push_ptr].state == INVALID_REQ);
+        check_state_with_allowed_flags (2, push_clt_op->state, INVALID_REQ);
       }
-      else  return NO_SLOT_TO_ISSUE_REQUEST;
+      else return NO_SLOT_TO_ISSUE_REQUEST;
     }
   }
   // Issuing the request
@@ -318,8 +335,11 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, val_len, cas_result, rmw_is_weak);
 
   // Implicit assumption: other client threads are not racing for this slot
-  atomic_store_explicit(&cl_op->state, ACTIVE_REQ, memory_order_release);
+  atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
   MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+  if (wrkr == 0 && s_i == 0) {
+    printf("Pushed a req new push ptr %u \n", interface[wrkr].clt_push_ptr[s_i]);
+  }
   last_pushed_req[session_id]++;
   return (int)last_pushed_req[session_id];
 }
@@ -1036,18 +1056,18 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
   uint32_t dummy_key = DUMMY_KEY_ID_OFFSET,
     tail_key_id = TAIL_KEY_ID_OFFSET,
     head_key_id = HEAD_KEY_ID_OFFSET;
-
+  printf("Client %u uses sessions from %u to %u \n", t_id, sess_offset,  sess_offset + SESSIONS_PER_CLIENT -1);
   for(uint32_t q_i = 0; q_i < MS_QUEUES_NUM; q_i++) {
     tail.key_id = dummy_key;
     head.key_id = dummy_key;
     uint16_t real_sess_i = sess_offset + s_i;
+    //printf("pushing a req for key %u \n", dummy_key);
     async_write_strong(dummy_key, (uint8_t *) &tail,
                        sizeof(struct ms_ptr), real_sess_i);
+
     dummy_key++; tail_key_id++; head_key_id++;
     MOD_ADD(s_i, SESSIONS_PER_CLIENT);
   }
-
-
   printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);
 
 }
@@ -1076,7 +1096,7 @@ static inline void ms_enqueue_blocking(uint16_t t_id)
     }
   }
 
-
+  while(true);
   uint32_t queue_id[SESSIONS_PER_CLIENT] = {0}; // Which queue is the session working on
   uint32_t q_id_cntr = (uint32_t) machine_id * 100;
 
@@ -1095,7 +1115,9 @@ static inline void ms_enqueue_blocking(uint16_t t_id)
       (uint32_t) async_read_strong(queue_id[s_i], (uint8_t *) &tail[s_i],
                                    sizeof(struct top), real_sess_i);
 
+    printf("S_i %u reading on pull ptr %u \n", s_i, last_req_id[s_i]);
     poll_a_req_blocking(real_sess_i, last_req_id[s_i]);
+    printf("polled a req \n");
     async_read_strong(tail[s_i].key_id, (uint8_t *) &last_node[s_i],
                       sizeof(struct top), real_sess_i);
 
