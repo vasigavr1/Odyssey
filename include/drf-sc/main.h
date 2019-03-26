@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define SESSIONS_PER_THREAD 5
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -72,7 +72,7 @@
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
 #define EXIT_ON_PRINT 1
-#define PRINT_NUM 4
+#define PRINT_NUM 1
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
 #define DUMP_STATS_2_FILE 0
@@ -99,10 +99,11 @@
 #define BLOCKING_TEST_CASE 0
 #define ASYNC_TEST_CASE 0
 #define TREIBER_BLOCKING 0
-#define TREIBER_ASYNC 0
-#define MSQ_ASYNC 1
+#define TREIBER_ASYNC 1
+#define MSQ_ASYNC 0
 #define TREIBER_WRITES_NUM 1
 #define MS_WRITES_NUM 1
+#define CLIENT_LOGS 0
 
 #define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
@@ -1223,6 +1224,7 @@ extern const uint16_t machine_bit_id[16];
 extern atomic_bool print_for_debug;
 extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
+extern FILE* client_log[CLIENTS_PER_MACHINE];
 
 
 

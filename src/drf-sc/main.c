@@ -22,6 +22,7 @@ struct rmw_info rmw;
 atomic_uint_fast32_t next_rmw_entry_available;
 atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
+FILE* client_log[CLIENTS_PER_MACHINE];
 
 //struct client_op req_array[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
 //atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
@@ -68,6 +69,12 @@ int main(int argc, char *argv[])
 		}
     else {
 			assert(ENABLE_CLIENTS);
+      if (CLIENT_LOGS) {
+        uint16_t cl_id = (uint16_t) (i - WORKERS_PER_MACHINE);
+        char fp_name[40];
+        sprintf(fp_name, "cLogs/client%u.out", cl_id);
+        client_log[cl_id] = fopen(fp_name, "w+");
+      }
 			spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
                     &attr, thread_arr, client, occupied_cores);
 		}

@@ -4675,7 +4675,6 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
    if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
-     printf("Completing local read \n");
      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // Writes
@@ -6550,7 +6549,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
   if (ENABLE_ASSERTIONS) {
     assert(coalesce_num > 0);
-    assert(send_sgl[br_i].length <= R_MES_SIZE);
+    assert(send_sgl[br_i].length <= R_SEND_SIZE);
   }
 
   if (DEBUG_READS && all_reads)

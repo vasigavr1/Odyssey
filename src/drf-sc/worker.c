@@ -176,17 +176,17 @@ void *worker(void *arg)
       print_verbouse_debug_info(p_ops, t_id, credits);
     }
     if (ENABLE_ASSERTIONS) {
-      loop_counter++;
-      if (loop_counter == M_16) {
-        //printf("Wrkr %u is working rectified keys %lu \n",
-        //       t_id, t_stats[t_id].rectified_keys);
-        if (t_id == 0)
-          printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
-                   "epoch_id %u, reqs %lld \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
-                 t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
-                 t_stats[t_id].cache_hits_per_thread);
-        loop_counter = 0;
-      }
+//      loop_counter++;
+//      if (loop_counter == M_16) {
+//        //printf("Wrkr %u is working rectified keys %lu \n",
+//        //       t_id, t_stats[t_id].rectified_keys);
+//        if (t_id == 0)
+//          printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
+//                   "epoch_id %u, reqs %lld \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+//                 t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
+//                 t_stats[t_id].cache_hits_per_thread);
+//        loop_counter = 0;
+//      }
     }
 
     /* ---------------------------------------------------------------------------
