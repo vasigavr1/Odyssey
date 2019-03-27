@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
 #define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 5
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -54,7 +54,7 @@
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 1
+#define CLIENTS_PER_MACHINE_ 3
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
@@ -71,10 +71,11 @@
 
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 1
+#define EXIT_ON_PRINT 0
 #define PRINT_NUM 1
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
+#define COMMIT_LOGS 0
 #define DUMP_STATS_2_FILE 0
 
 // MACROS
@@ -310,6 +311,10 @@
 #define NEEDS_GLOBAL 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
+
+// Broadcast Commits from helps in 2 occassions:
+// 1. You are helping someone
+// 2. You ahve received an already committed message
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
 #define TS_STALE_ON_REMOTE_KVS 8
@@ -909,6 +914,12 @@ struct rmw_local_entry {
   cache_meta *ptr_to_kv_pair;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
+};
+
+struct top {
+  uint32_t key_id;
+  uint32_t pop_counter;
+  uint32_t push_counter;
 };
 
 // Local state of pending RMWs - one entry per session
