@@ -227,25 +227,35 @@ inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write 
       long long *key_ptr_req = (long long *) op;
       if (key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
         key_in_store[op_i] = 1;
-        if (op->opcode == CACHE_OP_PUT || op->opcode == OP_RELEASE ||
-            op->opcode == OP_ACQUIRE) {
-          if (ENABLE_ASSERTIONS)
-            assert(kv_ptr[op_i]->opcode != KEY_HAS_BEEN_RMWED);
-          KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
+        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
+          if (op->opcode == CACHE_OP_PUT || op->opcode == OP_RELEASE ||
+              op->opcode == OP_ACQUIRE) {
+            KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
+          }
+          else if (ENABLE_ASSERTIONS) {
+            red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
+                         "m_id %u, val_len %u, version %u , \n",
+                       t_id, op->opcode, op_i, op->key.meta.m_id,
+                       op->val_len, op->key.meta.version);
+            assert(0);
+          }
         }
-        else if (op->opcode == ACCEPT_OP) {
-          KVS_updates_accepts(op, kv_ptr[op_i], p_ops, op_i, t_id);
+        else if (ENABLE_RMWS) {
+          if (op->opcode == ACCEPT_OP) {
+            KVS_updates_accepts(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (op->opcode == COMMIT_OP) {
+            KVS_updates_commits(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          }
+          else if (ENABLE_ASSERTIONS) {
+            red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
+                         "m_id %u, val_len %u, version %u , \n",
+                       t_id, op->opcode, op_i, op->key.meta.m_id,
+                       op->val_len, op->key.meta.version);
+            assert(0);
+          }
         }
-        else if (op->opcode == COMMIT_OP) {
-          KVS_updates_commits(op, kv_ptr[op_i], p_ops, op_i, t_id);
-        }
-        else if (ENABLE_ASSERTIONS) {
-          red_printf("Wrkr %u, cache batch update: wrong opcode in cache: %d, req %d, "
-                       "m_id %u, val_len %u, version %u , \n",
-                     t_id, op->opcode, op_i, op->key.meta.m_id,
-                     op->val_len, op->key.meta.version);
-          assert(0);
-        }
+        else if (ENABLE_ASSERTIONS) assert(false);
       }
       if (key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
         if (ENABLE_ASSERTIONS) assert(false);

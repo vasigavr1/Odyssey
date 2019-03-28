@@ -104,9 +104,9 @@
 #define MSQ_ASYNC 0
 #define TREIBER_WRITES_NUM 1
 #define MS_WRITES_NUM 1
-#define CLIENT_LOGS 0
+#define CLIENT_LOGS 1
 
-#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
+#define PER_SESSION_REQ_NUM 25 //(TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -149,7 +149,7 @@
 #define ENABLE_CAS_CANCELLING 1
 #define RMW_CAS_CANCEL_RATIO 400 // out of 1000
 #define USE_WEAK_CAS 1
-
+#define MAX_TR_NODE_KEY ((GLOBAL_SESSION_NUM * TREIBER_WRITES_NUM) + NUM_OF_RMW_KEYS)
 // QUEUE PAIRS
 #define QP_NUM 4
 #define R_QP_ID 0
@@ -920,6 +920,12 @@ struct top {
   uint32_t key_id;
   uint32_t pop_counter;
   uint32_t push_counter;
+};
+#define NODE_SIZE (VALUE_SIZE - 4)
+#define NODE_SIGNATURE 144
+struct node {
+  uint8_t value[NODE_SIZE];
+  uint32_t next_key_id;
 };
 
 // Local state of pending RMWs - one entry per session

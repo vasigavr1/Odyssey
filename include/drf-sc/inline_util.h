@@ -623,25 +623,25 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
 static inline bool check_top(struct top *top, char *message,
                              uint32_t stack_id)
 {
-  if (ENABLE_ASSERTIONS) {
+  //if (ENABLE_ASSERTIONS) {
     assert(top->push_counter >= top->pop_counter);
 
     if (top->push_counter == top->pop_counter) {
       if (top->key_id != 0) { // Stack must be empty
-        red_printf("%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
-                   message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        //red_printf("%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
+        //           message, stack_id, top->push_counter, top->pop_counter, top->key_id);
         return false;
         assert(false);
       }
     } else if (top->push_counter > top->pop_counter) {
       if (top->key_id < NUM_OF_RMW_KEYS) { // Stack cannot be empty
-        red_printf("%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
-                   message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        //red_printf("%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
+        //           message, stack_id, top->push_counter, top->pop_counter, top->key_id);
         return false;
         assert(false);
       }
     }
-  }
+  //}
   return true;
 }
 
@@ -670,6 +670,23 @@ static inline bool are_tops_equal(struct top *top, struct top *comp_top)
   return (top->key_id == comp_top->key_id &&
           top->push_counter == comp_top->push_counter &&
           top->pop_counter == comp_top->pop_counter);
+}
+
+
+
+static inline void check_node(uint8_t *val, char *message,
+                              uint32_t key_bkt)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct node *node = (struct node *) val;
+    if (node->next_key_id == 0) return;
+    if (node->next_key_id >= NUM_OF_RMW_KEYS && node->next_key_id <= MAX_TR_NODE_KEY)
+     return;
+
+    red_printf("%s node key id %u, bkt %u\n",
+               message, node->next_key_id, key_bkt);
+    assert(false);
+  }
 }
 
 static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_no, uint8_t *old_value,
@@ -1116,7 +1133,8 @@ static inline void print_and_check_mes_when_polling_r_reps(struct r_rep_message 
   }
 }
 
-static inline void increase_credits_when_polling_r_reps(uint16_t credits[][MACHINE_NUM], bool increase_w_credits,
+static inline void increase_credits_when_polling_r_reps(uint16_t credits[][MACHINE_NUM],
+                                                        bool increase_w_credits,
                                                         uint8_t rem_m_id, uint16_t t_id)
 {
   if (!increase_w_credits) credits[R_VC][rem_m_id]++;
@@ -2665,6 +2683,9 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
         break;
       case CACHE_OP_PUT:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
+        check_node(write->value, "set_w_state_for_each_write", write->key.bkt);
+        struct node *node = (struct node *) write->value;
+        assert(node->value[0] == NODE_SIGNATURE);
         update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
         w_meta->acks_expected = q_info->active_num;
         *w_state = SENT_PUT;
@@ -2797,6 +2818,8 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   if (source == FROM_TRACE) {
     struct trace_op *tr_op = (struct trace_op *) op;
     memcpy(&write->version, (void *) &op->key.meta.version, 4 + TRUE_KEY_SIZE + 2);
+    if (ENABLE_ASSERTIONS) assert(tr_op->real_val_len <= VALUE_SIZE);
+    check_node(tr_op->value_to_write, "when inserting", write->key.bkt);
     memcpy(write->value, tr_op->value_to_write, tr_op->real_val_len);
     write->m_id = (uint8_t) machine_id;
   }
@@ -3182,6 +3205,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
                                   uint16_t t_id, struct rmw_local_entry* loc_entry)
 {
   loc_entry->opcode = prop->opcode;
+  if (ENABLE_ASSERTIONS) assert(prop->real_val_len <= RMW_VALUE_SIZE);
   if (opcode_is_compare_rmw(prop->opcode) || prop->opcode == RMW_PLAIN_WRITE)
     memcpy(loc_entry->value_to_write, prop->value_to_write, prop->real_val_len);
   loc_entry->killable = prop->opcode == COMPARE_AND_SWAP_WEAK;
@@ -3838,7 +3862,12 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
     if (!read_info->seen_larger_ts) {
       assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
       read_info->times_seen_ts = 1;
-      memcpy(read_info->value, r_rep->value, read_info->val_len);
+      if (r_rep->opcode == TS_GREATER) {
+        check_node(read_info->value, "read_info on greater rep 1- before", read_info->key.bkt);
+        if (ENABLE_ASSERTIONS) assert(read_info->val_len <= VALUE_SIZE);
+        memcpy(read_info->value, r_rep->value, read_info->val_len);
+      }
+      check_node(read_info->value, "read_info on greater rep 1- after", read_info->key.bkt);
       read_info->seen_larger_ts = true;
     }
     else { // if the read has already received a "greater" ts
@@ -3846,7 +3875,13 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
       if (ts_comp == GREATER) {
         assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
         read_info->times_seen_ts = 1;
-        memcpy(read_info->value, r_rep->value, read_info->val_len);
+        if (r_rep->opcode == TS_GREATER) {
+          check_node(read_info->value, "read_info on greater rep 2- before", read_info->key.bkt);
+          if (ENABLE_ASSERTIONS) assert(read_info->val_len <= VALUE_SIZE);
+          memcpy(read_info->value, r_rep->value, read_info->val_len);
+
+        }
+        check_node(read_info->value, "read_info on greater rep 2- after", read_info->key.bkt);
       }
       if (ts_comp == EQUAL) read_info->times_seen_ts++;
       // Nothing to do if the the incoming is smaller than the already stored
@@ -3862,6 +3897,11 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
   }
   // assert(read_info->rep_num == 0);
   read_info->rep_num++;
+
+  {
+    if (read_info->opcode == CACHE_OP_PUT)
+      check_node(read_info->value, "read_info on recv rep- after", read_info->key.bkt);
+  }
 }
 
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
@@ -3974,16 +4014,29 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
        assert(pushing || popping);
        if (pushing) assert(new_top->pop_counter == top->pop_counter);
        if (popping) assert(new_top->push_counter == top->push_counter);
+
+      //new top is supposed to be
        if (new_top->push_counter > new_top->pop_counter && new_top->key_id == 0) {
-         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u pushing %d\n",
+         struct key new_top_key, top_key;
+         uint64_t key_hash = CityHash128((char *) &(new_top->key_id), 4).second;
+         memcpy(&new_top_key, &key_hash, TRUE_KEY_SIZE);
+         key_hash = CityHash128((char *) &(top->key_id), 4).second;
+         memcpy(&top_key, &key_hash, TRUE_KEY_SIZE);
+
+         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u %u/%u pushing %d\n",
                     loc_entry->log_no, loc_entry->key.bkt, new_top->push_counter, new_top->pop_counter,
-                    top->key_id, new_top->key_id,pushing);
+                    top->key_id, new_top->key_id, top_key.bkt, new_top_key.bkt, pushing);
          exit(0); // this is a hard error: a malformed new_top should never be able to find the same top
        }
        else if (new_top->push_counter == new_top->pop_counter && new_top->key_id > 0) {
-         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u pushing %d\n",
+         struct key new_top_key, top_key;
+         uint64_t key_hash = CityHash128((char *) &(new_top->key_id), 4).second;
+         memcpy(&new_top_key, &key_hash, TRUE_KEY_SIZE);
+         key_hash = CityHash128((char *) &(top->key_id), 4).second;
+         memcpy(&top_key, &key_hash, TRUE_KEY_SIZE);
+         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u %u/%u pushing %d\n",
                     loc_entry->log_no, loc_entry->key.bkt, new_top->push_counter, new_top->pop_counter,
-                    top->key_id, new_top->key_id, pushing);
+                    top->key_id, new_top->key_id, top_key.bkt, new_top_key.bkt, pushing);
          exit(0); // this is a hard error: a malformed new_top should never be able to find the same top
        }
        assert(top->key_id == comp_top->key_id &&
@@ -4013,6 +4066,7 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
   // memcmp() returns 0 if regions are equal. Thus the CAS fails if the result is not zero
   bool rmw_fails = memcmp(compare_val, kv_ptr_value, val_len) != 0;
   if (ENABLE_STAT_COUNTING && rmw_fails) {
+    //assert(false);
     t_stats[t_id].cancelled_rmws++;
   }
   return rmw_fails;
@@ -4041,6 +4095,7 @@ static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, s
 static inline bool does_rmw_fail_early(struct trace_op *op, struct cache_op *kv_ptr,
                                        struct cache_resp *resp, uint16_t t_id)
 {
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
   if (op->opcode == COMPARE_AND_SWAP_WEAK &&
      rmw_compare_fails(op->opcode, op->value_to_read,
                        &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len, t_id)) {
@@ -4307,8 +4362,8 @@ static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w
    **/
   for (uint8_t i = 0; i < w_mes->coalesce_num; i++) {
     if (session_id == info->per_message_sess_id[i]) {
-      //printf("Wrkr %u release is of session %u, which exists in write %u/%u \n",
-      //       t_id,session_id, i, w_mes->coalesce_num);
+//      printf("Wrkr %u release is of session %u, which exists in write %u/%u \n",
+//             t_id,session_id, i, w_mes->coalesce_num);
       return false;
     }
   }
@@ -4501,6 +4556,17 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
   }
   //if (t_id == 1) printf("Wrkr %u Validating state at ptr %u \n", t_id, w_ptr);
   p_ops->w_meta[w_ptr].w_state = VALID;
+  {
+    if (write->opcode == CACHE_OP_PUT) {
+      struct node *node = (struct node *) write->value;
+      if (node->next_key_id > MAX_TR_NODE_KEY)
+        red_printf("Source %d, key_id %u bkt %u \n", source, node->next_key_id, write->key.bkt);
+      check_node(write->value, "when inserting-in the end", write->key.bkt);
+
+      node->value[0] = NODE_SIGNATURE;
+    }
+
+  }
   if (ENABLE_ASSERTIONS) {
     if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   }
@@ -4723,15 +4789,15 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
         (*sizes_dbg_cntr)++;
         if (*sizes_dbg_cntr == M_32) {
           *sizes_dbg_cntr = 0;
-          printf("breaking due to max allowed size r_size %u/%d w_size %u/%u \n",
-                 p_ops->virt_r_size + reads_num, MAX_ALLOWED_R_SIZE,
+          printf("Wrkr %u breaking due to max allowed size r_size %u/%d w_size %u/%u \n",
+                 t_id, p_ops->virt_r_size + reads_num, MAX_ALLOWED_R_SIZE,
                  p_ops->virt_w_size + writes_num, MAX_ALLOWED_W_SIZE);
         }
       }
       return true;
     } else if (ENABLE_ASSERTIONS) *sizes_dbg_cntr = 0;
   }
-
+  memcpy(&op->key, key, TRUE_KEY_SIZE);
   bool is_update = (opcode == (uint8_t) CACHE_OP_PUT ||
                     opcode == (uint8_t) OP_RELEASE);
   bool is_rmw = opcode_is_rmw(opcode);
@@ -4743,12 +4809,13 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   }
   op->real_val_len = real_val_len;
   if (opcode == CACHE_OP_PUT) {
+    check_node(op->value_to_write, "when tracing", op->key.bkt);
     add_request_to_sess_info(&p_ops->sess_info[working_session], t_id);
   }
 
   //if (is_rmw) printf("rmw \n");
   increment_per_req_counters(opcode, t_id);
-  memcpy(&op->key, key, TRUE_KEY_SIZE);
+
   op->opcode = opcode;
   op->val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
   if (op->opcode == OP_RELEASE ||
@@ -4847,13 +4914,13 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     }
     check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
-   if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
-     signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
+    if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
+      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // Writes
     else if (resp[i].type == CACHE_PUT_SUCCESS) {
-      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
       insert_write(p_ops, (struct cache_op *) &ops[i], FROM_TRACE, 0, t_id);
+      signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // RMWS
     else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
@@ -6248,7 +6315,8 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     loc_entry->killable = (loc_entry->state == RETRY_WITH_BIGGER_TS ||
                            loc_entry->state == NEEDS_GLOBAL) &&
                            loc_entry->accepted_log_no == 0 &&
-                           opcode_is_compare_rmw(loc_entry->opcode);
+                           loc_entry->opcode == COMPARE_AND_SWAP_WEAK;
+
   }
   // CLEAN_UP
   if (loc_entry->state == RETRY_WITH_BIGGER_TS) {
@@ -6974,6 +7042,11 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (!EMULATE_ABD) handle_configuration_on_receiving_rel(write, t_id);
       if (ENABLE_ASSERTIONS) assert(write->opcode != ACCEPT_OP_BIT_VECTOR);
 
+      if (write->opcode != ACCEPT_OP && write->opcode != COMMIT_OP) {
+        assert(write->opcode == CACHE_OP_PUT);
+        check_node(write->value, "polling a write", write->key.bkt);
+      }
+
       if (write->opcode != NO_OP_RELEASE) {
         p_ops->ptrs_to_mes_ops[running_writes_for_kvs] = (((void *) write) - 3); // align with cache_op
         if (write->opcode == ACCEPT_OP) {
@@ -6996,7 +7069,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (ENABLE_ASSERTIONS) assert(writes_to_be_acked > 0);
       if (!ack_bookkeeping(&acks[w_mes->m_id], writes_to_be_acked, w_mes->l_id, w_mes->m_id, t_id)) {
         (*completed_but_not_polled_writes) = completed_messages - polled_messages;
-        if (DEBUG_QUORUM)
+        //if (DEBUG_QUORUM)
           yellow_printf("Wrkr %u leaves %u messages for the next polling round \n",
                         t_id, *completed_but_not_polled_writes);
         break;
@@ -7014,7 +7087,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   if (writes_for_kvs > 0) {
     if (DEBUG_WRITES) yellow_printf("Worker %u is going with %u writes to the cache \n", t_id, writes_for_kvs);
     cache_batch_op_updates((uint16_t) writes_for_kvs, t_id, (struct write **) p_ops->ptrs_to_mes_ops,
-                           p_ops, 0, MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
+                           p_ops, 0, (uint32_t)MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
     if (DEBUG_WRITES) yellow_printf("Worker %u propagated %u writes to the cache \n", t_id, writes_for_kvs);
   }
 }
@@ -7387,6 +7460,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
           memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
       }
       else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
+      check_node(read_info->value, "read to write-- r_info", read_info->key.bkt);
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
     // insert commit after rmw acquire if not a quorum of people have seen the last committed value
@@ -7593,8 +7667,8 @@ static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_o
   if (w_meta->w_state >= SENT_PUT && w_meta->acks_seen >= REMOTE_QUORUM) {
     p_ops->full_w_q_fifo++;
     if (p_ops->full_w_q_fifo == WRITE_FIFO_TIMEOUT) {
-      //printf("Wrkr %u expires write fifo timeout and "
-       //        "releases partially acked writes \n", t_id);
+      printf("Wrkr %u expires write fifo timeout and "
+               "releases partially acked writes \n", t_id);
       p_ops->full_w_q_fifo = 0;
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
       for (uint32_t i = 0; i < p_ops->w_size; i++) {
@@ -7841,6 +7915,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
                                                      struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                                      uint16_t t_id)
 {
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
   cache_meta prev_meta;
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
@@ -7850,6 +7925,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
   if (op->opcode == CACHE_OP_GET && p_ops->p_ooe_writes->size > 0) {
     uint8_t *val_ptr;
     if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
+      check_node(val_ptr, "ooe write", op->key.bkt);
       memcpy(op->value_to_read, val_ptr, op->real_val_len);
       //memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
       //red_printf("Wrkr %u Forwarding a value \n", t_id);
@@ -7899,8 +7975,10 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
                                          struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                          uint16_t t_id)
 {
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
   if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
-
+  check_node(op->value_to_write, "KVS_from_trace_writes", op->key.bkt);
+  struct node * new_node = (struct node *) op->value_to_write;
   optik_lock(&kv_ptr->key.meta);
   // OUT_OF_EPOCH--first round will be a read TS
   if (*(uint16_t *)kv_ptr->key.meta.epoch_id < epoch_id) {
@@ -7915,6 +7993,10 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
     // Store the value to be written in the read_info to be used in the second round
     memcpy(r_info->value, op->value_to_write, op->real_val_len);
+
+    //yellow_printf("Out of epoch write key %u, node-next key_id %u \n",
+    //             op->key.bkt, new_node->next_key_id);
+    check_node(r_info->value, "KVS_from_trace_writes-- r_info", op->key.bkt);
     r_info->val_len = op->real_val_len;
     p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
     p_ops->p_ooe_writes->size++;
@@ -7924,7 +8006,10 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     (*r_push_ptr_) =  r_push_ptr;
   }
   else { // IN-EPOCH
+    if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
+    check_node(kv_ptr->value, "KVS_from_trace_writes before", kv_ptr->key.bkt);
     memcpy(kv_ptr->value, op->value_to_write, op->real_val_len);
+    check_node(kv_ptr->value, "KVS_from_trace_writes after", kv_ptr->key.bkt);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     // This also writes the new version to op
     optik_unlock_write(&kv_ptr->key.meta, (uint8_t) machine_id, (uint32_t *) &op->ts.version);
@@ -7939,6 +8024,7 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
                                            struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                            uint16_t t_id)
 {
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
   cache_meta prev_meta;
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
@@ -8101,12 +8187,27 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct cache_op *o
   if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
   optik_lock(&kv_ptr->key.meta);
   if (optik_is_greater_version(kv_ptr->key.meta, op->key.meta)) {
+    check_node(kv_ptr->value, "kv_val recev write--apply", kv_ptr->key.bkt);
+    check_node(op->value, "write_val recev write--apply", op->key.bkt);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     optik_unlock(&kv_ptr->key.meta, op->key.meta.m_id, op->key.meta.version);
   } else {
+    struct node *old_node = (struct  node *) kv_ptr->value;
+    struct node *new_node = (struct  node *) op->value;
+    printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
+             "new key-id %u old key_id %u\n",
+           kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
+           kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
+           new_node->next_key_id, old_node->next_key_id);
+    exit(0);
+    check_node(kv_ptr->value, "kv_val recev write", kv_ptr->key.bkt);
+    check_node(op->value, "write_val recev write", op->key.bkt);
+
+    //assert(old_node->next_key_id == new_node->next_key_id);
+
     optik_unlock_decrement_version(&kv_ptr->key.meta);
-    t_stats[t_id].failed_rem_writes++;
+    if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
   }
 }
 
