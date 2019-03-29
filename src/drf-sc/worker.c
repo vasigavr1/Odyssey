@@ -180,11 +180,13 @@ void *worker(void *arg)
       if (loop_counter == M_16) {
         //printf("Wrkr %u is working rectified keys %lu \n",
         //       t_id, t_stats[t_id].rectified_keys);
+
         if (t_id == 0)
           printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
-                   "epoch_id %u, reqs %lld failed writes %lu \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+                   "epoch_id %u, reqs %lld failed writes %lu, writes done %lu/%lu \n", t_id, conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
                  t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
-                 t_stats[t_id].cache_hits_per_thread, t_stats[t_id].failed_rem_writes);
+                 t_stats[t_id].cache_hits_per_thread, t_stats[t_id].failed_rem_writes,
+          t_stats[t_id].writes_sent, t_stats[t_id].writes_asked_by_clients);
         loop_counter = 0;
       }
     }

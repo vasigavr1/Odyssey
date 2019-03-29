@@ -70,9 +70,12 @@ int main(int argc, char *argv[])
     else {
 			assert(ENABLE_CLIENTS);
       if (CLIENT_LOGS) {
-        uint16_t cl_id = (uint16_t) (i - WORKERS_PER_MACHINE);
+        uint16_t cl_id = (uint16_t) (machine_id * CLIENTS_PER_MACHINE +
+                                    (i - WORKERS_PER_MACHINE));
         char fp_name[40];
+
         sprintf(fp_name, "cLogs/client%u.out", cl_id);
+        cl_id =  (uint16_t)(i - WORKERS_PER_MACHINE);
         client_log[cl_id] = fopen(fp_name, "w+");
       }
 			spawn_threads(param_arr, i, "Client", &pinned_hw_threads,

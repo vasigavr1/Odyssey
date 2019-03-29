@@ -2156,7 +2156,7 @@ static inline void set_conf_bit_after_detecting_failure(const uint16_t t_id, con
 //---------------------------------------------------------------------------*/
 
 /*-------------------------------- CLIENT REQUEST ARRAY ----------------------------------------*/
-// singal completion of a request to the client
+// signal completion of a request to the client
 static inline void signal_completion_to_client(uint32_t sess_id,
                                                uint32_t req_array_i, uint16_t t_id)
 {
@@ -2172,7 +2172,7 @@ static inline void signal_completion_to_client(uint32_t sess_id,
   }
 }
 
-// singal that the requuqest is being processed to tne client
+// signal that the request is being processed to tne client
 static inline void signal_in_progress_to_client(uint32_t sess_id,
                                                 uint32_t req_array_i, uint16_t t_id)
 {
@@ -2182,6 +2182,7 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
     //       interface[t_id].req_array[sess_id][sess_id].state);
     struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+    if (ENABLE_ASSERTIONS) memset(&req_array->key, 0, TRUE_KEY_SIZE);
     check_state_with_allowed_flags(2, req_array->state, ACTIVE_REQ);
     atomic_store_explicit(&req_array->state, (uint8_t) IN_PROGRESS_REQ, memory_order_release);
   }
@@ -2254,7 +2255,7 @@ static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* v
 
 
 
-// Returns ture if it's valid to pull a request for that session
+// Returns true if it's valid to pull a request for that session
 static inline bool pull_request_from_this_session(struct pending_ops *p_ops, uint16_t sess_id,
                                                   uint16_t t_id)
 {
@@ -2334,6 +2335,8 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, struct r
   com->t_rmw_id = loc_entry->rmw_id.id;
   com->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
   com->log_no = loc_entry->log_no;
+
+
   if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
     memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
     struct top *top =(struct top*) com->value;
@@ -2346,6 +2349,24 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, struct r
       printf("Wrkr %u bcasting state %u, log %u \n", t_id, broadcast_state, com->log_no);
       assert(false);
     }
+  }
+  if (ENABLE_ASSERTIONS) {
+    struct rmw_entry *glob_entry = &rmw.entry[loc_entry->index_to_rmw];
+    optik_lock(loc_entry->ptr_to_kv_pair);
+    {
+      //assert(com->log_no >= glob_entry->last_committed_log_no);
+      struct cache_op *kv_ptr = (struct cache_op *) loc_entry->ptr_to_kv_pair;
+      if (com->log_no == glob_entry->last_committed_log_no) {
+        struct top *top =(struct top*) com->value;
+        struct top *g_top =(struct top*) &kv_ptr->value[RMW_BYTE_OFFSET];
+        if(memcmp(g_top, top, sizeof(struct top)) != 0) {
+          red_printf("Com top %u/%u/%u G top %u/%u/%u \n",
+                     top->key_id, top->push_counter, top->pop_counter,
+                     g_top->key_id, g_top->push_counter, g_top->pop_counter);
+        }
+      }
+    }
+    optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
   }
 
   if (ENABLE_ASSERTIONS) {
@@ -2454,7 +2475,7 @@ static inline void update_sess_info_partially_acked_write(struct pending_ops *p_
       for (uint8_t j = 0; j < w_meta->acks_expected; j++) {
         printf("seen expected %u, %d \n", j, w_meta->seen_expected[j]);
       }
-      assert(false);
+      //assert(false);
     }
   }
   uint8_t missing_id_num = w_meta->acks_expected - w_meta->acks_seen;
@@ -2686,6 +2707,14 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
         check_node(write->value, "set_w_state_for_each_write", write->key.bkt);
         struct node *node = (struct node *) write->value;
         assert(node->value[0] == NODE_SIGNATURE);
+        if (ENABLE_ASSERTIONS) {
+          t_stats[t_id].writes_sent++;
+          if(t_stats[t_id].writes_sent > t_stats[t_id].writes_asked_by_clients) {
+            //red_printf("Wrkr %u' s been asked for %lu writes, trying to forge write %u \n",
+            //           t_id, t_stats[t_id].writes_asked_by_clients, t_stats[t_id].writes_sent);
+            //assert(false);
+          }
+        }
         update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
         w_meta->acks_expected = q_info->active_num;
         *w_state = SENT_PUT;
@@ -3221,6 +3250,10 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   loc_entry->index_to_rmw = resp->rmw_entry;
   loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
+  if (ENABLE_ASSERTIONS) {
+    loc_entry->help_loc_entry->index_to_rmw = resp->rmw_entry;
+    loc_entry->help_loc_entry->ptr_to_kv_pair = resp->kv_pair_ptr;
+  }
   loc_entry->sess_id = prop->session_id;
   loc_entry->index_to_req_array = prop->index_to_req_array;
   //loc_entry->accept_acks = 0;
@@ -4082,6 +4115,11 @@ static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, s
       if (rmw_compare_fails(loc_entry->opcode, loc_entry->compare_val,
                             &kv_pair->value[RMW_BYTE_OFFSET], loc_entry->rmw_val_len, t_id)) {
         (*rmw_fails) = true;
+        if (ENABLE_ASSERTIONS) {
+          assert(!loc_entry->rmw_is_successful);
+          assert(loc_entry->rmw_val_len <= RMW_VALUE_SIZE);
+          assert(loc_entry->helping_flag != HELPING);
+        }
         memcpy(loc_entry->value_to_read, &kv_pair->value[RMW_BYTE_OFFSET],
                loc_entry->rmw_val_len);
         return true;
@@ -4525,9 +4563,12 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
                                          opcode, sess_id, t_id);
 
   if (source == FROM_READ && r_info->opcode == CACHE_OP_PUT) {
-    assert(p_ops->sess_info[sess_id].writes_not_yet_inserted > 0);
+    if (ENABLE_ASSERTIONS)
+      assert(p_ops->sess_info[sess_id].writes_not_yet_inserted > 0);
     p_ops->sess_info[sess_id].writes_not_yet_inserted--;
   }
+ // assert((source == FROM_TRACE && opcode == CACHE_OP_PUT) || source == FROM_COMMIT);
+
 
 
   struct write *write = (struct write *)
@@ -4755,13 +4796,20 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   uint32_t real_val_len;
   if (ENABLE_CLIENTS) {
     uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[working_session];
-    opcode = interface[t_id].req_array[working_session][pull_ptr].opcode;
-    key = &interface[t_id].req_array[working_session][pull_ptr].key;
+    struct client_op *if_cl_op = &interface[t_id].req_array[working_session][pull_ptr];
+    opcode = if_cl_op->opcode;
+    key = &if_cl_op->key;
     op->index_to_req_array = pull_ptr;
-    value_to_write = interface[t_id].req_array[working_session][pull_ptr].value_to_write;
-    value_to_read = interface[t_id].req_array[working_session][pull_ptr].value_to_read;
-    real_val_len = interface[t_id].req_array[working_session][pull_ptr].val_len;
-    if (ENABLE_ASSERTIONS) assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
+    value_to_write = if_cl_op->value_to_write;
+    value_to_read = if_cl_op->value_to_read;
+    real_val_len = if_cl_op->val_len;
+    if (ENABLE_ASSERTIONS) {
+      assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
+      uint32_t next_pull_ptr = (pull_ptr + 1) % PER_SESSION_REQ_NUM;
+      uint32_t prev_pull_ptr = (PER_SESSION_REQ_NUM + pull_ptr - 1) % PER_SESSION_REQ_NUM;
+      if (!is_client_req_active((uint32_t) working_session, next_pull_ptr, t_id))
+        assert(!is_client_req_active((uint32_t) working_session, prev_pull_ptr, t_id));
+    }
     //printf("Wrkr %u sess %u saves poll ptr %u for req at state %u \n", t_id,
     //       working_session,
     //       op->index_to_req_array,
@@ -6774,7 +6822,7 @@ static inline bool release_not_ready(struct pending_ops *p_ops,
           assert(sess_info->live_writes > 0);
           (*release_rdy_dbg_cnt)++;
           if (*release_rdy_dbg_cnt == M_4) {
-            printf("Wrkr %u stuck. Release cannot fire \n", t_id);
+            if (t_id == 0) printf("Wrkr %u stuck. Release cannot fire \n", t_id);
             (*release_rdy_dbg_cnt) = 0;
           }
         }
@@ -7043,7 +7091,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (ENABLE_ASSERTIONS) assert(write->opcode != ACCEPT_OP_BIT_VECTOR);
 
       if (write->opcode != ACCEPT_OP && write->opcode != COMMIT_OP) {
-        assert(write->opcode == CACHE_OP_PUT);
+        //assert(write->opcode == CACHE_OP_PUT);
         check_node(write->value, "polling a write", write->key.bkt);
       }
 
@@ -7669,6 +7717,7 @@ static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_o
     if (p_ops->full_w_q_fifo == WRITE_FIFO_TIMEOUT) {
       printf("Wrkr %u expires write fifo timeout and "
                "releases partially acked writes \n", t_id);
+      assert(false);
       p_ops->full_w_q_fifo = 0;
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
       for (uint32_t i = 0; i < p_ops->w_size; i++) {
@@ -7831,6 +7880,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
     }
     // Free writes/releases/commits
     if (w_meta->acks_seen == w_meta->acks_expected) {
+      assert(w_meta->acks_seen = REM_MACH_NUM);
       if (complete_requests_that_wait_all_acks(&w_meta->w_state, ack_ptr, t_id))
         update_sess_info_with_fully_acked_write(p_ops, ack_ptr, t_id);
     }
@@ -8187,27 +8237,31 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct cache_op *o
   if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
   optik_lock(&kv_ptr->key.meta);
   if (optik_is_greater_version(kv_ptr->key.meta, op->key.meta)) {
-    check_node(kv_ptr->value, "kv_val recev write--apply", kv_ptr->key.bkt);
-    check_node(op->value, "write_val recev write--apply", op->key.bkt);
+    check_node(kv_ptr->value, "kv_val recv write--apply", kv_ptr->key.bkt);
+    check_node(op->value, "write_val recv write--apply", op->key.bkt);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     optik_unlock(&kv_ptr->key.meta, op->key.meta.m_id, op->key.meta.version);
   } else {
     struct node *old_node = (struct  node *) kv_ptr->value;
     struct node *new_node = (struct  node *) op->value;
-    printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
-             "new key-id %u old key_id %u\n",
-           kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
-           kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
-           new_node->next_key_id, old_node->next_key_id);
-    exit(0);
+    if (op->opcode == CACHE_OP_PUT &&
+      kv_ptr->key.meta.version - 1 > op->key.meta.version) {
+      //printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
+      //         "new key-id %u old key_id %u\n",
+      //       kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
+      //       kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
+      //       new_node->next_key_id, old_node->next_key_id);
+      t_stats[t_id].failed_rem_writes++;
+      //exit(0);
+    }
     check_node(kv_ptr->value, "kv_val recev write", kv_ptr->key.bkt);
     check_node(op->value, "write_val recev write", op->key.bkt);
 
     //assert(old_node->next_key_id == new_node->next_key_id);
 
     optik_unlock_decrement_version(&kv_ptr->key.meta);
-    if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
+    //if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
   }
 }
 

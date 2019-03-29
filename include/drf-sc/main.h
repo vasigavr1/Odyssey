@@ -34,7 +34,7 @@
 #define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define WRITE_FIFO_TIMEOUT M_1
+#define WRITE_FIFO_TIMEOUT M_16
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -63,6 +63,7 @@
 #define SESSIONS_PER_MACHINE (WORKERS_PER_MACHINE * SESSIONS_PER_THREAD)
 #define SESSIONS_PER_CLIENT_ (SESSIONS_PER_MACHINE / CLIENTS_PER_MACHINE_)
 #define SESSIONS_PER_CLIENT MAX(1, SESSIONS_PER_CLIENT_)
+#define WORKERS_PER_CLIENT (ENABLE_CLIENTS ? (WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE ) : 0)
 #define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
@@ -72,7 +73,7 @@
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
 #define EXIT_ON_PRINT 0
-#define PRINT_NUM 1
+#define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
 #define COMMIT_LOGS 0
@@ -104,7 +105,7 @@
 #define MSQ_ASYNC 0
 #define TREIBER_WRITES_NUM 1
 #define MS_WRITES_NUM 1
-#define CLIENT_LOGS 1
+#define CLIENT_LOGS 0
 
 #define PER_SESSION_REQ_NUM 25 //(TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
@@ -167,7 +168,7 @@
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
 #define RMW_BYTE_OFFSET 4 // the value starts 4 bytes in
-#define RMW_VALUE_SIZE 16 // (VALUE_SIZE - RMW_BYTE_OFFSET)
+#define RMW_VALUE_SIZE 24 // (VALUE_SIZE - RMW_BYTE_OFFSET)
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
@@ -917,14 +918,20 @@ struct rmw_local_entry {
 };
 
 struct top {
+  uint32_t third_key_id;
+  uint32_t sec_key_id;
   uint32_t key_id;
   uint32_t pop_counter;
   uint32_t push_counter;
 };
-#define NODE_SIZE (VALUE_SIZE - 4)
+#define NODE_SIZE (VALUE_SIZE - 13)
 #define NODE_SIGNATURE 144
 struct node {
   uint8_t value[NODE_SIZE];
+  bool pushed;
+  uint16_t stack_id;
+  uint16_t owner;
+  uint32_t push_counter;
   uint32_t next_key_id;
 };
 
@@ -1130,7 +1137,8 @@ struct thread_stats { // 2 cache lines
 	long long reads_sent;
 	long long acks_sent;
 	long long r_reps_sent;
-  long long writes_sent;
+  uint64_t writes_sent;
+  uint64_t writes_asked_by_clients;
 
 
   long long reads_sent_mes_num;
