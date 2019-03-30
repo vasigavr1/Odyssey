@@ -29,6 +29,7 @@ FILE* client_log[CLIENTS_PER_MACHINE];
 struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
+uint64_t time_approx;
 
 //struct epoch_info epoch;
 

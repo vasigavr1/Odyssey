@@ -363,7 +363,13 @@ static inline bool opcode_is_compare_rmw(uint8_t opcode)
   return opcode == COMPARE_AND_SWAP_WEAK || opcode == COMPARE_AND_SWAP_STRONG;
 }
 
-
+static inline struct key create_key(uint32_t key_id)
+{
+  uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
+  struct key key;
+  memcpy(&key, &key_hash, TRUE_KEY_SIZE);
+  return key;
+}
 
 
 /* ---------------------------------------------------------------------------
@@ -689,22 +695,49 @@ static inline void check_node(uint8_t *val, char *message,
   }
 }
 
+
+#define LOG_COMS 0
+#define LOG_WS 1
+#define LOG_ACKS 2
+#define LOG ACCS 3
 static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_no, uint8_t *old_value,
-                                      uint8_t *value, const char* message)
+                                      uint8_t *value, const char* message, uint8_t flag)
 {
   if (COMMIT_LOGS) {
-    struct top *top = (struct top *) old_value;
-    struct top *new_top = (struct top *) value;
-    if (!are_tops_equal(top, new_top)) {
+    if (flag == LOG_COMS) {
+      struct top *top = (struct top *) old_value;
+      struct top *new_top = (struct top *) value;
+      //if (!are_tops_equal(top, new_top)) {
       bool pushing = new_top->push_counter == top->push_counter + 1;
       bool popping = new_top->pop_counter == top->pop_counter + 1;
       //if (pushing) assert(new_top->pop_counter == top->pop_counter);
       //if (popping) assert(new_top->push_counter == top->push_counter);
 
-      fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: %s: push/pop poitner %u/%u, key_ptr %u %s\n",
-              bkt, log_no,  pushing ? "Pushing" : "Pulling",
-              new_top->push_counter, new_top->pop_counter, new_top->key_id, message);
+      fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: %s: push/pop poitner %u/%u, "
+                "key_ptr %u/%u/%u/%u %s - t = %lu\n",
+              bkt, log_no, pushing ? "Pushing" : "Pulling",
+              new_top->push_counter, new_top->pop_counter, new_top->key_id,
+              new_top->sec_key_id, new_top->third_key_id, new_top->fourth_key_id, message,
+              time_approx);
     }
+    else if (flag == LOG_WS){
+      struct node *node = (struct node *) old_value;
+      struct node *new_node = (struct node *) value;
+      //if (!are_tops_equal(top, new_top)) {
+      //bool pushing = new_top->push_counter == top->push_counter + 1;
+      //bool popping = new_top->pop_counter == top->pop_counter + 1;
+      //if (pushing) assert(new_top->pop_counter == top->pop_counter);
+      //if (popping) assert(new_top->push_counter == top->push_counter);
+
+      fprintf(rmw_verify_fp[t_id], "Key: %u, %u/%u/%u/%u, "
+                "old: %u/%u/%u/%u version %u -- %s - t = %lu\n",
+              bkt, new_node->key_id,
+              new_node->stack_id, new_node->push_counter, new_node->next_key_id,
+              node->key_id,
+              node->stack_id, node->push_counter, node->next_key_id, log_no, message,
+              time_approx);
+    }
+    //}
   }
 }
 
@@ -3243,6 +3276,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   else if (prop->opcode == FETCH_AND_ADD)
     loc_entry->compare_val = prop->value_to_write; // value to be added
 
+  loc_entry->must_release = true; // TODO That can be a programmer input
   loc_entry->fp_detected = false;
   loc_entry->rmw_val_len = prop->real_val_len;
   loc_entry->rmw_is_successful = false;
@@ -3407,7 +3441,8 @@ static inline void take_actions_to_commit_rmw(struct rmw_entry *glob_entry,
     check_top(top, "my own- not helping - top", 0);
     check_top(new_top, "my own- not helping - new-top", 0);
     update_commit_logs(t_id, kv_pair->key.bkt, loc_entry_to_commit->log_no,
-                       &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write, " local_commit");
+                       &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write,
+                       " local_commit", LOG_COMS);
     memcpy(&kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
   }
   else if (!loc_entry->rmw_is_successful && loc_entry->helping_flag != HELPING) {
@@ -3428,7 +3463,8 @@ static inline void take_actions_to_commit_rmw(struct rmw_entry *glob_entry,
     check_top(top, "Helping-top", 0);
     check_top(new_top, "Helping-new_top", 0);
     update_commit_logs(t_id, kv_pair->key.bkt, loc_entry_to_commit->log_no,
-                       &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write, " local_commit");
+                       &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write,
+                       " local_commit", LOG_COMS);
     memcpy(&kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
   }
 
@@ -4521,8 +4557,6 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   acc->val_len = (uint8_t) loc_entry->rmw_val_len;
   signal_conf_bit_flip_in_accept(loc_entry, acc, t_id);
 
-
-
   p_ops->w_fifo->bcast_size++;
   if (ENABLE_ASSERTIONS) {
     assert(acc->l_id < p_ops->prop_info->l_id);
@@ -5477,7 +5511,8 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
       else check_top(new_top, "FROM rep-new_top", 0);
 
     }
-    update_commit_logs(t_id, kv_pair->key.bkt, new_log_no, &kv_pair->value[RMW_BYTE_OFFSET], rmw_rep->value, "From rep ");
+    update_commit_logs(t_id, kv_pair->key.bkt, new_log_no, &kv_pair->value[RMW_BYTE_OFFSET],
+                       rmw_rep->value, "From rep ", LOG_COMS);
     memcpy(&kv_pair->value[RMW_BYTE_OFFSET], rmw_rep->value, (size_t) RMW_VALUE_SIZE);
 
 
@@ -5622,7 +5657,8 @@ static inline uint64_t handle_remote_commit_message(struct cache_op *kv_ptr, voi
       check_top(new_top, "FROM Commit-new_top", 0);
     }
 
-    update_commit_logs(t_id, kv_ptr->key.bkt, log_no, &kv_ptr->value[RMW_BYTE_OFFSET], value, "From remote commit ");
+    update_commit_logs(t_id, kv_ptr->key.bkt, log_no, &kv_ptr->value[RMW_BYTE_OFFSET],
+                       value, "From remote commit ", LOG_COMS);
     memcpy(&kv_ptr->value[RMW_BYTE_OFFSET], value, (size_t) RMW_VALUE_SIZE);
 
   }
@@ -6543,11 +6579,14 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     }
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
-      if (p_ops->sess_info[sess_i].writes_not_yet_inserted > 0) {
+      //if (p_ops->sess_info[sess_i].writes_not_yet_inserted > 0) {
+      if (loc_entry->must_release && !p_ops->sess_info[sess_i].ready_to_release) {
         //printf("Wrkr %u, sess %u breaks due to %u writes not yet inserted \n",
         //       t_id, sess_i, p_ops->sess_info[sess_i].writes_not_yet_inserted );
         continue;
       }
+      else if (loc_entry->must_release) loc_entry->must_release = false;
+
       uint8_t quorum = REMOTE_QUORUM;
       if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
         check_sum_of_reps(loc_entry);
@@ -7924,6 +7963,10 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
       ack->ack_num = 0; continue;
     }
 
+    if (ENABLE_ASSERTIONS) {
+      assert(pull_lid <= l_id);
+      // since we are trying to gather all acks it cannot be that an ack is late
+    }
     if (pull_lid >= l_id) {
       if ((pull_lid - l_id) >= ack_num) {ack->opcode = 5;
         ack->ack_num = 0; continue;}
@@ -8032,6 +8075,7 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
   optik_lock(&kv_ptr->key.meta);
   // OUT_OF_EPOCH--first round will be a read TS
   if (*(uint16_t *)kv_ptr->key.meta.epoch_id < epoch_id) {
+    assert(false);
     uint32_t r_push_ptr = *r_push_ptr_;
     struct read_info *r_info = &p_ops->read_info[r_push_ptr];
     r_info->ts_to_read.m_id = kv_ptr->key.meta.m_id;
@@ -8056,8 +8100,13 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     (*r_push_ptr_) =  r_push_ptr;
   }
   else { // IN-EPOCH
-    if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-    check_node(kv_ptr->value, "KVS_from_trace_writes before", kv_ptr->key.bkt);
+    if (ENABLE_ASSERTIONS) {
+      assert(op->real_val_len <= VALUE_SIZE && op->real_val_len >= sizeof(struct node));
+      check_node(kv_ptr->value, "KVS_from_trace_writes before", kv_ptr->key.bkt);
+      assert(kv_ptr->key.bkt == create_key(new_node->key_id).bkt);
+      update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
+                         op->value_to_write, "local write", LOG_WS);
+    }
     memcpy(kv_ptr->value, op->value_to_write, op->real_val_len);
     check_node(kv_ptr->value, "KVS_from_trace_writes after", kv_ptr->key.bkt);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
@@ -8239,19 +8288,25 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct cache_op *o
   if (optik_is_greater_version(kv_ptr->key.meta, op->key.meta)) {
     check_node(kv_ptr->value, "kv_val recv write--apply", kv_ptr->key.bkt);
     check_node(op->value, "write_val recv write--apply", op->key.bkt);
+    update_commit_logs(t_id, kv_ptr->key.bkt, op->key.meta.version, kv_ptr->value,
+                       op->value, "rem write", LOG_WS);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     optik_unlock(&kv_ptr->key.meta, op->key.meta.m_id, op->key.meta.version);
+
   } else {
     struct node *old_node = (struct  node *) kv_ptr->value;
     struct node *new_node = (struct  node *) op->value;
     if (op->opcode == CACHE_OP_PUT &&
       kv_ptr->key.meta.version - 1 > op->key.meta.version) {
-      //printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
-      //         "new key-id %u old key_id %u\n",
-      //       kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
-      //       kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
-      //       new_node->next_key_id, old_node->next_key_id);
+      printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
+               "new key-id %u/%u/%u/%u/%d old key_id %u/%u/%u/%u/%d \n",
+             kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
+             kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
+             new_node->next_key_id, new_node->stack_id, new_node->push_counter,
+             new_node->owner, new_node->pushed,
+             old_node->next_key_id, old_node->stack_id, old_node->push_counter,
+             old_node->owner, old_node->pushed);
       t_stats[t_id].failed_rem_writes++;
       //exit(0);
     }

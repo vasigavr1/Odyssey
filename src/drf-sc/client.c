@@ -1118,12 +1118,10 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
         uint32_t dbg_count = 0;
         while  (first_node[0].stack_id != (uint16_t) info->stack_id) {
           if (dbg_count == 0) {
-            uint64_t key_hash = CityHash128((char *) &(info->stack_id), 4).second;
-            struct key key;
-            memcpy(&key, &key_hash, TRUE_KEY_SIZE);
-            yellow_printf("Sess %u,  Popping stack %u -- Read node %u stack id %u, pushed %u, owner %u,"
+            struct key key = create_key(info->stack_id);
+            yellow_printf("Sess %u/%u,  Popping stack %u -- Read node %u stack id %u, pushed %u, owner %u,"
                             "bkt %u  key id %u push/pop %u/%u \n",
-                          info->glob_sess_i, info->stack_id, top->key_id,
+                          info->glob_sess_i, t_id, info->stack_id, top->key_id,
                           first_node[0].stack_id, first_node[0].pushed, first_node[0].owner, key.bkt,
             new_top->key_id, new_top->push_counter, new_top->pop_counter);
           }
@@ -1137,13 +1135,27 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
           //assert(false);
         }
 
-        if (top->sec_key_id != 1)
-        {
+        if (top->sec_key_id != 1) {
           while (top->sec_key_id != first_node[0].next_key_id) {
+            struct key key = create_key(info->stack_id);
             if (dbg_count == 0)
-              printf("%u/%u \n", top->sec_key_id, new_top->key_id);
+              printf("sess %u/%u, after popping stack %u/%u (bkt %u ), "
+                       "old top %u/%u/%u, new_top %u/%u/%u"
+                       " got key %u/%u "
+                       "left first node: key %u/%d/%u"
+                       " -- it should have been  %u/%d/%u \n",
+                info->glob_sess_i, t_id, info->stack_id, first_node[0].stack_id, key.bkt,
+                     top->key_id, top->push_counter, top->pop_counter,
+                     new_top->key_id, new_top->push_counter, new_top->pop_counter,
+                     top->key_id, create_key(top->key_id).bkt,
+                     first_node[0].next_key_id, first_node[0].pushed, first_node[0].push_counter,
+                     top->sec_key_id, true, top->push_counter);
             blocking_read(top->key_id, (uint8_t *) &first_node[0],
                           sizeof(struct node), real_sess_i);
+            if (top->sec_key_id == first_node[0].next_key_id)
+              green_printf("sess %u/%u, Read key becomes correct %u/%u/%u/%u \n",
+                           info->glob_sess_i, t_id, first_node[0].next_key_id,
+                           first_node[0].pushed, first_node[0].stack_id, first_node[0].push_counter);
             MOD_ADD(dbg_count, M_4);
           }
 
@@ -1174,14 +1186,12 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
       break;
     case READ_FIRST:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
-
-
       new_top->pop_counter = top->pop_counter + 1;
       new_top->push_counter = top->push_counter;
       new_top->key_id = first_node[0].next_key_id;
-      new_top->sec_key_id = new_top->third_key_id;
-      new_top->third_key_id = 1; // we concede that we do not know that
-
+      new_top->sec_key_id = top->third_key_id;
+      new_top->third_key_id = top->fourth_key_id; // we concede that we do not know that
+      new_top->fourth_key_id = 1;
       //assert(first_node[0].stack_id = (uint16_t) info->stack_id);
       //assert(first_node[0].push_counter <= top->push_counter);
 
@@ -1271,11 +1281,35 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
         // Do only one write here: the one that needs to point to what top used to point
         // the rest of the writes need not happen in the conflict path, and need not wait
         // for the previous read to complete
+        if (info->done_cas) {
+          uint32_t dbg_count = 0;
+          while ( new_top->push_counter - 1 == top->push_counter &&
+            new_top->pop_counter == top->pop_counter) {
+            if (dbg_count == 0) {
+              red_printf("Sess %u/%u Stack_id %u, CAS failed, top %u/%u/%u, prev top %u/%u/%u \n",
+            info->glob_sess_i, t_id, info->stack_id, top->key_id, top->push_counter, top->pop_counter,
+                       new_node[0].next_key_id, new_top->push_counter - 1, new_top->pop_counter);
+            }
+
+            blocking_read(info->stack_id, (uint8_t *) top,
+                          sizeof(struct top), real_sess_i);
+
+            if (dbg_count == 0) {
+              red_printf("Sess %u/%u Stack_id %u, CAS failed-blocking read, top %u/%u/%u, prev top %u/%u/%u \n",
+                         info->glob_sess_i, t_id, info->stack_id, top->key_id, top->push_counter, top->pop_counter,
+                         new_node[0].next_key_id, new_top->push_counter - 1, new_top->pop_counter);
+            }
+
+            MOD_ADD(dbg_count, M_4);
+          }
+        }
+
         new_node[0].next_key_id = top->key_id;
         new_node[0].owner = info->glob_sess_i;
         new_node[0].stack_id = (uint16_t) info->stack_id;
         new_node[0].push_counter = top->push_counter + 1;
         new_node[0].pushed = true;
+        new_node[0].key_id = info->owned_key;
 
         assert(info->valid_key_to_write);
         new_top->pop_counter = top->pop_counter;
@@ -1283,11 +1317,10 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
         new_top->key_id = info->owned_key;
         new_top->sec_key_id = top->key_id;
         new_top->third_key_id = top->sec_key_id;
+        new_top->fourth_key_id = top->third_key_id;
         assert(new_top->key_id >= NUM_OF_RMW_KEYS);
         assert(info->owned_key  <= MAX_TR_NODE_KEY);
-
         //check_top(new_top, "Push-new_top before CAS ", info->stack_id);
-
 //        if (!check_top(new_top, "before pushing", info->stack_id)) {
 //          info->push_dbg++;
 //          if (info->push_dbg == DEBUG_MAX) {
@@ -1303,15 +1336,13 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
         //printf("Sess %u Trying to push %u  to stack %u \n", real_sess_i, key_to_write, info->stack_id);
 
         if (ENABLE_ASSERTIONS) t_stats[info->wrkr].writes_asked_by_clients++;
-//        if (info->wrkr == 13)
-//          yellow_printf("Clt %u have Asked worker %u for %lu writes \n",
-//                        t_id, info->wrkr, t_stats[info->wrkr].writes_asked_by_clients);
+
         async_write_strong(info->owned_key, (uint8_t *) &new_node[0],
                            sizeof(struct node), real_sess_i);
         //async_release_strong(MAX_TR_NODE_KEY + info->glob_sess_i, (uint8_t *) &new_node[0],
-        //                     sizeof(struct node), real_sess_i);
+         //                    sizeof(struct node), real_sess_i);
         info->last_req_id = (uint32_t) async_cas_strong(info->stack_id, (uint8_t *) top, (uint8_t *) new_top,
-                                                        sizeof(struct top), &info->success, false, real_sess_i);
+                                                        sizeof(struct top), &info->success, true, real_sess_i);
         assert(info->last_req_id > 0);
         info->done_cas = true;
       }

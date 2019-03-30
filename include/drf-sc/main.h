@@ -31,7 +31,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 1200 // in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_16
@@ -50,7 +50,7 @@
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 1
+#define ACCEPT_IS_RELEASE 0
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_CLIENTS 1
@@ -896,6 +896,7 @@ struct rmw_local_entry {
   uint8_t helping_flag;
   bool fp_detected;
   bool killable; // can the RMW (if CAS) be killed early
+  bool must_release;
   bool rmw_is_successful; // was the RMW (if CAS) successful
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
@@ -918,13 +919,14 @@ struct rmw_local_entry {
 };
 
 struct top {
+  uint32_t fourth_key_id;
   uint32_t third_key_id;
   uint32_t sec_key_id;
   uint32_t key_id;
   uint32_t pop_counter;
   uint32_t push_counter;
 };
-#define NODE_SIZE (VALUE_SIZE - 13)
+#define NODE_SIZE (VALUE_SIZE - 17)
 #define NODE_SIGNATURE 144
 struct node {
   uint8_t value[NODE_SIZE];
@@ -932,6 +934,7 @@ struct node {
   uint16_t stack_id;
   uint16_t owner;
   uint32_t push_counter;
+  uint32_t key_id;
   uint32_t next_key_id;
 };
 
@@ -1250,7 +1253,7 @@ extern atomic_bool print_for_debug;
 extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 extern FILE* client_log[CLIENTS_PER_MACHINE];
-
+extern uint64_t time_approx;
 
 
 

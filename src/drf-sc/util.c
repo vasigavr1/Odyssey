@@ -151,6 +151,7 @@ void print_parameters_in_the_start()
 void init_globals()
 {
   uint32_t i = 0;
+  time_approx = 0;
   remote_IP = (char *) malloc(16 * sizeof(char));
   dev_name = (char *) malloc(16 * sizeof(char));
   atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
