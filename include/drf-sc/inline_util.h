@@ -534,7 +534,6 @@ static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt *
   }
 }
 
-
 /* ---------------------------------------------------------------------------
 //------------------------------ LATENCY MEASUREMENTS-------------------------
 //---------------------------------------------------------------------------*/
@@ -620,86 +619,11 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
   }
 }
 
-
 /* ---------------------------------------------------------------------------
 //------------------------------DEBUGGING-------------------------------------
 //---------------------------------------------------------------------------*/
-
-
-static inline bool check_top(struct top *top, char *message,
-                             uint32_t stack_id)
-{
-  //if (ENABLE_ASSERTIONS) {
-    assert(top->push_counter >= top->pop_counter);
-
-    if (top->push_counter == top->pop_counter) {
-      if (top->key_id != 0) { // Stack must be empty
-        //red_printf("%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
-        //           message, stack_id, top->push_counter, top->pop_counter, top->key_id);
-        return false;
-        assert(false);
-      }
-    } else if (top->push_counter > top->pop_counter) {
-      if (top->key_id < NUM_OF_RMW_KEYS) { // Stack cannot be empty
-        //red_printf("%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
-        //           message, stack_id, top->push_counter, top->pop_counter, top->key_id);
-        return false;
-        assert(false);
-      }
-    }
-  //}
-  return true;
-}
-
-
-static inline bool check_top_success(struct top *top, struct top *new_top)
-{
-  assert(top != NULL); assert(new_top != NULL);
-  bool pushing = new_top->push_counter == top->push_counter + 1;
-  bool popping = new_top->pop_counter == top->pop_counter + 1;
-  assert(pushing || popping);
-  if (pushing) assert(new_top->pop_counter == top->pop_counter);
-  if (popping) assert(new_top->push_counter == top->push_counter);
-}
-
-static inline bool check_tops_equal(struct top *top, struct top *comp_top)
-{
-  assert(top != NULL); assert(comp_top != NULL);
-  assert(top->key_id == comp_top->key_id &&
-         top->push_counter == comp_top->push_counter &&
-         top->pop_counter == comp_top->pop_counter);
-}
-
-static inline bool are_tops_equal(struct top *top, struct top *comp_top)
-{
-  assert(top != NULL); assert(comp_top != NULL);
-  return (top->key_id == comp_top->key_id &&
-          top->push_counter == comp_top->push_counter &&
-          top->pop_counter == comp_top->pop_counter);
-}
-
-
-
-static inline void check_node(uint8_t *val, char *message,
-                              uint32_t key_bkt)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct node *node = (struct node *) val;
-    if (node->next_key_id == 0) return;
-    if (node->next_key_id >= NUM_OF_RMW_KEYS && node->next_key_id <= MAX_TR_NODE_KEY)
-     return;
-
-    red_printf("%s node key id %u, bkt %u\n",
-               message, node->next_key_id, key_bkt);
-    assert(false);
-  }
-}
-
-
 #define LOG_COMS 0
 #define LOG_WS 1
-#define LOG_ACKS 2
-#define LOG ACCS 3
 static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_no, uint8_t *old_value,
                                       uint8_t *value, const char* message, uint8_t flag)
 {
@@ -707,12 +631,8 @@ static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_
     if (flag == LOG_COMS) {
       struct top *top = (struct top *) old_value;
       struct top *new_top = (struct top *) value;
-      //if (!are_tops_equal(top, new_top)) {
       bool pushing = new_top->push_counter == top->push_counter + 1;
       bool popping = new_top->pop_counter == top->pop_counter + 1;
-      //if (pushing) assert(new_top->pop_counter == top->pop_counter);
-      //if (popping) assert(new_top->push_counter == top->push_counter);
-
       fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: %s: push/pop poitner %u/%u, "
                 "key_ptr %u/%u/%u/%u %s - t = %lu\n",
               bkt, log_no, pushing ? "Pushing" : "Pulling",
@@ -723,12 +643,6 @@ static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_
     else if (flag == LOG_WS){
       struct node *node = (struct node *) old_value;
       struct node *new_node = (struct node *) value;
-      //if (!are_tops_equal(top, new_top)) {
-      //bool pushing = new_top->push_counter == top->push_counter + 1;
-      //bool popping = new_top->pop_counter == top->pop_counter + 1;
-      //if (pushing) assert(new_top->pop_counter == top->pop_counter);
-      //if (popping) assert(new_top->push_counter == top->push_counter);
-
       fprintf(rmw_verify_fp[t_id], "Key: %u, %u/%u/%u/%u, "
                 "old: %u/%u/%u/%u version %u -- %s - t = %lu\n",
               bkt, new_node->key_id,
@@ -737,7 +651,6 @@ static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_
               node->stack_id, node->push_counter, node->next_key_id, log_no, message,
               time_approx);
     }
-    //}
   }
 }
 
@@ -2372,36 +2285,10 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, struct r
 
   if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
     memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-    struct top *top =(struct top*) com->value;
-    check_top(top, "Creating com from val-to-read", com->key.bkt);
   }
   else {
     memcpy(com->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-    struct top *top =(struct top*) com->value;
-    if (!check_top(top, "Creating com from val-to-write", com->key.bkt)) {
-      printf("Wrkr %u bcasting state %u, log %u \n", t_id, broadcast_state, com->log_no);
-      assert(false);
-    }
   }
-  if (ENABLE_ASSERTIONS) {
-    struct rmw_entry *glob_entry = &rmw.entry[loc_entry->index_to_rmw];
-    optik_lock(loc_entry->ptr_to_kv_pair);
-    {
-      //assert(com->log_no >= glob_entry->last_committed_log_no);
-      struct cache_op *kv_ptr = (struct cache_op *) loc_entry->ptr_to_kv_pair;
-      if (com->log_no == glob_entry->last_committed_log_no) {
-        struct top *top =(struct top*) com->value;
-        struct top *g_top =(struct top*) &kv_ptr->value[RMW_BYTE_OFFSET];
-        if(memcmp(g_top, top, sizeof(struct top)) != 0) {
-          red_printf("Com top %u/%u/%u G top %u/%u/%u \n",
-                     top->key_id, top->push_counter, top->pop_counter,
-                     g_top->key_id, g_top->push_counter, g_top->pop_counter);
-        }
-      }
-    }
-    optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
-  }
-
   if (ENABLE_ASSERTIONS) {
     assert(com->t_rmw_id < B_4);
     assert(com->log_no > 0);
@@ -2737,17 +2624,6 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
         break;
       case CACHE_OP_PUT:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
-        check_node(write->value, "set_w_state_for_each_write", write->key.bkt);
-        struct node *node = (struct node *) write->value;
-        assert(node->value[0] == NODE_SIGNATURE);
-        if (ENABLE_ASSERTIONS) {
-          t_stats[t_id].writes_sent++;
-          if(t_stats[t_id].writes_sent > t_stats[t_id].writes_asked_by_clients) {
-            //red_printf("Wrkr %u' s been asked for %lu writes, trying to forge write %u \n",
-            //           t_id, t_stats[t_id].writes_asked_by_clients, t_stats[t_id].writes_sent);
-            //assert(false);
-          }
-        }
         update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
         w_meta->acks_expected = q_info->active_num;
         *w_state = SENT_PUT;
@@ -2881,7 +2757,6 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     struct trace_op *tr_op = (struct trace_op *) op;
     memcpy(&write->version, (void *) &op->key.meta.version, 4 + TRUE_KEY_SIZE + 2);
     if (ENABLE_ASSERTIONS) assert(tr_op->real_val_len <= VALUE_SIZE);
-    check_node(tr_op->value_to_write, "when inserting", write->key.bkt);
     memcpy(write->value, tr_op->value_to_write, tr_op->real_val_len);
     write->m_id = (uint8_t) machine_id;
   }
@@ -2923,7 +2798,26 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   // Make sure the pointed values are correct
 }
 
+static inline void increas_virt_w_size(struct pending_ops *p_ops, struct write *write,
+                                       uint8_t source, uint16_t t_id) {
+  if (write->opcode == OP_RELEASE) {
+    if (ENABLE_ASSERTIONS) assert(source == FROM_READ);
+    p_ops->virt_w_size += 2;
+    //yellow_printf("+2 %u at %u \n",  p_ops->virt_w_size, p_ops->w_push_ptr);
+  } else {
+    //yellow_printf("Increasing virt_w_size %u at %u, source %u \n",
+    //              p_ops->virt_w_size, p_ops->w_push_ptr, source);
+    p_ops->virt_w_size++;
+  }
 
+  if (ENABLE_ASSERTIONS) {
+    if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE + 1)
+      red_printf("Wrkr %u Virt_w_size %u/%d, source %u, write->opcode %u \n",
+                 t_id, p_ops->virt_w_size, MAX_ALLOWED_W_SIZE, source, write->opcode);
+    assert(p_ops->w_size <= MAX_ALLOWED_W_SIZE);
+    assert(p_ops->w_size <= p_ops->virt_w_size);
+  }
+}
 // When committing reads
 static inline void set_flags_before_committing_a_read(struct read_info *read_info,
                                                       bool *acq_second_round_to_flip_bit, bool *insert_write_flag,
@@ -3004,17 +2898,6 @@ static inline void fill_reply_entry_with_committed_RMW (struct cache_op *kv_ptr,
   rep->ts.m_id = kv_ptr->key.meta.m_id;
   rep->ts.version = kv_ptr->key.meta.version - 1;
   memcpy(rep->value, &kv_ptr->value[RMW_BYTE_OFFSET], (size_t) RMW_VALUE_SIZE);
-  {
-    struct top *top =(struct top*)  &kv_ptr->value[RMW_BYTE_OFFSET];
-    struct top *new_top =(struct top*) rep->value;
-    if (top->key_id != new_top->key_id) {
-      assert((top->push_counter != new_top->push_counter) ||
-             (top->pop_counter != new_top->pop_counter));
-    }
-    check_top(top, "FROM kv_val-top", 0);
-    check_top(new_top, "FROM kv to rep-new_top", 0);
-  }
-
   rep->log_no = rmw.entry[entry].last_committed_log_no;
   rep->rmw_id = rmw.entry[entry].last_committed_rmw_id.id;
   rep->glob_sess_id = rmw.entry[entry].last_committed_rmw_id.glob_sess_id;
@@ -3427,41 +3310,16 @@ static inline void take_actions_to_commit_rmw(struct rmw_entry *glob_entry,
   }
   struct cache_op *kv_pair = (struct cache_op *) loc_entry->ptr_to_kv_pair;
 
+  // Update the KVS in 2 cases:
+  // 1. When not helping and the RMW is successful
+  // 2  When helping
   if (loc_entry->rmw_is_successful && loc_entry->helping_flag != HELPING) {
-    struct top *top =(struct top*) &kv_pair->value[RMW_BYTE_OFFSET];
-    struct top *comp_top =(struct top*) loc_entry_to_commit->compare_val;
-    struct top *new_top =(struct top*) loc_entry_to_commit->value_to_write;
-    assert(top != NULL); assert(comp_top != NULL); assert(new_top != NULL);
-    check_top_success(top, new_top);
-    check_tops_equal(top, comp_top);
-    if (top->key_id != new_top->key_id) {
-      assert((top->push_counter != new_top->push_counter) ||
-             (top->pop_counter != new_top->pop_counter));
-    }
-    check_top(top, "my own- not helping - top", 0);
-    check_top(new_top, "my own- not helping - new-top", 0);
     update_commit_logs(t_id, kv_pair->key.bkt, loc_entry_to_commit->log_no,
                        &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
     memcpy(&kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
   }
-  else if (!loc_entry->rmw_is_successful && loc_entry->helping_flag != HELPING) {
-    struct top *top =(struct top*) &kv_pair->value[RMW_BYTE_OFFSET];
-    struct top *comp_top =(struct top*) loc_entry_to_commit->value_to_read;
-    check_tops_equal(top, comp_top);
-  }
-
-  if (loc_entry->helping_flag == HELPING) {
-    struct top *top =(struct top*) &kv_pair->value[RMW_BYTE_OFFSET];
-    struct top *new_top =(struct top*) loc_entry_to_commit->value_to_write;
-    if(!are_tops_equal(top, new_top))
-      check_top_success(top, new_top);
-    if (top->key_id != new_top->key_id) {
-      assert((top->push_counter != new_top->push_counter) ||
-             (top->pop_counter != new_top->pop_counter));
-    }
-    check_top(top, "Helping-top", 0);
-    check_top(new_top, "Helping-new_top", 0);
+  else if (loc_entry->helping_flag == HELPING) {
     update_commit_logs(t_id, kv_pair->key.bkt, loc_entry_to_commit->log_no,
                        &kv_pair->value[RMW_BYTE_OFFSET], loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
@@ -3932,11 +3790,9 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
       assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
       read_info->times_seen_ts = 1;
       if (r_rep->opcode == TS_GREATER) {
-        check_node(read_info->value, "read_info on greater rep 1- before", read_info->key.bkt);
         if (ENABLE_ASSERTIONS) assert(read_info->val_len <= VALUE_SIZE);
         memcpy(read_info->value, r_rep->value, read_info->val_len);
       }
-      check_node(read_info->value, "read_info on greater rep 1- after", read_info->key.bkt);
       read_info->seen_larger_ts = true;
     }
     else { // if the read has already received a "greater" ts
@@ -3945,12 +3801,10 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
         assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
         read_info->times_seen_ts = 1;
         if (r_rep->opcode == TS_GREATER) {
-          check_node(read_info->value, "read_info on greater rep 2- before", read_info->key.bkt);
           if (ENABLE_ASSERTIONS) assert(read_info->val_len <= VALUE_SIZE);
           memcpy(read_info->value, r_rep->value, read_info->val_len);
 
         }
-        check_node(read_info->value, "read_info on greater rep 2- after", read_info->key.bkt);
       }
       if (ts_comp == EQUAL) read_info->times_seen_ts++;
       // Nothing to do if the the incoming is smaller than the already stored
@@ -3966,11 +3820,6 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
   }
   // assert(read_info->rep_num == 0);
   read_info->rep_num++;
-
-  {
-    if (read_info->opcode == CACHE_OP_PUT)
-      check_node(read_info->value, "read_info on recv rep- after", read_info->key.bkt);
-  }
 }
 
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
@@ -4077,43 +3926,6 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
      loc_entry->rmw_is_successful = memcmp(loc_entry->compare_val,
                                           &kv_pair->value[RMW_BYTE_OFFSET],
                                            loc_entry->rmw_val_len) == 0;
-     if (loc_entry->rmw_is_successful) {
-       bool pushing = new_top->push_counter == top->push_counter + 1;
-       bool popping = new_top->pop_counter == top->pop_counter + 1;
-       assert(pushing || popping);
-       if (pushing) assert(new_top->pop_counter == top->pop_counter);
-       if (popping) assert(new_top->push_counter == top->push_counter);
-
-      //new top is supposed to be
-       if (new_top->push_counter > new_top->pop_counter && new_top->key_id == 0) {
-         struct key new_top_key, top_key;
-         uint64_t key_hash = CityHash128((char *) &(new_top->key_id), 4).second;
-         memcpy(&new_top_key, &key_hash, TRUE_KEY_SIZE);
-         key_hash = CityHash128((char *) &(top->key_id), 4).second;
-         memcpy(&top_key, &key_hash, TRUE_KEY_SIZE);
-
-         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u %u/%u pushing %d\n",
-                    loc_entry->log_no, loc_entry->key.bkt, new_top->push_counter, new_top->pop_counter,
-                    top->key_id, new_top->key_id, top_key.bkt, new_top_key.bkt, pushing);
-         exit(0); // this is a hard error: a malformed new_top should never be able to find the same top
-       }
-       else if (new_top->push_counter == new_top->pop_counter && new_top->key_id > 0) {
-         struct key new_top_key, top_key;
-         uint64_t key_hash = CityHash128((char *) &(new_top->key_id), 4).second;
-         memcpy(&new_top_key, &key_hash, TRUE_KEY_SIZE);
-         key_hash = CityHash128((char *) &(top->key_id), 4).second;
-         memcpy(&top_key, &key_hash, TRUE_KEY_SIZE);
-         red_printf("Locally Accepting at log_no %u for key %u pushed/pulled %u/%u top key-id/new_top key-id %u/%u %u/%u pushing %d\n",
-                    loc_entry->log_no, loc_entry->key.bkt, new_top->push_counter, new_top->pop_counter,
-                    top->key_id, new_top->key_id, top_key.bkt, new_top_key.bkt, pushing);
-         exit(0); // this is a hard error: a malformed new_top should never be able to find the same top
-       }
-       assert(top->key_id == comp_top->key_id &&
-                top->push_counter == comp_top->push_counter &&
-                top->pop_counter == comp_top->pop_counter);
-       //check_top(comp_top, "COMP:perform_the_rmw_on_the_loc_entry", loc_entry->key.bkt);
-       //check_top(new_top, "perform_the_rmw_on_the_loc_entry", loc_entry->key.bkt);
-     }
      if (!loc_entry->rmw_is_successful)
        memcpy(loc_entry->value_to_read, &kv_pair->value[RMW_BYTE_OFFSET],
               loc_entry->rmw_val_len);
@@ -4135,7 +3947,6 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
   // memcmp() returns 0 if regions are equal. Thus the CAS fails if the result is not zero
   bool rmw_fails = memcmp(compare_val, kv_ptr_value, val_len) != 0;
   if (ENABLE_STAT_COUNTING && rmw_fails) {
-    //assert(false);
     t_stats[t_id].cancelled_rmws++;
   }
   return rmw_fails;
@@ -4596,14 +4407,11 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
   set_w_sess_info_and_index_to_req_array(p_ops, op, source, w_ptr, incoming_pull_ptr,
                                          opcode, sess_id, t_id);
 
-  if (source == FROM_READ && r_info->opcode == CACHE_OP_PUT) {
-    if (ENABLE_ASSERTIONS)
-      assert(p_ops->sess_info[sess_id].writes_not_yet_inserted > 0);
+  if (ENABLE_ASSERTIONS && source == FROM_READ &&
+    r_info->opcode == CACHE_OP_PUT) {
+    assert(p_ops->sess_info[sess_id].writes_not_yet_inserted > 0);
     p_ops->sess_info[sess_id].writes_not_yet_inserted--;
   }
- // assert((source == FROM_TRACE && opcode == CACHE_OP_PUT) || source == FROM_COMMIT);
-
-
 
   struct write *write = (struct write *)
     get_w_ptr(p_ops, opcode, (uint16_t)p_ops->w_meta[w_ptr].sess_id, t_id);
@@ -4631,44 +4439,13 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
   }
   //if (t_id == 1) printf("Wrkr %u Validating state at ptr %u \n", t_id, w_ptr);
   p_ops->w_meta[w_ptr].w_state = VALID;
-  {
-    if (write->opcode == CACHE_OP_PUT) {
-      struct node *node = (struct node *) write->value;
-      if (node->next_key_id > MAX_TR_NODE_KEY)
-        red_printf("Source %d, key_id %u bkt %u \n", source, node->next_key_id, write->key.bkt);
-      check_node(write->value, "when inserting-in the end", write->key.bkt);
-
-      node->value[0] = NODE_SIGNATURE;
-    }
-
-  }
   if (ENABLE_ASSERTIONS) {
     if (p_ops->w_size > 0) assert(p_ops->w_push_ptr != p_ops->w_pull_ptr);
   }
-
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
-
-
-  if (write->opcode == OP_RELEASE) {
-    assert(source == FROM_READ);
-    p_ops->virt_w_size += 2;
-    //yellow_printf("+2 %u at %u \n",  p_ops->virt_w_size, p_ops->w_push_ptr);
-  }
-  else {
-    //yellow_printf("Increasing virt_w_size %u at %u, source %u \n",
-    //              p_ops->virt_w_size, p_ops->w_push_ptr, source);
-    p_ops->virt_w_size++;
-  }
-
+  increas_virt_w_size(p_ops, write, source, t_id);
   MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
-  if (ENABLE_ASSERTIONS) {
-    if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE + 1)
-      red_printf("Wrkr %u Virt_w_size %u/%d, source %u, write->opcode %u \n",
-                 t_id, p_ops->virt_w_size, MAX_ALLOWED_W_SIZE, source, write->opcode);
-    assert(p_ops->w_size <= MAX_ALLOWED_W_SIZE);
-    assert(p_ops->w_size <= p_ops->virt_w_size);
-  }
 }
 
 // setup a new r_rep entry
@@ -4891,11 +4668,8 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   }
   op->real_val_len = real_val_len;
   if (opcode == CACHE_OP_PUT) {
-    check_node(op->value_to_write, "when tracing", op->key.bkt);
     add_request_to_sess_info(&p_ops->sess_info[working_session], t_id);
   }
-
-  //if (is_rmw) printf("rmw \n");
   increment_per_req_counters(opcode, t_id);
 
   op->opcode = opcode;
@@ -5012,7 +4786,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     else {
       check_state_with_allowed_flags(3, resp[i].type, CACHE_GET_SUCCESS, CACHE_GET_TS_SUCCESS);
       insert_read(p_ops, (struct cache_op*) &ops[i], FROM_TRACE, t_id);
-      if (ops[i].opcode == CACHE_OP_PUT) {
+      if (ENABLE_ASSERTIONS && ops[i].opcode == CACHE_OP_PUT) {
         p_ops->sess_info[ops[i].session_id].writes_not_yet_inserted++;
       }
     }
@@ -5060,18 +4834,6 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, uint32_t pos, u
     }
     else { // need to copy the value, ts and RMW-id here
       memcpy(rep->value, glob_entry->value, (size_t) RMW_VALUE_SIZE);
-      {
-        struct top *top =(struct top*) glob_entry->value;
-        struct top *new_top =(struct top*) rep->value;
-        if (top->key_id != new_top->key_id) {
-          assert((top->push_counter != new_top->push_counter) ||
-                 (top->pop_counter != new_top->pop_counter));
-        }
-        check_top(top, "FROM glob_val-top", glob_entry->key.bkt);
-        check_top(new_top, "FROM glob to rep-new_top", glob_entry->key.bkt);
-      }
-
-
       assign_ts_to_netw_ts(&rep->ts, &glob_entry->accepted_ts);
       rep->rmw_id = glob_entry->rmw_id.id;
       rep->glob_sess_id = glob_entry->rmw_id.glob_sess_id;
@@ -5211,18 +4973,10 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
     // we need to remember the last accepted value
     if (loc_entry->rmw_is_successful) {
       memcpy(glob_entry->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-      struct top *top =(struct top*) glob_entry->value;
-
-
-      //check_top(top, "FROM val_to_write to glob-top", glob_entry->key.bkt);
     }
     else {
       memcpy(glob_entry->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-      struct top *top =(struct top*) glob_entry->value;
-      check_top(top, "FROM val_to_read to glob-top", glob_entry->key.bkt);
     }
-
-
     loc_entry->accepted_log_no = glob_entry->log_no;
     assign_second_rmw_id_to_first(&loc_entry->last_registered_rmw_id, &glob_entry->last_registered_rmw_id);
     check_last_registered_rmw_id(loc_entry, glob_entry, loc_entry->helping_flag, t_id);
@@ -5345,8 +5099,6 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     glob_entry->accepted_log_no = glob_entry->log_no;
     glob_entry->accepted_rmw_id = glob_entry->rmw_id;
     memcpy(glob_entry->value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-    struct top *top = (struct top*) glob_entry->value;
-    check_top(top, "FROM helploc_entry to glob-top", glob_entry->key.bkt);
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept_to_help and succeed", t_id);
     optik_unlock_decrement_version(loc_entry->ptr_to_kv_pair);
     return_flag = ACCEPT_ACK;
@@ -5484,38 +5236,9 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
       glob_entry->last_registered_log_no = new_log_no;
     }
     struct cache_op *kv_pair = (struct cache_op *) loc_entry->ptr_to_kv_pair;
-    {
-      struct top *top =(struct top*) &kv_pair->value[RMW_BYTE_OFFSET];
-      struct top *new_top =(struct top*) rmw_rep->value;
-//      green_printf("FROM REP \n Top pushed %u/%u key_id %u \n"
-//                     " New Top pushed %u/%u key_id %u \n",
-//                   top->push_counter, top->pop_counter, top->key_id,
-//                   new_top->push_counter, new_top->pop_counter, new_top->key_id);
-//      bool success = memcmp(top, new_top, sizeof(struct top)) != 0;
-//
-//
-//      printf("FROM REP: Log %u RMW to key %u goes through, success %d, \n",
-//             new_log_no, kv_pair->key.bkt, success);
-      if (top->key_id != new_top->key_id) {
-        assert((top->push_counter != new_top->push_counter) ||
-               (top->pop_counter != new_top->pop_counter));
-      }
-      check_top(top, "FROM rep-top", 0);
-      if (new_top->push_counter > new_top->pop_counter && new_top->key_id == 0) {
-        // new top cannot point to 0
-        yellow_printf("Wrkr %u log_no %u, opcode %u rmw_id %u-%u \n",
-                      t_id, new_log_no, rmw_rep->opcode, new_rmw_id, new_glob_sess_id);
-
-        assert(false);
-      }
-      else check_top(new_top, "FROM rep-new_top", 0);
-
-    }
     update_commit_logs(t_id, kv_pair->key.bkt, new_log_no, &kv_pair->value[RMW_BYTE_OFFSET],
                        rmw_rep->value, "From rep ", LOG_COMS);
     memcpy(&kv_pair->value[RMW_BYTE_OFFSET], rmw_rep->value, (size_t) RMW_VALUE_SIZE);
-
-
     if (compare_meta_ts_with_netw_ts(loc_entry->ptr_to_kv_pair, &rmw_rep->ts) == SMALLER) {
       kv_pair->key.meta.m_id = rmw_rep->ts.m_id;
       kv_pair->key.meta.version = rmw_rep->ts.version + 1; // the unlock function will decrement 1
@@ -5637,26 +5360,6 @@ static inline uint64_t handle_remote_commit_message(struct cache_op *kv_ptr, voi
       kv_ptr->key.meta.m_id = m_id;
       kv_ptr->key.meta.version = version + 1; // the unlock function will decrement 1
     }
-
-    {
-      struct top *top =(struct top*) &kv_ptr->value[RMW_BYTE_OFFSET];
-      struct top *new_top =(struct top*) value;
-//      green_printf("FROM COMMIT \n"
-//                     " Top pushed %u/%u key_id %u \n"
-//                     " New Top pushed %u/%u key_id %u \n",
-//                   top->push_counter, top->pop_counter, top->key_id,
-//                   new_top->push_counter, new_top->pop_counter, new_top->key_id);
-//      bool success = memcmp(top, new_top, sizeof(struct top)) != 0;
-//      printf("FROM COMMIT: Log %u RMW to key %u goes through, success %d, \n",
-//             log_no, kv_ptr->key.bkt, success);
-      if (top->key_id != new_top->key_id) {
-        assert((top->push_counter != new_top->push_counter) ||
-               (top->pop_counter != new_top->pop_counter));
-      }
-      check_top(top, "FROM commit-top", 0);
-      check_top(new_top, "FROM Commit-new_top", 0);
-    }
-
     update_commit_logs(t_id, kv_ptr->key.bkt, log_no, &kv_ptr->value[RMW_BYTE_OFFSET],
                        value, "From remote commit ", LOG_COMS);
     memcpy(&kv_ptr->value[RMW_BYTE_OFFSET], value, (size_t) RMW_VALUE_SIZE);
@@ -5755,8 +5458,6 @@ static inline uint8_t handle_remote_accept_in_cache(struct cache_op *kv_ptr, str
                             acc->glob_sess_id, t_id);
     if (ENABLE_ASSERTIONS) assert(*entry == *(uint32_t *)kv_ptr->value);
     memcpy(rmw.entry[*entry].value, acc->value, (size_t) RMW_VALUE_SIZE);
-    struct top *top =(struct top*) rmw.entry[*entry].value;
-    check_top(top, "handle_remote_accept_in_cache", rmw.entry[*entry].key.bkt);
     kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
     if (DEBUG_RMW)
       yellow_printf("Worker %u got entry %u for a remote accept RMW, new opcode %u \n",
@@ -6161,8 +5862,6 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
     help_loc_entry->new_ts = glob_entry->accepted_ts;
     help_loc_entry->rmw_id = glob_entry->accepted_rmw_id;
     memcpy(help_loc_entry->value_to_write, glob_entry->value, (size_t) RMW_VALUE_SIZE);
-    struct top *top =(struct top*) help_loc_entry->value_to_write;
-    check_top(top, "attempt_to_help_a_locally_accepted_value", glob_entry->key.bkt);
     loc_entry->new_ts.version =  MAX((loc_entry->ptr_to_kv_pair->version + 1),
                                      (glob_entry->new_ts.version + 2));
     loc_entry->new_ts.m_id = (uint8_t) machine_id;
@@ -6579,10 +6278,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     }
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
-      //if (p_ops->sess_info[sess_i].writes_not_yet_inserted > 0) {
       if (loc_entry->must_release && !p_ops->sess_info[sess_i].ready_to_release) {
-        //printf("Wrkr %u, sess %u breaks due to %u writes not yet inserted \n",
-        //       t_id, sess_i, p_ops->sess_info[sess_i].writes_not_yet_inserted );
         continue;
       }
       else if (loc_entry->must_release) loc_entry->must_release = false;
@@ -7129,11 +6825,6 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (!EMULATE_ABD) handle_configuration_on_receiving_rel(write, t_id);
       if (ENABLE_ASSERTIONS) assert(write->opcode != ACCEPT_OP_BIT_VECTOR);
 
-      if (write->opcode != ACCEPT_OP && write->opcode != COMMIT_OP) {
-        //assert(write->opcode == CACHE_OP_PUT);
-        check_node(write->value, "polling a write", write->key.bkt);
-      }
-
       if (write->opcode != NO_OP_RELEASE) {
         p_ops->ptrs_to_mes_ops[running_writes_for_kvs] = (((void *) write) - 3); // align with cache_op
         if (write->opcode == ACCEPT_OP) {
@@ -7547,7 +7238,6 @@ static inline void commit_reads(struct pending_ops *p_ops,
           memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
       }
       else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
-      check_node(read_info->value, "read to write-- r_info", read_info->key.bkt);
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
     // insert commit after rmw acquire if not a quorum of people have seen the last committed value
@@ -7725,7 +7415,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
   }
 }
 
-
+// When a write has not gathered all acks but time-out expires
 static inline bool complete_requests_that_wait_all_acks(uint8_t *w_state,
                                                         uint32_t w_ptr, uint16_t t_id)
 {
@@ -7754,9 +7444,8 @@ static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_o
   if (w_meta->w_state >= SENT_PUT && w_meta->acks_seen >= REMOTE_QUORUM) {
     p_ops->full_w_q_fifo++;
     if (p_ops->full_w_q_fifo == WRITE_FIFO_TIMEOUT) {
-      printf("Wrkr %u expires write fifo timeout and "
-               "releases partially acked writes \n", t_id);
-      assert(false);
+      //printf("Wrkr %u expires write fifo timeout and "
+      //         "releases partially acked writes \n", t_id);
       p_ops->full_w_q_fifo = 0;
       uint32_t w_pull_ptr = p_ops->w_pull_ptr;
       for (uint32_t i = 0; i < p_ops->w_size; i++) {
@@ -7962,11 +7651,6 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
       ack->opcode = INVALID_OPCODE;
       ack->ack_num = 0; continue;
     }
-
-    if (ENABLE_ASSERTIONS) {
-      assert(pull_lid <= l_id);
-      // since we are trying to gather all acks it cannot be that an ack is late
-    }
     if (pull_lid >= l_id) {
       if ((pull_lid - l_id) >= ack_num) {ack->opcode = 5;
         ack->ack_num = 0; continue;}
@@ -8018,7 +7702,6 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
   if (op->opcode == CACHE_OP_GET && p_ops->p_ooe_writes->size > 0) {
     uint8_t *val_ptr;
     if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
-      check_node(val_ptr, "ooe write", op->key.bkt);
       memcpy(op->value_to_read, val_ptr, op->real_val_len);
       //memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
       //red_printf("Wrkr %u Forwarding a value \n", t_id);
@@ -8070,12 +7753,10 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
   if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
-  check_node(op->value_to_write, "KVS_from_trace_writes", op->key.bkt);
   struct node * new_node = (struct node *) op->value_to_write;
   optik_lock(&kv_ptr->key.meta);
   // OUT_OF_EPOCH--first round will be a read TS
   if (*(uint16_t *)kv_ptr->key.meta.epoch_id < epoch_id) {
-    assert(false);
     uint32_t r_push_ptr = *r_push_ptr_;
     struct read_info *r_info = &p_ops->read_info[r_push_ptr];
     r_info->ts_to_read.m_id = kv_ptr->key.meta.m_id;
@@ -8090,7 +7771,6 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
 
     //yellow_printf("Out of epoch write key %u, node-next key_id %u \n",
     //             op->key.bkt, new_node->next_key_id);
-    check_node(r_info->value, "KVS_from_trace_writes-- r_info", op->key.bkt);
     r_info->val_len = op->real_val_len;
     p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
     p_ops->p_ooe_writes->size++;
@@ -8101,14 +7781,10 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
   }
   else { // IN-EPOCH
     if (ENABLE_ASSERTIONS) {
-      assert(op->real_val_len <= VALUE_SIZE && op->real_val_len >= sizeof(struct node));
-      check_node(kv_ptr->value, "KVS_from_trace_writes before", kv_ptr->key.bkt);
-      assert(kv_ptr->key.bkt == create_key(new_node->key_id).bkt);
       update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
                          op->value_to_write, "local write", LOG_WS);
     }
     memcpy(kv_ptr->value, op->value_to_write, op->real_val_len);
-    check_node(kv_ptr->value, "KVS_from_trace_writes after", kv_ptr->key.bkt);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     // This also writes the new version to op
     optik_unlock_write(&kv_ptr->key.meta, (uint8_t) machine_id, (uint32_t *) &op->ts.version);
@@ -8286,8 +7962,6 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct cache_op *o
   if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
   optik_lock(&kv_ptr->key.meta);
   if (optik_is_greater_version(kv_ptr->key.meta, op->key.meta)) {
-    check_node(kv_ptr->value, "kv_val recv write--apply", kv_ptr->key.bkt);
-    check_node(op->value, "write_val recv write--apply", op->key.bkt);
     update_commit_logs(t_id, kv_ptr->key.bkt, op->key.meta.version, kv_ptr->value,
                        op->value, "rem write", LOG_WS);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
@@ -8295,28 +7969,8 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct cache_op *o
     optik_unlock(&kv_ptr->key.meta, op->key.meta.m_id, op->key.meta.version);
 
   } else {
-    struct node *old_node = (struct  node *) kv_ptr->value;
-    struct node *new_node = (struct  node *) op->value;
-    if (op->opcode == CACHE_OP_PUT &&
-      kv_ptr->key.meta.version - 1 > op->key.meta.version) {
-      printf("Failing to perform a remote write to key %u, write-ts %u/%u, stored ts %u/%u/"
-               "new key-id %u/%u/%u/%u/%d old key_id %u/%u/%u/%u/%d \n",
-             kv_ptr->key.bkt, op->key.meta.version, op->key.meta.m_id,
-             kv_ptr->key.meta.version, kv_ptr->key.meta.m_id,
-             new_node->next_key_id, new_node->stack_id, new_node->push_counter,
-             new_node->owner, new_node->pushed,
-             old_node->next_key_id, old_node->stack_id, old_node->push_counter,
-             old_node->owner, old_node->pushed);
-      t_stats[t_id].failed_rem_writes++;
-      //exit(0);
-    }
-    check_node(kv_ptr->value, "kv_val recev write", kv_ptr->key.bkt);
-    check_node(op->value, "write_val recev write", op->key.bkt);
-
-    //assert(old_node->next_key_id == new_node->next_key_id);
-
     optik_unlock_decrement_version(&kv_ptr->key.meta);
-    //if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
+    if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
   }
 }
 
@@ -8373,12 +8027,6 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
                            acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                            ENABLE_ASSERTIONS ? "received accept" : NULL);
         memcpy(rmw.entry[entry].value, acc->value, (size_t) RMW_VALUE_SIZE);
-        struct top *top = (struct top*) rmw.entry[entry].value;
-        if (top->push_counter > top->pop_counter && top->key_id == 0) {
-          red_printf("Accepting at log_no %u for key %u pushed/pulled %u/%u \n",
-                     acc->log_no, acc->key.bkt, top->push_counter, top->pop_counter);
-        }
-        //check_top(top, "KVS_updates_accepts", rmw.entry[entry].key.bkt);
         if (log_no - 1 > glob_entry->last_registered_log_no) {
           register_last_committed_rmw_id_by_remote_accept(glob_entry, acc, t_id);
           assign_net_rmw_id_to_rmw_id(&glob_entry->last_registered_rmw_id, &acc->last_registered_rmw_id);

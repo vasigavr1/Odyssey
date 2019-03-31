@@ -34,7 +34,7 @@
 #define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define WRITE_FIFO_TIMEOUT M_16
+#define WRITE_FIFO_TIMEOUT M_1
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
@@ -54,7 +54,7 @@
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 3
+#define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
@@ -103,11 +103,12 @@
 #define TREIBER_BLOCKING 0
 #define TREIBER_ASYNC 1
 #define MSQ_ASYNC 0
-#define TREIBER_WRITES_NUM 1
+#define TREIBER_WRITES_NUM 32
+#define TREIBER_NO_CONFLICTS 0
 #define MS_WRITES_NUM 1
 #define CLIENT_LOGS 0
 
-#define PER_SESSION_REQ_NUM 25 //(TREIBER_WRITES_NUM + 2)
+#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -142,7 +143,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 15000
+#define NUM_OF_RMW_KEYS 50000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -918,25 +919,6 @@ struct rmw_local_entry {
   struct rmw_local_entry* help_loc_entry;
 };
 
-struct top {
-  uint32_t fourth_key_id;
-  uint32_t third_key_id;
-  uint32_t sec_key_id;
-  uint32_t key_id;
-  uint32_t pop_counter;
-  uint32_t push_counter;
-};
-#define NODE_SIZE (VALUE_SIZE - 17)
-#define NODE_SIGNATURE 144
-struct node {
-  uint8_t value[NODE_SIZE];
-  bool pushed;
-  uint16_t stack_id;
-  uint16_t owner;
-  uint32_t push_counter;
-  uint32_t key_id;
-  uint32_t next_key_id;
-};
 
 // Local state of pending RMWs - one entry per session
 // Accessed with session id!
@@ -948,13 +930,15 @@ struct prop_info {
 struct sess_info {
   bool stalled;
   bool ready_to_release;
+  uint8_t missing_num;
+  uint8_t missing_ids[REM_MACH_NUM];
+  uint16_t epoch_id;
   // live writes: writes that have not been acked-
   // could be ooe-writes in their read phase
   uint32_t live_writes;
 
-  uint32_t writes_not_yet_inserted;
-  uint8_t missing_num;
-  uint8_t missing_ids[REM_MACH_NUM];
+  uint32_t writes_not_yet_inserted; // for debug only
+
 };
 
 struct per_write_meta {
@@ -1299,6 +1283,27 @@ struct local_latency {
 
 
 extern struct latency_counters latency_count;
+
+// TREIBER STRUCTS
+struct top {
+  uint32_t fourth_key_id;
+  uint32_t third_key_id;
+  uint32_t sec_key_id;
+  uint32_t key_id;
+  uint32_t pop_counter;
+  uint32_t push_counter;
+};
+#define NODE_SIZE (VALUE_SIZE - 17)
+#define NODE_SIGNATURE 144
+struct node {
+  uint8_t value[NODE_SIZE];
+  bool pushed;
+  uint16_t stack_id;
+  uint16_t owner;
+  uint32_t push_counter;
+  uint32_t key_id;
+  uint32_t next_key_id;
+};
 
 
 void *client(void *arg);

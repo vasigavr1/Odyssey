@@ -756,7 +756,8 @@ static inline void rel_acq_circular_async() {
 }
 
 /*-------------------------------------- TREIBER STACK---------------------------------------------------------------- */
-struct tr_sess_info {
+
+struct tr_sess_info_dbg {
   uint8_t state;
   uint8_t push_or_pull_state;
   bool success;
@@ -780,7 +781,7 @@ struct tr_sess_info {
 };
 
 
-static inline void update_file(uint16_t t_id, uint32_t key_id, struct tr_sess_info *info, bool push,
+static inline void update_file(uint16_t t_id, uint32_t key_id, struct tr_sess_info_dbg *info, bool push,
                                struct top *top, struct top * new_top)
 {
   if (CLIENT_LOGS) {
@@ -810,7 +811,72 @@ static inline void update_file(uint16_t t_id, uint32_t key_id, struct tr_sess_in
 
 }
 
+static inline bool check_top(struct top *top, char *message,
+                             uint32_t stack_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(top->push_counter >= top->pop_counter);
 
+    if (top->push_counter == top->pop_counter) {
+      if (top->key_id != 0) { // Stack must be empty
+        red_printf("%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
+                   message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        return false;
+        assert(false);
+      }
+    } else if (top->push_counter > top->pop_counter) {
+      if (top->key_id < NUM_OF_RMW_KEYS) { // Stack cannot be empty
+        red_printf("%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
+                   message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        return false;
+        assert(false);
+      }
+    }
+  }
+  return true;
+}
+
+
+static inline bool check_top_success(struct top *top, struct top *new_top)
+{
+  assert(top != NULL); assert(new_top != NULL);
+  bool pushing = new_top->push_counter == top->push_counter + 1;
+  bool popping = new_top->pop_counter == top->pop_counter + 1;
+  assert(pushing || popping);
+  if (pushing) assert(new_top->pop_counter == top->pop_counter);
+  if (popping) assert(new_top->push_counter == top->push_counter);
+}
+
+static inline bool check_tops_equal(struct top *top, struct top *comp_top)
+{
+  assert(top != NULL); assert(comp_top != NULL);
+  assert(top->key_id == comp_top->key_id &&
+         top->push_counter == comp_top->push_counter &&
+         top->pop_counter == comp_top->pop_counter);
+}
+
+static inline bool are_tops_equal(struct top *top, struct top *comp_top)
+{
+  assert(top != NULL); assert(comp_top != NULL);
+  return (top->key_id == comp_top->key_id &&
+          top->push_counter == comp_top->push_counter &&
+          top->pop_counter == comp_top->pop_counter);
+}
+
+static inline void check_node(uint8_t *val, char *message,
+                              uint32_t key_bkt)
+{
+  if (ENABLE_ASSERTIONS) {
+    struct node *node = (struct node *) val;
+    if (node->next_key_id == 0) return;
+    if (node->next_key_id >= NUM_OF_RMW_KEYS && node->next_key_id <= MAX_TR_NODE_KEY)
+      return;
+
+    red_printf("%s node key id %u, bkt %u\n",
+               message, node->next_key_id, key_bkt);
+    assert(false);
+  }
+}
 
 
 static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id, int key_id_to_push)
@@ -896,11 +962,9 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
 #define POPPING 1
 
 
-
-#define NUMBER_OF_STACKS 10000
+#define KEY_OFFSET NUM_OF_RMW_KEYS
+#define NUMBER_OF_STACKS 50000
 #define DEBUG_MAX 200
-
-
 
 
 
@@ -1071,7 +1135,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
 
 }
 
-static inline void treiber_pop_state_machine(struct tr_sess_info *info,
+static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
                                              uint32_t* stack_id_cntr,
                                              uint16_t t_id)
 {
@@ -1162,6 +1226,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
         }
 
         info->owned_key = top->key_id;
+        if (TREIBER_WRITES_NUM == 2) assert(info->owned_key % 2 == 0);
         first_node[0].pushed = false;
         first_node[0].stack_id = (uint16_t) (NUMBER_OF_STACKS + info->stack_id);
         first_node[0].owner = info->glob_sess_i;
@@ -1174,8 +1239,9 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
 //                    info->real_sess_i, top->key_id, info->stack_id, new_top->push_counter, new_top->pop_counter);
         update_file(t_id, top->key_id, info, false, top, new_top);
         info->success = false;
-        info->stack_id = (top->key_id + new_top->push_counter + (uint32_t)(&info->stack_id) +
-          (uint32_t)(c_stats[t_id].treiber_pops * c_stats[t_id].treiber_pushes) ) % NUMBER_OF_STACKS;
+        info->stack_id = *stack_id_cntr;
+        MOD_ADD(*stack_id_cntr, NUMBER_OF_STACKS);// (top->key_id + new_top->push_counter + (uint32_t)(&info->stack_id) +
+          //(uint32_t)(c_stats[t_id].treiber_pops * c_stats[t_id].treiber_pushes) ) % NUMBER_OF_STACKS;
         c_stats[t_id].treiber_pops++;
 
         info->valid_key_to_write = true;
@@ -1197,6 +1263,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
 
 
       check_top(top, "Pop-already checked ", info->stack_id);
+       // Below usage of check_top is okay to fire -- it means we read a stale first node
       if (!check_top(new_top, "Pop-new_top before CAS ", info->stack_id)) {
         //cyan_printf("Before popping stack %u, new_top key/top key %u/%u, new pushed/pulled %u/%u\n",
         //            info->stack_id, new_top->key_id, top->key_id, new_top->push_counter, new_top->pop_counter);
@@ -1228,7 +1295,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
 }
 
 
-static inline void treiber_push_state_machine(struct tr_sess_info *info,
+static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
                                               uint32_t* stack_id_cntr, uint16_t t_id)
 {
   struct top *top = &info->top;
@@ -1256,7 +1323,7 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
 //        yellow_printf("Clt %u have Asked worker %u for %lu writes \n",
 //                      t_id, info->wrkr, t_stats[info->wrkr].writes_asked_by_clients);
       for (uint16_t i = 1; i < TREIBER_WRITES_NUM; i++) {
-        assert(false);
+        //assert(false);
 
         async_write_strong(info->owned_key + i, (uint8_t *) &new_node[i],
                            sizeof(struct node), real_sess_i);
@@ -1320,6 +1387,7 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
         new_top->fourth_key_id = top->third_key_id;
         assert(new_top->key_id >= NUM_OF_RMW_KEYS);
         assert(info->owned_key  <= MAX_TR_NODE_KEY);
+        if (TREIBER_WRITES_NUM == 2) assert(info->owned_key % 2 == 0);
         //check_top(new_top, "Push-new_top before CAS ", info->stack_id);
 //        if (!check_top(new_top, "before pushing", info->stack_id)) {
 //          info->push_dbg++;
@@ -1367,18 +1435,18 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
 
 
 // Each session picks a stack, pushes one element and then pops one element
-static inline void treiber_push_pull_multi_session(uint16_t t_id)
+static inline void treiber_push_pull_multi_session_dbg(uint16_t t_id)
 {
 
   assert(sizeof(struct top) <= RMW_VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   assert(TREIBER_WRITES_NUM > 0);
   uint16_t s_i = 0;
-  uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS + (SESSIONS_PER_MACHINE * machine_id));
+  uint32_t key_offset = (uint32_t) (KEY_OFFSET + (SESSIONS_PER_MACHINE * machine_id));
   uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
   assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
   uint32_t stack_id_cntr = 0;//(uint32_t) machine_id * 100;
-  struct tr_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct tr_sess_info));
+  struct tr_sess_info_dbg *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct tr_sess_info_dbg));
   uint32_t first_key = key_offset + sess_offset * TREIBER_WRITES_NUM;
   uint32_t last_key = key_offset + (sess_offset + (SESSIONS_PER_CLIENT -1)) * TREIBER_WRITES_NUM;
   uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
@@ -1394,12 +1462,15 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
     info[s_i].s_i = s_i;
     info[s_i].real_sess_i = sess_offset + s_i;
     info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
-    info[s_i].owned_key = key_offset + info[s_i].real_sess_i * TREIBER_WRITES_NUM;
+    info[s_i].owned_key = (uint32_t) (KEY_OFFSET + (info[s_i].glob_sess_i * TREIBER_WRITES_NUM));
+    //printf("owned %u \n", info[s_i].owned_key);
+    if (TREIBER_WRITES_NUM == 2) assert(info->owned_key % 2 == 0);
+
     //printf("Session %u key %u \n", info[s_i].real_sess_i, info[s_i].key_to_write);
     if (ENABLE_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
     info[s_i].new_node = calloc(TREIBER_WRITES_NUM, (sizeof(struct node)));
     info[s_i].new_node[0].next_key_id = 0;
-    info[s_i].stack_id =  (info[s_i].owned_key - NUM_OF_RMW_KEYS) % NUMBER_OF_STACKS;
+    info[s_i].stack_id =  (key_offset + info[s_i].real_sess_i - NUM_OF_RMW_KEYS) % NUMBER_OF_STACKS;
     assert(info[s_i].stack_id < NUMBER_OF_STACKS);
     info[s_i].valid_key_to_write = true;
     info[s_i].wrkr = (uint16_t) (info[s_i].real_sess_i / SESSIONS_PER_THREAD);
@@ -1409,7 +1480,206 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
   while(true) {
     switch (info[s_i].push_or_pull_state) {
       case PUSHING:
-        treiber_push_state_machine(&info[s_i], &stack_id_cntr, t_id);
+        treiber_push_state_machine_dbg(&info[s_i], &stack_id_cntr, t_id);
+        break;
+      case POPPING:
+        treiber_pop_state_machine_dbg(&info[s_i], &stack_id_cntr, t_id);
+        break;
+      default: if (ENABLE_ASSERTIONS) assert(false);
+    }
+    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+  }
+
+}
+
+struct tr_sess_info {
+  uint8_t state;
+  uint8_t push_or_pull_state;
+  bool success;
+  //bool valid_key_to_write;
+  //bool done_cas;
+  uint16_t s_i;
+  uint16_t real_sess_i;
+  //uint16_t glob_sess_i;
+  uint16_t wrkr;
+  uint32_t last_req_id;
+  uint32_t stack_id;
+  uint32_t owned_key;
+  //uint32_t pop_dbg;
+  //uint32_t push_dbg;
+  struct top top;
+  struct top new_top;
+  struct node *new_node;
+  //struct node *owned_node;
+};
+
+static inline void treiber_pop_state_machine(struct tr_sess_info *info,
+                                             uint32_t *stack_id_cntr,
+                                             uint16_t t_id)
+{
+  struct top *top = &info->top;
+  struct top *new_top = &info->new_top;
+  struct node *first_node = info->new_node;
+  uint16_t real_sess_i = info->real_sess_i;
+  if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+  switch (info->state) {
+    case INIT:
+      if (ENABLE_ASSERTIONS) assert(!info->success);
+      info->last_req_id = (uint32_t)  async_read_strong(info->stack_id, (uint8_t *) top,
+                                                        sizeof(struct top), real_sess_i);
+      info->state = READ_TOP;
+      break;
+    case READ_TOP:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      assert(top->key_id >= KEY_OFFSET);
+      if (!info->success) { //either CAS failed, or has not been attempted yet
+        check_top(top, "", info->stack_id);
+        for (uint16_t i = 0; i < TREIBER_WRITES_NUM; i++) {
+          info->last_req_id =
+            (uint32_t) async_read_strong(top->key_id + i, (uint8_t *) &first_node[i],
+                                         sizeof(struct node), real_sess_i);
+        }
+        info->state = READ_FIRST;
+      }
+      else if (info->success) {
+        info->owned_key = top->key_id;
+//        cyan_printf("Session %u Popped key %u from stack %u pushed/pulled %u/%u \n",
+//                    info->real_sess_i, top->key_id, info->stack_id, new_top->push_counter, new_top->pop_counter);
+        info->success = false;
+        if (!TREIBER_NO_CONFLICTS) {
+           info->stack_id = *stack_id_cntr;
+           MOD_ADD(*stack_id_cntr, NUMBER_OF_STACKS);
+        }
+        c_stats[t_id].treiber_pops++;
+        // Transition to pushing
+        info->push_or_pull_state = PUSHING;
+        info->state = INIT;
+      }
+      break;
+    case READ_FIRST:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      new_top->pop_counter = top->pop_counter + 1;
+      new_top->push_counter = top->push_counter;
+      if (new_top->push_counter > new_top->pop_counter &&
+          first_node[0].next_key_id == 0) {
+        info->state = INIT; break;
+      }
+      new_top->key_id = first_node[0].next_key_id;
+      check_top(top, "Pop-already checked ", info->stack_id);
+      info->last_req_id =
+        (uint32_t) async_cas_strong(info->stack_id, (uint8_t *) top, (uint8_t *) new_top,
+                                    sizeof(struct top), &info->success, true, real_sess_i);
+      info->state = READ_TOP;
+      break;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
+
+static inline void treiber_push_state_machine(struct tr_sess_info *info,
+                                             uint16_t t_id)
+{
+  struct top *top = &info->top;
+  struct top *new_top = &info->new_top;
+  struct node *new_node = info->new_node;
+  uint16_t real_sess_i = info->real_sess_i;
+
+  if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+
+  switch (info->state) {
+    case INIT: // INITIAL phase of a push: come here in the first push ever, and after every successful push
+      if (ENABLE_ASSERTIONS) assert(!info->success);
+      info->last_req_id = (uint32_t) async_read_strong(info->stack_id, (uint8_t *) top,
+                                                       sizeof(struct top), real_sess_i);
+      for (uint16_t i = 1; i < TREIBER_WRITES_NUM; i++) {
+         async_write_strong(info->owned_key + i, (uint8_t *) &new_node[i],
+                           sizeof(struct node), real_sess_i);
+      }
+      info->state = READ_TOP;
+      break;
+    case READ_TOP:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      assert(check_top(top, "Push-after reading top ", info->stack_id));
+      if (!info->success) {
+        // Do only one write here: the one that needs to point to what top used to point
+        // the rest of the writes need not happen in the conflict path, and need not wait
+        // for the previous read to complete
+        new_node[0].next_key_id = top->key_id;
+        new_top->pop_counter = top->pop_counter;
+        new_top->push_counter = top->push_counter + 1;
+        new_top->key_id = info->owned_key;
+        if (ENABLE_ASSERTIONS) {
+          assert(new_top->key_id >= NUM_OF_RMW_KEYS);
+          assert(info->owned_key <= MAX_TR_NODE_KEY);
+        }
+        check_node((uint8_t *)&new_node[0], "client before pushing", info->stack_id);
+        async_write_strong(info->owned_key, (uint8_t *) &new_node[0],
+                           sizeof(struct node), real_sess_i);
+        info->last_req_id = (uint32_t) async_cas_strong(info->stack_id, (uint8_t *) top, (uint8_t *) new_top,
+                                                        sizeof(struct top), &info->success, true, real_sess_i);
+      }
+      else if (info->success) { // If push succeeded, do a pull
+        //yellow_printf("Session %u Pushed key %u to stack %u : %u/%u \n",
+        //              info->real_sess_i, new_top->key_id, info->stack_id,
+        //              new_top->push_counter, new_top->pop_counter);
+        check_top(new_top, "Push-new_top after success ", info->stack_id);
+        info->success = false;
+        c_stats[t_id].treiber_pushes++;
+        if (ENABLE_ASSERTIONS) assert(c_stats[t_id].treiber_pushes > c_stats[t_id].treiber_pops);
+        info->push_or_pull_state = POPPING;
+        info->state = INIT;
+      }
+      break;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
+
+
+// Each session picks a stack, pushes one element and then pops one element
+static inline void treiber_push_pull_multi_session(uint16_t t_id)
+{
+
+  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct node) == VALUE_SIZE);
+  assert(TREIBER_WRITES_NUM > 0);
+  assert(NUMBER_OF_STACKS >= GLOBAL_SESSION_NUM);
+  uint16_t s_i = 0;
+  uint32_t key_offset = (uint32_t) (KEY_OFFSET + (SESSIONS_PER_MACHINE * machine_id));
+  uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
+  assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
+  struct tr_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct tr_sess_info));
+  uint32_t first_key = key_offset + sess_offset * TREIBER_WRITES_NUM;
+  uint32_t last_key = key_offset + (sess_offset + (SESSIONS_PER_CLIENT -1)) * TREIBER_WRITES_NUM;
+  uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
+  uint16_t min_wrkr = (uint16_t) (min_sess / SESSIONS_PER_THREAD),
+    max_wrkr = (uint16_t) (max_sess / SESSIONS_PER_THREAD);
+
+  uint32_t stack_id_cntr = ((machine_id * 100) + last_key) % NUMBER_OF_STACKS;
+  printf("Client %u: sessions %u to %u, workers %u to %u, keys %u to %u, globally max key %u \n",
+         t_id, min_sess, max_sess, min_wrkr, max_wrkr,
+         first_key, last_key, MAX_TR_NODE_KEY);
+
+  for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
+    info[s_i].state = INIT;
+    info[s_i].push_or_pull_state = PUSHING;
+    info[s_i].s_i = s_i;
+    info[s_i].real_sess_i = sess_offset + s_i;
+    info[s_i].owned_key = key_offset + info[s_i].real_sess_i * TREIBER_WRITES_NUM;
+    info[s_i].owned_key = (uint32_t) (KEY_OFFSET + (
+                          (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i) * TREIBER_WRITES_NUM));
+    //printf("Session %u key %u \n", info[s_i].real_sess_i, info[s_i].key_to_write);
+    if (ENABLE_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
+    info[s_i].new_node = calloc(TREIBER_WRITES_NUM, (sizeof(struct node)));
+    info[s_i].new_node[0].next_key_id = 0;
+    info[s_i].stack_id =  (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
+    //(info[s_i].owned_key - KEY_OFFSET) % NUMBER_OF_STACKS;
+    assert(info[s_i].stack_id < NUMBER_OF_STACKS);
+  }
+  s_i = 0;
+  while(true) {
+    switch (info[s_i].push_or_pull_state) {
+      case PUSHING:
+        treiber_push_state_machine(&info[s_i], t_id);
         break;
       case POPPING:
         treiber_pop_state_machine(&info[s_i], &stack_id_cntr, t_id);
