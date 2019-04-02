@@ -100,18 +100,18 @@ void *print_stats(void* no_arg) {
 
     }
 
-    uint64_t all_client_treiber_pushes = 0, all_client_treiber_pops = 0;
+    uint64_t all_client_microbench_pushes = 0, all_client_microbench_pops = 0;
     for (i = 0; i < CLIENTS_PER_MACHINE; i++) {
-      all_client_treiber_pushes += curr_c_stats[i].treiber_pushes - prev_c_stats[i].treiber_pushes;
-      all_client_treiber_pops += curr_c_stats[i].treiber_pops - prev_c_stats[i].treiber_pops;
+      all_client_microbench_pushes += curr_c_stats[i].microbench_pushes - prev_c_stats[i].microbench_pushes;
+      all_client_microbench_pops += curr_c_stats[i].microbench_pops - prev_c_stats[i].microbench_pops;
     }
 
     memcpy(prev_w_stats, curr_w_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
     memcpy(prev_c_stats, curr_c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
     total_throughput = (all_wrkr_completed_reqs) / seconds;
     double zk_write_reatio = all_wrkr_completed_zk_writes / (double) all_wrkr_completed_reqs;
-    double total_treiber_pushes = (all_client_treiber_pushes) / seconds;
-    double total_treiber_pops = (all_client_treiber_pops) / seconds;
+    double total_treiber_pushes = (all_client_microbench_pushes) / seconds;
+    double total_treiber_pops = (all_client_microbench_pops) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
     green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f zk_wr: %.2f\n", print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
