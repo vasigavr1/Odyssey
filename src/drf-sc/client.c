@@ -1931,7 +1931,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
   struct ms_ptr *new_node_ptr = &info->owned_node_ptr;
   struct ms_ptr *last_node_ptr = &info->last_or_first_node_ms_ptr;
   struct ms_ptr *new_last_node_ptr = &info->new_last_or_first_node_ms_ptr;
-
+  uint32_t tail_key_id = info->queue_id;
   if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 
   switch (info->state) {
@@ -1958,7 +1958,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
 
       //break;
     case MS_LOOP_START:
-      info->last_req_id = (uint32_t) async_read_strong(info->queue_id, (uint8_t *) tail,
+      info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) tail,
                                                        sizeof(struct ms_ptr), real_sess_i);
       info->state = MS_READ_TAIL;
       break;
@@ -1972,7 +1972,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
       async_read_strong(get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
                         sizeof(struct ms_ptr), real_sess_i);
       // read tail again -- a second time
-      info->last_req_id = (uint32_t) async_read_strong(info->queue_id, (uint8_t *) sec_tail,
+      info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) sec_tail,
                                                        sizeof(struct ms_ptr), real_sess_i);
 
       info->state = MS_READ_LAST_NODE;
@@ -2007,7 +2007,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
         if (CLIENT_ASSERTIONS) assert(is_valid_node_key(last_node_ptr->next_key_id));
         new_tail->next_key_id = last_node_ptr->next_key_id;
         new_tail->counter = tail->counter + 1;
-        (uint32_t) async_cas_strong(info->queue_id, (uint8_t *) tail, (uint8_t *) new_tail,
+        (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
                                     sizeof(struct ms_ptr), &info->unused_cas_result, true, real_sess_i);
         info->state = MS_LOOP_START;
       }
@@ -2018,7 +2018,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
         new_tail->next_key_id = info->owned_key;
         if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_tail->next_key_id));
         new_tail->counter = tail->counter + 1;
-        (uint32_t) async_cas_strong(info->queue_id, (uint8_t *) tail, (uint8_t *) new_tail,
+        (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
                                     sizeof(struct ms_ptr), &info->unused_cas_result, true, real_sess_i);
 
         //green_printf("Session %u/%u enqueues key %u to stack %u \n",
@@ -2052,7 +2052,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
   struct ms_ptr *sec_head = &info->second_head;
   struct ms_ptr *new_head = &info->new_head;
 
-  struct ms_node * new_node = info->new_node;
+  struct ms_node *new_node = info->new_node;
   struct ms_ptr *first_node_ptr = &info->owned_node_ptr;
 
   uint16_t real_sess_i = info->real_sess_i;
@@ -2085,7 +2085,9 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
       break;
     case MS_READ_FIRST_NODE:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
-      if (CLIENT_ASSERTIONS) assert(is_valid_node_key(sec_head->next_key_id));
+      if (CLIENT_ASSERTIONS) {
+        assert(is_valid_node_key(sec_head->next_key_id));
+      }
       if (!are_ms_ptrs_equal(head, sec_head)) {
         info->state = MS_LOOP_START;
         break;
@@ -2146,8 +2148,10 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
         info->dequeue_num++;
         c_stats[t_id].microbench_pops++;
         if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes >= c_stats[t_id].microbench_pops);
-        info->queue_id = *queue_id_cntr;
-        MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
+        if (!MS_NO_CONFLICT) {
+          info->queue_id = *queue_id_cntr;
+          MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
+        }
         info->enq_or_deq_state = ENQUEUING;
         info->state = MS_INIT;
       }

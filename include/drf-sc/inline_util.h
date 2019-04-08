@@ -2081,7 +2081,7 @@ static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const ui
 }
 
 // Detect a failure: Bring a given bit of config_bit_vector to state DOWN_STABLE
-static inline void set_conf_bit_after_detecting_failure(const uint16_t t_id, const uint16_t m_id)
+static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, const uint16_t t_id)
 {
   if (DEBUG_BIT_VECS)
     yellow_printf("Wrkr %u handles Send and conf bit vec after failure to machine %u,"
@@ -2479,6 +2479,7 @@ static inline uint8_t create_bit_vec_of_failures(struct pending_ops *p_ops, stru
     for (uint8_t j = 0; j < sess_info->missing_num; j++) {
       if (!bit_vec[sess_info->missing_ids[j]]) {
         bit_vec[sess_info->missing_ids[j]] = true;
+        set_conf_bit_after_detecting_failure(sess_info->missing_ids[j], t_id);
         failed_machine_num++;
       }
     }
@@ -6322,7 +6323,7 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
-      set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
+      //set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
       //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
       if (!DEBUG_BIT_VECS)

@@ -21,16 +21,16 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define WRITE_RATIO 200 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define WRITE_RATIO 000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 50
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 8
+#define R_CREDITS 7 //
 #define W_CREDITS 8
-#define MAX_READ_SIZE 300 //in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
-#define MAX_WRITE_SIZE 1200 // in terms of bytes for Writes/Releases/Accepts/Commits
+#define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
+#define MAX_WRITE_SIZE  1200 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
 #define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
@@ -38,22 +38,22 @@
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 1
+#define ENABLE_STAT_COUNTING 0
 #define MAXIMUM_INLINE_SIZE 188
-#define MAX_OP_BATCH_ 50
-#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
+#define MAX_OP_BATCH_ 51
+#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 750// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
-#define ENABLE_RMW_ACQUIRES_ 1
-#define EMULATE_ABD 0// Do not enforce releases to gather all credits or start a new message
+#define ENABLE_RMW_ACQUIRES_ 0
+#define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 0
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 
@@ -106,6 +106,7 @@
 #define TREIBER_WRITES_NUM 32
 #define TREIBER_NO_CONFLICTS 0
 #define MS_WRITES_NUM 1
+#define MS_NO_CONFLICT 1
 #define CLIENT_LOGS 0
 
 #define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)

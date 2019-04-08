@@ -9,7 +9,7 @@ void *print_stats(void* no_arg) {
   uint64_t  all_wrkr_completed_reqs = 0, all_wrkr_completed_zk_writes;
   double total_throughput = 0;
 
-  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 16 : 16;
+  uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 16;
   struct thread_stats curr_w_stats[WORKERS_PER_MACHINE], prev_w_stats[WORKERS_PER_MACHINE];
   //curr_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
   //prev_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
