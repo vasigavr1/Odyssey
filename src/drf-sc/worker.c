@@ -166,11 +166,11 @@ void *worker(void *arg)
 
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
-      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 100000) && (!slept)) {
+      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 5000000) && (!slept)) {
       uint seconds = 4;
-      if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
+      //if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
       sleep(seconds); slept = true;
-      yellow_printf("Worker %u is back\n", t_id);
+      //yellow_printf("Worker %u is back\n", t_id);
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
       print_verbouse_debug_info(p_ops, t_id, credits);

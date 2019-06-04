@@ -25,7 +25,10 @@ void *print_stats(void* no_arg) {
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
-    sleep(sleep_time);
+    if (ENABLE_MS_MEASUREMENTS)
+      usleep(100000);
+    else sleep(sleep_time);
+
     clock_gettime(CLOCK_REALTIME, &end);
     double seconds = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) / 1000000001;
     start = end;

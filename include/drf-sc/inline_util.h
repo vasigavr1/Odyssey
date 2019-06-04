@@ -619,6 +619,14 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
   }
 }
 
+// When an out-of-epoch request completes rectify the keys epoch
+static inline void rectify_key_epoch_id(uint16_t epoch_id, struct cache_op * kv_ptr, uint16_t t_id) {
+  if (!MEASURE_SLOW_PATH) {
+    if (epoch_id > *(uint16_t *) kv_ptr->key.meta.epoch_id)
+      *(uint16_t *) kv_ptr->key.meta.epoch_id = epoch_id;
+  }
+}
+
 /* ---------------------------------------------------------------------------
 //------------------------------DEBUGGING-------------------------------------
 //---------------------------------------------------------------------------*/
@@ -6326,9 +6334,10 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       //set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
       //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
-      if (!DEBUG_BIT_VECS)
-       if (t_id == 0)
-        cyan_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
+      if (!DEBUG_BIT_VECS) {
+        if (t_id == 0)
+         cyan_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
+      }
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -7739,6 +7748,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
     MOD_ADD(r_push_ptr, PENDING_READS);
   }
   else { //stored value can be read locally or has been forwarded
+    //printf("%u/%u \n", *(uint16_t *)prev_meta.epoch_id, epoch_id);
     resp->type = CACHE_LOCAL_GET_SUCCESS;
     // this is needed to trick the version check in batch_from_trace_to_cache()
     if (ENABLE_ASSERTIONS) op->ts.version = 0;
@@ -8242,9 +8252,7 @@ static inline void KVS_out_of_epoch_writes(struct read_info *op, struct cache_op
   cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
   uint32_t r_info_version =  op->ts_to_read.version;
   optik_lock(&kv_ptr->key.meta);
-  // Change epoch if needed
-  if (op->epoch_id > *(uint16_t *)kv_ptr->key.meta.epoch_id)
-    *(uint16_t*)kv_ptr->key.meta.epoch_id = op->epoch_id;
+  rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
   // find the the max ts and write it in the kvs
   if (!optik_is_greater_version(kv_ptr->key.meta, op_meta))
     op->ts_to_read.version = kv_ptr->key.meta.version + 1;
@@ -8270,8 +8278,7 @@ static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, str
   optik_lock(&kv_ptr->key.meta);
 
   if (optik_is_greater_version(kv_ptr->key.meta, op_meta)) {
-    if (op->epoch_id > *(uint16_t *)kv_ptr->key.meta.epoch_id)
-      *(uint16_t *) kv_ptr->key.meta.epoch_id = op->epoch_id;
+    rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
     memcpy(kv_ptr->value, op->value, op->val_len);
     optik_unlock(&kv_ptr->key.meta, op->ts_to_read.m_id, op->ts_to_read.version);
   }

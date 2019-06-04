@@ -19,18 +19,19 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 30
 #define MACHINE_NUM 5
-#define WRITE_RATIO 000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 50
+
+#define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 7 //
+#define R_CREDITS 8 //
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
-#define MAX_WRITE_SIZE  1200 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
+#define MAX_WRITE_SIZE 400 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
 #define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
@@ -41,21 +42,23 @@
 #define ENABLE_STAT_COUNTING 0
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 750// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 00// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 1
+#define ENABLE_RMWS_ 0
 #define ENABLE_RMW_ACQUIRES_ 0
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 0
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
+#define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
+#define MEASURE_SLOW_PATH 0
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -66,6 +69,13 @@
 #define WORKERS_PER_CLIENT (ENABLE_CLIENTS ? (WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE ) : 0)
 #define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
+
+//#define ENABLE_FIXED_RMW 1
+//#define DESIRED_TOTAL_WRITE_RATIO WRITE_RATIO_
+//#define REMAINING_WRITE_RATIO (DESIRED_TOTAL_WRITE_RATIO - RMW_RATIO)
+//#define WRITE_RATIO_FIXED_RMW (1000 / ((1000 - RMW_RATIO) / (REMAINING_WRITE_RATIO)))
+//#define WRITE_RATIO (ENABLE_FIXED_RMW ? WRITE_RATIO_FIXED_RMW :  WRITE_RATIO_)
+
 
 // Where to BIND the KVS
 #define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
@@ -101,8 +111,8 @@
 #define BLOCKING_TEST_CASE 0
 #define ASYNC_TEST_CASE 0
 #define TREIBER_BLOCKING 0
-#define TREIBER_ASYNC 0
-#define MSQ_ASYNC 1
+#define TREIBER_ASYNC 1
+#define MSQ_ASYNC 0
 #define TREIBER_WRITES_NUM 32
 #define TREIBER_NO_CONFLICTS 0
 #define MS_WRITES_NUM 1

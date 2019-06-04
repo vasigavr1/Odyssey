@@ -154,7 +154,7 @@ void init_globals()
   time_approx = 0;
   remote_IP = (char *) malloc(16 * sizeof(char));
   dev_name = (char *) malloc(16 * sizeof(char));
-  atomic_store_explicit(&epoch_id, 0, memory_order_relaxed);
+  epoch_id = MEASURE_SLOW_PATH ? 1 : 0;
   // This (sadly) seems to be the only way to initialize the locks
   // in struct_bit_vector, i.e. the atomic_flags
   memset(&send_bit_vector, 0, sizeof(struct bit_vector));
@@ -332,8 +332,8 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
       is_rmw = rand_r(seed) % 1000 < RMW_RATIO;
   }
   if (!is_rmw) {
-    is_update = rand_r(seed) % 1000 < WRITE_RATIO;
-    is_sc = rand_r(seed) % 1000 < SC_RATIO;
+    is_update = rand() % 1000 < WRITE_RATIO; //rand_r(seed) % 1000 < WRITE_RATIO;
+    is_sc = rand() % 1000 < SC_RATIO; //rand_r(seed) % 1000 < SC_RATIO;
   }
 
   if (is_rmw) {
@@ -515,7 +515,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     else {
       bool found = false;
       do {
-        key_id = (uint32) rand_r(&seed) % CACHE_NUM_KEYS;
+        key_id = (uint32) rand() % CACHE_NUM_KEYS; //rand_r(&seed) % CACHE_NUM_KEYS;
         found = false;
         for (uint32_t j = 0; j < NUM_OF_RMW_KEYS; j++)
           if (key_id == keys_that_get_rmwed[j]) found = true;
@@ -528,7 +528,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
   if (t_id == 0) {
     cyan_printf("UNIFORM TRACE \n");
     printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%, "
-             "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d \n",
+             "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d, Write ratio %d \n",
            (double) (opc_info->writes * 100) / TRACE_SIZE,
            (double) (opc_info->sc_writes * 100) / TRACE_SIZE,
            (double) (opc_info->reads * 100) / TRACE_SIZE,
@@ -539,7 +539,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
            (double) (opc_info->rmw_acquires * 100) / TRACE_SIZE,
            opc_info->writes + opc_info->sc_writes + opc_info->reads + opc_info->sc_reads + opc_info->rmws +
            opc_info->rmw_acquires,
-           TRACE_SIZE);
+           TRACE_SIZE, WRITE_RATIO);
   }
   (*cmds)[TRACE_SIZE].opcode = NOP;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,

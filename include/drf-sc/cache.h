@@ -12,7 +12,7 @@
 #include "main.h"
 #include "mica.h"
 #define CACHE_DEBUG 0
-#define CACHE_NUM_BKTS (8 * 1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
+#define CACHE_NUM_BKTS (8 * 1024 * 1024)
 #define CACHE_NUM_KEYS (1000 * 1000)
 
 

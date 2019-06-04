@@ -402,7 +402,8 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
                      op->opcode == CACHE_OP_GET) { // a read resulted on receiving a higher timestamp than expected
             KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
           } else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-            if (op->epoch_id > *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id) {
+            if (!MEASURE_SLOW_PATH &&
+                op->epoch_id > *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id) {
               optik_lock(&kv_ptr[op_i]->key.meta);
               *(uint16_t *) kv_ptr[op_i]->key.meta.epoch_id = op->epoch_id;
               optik_unlock_decrement_version(&kv_ptr[op_i]->key.meta);
