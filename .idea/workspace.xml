@@ -14,17 +14,7 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
-      <change beforePath="$PROJECT_DIR$/include/drf-sc/cache.h" afterPath="$PROJECT_DIR$/include/drf-sc/cache.h" />
-      <change beforePath="$PROJECT_DIR$/include/drf-sc/inline_util.h" afterPath="$PROJECT_DIR$/include/drf-sc/inline_util.h" />
-      <change beforePath="$PROJECT_DIR$/include/drf-sc/main.h" afterPath="$PROJECT_DIR$/include/drf-sc/main.h" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/cache.c" afterPath="$PROJECT_DIR$/src/drf-sc/cache.c" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/drf-sc" afterPath="$PROJECT_DIR$/src/drf-sc/drf-sc" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/stats.c" afterPath="$PROJECT_DIR$/src/drf-sc/stats.c" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/util.c" afterPath="$PROJECT_DIR$/src/drf-sc/util.c" />
-      <change beforePath="$PROJECT_DIR$/src/drf-sc/worker.c" afterPath="$PROJECT_DIR$/src/drf-sc/worker.c" />
-    </list>
+    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="" />
     <ignored path="$PROJECT_DIR$/cmake-build-debug/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -601,16 +591,15 @@
       <workItem from="1548775967174" duration="134062000" />
       <workItem from="1551799994997" duration="172656000" />
       <workItem from="1552647463221" duration="389396000" />
-      <workItem from="1559660574616" duration="153000" />
+      <workItem from="1559660574616" duration="737000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="1912046000" />
+    <option name="totallyTimeSpent" value="1912630000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="67" y="-4" width="1853" height="1204" extended-state="6" />
-    <editor active="true" />
     <layout>
       <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32973558" sideWeight="0.5" order="0" side_tool="false" content_ui="combo" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
