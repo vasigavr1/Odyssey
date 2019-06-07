@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 
 #houston-sanantonio-austin-indianapolis-philly-atlanta-chicago-detroit-baltimore
-allIPs=(192.168.8.4 #houston
-        192.168.8.6 #austin
-        192.168.8.5 #sanantonio
-        192.168.8.2 #philly
-        192.168.8.3 #indianapolis
+#allIPs=(192.168.8.4 #houston
+#        192.168.8.6 #austin
+#        192.168.8.5 #sanantonio
+#        192.168.8.2 #philly
+#        192.168.8.3 #indianapolis
+#        192.168.5.11
+#        192.168.5.13 )
+allIPs=(129.215.165.8 #houston
+        129.215.165.9 #austin
+        129.215.165.7 #sanantonio
+        129.215.165.5 #philly
+        129.215.165.3 #indianapolis
         192.168.5.11
         192.168.5.13 )
-localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+#localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+localIP=$(ip addr | grep 'state UP' -A2 | grep 'inet 129.'| awk '{print $2}' | cut -f1  -d'/')
 
 tmp=$((${#localIP}-1))
 machine_id=-1
@@ -27,7 +35,7 @@ echo RemoteIPs: "${remoteIPs[@]}"
 echo Machine-Id "$machine_id"
 
 
-export REGISTRY_IP="192.168.8.4" # I.E. HOUSTON
+export REGISTRY_IP="129.215.165.8" # I.E. HOUSTON
 export MLX5_SINGLE_THREADED=1
 export MLX5_SCATTER_TO_CQE=1
 

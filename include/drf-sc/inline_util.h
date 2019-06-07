@@ -4760,6 +4760,8 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
       if (trace[trace_iter].opcode == NOP) trace_iter = 0;
     }
   }
+
+
   *last_session_ = (uint16_t) working_session;
 
   t_stats[t_id].cache_hits_per_thread += op_i;

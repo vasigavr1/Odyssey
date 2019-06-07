@@ -19,8 +19,8 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 30
-#define MACHINE_NUM 5
+#define WORKERS_PER_MACHINE 10
+#define MACHINE_NUM 4
 
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
