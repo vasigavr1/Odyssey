@@ -112,14 +112,14 @@ void *print_stats(void* no_arg) {
     memcpy(prev_w_stats, curr_w_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
     memcpy(prev_c_stats, curr_c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
     total_throughput = (all_wrkr_completed_reqs) / seconds;
-    double zk_write_reatio = all_wrkr_completed_zk_writes / (double) all_wrkr_completed_reqs;
+    double zk_write_ratio = all_wrkr_completed_zk_writes / (double) all_wrkr_completed_reqs;
     double total_treiber_pushes = (all_client_microbench_pushes) / seconds;
     double total_treiber_pops = (all_client_microbench_pops) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
     green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f zk_wr: %.2f\n", print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
                  total_treiber_pushes, total_treiber_pops,
-                 zk_write_reatio);
+                 zk_write_ratio);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

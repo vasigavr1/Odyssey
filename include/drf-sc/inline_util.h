@@ -1496,6 +1496,16 @@ static inline void  check_ack_and_print(struct pending_ops* p_ops, uint16_t ack_
                  ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
 
     }
+    if (p_ops->w_meta[ack_ptr].acks_seen >= REM_MACH_NUM) {
+      uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
+      red_printf("Worker %u: acks seen %u/%d, w_state %u, max_pending _writes %d,"
+                   "Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
+                 t_id, p_ops->w_meta[ack_ptr].acks_seen, REM_MACH_NUM,
+                 p_ops->w_meta[ack_ptr].w_state,
+                 PENDING_WRITES,
+                 origin_ack_ptr, (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,
+                 ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
+    }
     assert(p_ops->w_meta[ack_ptr].acks_seen < REM_MACH_NUM);
   }
 }
@@ -3812,7 +3822,6 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
         if (r_rep->opcode == TS_GREATER) {
           if (ENABLE_ASSERTIONS) assert(read_info->val_len <= VALUE_SIZE);
           memcpy(read_info->value, r_rep->value, read_info->val_len);
-
         }
       }
       if (ts_comp == EQUAL) read_info->times_seen_ts++;
@@ -7233,6 +7242,9 @@ static inline void commit_reads(struct pending_ops *p_ops,
         (!read_info->seen_larger_ts)) {
         read_info->opcode = UPDATE_EPOCH_OP_GET;
       }
+      check_state_with_allowed_flags(2, read_info->opcode, OP_ACQUIRE);
+      if (read_info->seen_larger_ts)
+        memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
       p_ops->ptrs_to_mes_ops[writes_for_cache] = (void *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
       // An out-of-epoch write will get its TS set when inserting a write,
@@ -7448,7 +7460,7 @@ static inline bool complete_requests_that_wait_all_acks(uint8_t *w_state,
   return false;
 }
 
-
+//
 static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_ops, uint16_t t_id)
 {
   struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
@@ -7473,7 +7485,7 @@ static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_o
   }
 }
 
-
+//
 static inline void clear_after_release_quorum(struct pending_ops *p_ops,
                                               uint32_t w_ptr, uint16_t t_id)
 {
@@ -7556,11 +7568,13 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
                               struct latency_flags *latency_info, uint16_t t_id)
 {
   for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {
+    //printf("Checking my acks \n");
     check_ack_and_print(p_ops, ack_i, ack_ptr, ack_num, l_id, pull_lid, t_id);
     struct per_write_meta *w_meta = &p_ops->w_meta[ack_ptr];
     w_meta->acks_seen++;
     bool ack_m_id_found = false;
     if (ENABLE_ASSERTIONS) assert(w_meta->acks_expected >= REMOTE_QUORUM);
+
     for (uint8_t i = 0; i < w_meta->acks_expected; i++) {
       if (ack_m_id == w_meta->expected_ids[i]) {
         ack_m_id_found = true;
@@ -7582,7 +7596,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
 //           t_id, ack_i, ack_num, ack_m_id, ack_ptr,
 //           w_meta->acks_seen, w_meta->acks_expected);
 
-    // If it's a quorum, the request has been completed -- byt releases/writes/commits will
+    // If it's a quorum, the request has been completed -- but releases/writes/commits will
     // still hold a slot in the write FIFO until they see expected acks (or timeout)
     if (w_meta->acks_seen == REMOTE_QUORUM) {
       if (ENABLE_ASSERTIONS) (*outstanding_writes)--;
@@ -7618,9 +7632,10 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
           assert(false);
       }
     }
+
     // Free writes/releases/commits
     if (w_meta->acks_seen == w_meta->acks_expected) {
-      assert(w_meta->acks_seen = REM_MACH_NUM);
+      //assert(w_meta->acks_seen == REM_MACH_NUM);
       if (complete_requests_that_wait_all_acks(&w_meta->w_state, ack_ptr, t_id))
         update_sess_info_with_fully_acked_write(p_ops, ack_ptr, t_id);
     }
@@ -7926,7 +7941,6 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     r_info->log_no = glob_entry->last_committed_log_no;
     r_info->rmw_id = glob_entry->last_committed_rmw_id;
-
   }
   r_info->ts_to_read.version = kv_ptr->key.meta.version - 1;
   r_info->ts_to_read.m_id = kv_ptr->key.meta.m_id;
@@ -7934,7 +7948,11 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_
   optik_unlock_decrement_version(&kv_ptr->key.meta);
 
   // Copy the value to the read_info too
-  memcpy(r_info->value, &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len);
+  //memcpy(r_info->value, &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len);
+  //assert(memcmp(r_info->value, op->value_to_read, op->real_val_len) == 0);
+  memcpy(r_info->value, op->value_to_read, op->real_val_len);
+
+
   r_info->value_to_read = op->value_to_read;
   r_info->val_len = op->real_val_len;
   if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
