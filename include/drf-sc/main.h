@@ -114,7 +114,7 @@
 #define MSQ_ASYNC 1
 #define TREIBER_WRITES_NUM 32
 #define TREIBER_NO_CONFLICTS 0
-#define MS_WRITES_NUM 1
+#define MS_WRITES_NUM 32
 #define MS_NO_CONFLICT 0
 #define CLIENT_LOGS 0
 

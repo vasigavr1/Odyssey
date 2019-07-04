@@ -1713,7 +1713,7 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
 
 
 // KEY ALLOCATION-- SIZES & OFFSETS
-#define MS_QUEUES_NUM GLOBAL_SESSION_NUM
+#define MS_QUEUES_NUM 2 *GLOBAL_SESSION_NUM
 #define MS_NODE_NUM GLOBAL_SESSION_NUM // 1 per session is enough, as each session only owns one at a time
 #define DUMMY_KEYS_NUM (MS_QUEUES_NUM)
 // all dummies point to 0 when starting
@@ -1726,8 +1726,8 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
 #define LAST_MS_NODE_PTR (MS_NODE_PTR_OFFSET + DUMMY_KEYS_NUM + MS_NODE_NUM)
 
 #define DUMMY_KEY_ID_OFFSET (NUM_OF_RMW_KEYS)
-#define MS_NODE_KEY_OFFSET (DUMMY_KEY_ID_OFFSET + DUMMY_KEYS_NUM) //after dummies
-#define INIT_DONE_FLAG_KEY (MS_NODE_KEY_OFFSET + MS_NODE_NUM) // after all nodes //TODO where is the *MS_Writes_NUM
+#define MS_NODE_KEY_OFFSET (DUMMY_KEY_ID_OFFSET + (MS_WRITES_NUM * DUMMY_KEYS_NUM)) //after dummies
+#define INIT_DONE_FLAG_KEY (MS_NODE_KEY_OFFSET + (MS_WRITES_NUM * MS_NODE_NUM)) // after all nodes //TODO where is the *MS_Writes_NUM
 
 #define INIT_DONE_FLAG 162
 #define CLIENT_ASSERTIONS 0
@@ -1906,7 +1906,8 @@ static inline bool is_valid_node_key(uint32_t key_id)
 {
   if (!(key_id >= DUMMY_KEY_ID_OFFSET && key_id < INIT_DONE_FLAG_KEY))
     ;//red_printf("Key invalid %u \n", key_id);
-  return key_id >= DUMMY_KEY_ID_OFFSET && key_id < INIT_DONE_FLAG_KEY;
+  return key_id >= DUMMY_KEY_ID_OFFSET && key_id < INIT_DONE_FLAG_KEY &&
+        ((key_id - DUMMY_KEY_ID_OFFSET) % MS_WRITES_NUM == 0);
 }
 
 static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, char * message,
@@ -2000,7 +2001,7 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
                        sizeof(struct ms_ptr), 0);
 
 
-    dummy_key++; tail_key_id++; head_key_id++;
+    dummy_key += MS_WRITES_NUM; tail_key_id++; head_key_id++;
     //MOD_ADD(s_i, SESSIONS_PER_CLIENT);
   }
   printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);

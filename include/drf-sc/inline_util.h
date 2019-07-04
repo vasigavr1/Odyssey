@@ -7948,11 +7948,7 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, struct cache_
   optik_unlock_decrement_version(&kv_ptr->key.meta);
 
   // Copy the value to the read_info too
-  //memcpy(r_info->value, &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len);
-  //assert(memcmp(r_info->value, op->value_to_read, op->real_val_len) == 0);
   memcpy(r_info->value, op->value_to_read, op->real_val_len);
-
-
   r_info->value_to_read = op->value_to_read;
   r_info->val_len = op->real_val_len;
   if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
