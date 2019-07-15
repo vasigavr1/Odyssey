@@ -85,9 +85,7 @@ void static_assert_compile_parameters()
   //static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8 + 4, "");
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 
-  // CLIENT
-  static_assert(CLIENT_USE_TRACE + CLIENT_UI + CLIENT_TEST_CASES == 1,
-                "open exactly one of these options");
+
 //  printf("Client op  %u  %u \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
 //  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
@@ -705,7 +703,7 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctr
       get_qps_from_all_other_machines(global_id, cb);
       assert(!qps_are_set_up);
       // Spawn a thread that prints the stats
-      if (!CLIENT_UI) {
+      if (CLIENT_MODE != CLIENT_UI) {
         if (spawn_stats_thread() != 0)
           red_printf("Stats thread was not successfully spawned \n");
       }

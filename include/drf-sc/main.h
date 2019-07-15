@@ -20,7 +20,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 30
-#define MACHINE_NUM 3
+#define MACHINE_NUM 5
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
@@ -105,19 +105,22 @@
 	-----------------CLIENT---------------------------
 --------------------------------------------------*/
 #define CLIENT_USE_TRACE 0
-#define CLIENT_UI 0
-#define CLIENT_TEST_CASES 1
-#define BLOCKING_TEST_CASE 0
-#define ASYNC_TEST_CASE 0
-#define TREIBER_BLOCKING 0
-#define TREIBER_ASYNC 0
-#define MSQ_ASYNC 1
+#define CLIENT_UI 1
+#define BLOCKING_TEST_CASE 2
+#define ASYNC_TEST_CASE 3
+#define TREIBER_BLOCKING 4
+#define TREIBER_ASYNC 5 // Treiber Stack
+#define MSQ_ASYNC 6 // Michael & Scott Queue
+#define HML_ASYNC 7 // Harris & Michael List
+
+#define CLIENT_MODE MSQ_ASYNC
+
 #define TREIBER_WRITES_NUM 32
 #define TREIBER_NO_CONFLICTS 0
-#define MS_WRITES_NUM 32
+#define MS_WRITES_NUM 1
 #define MS_NO_CONFLICT 0
 #define CLIENT_LOGS 0
-
+#define HM_WRITES_NUM 1
 #define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
 #define CLIENT_DEBUG 0
 

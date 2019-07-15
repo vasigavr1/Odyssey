@@ -11,13 +11,7 @@ void *print_stats(void* no_arg) {
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 16;
   struct thread_stats curr_w_stats[WORKERS_PER_MACHINE], prev_w_stats[WORKERS_PER_MACHINE];
-  //curr_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-  //prev_w_stats = (struct thread_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct thread_stats));
-
   struct client_stats curr_c_stats[WORKERS_PER_MACHINE], prev_c_stats[WORKERS_PER_MACHINE];
-//  curr_c_stats = (struct client_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct client_stats));
-//  prev_c_stats = (struct client_stats *) malloc(WORKERS_PER_MACHINE * sizeof(struct client_stats));
-
   struct stats all_stats;
   sleep(4);
   memcpy(prev_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
@@ -34,7 +28,6 @@ void *print_stats(void* no_arg) {
     start = end;
     memcpy(curr_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
     memcpy(curr_c_stats, (void *) c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
-//        memcpy(curr_w_stats, (void*) f_stats, FOLLOWERS_PER_MACHINE * (sizeof(struct follower_stats)));
     all_wrkr_completed_reqs = 0;
     all_wrkr_completed_zk_writes = 0;
     print_count++;

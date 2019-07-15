@@ -27,60 +27,67 @@
 #define ERROR_KEY_ID_DOES_NOT_EXIST (-11)
 
 
+#define CLIENT_ASSERTIONS 0
+
+
 /* --------------------------------------------------------------------------------------
  * ----------------------------------TRACE-----------------------------------------------
  * --------------------------------------------------------------------------------------*/
 
 // Use a trace - can be either manufactured or from text
-static inline  uint32_t  send_reqs_from_trace(uint16_t worker_num, uint16_t first_worker,
-                                          struct trace_command *trace, uint32_t trace_ptr,
-                                          uint32_t *dbg_cntr_, uint16_t t_id)
+static inline uint32_t send_reqs_from_trace(struct trace_command *trace, uint16_t t_id)
 {
-  uint32_t dbg_cntr = *dbg_cntr_;
-  uint16_t w_i = 0, s_i = 0;
-  bool polled = false;
-  // poll requests
-  for (w_i = 0; w_i < worker_num; w_i++) {
-    uint16_t wrkr = w_i + first_worker;
-    for (s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
-      uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
-      while (interface[wrkr].req_array[s_i][pull_ptr].state == COMPLETED_REQ) {
-        // get the result
-        polled = true;
-        if (CLIENT_DEBUG)
-          green_printf("Client %u pulling req from worker %u for session %u, slot %u\n",
-                       t_id, wrkr, s_i, pull_ptr);
-        atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
-        MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
+  const uint16_t worker_num = (uint16_t)(WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE_);
+  uint16_t first_worker = worker_num * t_id;
+  uint16_t last_worker = (uint16_t) (first_worker + worker_num - 1);
+  uint32_t dbg_cntr = 0;
+  uint32_t trace_ptr = 0;
+  while (true) {
+    uint16_t w_i = 0, s_i = 0;
+    bool polled = false;
+    // poll requests
+    for (w_i = 0; w_i < worker_num; w_i++) {
+      uint16_t wrkr = w_i + first_worker;
+      for (s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
+        uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
+        while (interface[wrkr].req_array[s_i][pull_ptr].state == COMPLETED_REQ) {
+          // get the result
+          polled = true;
+          if (CLIENT_DEBUG)
+            green_printf("Client %u pulling req from worker %u for session %u, slot %u\n",
+                         t_id, wrkr, s_i, pull_ptr);
+          atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
+          MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
+        }
+      }
+    }
+    if (!polled) dbg_cntr++;
+    else dbg_cntr = 0;
+    if (dbg_cntr == BILLION) {
+      printf("Failed to poll \n");
+      //interface[wrkr].clt_pull_ptr[s_i], (void *)&req_array[w_i][s_i][interface[wrkr].clt_pull_ptr[s_i]].state, req_array[w_i][s_i][pull_ptr[w_i][s_i]].state);
+      dbg_cntr = 0;
+    }
+    // issue requests
+    for (w_i = 0; w_i < worker_num; w_i++) {
+      uint16_t wrkr = w_i + first_worker;
+      for (s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
+        uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
+        while (interface[wrkr].req_array[s_i][push_ptr].state == INVALID_REQ) {
+          if (CLIENT_DEBUG)
+            yellow_printf("Client %u inserting req to worker %u for session %u, in slot %u from trace slot %u ptr %p\n",
+                          t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
+          interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
+          memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, TRUE_KEY_SIZE);
+          atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ,
+                                memory_order_release);
+          MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+          trace_ptr++;
+          if (trace[trace_ptr].opcode == NOP) trace_ptr = 0;
+        }
       }
     }
   }
-  if (!polled) dbg_cntr++;
-  else dbg_cntr = 0;
-  if (dbg_cntr == BILLION) {
-    printf("Failed to poll \n");
-    //interface[wrkr].clt_pull_ptr[s_i], (void *)&req_array[w_i][s_i][interface[wrkr].clt_pull_ptr[s_i]].state, req_array[w_i][s_i][pull_ptr[w_i][s_i]].state);
-    dbg_cntr = 0;
-  }
-  // issue requests
-  for (w_i = 0; w_i < worker_num; w_i++) {
-    uint16_t wrkr = w_i + first_worker;
-    for (s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
-      uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
-      while (interface[wrkr].req_array[s_i][push_ptr].state == INVALID_REQ) {
-        if (CLIENT_DEBUG)
-          yellow_printf("Client %u inserting req to worker %u for session %u, in slot %u from trace slot %u ptr %p\n",
-                        t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
-        interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
-        memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, TRUE_KEY_SIZE);
-        atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ, memory_order_release);
-        MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
-        trace_ptr++;
-        if (trace[trace_ptr].opcode == NOP) trace_ptr = 0;
-      }
-    }
-  }
-  *dbg_cntr_ = dbg_cntr;
   return trace_ptr;
 }
 
@@ -514,8 +521,8 @@ static inline int blocking_faa(uint32_t key_id, uint8_t *value_to_read,
 
 
 /* ------------------------------------------------------------------------------------------------------------------- */
-
-
+/* ------------------------------------USER INTERFACE----------------------------------------------------------------- */
+/* ------------------------------------------------------------------------------------------------------------------- */
 // allow the user to check the API from the console
 static inline void user_interface()
 {
@@ -608,6 +615,9 @@ static inline void user_interface()
   }
 }
 
+/* ------------------------------------------------------------------------------------------------------------------- */
+/* -----------------------------------SIMPLE TESTING------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------------------------------------------------- */
 #define RELAXED_WRITES 5
 static inline void rel_acq_circular_blocking() {
   int i = 0;
@@ -755,7 +765,9 @@ static inline void rel_acq_circular_async() {
   }
 }
 
+/* ------------------------------------------------------------------------------------------------------------------- */
 /*-------------------------------------- TREIBER STACK---------------------------------------------------------------- */
+/* ------------------------------------------------------------------------------------------------------------------- */
 
 struct tr_sess_info_dbg {
   uint8_t state;
@@ -951,6 +963,23 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
 //  green_printf("Session %u successfully popped key %u from stack %u, top counter %u\n",
 //               session_id, top.key_id, stack_id, top.counter);
   return top.key_id;
+}
+
+
+
+static inline void treiber_push_pop_blocking()
+{
+  uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS + (NUM_OF_RMW_KEYS * machine_id));
+  uint32_t stack_id = 0;//machine_id;
+  for (int i = 0; i < 10; i++) {
+    treiber_push_blocking(0, stack_id, key_offset + i);
+  }
+  while (true) {
+    for (int i = 0; i < NUM_OF_RMW_KEYS; i++) {
+      uint32_t key_to_push = (uint32_t) treiber_pop_blocking(0, stack_id);
+      treiber_push_blocking(0, stack_id, key_to_push);
+    }
+  }
 }
 
 #define TR_INIT 0
@@ -1691,10 +1720,11 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
 
 }
 
-
-/*------------------------------M&S QUEUE---------------------------------------------------*/
-#define ENQUEUING 0
-#define DEQUEUING 1
+/* ------------------------------------------------------------------------------------------------------------------- */
+/*------------------------------M&S QUEUE------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------------------------------------------------- */
+#define MS_ENQUEUING 0
+#define MS_DEQUEUING 1
 
 //MS_STATES
 #define MS_INIT 0
@@ -1706,31 +1736,29 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
 #define MS_READ_HEAD 2
 #define MS_READ_FIRST_NODE 3
 
-
-
 #define MS_NODE_SIZE (VALUE_SIZE - 8)
 #define MS_PTR_SIZE 12;
 
 
 // KEY ALLOCATION-- SIZES & OFFSETS
-#define MS_QUEUES_NUM 2 *GLOBAL_SESSION_NUM
-#define MS_NODE_NUM GLOBAL_SESSION_NUM // 1 per session is enough, as each session only owns one at a time
+#define MS_QUEUES_NUM (2 *GLOBAL_SESSION_NUM)
+#define MS_NODE_NUM (GLOBAL_SESSION_NUM) // 1 per session is enough, as each session only owns one at a time
 #define DUMMY_KEYS_NUM (MS_QUEUES_NUM)
 // all dummies point to 0 when starting
 // the dummy node has no body, it's just a ptr
 // there is 1 Dummy per Queue
 
-#define TAIL_KEY_ID_OFFSET 0
-#define HEAD_KEY_ID_OFFSET MS_QUEUES_NUM
+#define MS_TAIL_KEY_ID_OFFSET 0
+#define MS_HEAD_KEY_ID_OFFSET MS_QUEUES_NUM
 #define MS_NODE_PTR_OFFSET (2 * MS_QUEUES_NUM)
 #define LAST_MS_NODE_PTR (MS_NODE_PTR_OFFSET + DUMMY_KEYS_NUM + MS_NODE_NUM)
 
 #define DUMMY_KEY_ID_OFFSET (NUM_OF_RMW_KEYS)
 #define MS_NODE_KEY_OFFSET (DUMMY_KEY_ID_OFFSET + (MS_WRITES_NUM * DUMMY_KEYS_NUM)) //after dummies
-#define INIT_DONE_FLAG_KEY (MS_NODE_KEY_OFFSET + (MS_WRITES_NUM * MS_NODE_NUM)) // after all nodes //TODO where is the *MS_Writes_NUM
+#define MS_INIT_DONE_FLAG_KEY (MS_NODE_KEY_OFFSET + (MS_WRITES_NUM * MS_NODE_NUM)) // after all nodes
 
-#define INIT_DONE_FLAG 162
-#define CLIENT_ASSERTIONS 0
+#define MS_INIT_DONE_FLAG 162
+
 
 /* ----Key allocation----
  * 0 -> MS_QUEUES_NUM                 : tails
@@ -1739,7 +1767,7 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
  * ---NON-RMWABLE
  * DUMMY_KEY_ID_OFFSET -> DUMMY_KEY_ID_OFFSET + DUMMY_KEYS_NUM : dummy nodes (1 per queue)
  * DUMMY_KEY_ID_OFFSET + DUMMY_KEYS_NUM -> ++ MS_NODE_NUM * MS_WRITES_NUM : bodies of nodes
- * MS_NODE_KEY_OFFSET + MS_NODE_NUM : init_done flag (INIT_DONE_FLAG_KEY)
+ * MS_NODE_KEY_OFFSET + (MS_WRITES_NUM * MS_NODE_NUM) : init_done flag (INIT_DONE_FLAG_KEY)
  *
  * */
 
@@ -1878,12 +1906,12 @@ static inline void ms_init_print()
 {
   printf("Number of Queues: %d, available nodes: %d, RMWable: %d, MS_WRITES_NUM: %d \n",
          MS_QUEUES_NUM, MS_NODE_NUM, NUM_OF_RMW_KEYS, MS_WRITES_NUM);
-  printf("%d --> %d: tails \n", TAIL_KEY_ID_OFFSET, (HEAD_KEY_ID_OFFSET - 1));
-  printf("%d --> %d: heads \n", HEAD_KEY_ID_OFFSET, (MS_NODE_PTR_OFFSET - 1));
+  printf("%d --> %d: tails \n", MS_TAIL_KEY_ID_OFFSET, (MS_HEAD_KEY_ID_OFFSET - 1));
+  printf("%d --> %d: heads \n", MS_HEAD_KEY_ID_OFFSET, (MS_NODE_PTR_OFFSET - 1));
   printf("%d --> %d: node keys (including dummies) \n", MS_NODE_PTR_OFFSET, (LAST_MS_NODE_PTR - 1));
   printf("----------Non-RMWable---------\n");
-  printf("%d --> %d: dummy nodes \n", DUMMY_KEY_ID_OFFSET, (INIT_DONE_FLAG_KEY - 1));
-  printf("%d: init done flag key \n", INIT_DONE_FLAG_KEY);
+  printf("%d --> %d: dummy nodes \n", DUMMY_KEY_ID_OFFSET, (MS_INIT_DONE_FLAG_KEY - 1));
+  printf("%d: init done flag key \n", MS_INIT_DONE_FLAG_KEY);
 
 }
 
@@ -1904,9 +1932,9 @@ static inline bool are_ms_ptrs_equal(struct ms_ptr *ptr1, struct ms_ptr *ptr2)
 //
 static inline bool is_valid_node_key(uint32_t key_id)
 {
-  if (!(key_id >= DUMMY_KEY_ID_OFFSET && key_id < INIT_DONE_FLAG_KEY))
+  if (!(key_id >= DUMMY_KEY_ID_OFFSET && key_id < MS_INIT_DONE_FLAG_KEY))
     ;//red_printf("Key invalid %u \n", key_id);
-  return key_id >= DUMMY_KEY_ID_OFFSET && key_id < INIT_DONE_FLAG_KEY &&
+  return key_id >= DUMMY_KEY_ID_OFFSET && key_id < MS_INIT_DONE_FLAG_KEY &&
         ((key_id - DUMMY_KEY_ID_OFFSET) % MS_WRITES_NUM == 0);
 }
 
@@ -1918,10 +1946,10 @@ static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, ch
       red_printf("Client: %u Session %u: %s: in queue: %u, owned key %u, state %u, "
                    "checking key ptr %u from node %u: %s \n",
                  t_id, info->real_sess_i,
-                 info->enq_or_deq_state == ENQUEUING ? "E" : "D", info->queue_id, info->owned_key,
+                 info->enq_or_deq_state == MS_ENQUEUING ? "E" : "D", info->queue_id, info->owned_key,
                  info->state, key_id, node_id, message);
 
-      if (info->enq_or_deq_state == ENQUEUING) {
+      if (info->enq_or_deq_state == MS_ENQUEUING) {
         struct ms_ptr *new_tail = &info->new_tail;
         struct ms_ptr *tail = &info->tail;
 
@@ -1960,8 +1988,8 @@ static inline void ms_wait_for_init(uint16_t t_id)
   uint16_t real_session = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
   do {
     usleep(2000);
-    blocking_read(INIT_DONE_FLAG_KEY, &init_done_flag, 1, real_session);
-  } while (init_done_flag != INIT_DONE_FLAG);
+    blocking_read(MS_INIT_DONE_FLAG_KEY, &init_done_flag, 1, real_session);
+  } while (init_done_flag != MS_INIT_DONE_FLAG);
   printf("CLient %u sees the INIT_DONE_FLAG raised %u \n", t_id, init_done_flag);
 }
 
@@ -1969,13 +1997,9 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
 {
   assert(NUM_OF_RMW_KEYS > (2 * MS_QUEUES_NUM) + MS_NODE_NUM);
   struct ms_ptr tail, head, dummy_ptr;
-  tail.counter = 1;
-  head.counter = 1;
-  //uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
-  //uint16_t s_i = 0;
   uint32_t dummy_key = DUMMY_KEY_ID_OFFSET,
-    tail_key_id = TAIL_KEY_ID_OFFSET,
-    head_key_id = HEAD_KEY_ID_OFFSET;
+    tail_key_id = MS_TAIL_KEY_ID_OFFSET,
+    head_key_id = MS_HEAD_KEY_ID_OFFSET;
   //printf("Client %u uses sessions from %u to %u \n", t_id, sess_offset,  sess_offset + SESSIONS_PER_CLIENT -1);
   for(uint32_t q_i = 0; q_i < MS_QUEUES_NUM; q_i++) {
     tail.next_key_id = dummy_key;
@@ -2005,9 +2029,9 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
     //MOD_ADD(s_i, SESSIONS_PER_CLIENT);
   }
   printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);
-  uint8_t init_done_flag = INIT_DONE_FLAG;
+  uint8_t init_done_flag = MS_INIT_DONE_FLAG;
 
-  async_release_strong(INIT_DONE_FLAG_KEY, &init_done_flag, 1, 0);
+  async_release_strong(MS_INIT_DONE_FLAG_KEY, &init_done_flag, 1, 0);
 
 }
 
@@ -2069,7 +2093,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
       async_acquire_strong(get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
                         sizeof(struct ms_ptr), real_sess_i);
       // read tail again -- a second time
-      info->last_req_id = (uint32_t) async_acquire_strong(tail_key_id, (uint8_t *) sec_tail,
+      info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) sec_tail,
                                                        sizeof(struct ms_ptr), real_sess_i);
 
       info->state = MS_READ_LAST_NODE;
@@ -2136,7 +2160,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
         info->enqueue_num++;
         c_stats[t_id].microbench_pushes++;
         if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes > c_stats[t_id].microbench_pops);
-        info->enq_or_deq_state = DEQUEUING;
+        info->enq_or_deq_state = MS_DEQUEUING;
         info->state = MS_INIT;
       }
       else {
@@ -2153,7 +2177,6 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
                                             uint16_t t_id)
 {
   struct ms_ptr *tail = &info->tail;
-//  struct ms_ptr *sec_tail = &info->second_tail;
   struct ms_ptr *new_tail = &info->new_tail;
   struct ms_ptr *head = &info->head;
   struct ms_ptr *sec_head = &info->second_head;
@@ -2162,7 +2185,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
   struct ms_ptr *first_node_ptr = &info->owned_node_ptr;
 
   uint16_t real_sess_i = info->real_sess_i;
-  uint32_t head_key_id = info->queue_id + HEAD_KEY_ID_OFFSET;
+  uint32_t head_key_id = info->queue_id + MS_HEAD_KEY_ID_OFFSET;
   uint32_t tail_key_id = info->queue_id;
 
   if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
@@ -2176,12 +2199,11 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
       info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) head,
                                                        sizeof(struct ms_ptr), real_sess_i);
       // read tail
-      async_acquire_strong(tail_key_id, (uint8_t *) tail, sizeof(struct ms_ptr), real_sess_i);
+      async_read_strong(tail_key_id, (uint8_t *) tail, sizeof(struct ms_ptr), real_sess_i);
       info->state = MS_READ_HEAD;
       break;
     case MS_READ_HEAD:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
-      //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(head->next_key_id));
       err_message_if_invalid_node_key(info, "reading head when dequeuing in MS_READ_HEAD",
                                       head_key_id, head->next_key_id, t_id);
 
@@ -2189,15 +2211,12 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
       async_acquire_strong(get_node_ptr_key_id(head->next_key_id), (uint8_t *) first_node_ptr,
                         sizeof(struct ms_ptr), real_sess_i);
       // read head again -- a second time
-      info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) sec_head,
+      info->last_req_id = (uint32_t) async_read_strong(head_key_id, (uint8_t *) sec_head,
                                                        sizeof(struct ms_ptr), real_sess_i);
       info->state = MS_READ_FIRST_NODE;
       break;
     case MS_READ_FIRST_NODE:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      if (CLIENT_ASSERTIONS) {
-//        assert(is_valid_node_key(sec_head->next_key_id));
-//      }
       err_message_if_invalid_node_key(info, "reading sec_head when dequeuing in MS_READ_FIRST_NODE",
                                       head_key_id, sec_head->next_key_id, t_id);
       if (!are_ms_ptrs_equal(head, sec_head)) {
@@ -2215,8 +2234,6 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
         }
         else { //if tail is slacking advance it
           new_tail->next_key_id = first_node_ptr->next_key_id;
-          //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_tail->next_key_id));
-
           new_tail->counter = tail->counter + 1;
           info->advance_tail_result = false;
           info->tail_left_behind = true;
@@ -2234,8 +2251,6 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
         }
         // try the CAS
         new_head->next_key_id = first_node_ptr->next_key_id;
-        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_head->next_key_id));
-
         new_head->counter = head->counter + 1;
         err_message_if_invalid_node_key(info, "head points to a different node than tail,"
                                           " but the node points to null, MS_READ_FIRST_NODE",
@@ -2254,17 +2269,13 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
           assert(first_node_ptr->pushed);
           assert(first_node_ptr->my_key_id == info->owned_key_ptr);
           assert(first_node_ptr->queue_id == info->queue_id);
-          //assert(is_valid_node_key(new_head->next_key_id));
           err_message_if_invalid_node_key(info, "reading new_head when dequeuing in MS_POTENTIAL_SUCCESS",
                                           head_key_id, new_head->next_key_id, t_id);
-//          printf("%u/%u \n ", first_node_ptr->my_key_id, info->owned_key_ptr);
           first_node_ptr->pushed = false;
           first_node_ptr->counter++;
           async_write_strong(first_node_ptr->my_key_id, (uint8_t *) first_node_ptr,
                              sizeof(struct ms_ptr), info->real_sess_i);
         }
-        //yellow_printf("Session %u/%u dequeues key %u from stack %u \n",
-        //              info->glob_sess_i, t_id, info->owned_key, info->queue_id);
         update_ms_file(t_id, 0, info, false);
         info->success = false;
         info->dequeue_num++;
@@ -2274,7 +2285,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
           info->queue_id = *queue_id_cntr;
           MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
         }
-        info->enq_or_deq_state = ENQUEUING;
+        info->enq_or_deq_state = MS_ENQUEUING;
         info->state = MS_INIT;
       }
       else {
@@ -2289,6 +2300,11 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
 //
 static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 {
+
+  if (machine_id == 0 && t_id == 0)
+    ms_set_up_tail_and_head(t_id);
+  else ms_wait_for_init(t_id);
+
   assert(sizeof(struct ms_ptr) == RMW_VALUE_SIZE);
   assert(sizeof(struct ms_node) == VALUE_SIZE);
   assert(NUM_OF_RMW_KEYS > LAST_MS_NODE_PTR);
@@ -2311,11 +2327,9 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
   if (machine_id == 0 && t_id == 0) ms_init_print();
 
 
-
-
   for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
     info[s_i].state = MS_INIT;
-    info[s_i].enq_or_deq_state = ENQUEUING;
+    info[s_i].enq_or_deq_state = MS_ENQUEUING;
     info[s_i].s_i = s_i;
     info[s_i].real_sess_i = sess_offset + s_i;
     info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
@@ -2325,21 +2339,19 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
     if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
     info[s_i].new_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
     info[s_i].last_or_first_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
-    //info[s_i].new_node[0].next_key_id = 0;
     info[s_i].queue_id = info[s_i].glob_sess_i;
     info[s_i].advance_tail_result = false;
     info[s_i].tail_left_behind = false;
-    //(info[s_i].owned_key - KEY_OFFSET) % NUMBER_OF_STACKS;
     assert(info[s_i].queue_id < MS_QUEUES_NUM);
   }
 
   s_i = 0;
   while(true) {
     switch (info[s_i].enq_or_deq_state) {
-      case ENQUEUING:
+      case MS_ENQUEUING:
         ms_enqueue_state_machine(&info[s_i],  t_id);
         break;
-      case DEQUEUING:
+      case MS_DEQUEUING:
         ms_dequeue_state_machine(&info[s_i], &queue_id_cntr, t_id);
         break;
       default: if (CLIENT_ASSERTIONS) assert(false);
@@ -2348,68 +2360,542 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
   }
 }
 
+
+
+/* ------------------------------------------------------------------------------------------------------------------- */
+/*------------------------------H&M LIST------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------------------------------------------------- */
+#define HM_INSERTING 0
+#define HM_DELETING 1
+#define HM_SEARCHING 2
+
+//HM_STATES
+#define HM_INIT 0
+#define HM_LOOP_START 1
+#define HM_READ_TAIL 2
+#define HM_READ_LAST_NODE 3
+#define HM_POTENTIAL_SUCCESS 4
+
+#define HM_READ_HEAD 2
+#define HM_READ_FIRST_NODE 3
+
+#define HM_NODE_SIZE (VALUE_SIZE - 8)
+#define HM_PTR_SIZE 12;
+
+
+// KEY ALLOCATION-- SIZES & OFFSETS
+#define HM_LISTS_NUM (2 *GLOBAL_SESSION_NUM)
+#define HM_NODE_NUM (HM_LISTS_NUM + GLOBAL_SESSION_NUM) // 1 inserted in each list to begin with and 1 per session beyond that
+
+
+#define HM_HEAD_KEY_ID_OFFSET 0 // there is one head per list, totally: HM_LISTS_NUM heads
+#define HM_NODE_PTR_OFFSET (HM_HEAD_KEY_ID_OFFSET + HM_LISTS_NUM)
+#define LAST_HM_NODE_PTR (HM_NODE_PTR_OFFSET + HM_NODE_NUM)
+
+
+#define HM_NODE_KEY_OFFSET (NUM_OF_RMW_KEYS)
+#define HM_INIT_DONE_FLAG_KEY (HM_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_NODE_NUM))
+
+#define HM_INIT_DONE_FLAG 162
+
+
+/* ----Key allocation----
+ * 0 -> HM_LISTS_NUM                 : heads
+ * HM_LISTS_NUM -> HM_LISTS_NUM + HM_NODE_NUM   : pointers of nodes
+ * ---NON-RMWABLE
+ * HM_NODE_KEY_OFFSET -> HM_NODE_KEY_OFFSET + HM_NODE_NUM * HM_WRITES_NUM : bodies of nodes
+ * HM_NODE_KEY_OFFSET + (HM_NODE_NUM * HM_WRITES_NUM) : init_done flag (INIT_DONE_FLAG_KEY)
+ *
+ * */
+
+struct hm_ptr {
+  bool pushed;
+  bool marked;
+  uint32_t list_id;
+  uint32_t my_key_id;
+  uint32_t next_key_id;
+  uint64_t counter;
+};
+
+struct hm_node {
+  uint8_t value[HM_NODE_SIZE];
+  uint32_t node_id;
+  uint32_t node_ptr_key_id;
+};
+
+struct hm_sess_info {
+  uint8_t state;
+  uint8_t ins_or_del_state;
+  bool success;
+  bool advance_tail_result;
+  bool tail_left_behind;
+  //bool valid_key_to_write;
+  //bool done_cas;
+  uint16_t s_i;
+  uint16_t real_sess_i;
+  uint16_t glob_sess_i;
+  uint16_t wrkr;
+  uint32_t last_req_id;
+  uint32_t queue_id;
+  uint32_t owned_key; // they key of the owned ms_node
+  uint32_t owned_key_ptr;
+  uint32_t enqueue_num;
+  uint32_t dequeue_num;
+  //uint32_t pop_dbg;
+  //uint32_t push_dbg;
+//  struct ms_ptr tail;
+//  struct ms_ptr second_tail;
+//  struct ms_ptr new_tail;
+//  struct ms_ptr head;
+//  struct ms_ptr second_head;
+//  struct ms_ptr new_head;
+//  struct ms_node *new_node;
+//  struct ms_node *last_or_first_node;
+//  struct ms_ptr owned_node_ptr; // even though there are many new nodes, there is only one pointer for them
+//  struct ms_ptr last_or_first_node_ms_ptr;
+//  struct ms_ptr new_last_or_first_node_ms_ptr;
+  //struct node *owned_node;
+};
+
+
+static inline void hm_init_print()
+{
+  printf("Number of Lists: %d, available nodes: %d, RMWable: %d, HM_WRITES_NUM: %d \n",
+         HM_LISTS_NUM, HM_NODE_NUM, NUM_OF_RMW_KEYS, HM_WRITES_NUM);
+  printf("%d --> %d: heads \n", HM_HEAD_KEY_ID_OFFSET, (HM_NODE_PTR_OFFSET - 1));
+  printf("%d --> %d: node keys  \n", HM_NODE_PTR_OFFSET, (LAST_HM_NODE_PTR - 1));
+  printf("----------Non-RMWable---------\n");
+  printf("%d --> %d: nodes \n", HM_NODE_KEY_OFFSET, (HM_INIT_DONE_FLAG_KEY - 1));
+  printf("%d: init done flag key \n", HM_INIT_DONE_FLAG_KEY);
+
+}
+
+// One client thread is responsible to initialize all the lists, while the rest wait for it (by polling on a flag)
+static inline void hm_set_up_lists(uint16_t t_id)
+{
+  assert(NUM_OF_RMW_KEYS > (HM_LISTS_NUM + HM_NODE_NUM));
+  struct hm_ptr head, node_ptr;
+  uint32_t node_key = HM_NODE_KEY_OFFSET,
+    head_key_id = MS_HEAD_KEY_ID_OFFSET;
+  //printf("Client %u uses sessions from %u to %u \n", t_id, sess_offset,  sess_offset + SESSIONS_PER_CLIENT -1);
+  for(uint32_t l_i = 0; l_i < HM_LISTS_NUM; l_i++) {
+    head.pushed = true;
+    head.marked = false;
+    head.list_id = l_i;
+    head.my_key_id = l_i;
+    head.next_key_id = node_key;
+    head.counter = 0;
+
+
+    //printf("pushing a req for key %u \n", dummy_key);
+
+    async_write_strong(head_key_id, (uint8_t *) &head,
+                       sizeof(struct hm_ptr), 0);
+    uint32_t dummy_ptr_key = get_node_ptr_key_id(node_key);
+    node_ptr.next_key_id = 0;
+    node_ptr.list_id = l_i;
+    node_ptr.my_key_id = dummy_ptr_key;
+    node_ptr.pushed = true;
+    node_ptr.counter = 1;
+
+    //printf("%u %u %u \n", dummy_key, dummy_ptr_key, dummy_ptr.my_key_id);
+    async_write_strong(dummy_ptr_key, (uint8_t *) &dummy_ptr,
+                       sizeof(struct ms_ptr), 0);
+
+
+    node_key += MS_WRITES_NUM; tail_key_id++; head_key_id++;
+    //MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+  }
+  printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);
+  uint8_t init_done_flag = MS_INIT_DONE_FLAG;
+
+  async_release_strong(MS_INIT_DONE_FLAG_KEY, &init_done_flag, 1, 0);
+
+}
+
+
+// Machines 1 to N, wait for machine 0 to perform the initialization
+static inline void hm_wait_for_init(uint16_t t_id)
+{
+  uint8_t init_done_flag;
+  uint16_t real_session = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
+  do {
+    usleep(2000);
+    blocking_read(HM_INIT_DONE_FLAG_KEY, &init_done_flag, 1, real_session);
+  } while (init_done_flag != HM_INIT_DONE_FLAG);
+  printf("CLient %u sees the INIT_DONE_FLAG raised %u \n", t_id, init_done_flag);
+}
+
+
+
+//ENQUEUE FSM
+static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t_id)
+{
+//  struct ms_node *new_node = info->new_node;
+//  struct ms_ptr *tail = &info->tail;
+//  struct ms_ptr *sec_tail = &info->second_tail;
+//  struct ms_ptr *new_tail = &info->new_tail;
+//  uint16_t real_sess_i = info->real_sess_i;
+//  struct ms_ptr *new_node_ptr = &info->owned_node_ptr;
+//  struct ms_ptr *last_node_ptr = &info->last_or_first_node_ms_ptr;
+//  struct ms_ptr *new_last_node_ptr = &info->new_last_or_first_node_ms_ptr;
+//  uint32_t tail_key_id = info->queue_id;
+//  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+//
+//  switch (info->state) {
+//    case MS_INIT:
+//      if (CLIENT_ASSERTIONS) {
+//        assert(!info->success);
+//        assert(info->enqueue_num == info->dequeue_num);
+//        assert(info->owned_key_ptr == get_node_ptr_key_id(info->owned_key));
+//      }
+//      new_node[0].node_id = info->owned_key;
+//      new_node[0].node_ptr_key_id = info->owned_key_ptr;
+//      for (uint16_t i = 0; i < MS_WRITES_NUM; i++) {
+//        async_write_strong(info->owned_key + i, (uint8_t *) &new_node[i],
+//                           sizeof(struct ms_node), real_sess_i);
+//      }
+//
+//      // Set the ptr of the node to be pointing to null
+//      if (CLIENT_ASSERTIONS) {
+//        new_node_ptr->pushed = true;
+//        new_node_ptr->my_key_id = info->owned_key_ptr;
+//        new_node_ptr->counter++;
+//        new_node_ptr->queue_id = info->queue_id;
+//      }
+//      new_node_ptr->next_key_id = 0;
+//      async_write_strong(info->owned_key_ptr, (uint8_t *) new_node_ptr,
+//                         sizeof(struct ms_ptr), info->real_sess_i);
+//
+//      //break;
+//    case MS_LOOP_START:
+//      log_the_tail_advancement(info, true, t_id);
+//      // read tail -- this has to be acquire
+//      info->last_req_id = (uint32_t) async_acquire_strong(tail_key_id, (uint8_t *) tail,
+//                                                          sizeof(struct ms_ptr), real_sess_i);
+//      info->state = MS_READ_TAIL;
+//      break;
+//    case MS_READ_TAIL:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(tail->next_key_id));
+//      err_message_if_invalid_node_key(info, "reading tail when enqueuing in MS_READ_TAIL",
+//                                      tail_key_id, tail->next_key_id,  t_id);
+//      //printf("Session %u/%u read tail of %u, which points to %u/%u \n",
+//      //       info->glob_sess_i, t_id, info->queue_id, tail->next_key_id,
+//      //       get_node_ptr_key_id(tail->next_key_id));
+//      async_acquire_strong(get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
+//                           sizeof(struct ms_ptr), real_sess_i);
+//      // read tail again -- a second time
+//      info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) sec_tail,
+//                                                       sizeof(struct ms_ptr), real_sess_i);
+//
+//      info->state = MS_READ_LAST_NODE;
+//      break;
+//    case MS_READ_LAST_NODE:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      if (!are_ms_ptrs_equal(tail, sec_tail)) {
+//        info->state = MS_LOOP_START;
+//        break;
+//      }
+//      //printf ("Tail and sec tail are consistent \n");
+//      if (CLIENT_ASSERTIONS) assert(are_ms_ptrs_equal(tail, sec_tail));
+//      if (last_node_ptr->next_key_id == 0) { // if it points to zero then, it is the last item in the queue
+//        //printf ("Tail is pointing to the last element \n");
+//        if (CLIENT_ASSERTIONS) {
+//          new_last_node_ptr->my_key_id = last_node_ptr->my_key_id;
+//          new_last_node_ptr->pushed = last_node_ptr->pushed;
+//          new_last_node_ptr->queue_id = last_node_ptr->queue_id;
+//          assert(last_node_ptr->queue_id == info->queue_id);
+//        }
+//
+//        new_last_node_ptr->next_key_id = info->owned_key;
+//        new_last_node_ptr->counter = last_node_ptr->counter + 1;
+//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_last_node_ptr->next_key_id));
+//        err_message_if_invalid_node_key(info, "reading new last_node_ptr when enqueuing in MS_READ_LAST_NODE",
+//                                        new_last_node_ptr->my_key_id, new_last_node_ptr->next_key_id, t_id);
+//
+//        info->last_req_id = (uint32_t) async_cas_strong(get_node_ptr_key_id(tail->next_key_id),
+//                                                        (uint8_t *) last_node_ptr, (uint8_t *) new_last_node_ptr,
+//                                                        sizeof(struct ms_ptr), &info->success, true, real_sess_i);
+//        info->state = MS_POTENTIAL_SUCCESS;
+//      }
+//      else { // if the read node does not point to zero then another node has been enqueued
+//        //printf ("Tail of %u is not pointing to the last element %u/%u --> %u \n", info->queue_id,
+//        //        tail->next_key_id, get_node_ptr_key_id(tail->next_key_id), last_node_ptr->next_key_id);
+//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(last_node_ptr->next_key_id));
+//        err_message_if_invalid_node_key(info, "reading last_node_ptr when enqueuing in MS_READ_LAST_NODE",
+//                                        last_node_ptr->my_key_id, last_node_ptr->next_key_id, t_id);
+//        new_tail->next_key_id = last_node_ptr->next_key_id;
+//        new_tail->counter = tail->counter + 1;
+//        info->advance_tail_result = false;
+//        info->tail_left_behind = true;
+//        info->last_req_id = (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
+//                                                        sizeof(struct ms_ptr), &info->advance_tail_result,
+//                                                        true, real_sess_i);
+//        info->state = MS_LOOP_START;
+//      }
+//      break;
+//    case MS_POTENTIAL_SUCCESS:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      if (info->success) {
+//        new_tail->next_key_id = info->owned_key;
+//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_tail->next_key_id));
+//        err_message_if_invalid_node_key(info, "reading new_tail when enqueuing in MS_POTENTIAL_SUCCESS",
+//                                        tail_key_id, new_tail->next_key_id, t_id);
+//        new_tail->counter = tail->counter + 1;
+//        (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
+//                                    sizeof(struct ms_ptr), &info->advance_tail_result, true, real_sess_i);
+//
+//        //green_printf("Session %u/%u enqueues key %u to stack %u \n",
+//        //             info->glob_sess_i, t_id, info->owned_key, info->queue_id);
+//        update_ms_file(t_id, 0, info, true);
+//        info->success = false;
+//        info->enqueue_num++;
+//        c_stats[t_id].microbench_pushes++;
+//        if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes > c_stats[t_id].microbench_pops);
+//        info->enq_or_deq_state = MS_DEQUEUING;
+//        info->state = MS_INIT;
+//      }
+//      else {
+//        info->state = MS_LOOP_START;
+//        break;
+//      }
+//      break;
+//    default: if (CLIENT_ASSERTIONS) assert(false);
+//  }
+}
+
+static inline void hm_delete_state_machine(struct hm_sess_info *info,
+                                            uint16_t t_id)
+{
+//
+//  struct ms_ptr *tail = &info->tail;
+//  struct ms_ptr *new_tail = &info->new_tail;
+//  struct ms_ptr *head = &info->head;
+//  struct ms_ptr *sec_head = &info->second_head;
+//  struct ms_ptr *new_head = &info->new_head;
+//  struct ms_node *new_node = info->new_node;
+//  struct ms_ptr *first_node_ptr = &info->owned_node_ptr;
+//
+//  uint16_t real_sess_i = info->real_sess_i;
+//  uint32_t head_key_id = info->queue_id + MS_HEAD_KEY_ID_OFFSET;
+//  uint32_t tail_key_id = info->queue_id;
+//
+//  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+//
+//  switch (info->state) {
+//    case MS_INIT:
+//      if (CLIENT_ASSERTIONS) assert(info->enqueue_num == info->dequeue_num + 1);
+//    case MS_LOOP_START:
+//      log_the_tail_advancement(info, false, t_id);
+//      // read head
+//      info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) head,
+//                                                          sizeof(struct ms_ptr), real_sess_i);
+//      // read tail
+//      async_read_strong(tail_key_id, (uint8_t *) tail, sizeof(struct ms_ptr), real_sess_i);
+//      info->state = MS_READ_HEAD;
+//      break;
+//    case MS_READ_HEAD:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      err_message_if_invalid_node_key(info, "reading head when dequeuing in MS_READ_HEAD",
+//                                      head_key_id, head->next_key_id, t_id);
+//
+//      // read first node
+//      async_acquire_strong(get_node_ptr_key_id(head->next_key_id), (uint8_t *) first_node_ptr,
+//                           sizeof(struct ms_ptr), real_sess_i);
+//      // read head again -- a second time
+//      info->last_req_id = (uint32_t) async_read_strong(head_key_id, (uint8_t *) sec_head,
+//                                                       sizeof(struct ms_ptr), real_sess_i);
+//      info->state = MS_READ_FIRST_NODE;
+//      break;
+//    case MS_READ_FIRST_NODE:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      err_message_if_invalid_node_key(info, "reading sec_head when dequeuing in MS_READ_FIRST_NODE",
+//                                      head_key_id, sec_head->next_key_id, t_id);
+//      if (!are_ms_ptrs_equal(head, sec_head)) {
+//        info->state = MS_LOOP_START;
+//        break;
+//      }
+//      if (CLIENT_ASSERTIONS) assert(are_ms_ptrs_equal(head, sec_head));
+//      if (head->next_key_id == tail->next_key_id) {
+//        if (CLIENT_ASSERTIONS && first_node_ptr->next_key_id == 0) { // If the queue is empty
+//          red_printf("Session %u/%u tries to dequeue from %u/%u, first node_ptr %u/%u points to 0 \n",
+//                     info->glob_sess_i, t_id, info->queue_id, head->counter, head->next_key_id,
+//                     get_node_ptr_key_id(head->next_key_id));
+//          exit(0);
+//          assert(false); // DUMMY has to point somewhere, because an enqueue has already happened
+//        }
+//        else { //if tail is slacking advance it
+//          new_tail->next_key_id = first_node_ptr->next_key_id;
+//          new_tail->counter = tail->counter + 1;
+//          info->advance_tail_result = false;
+//          info->tail_left_behind = true;
+//          info->last_req_id = (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
+//                                                          sizeof(struct ms_ptr), &info->advance_tail_result,
+//                                                          true, real_sess_i);
+//        }
+//        info->state = MS_LOOP_START;
+//      }
+//      else { // if does not point to the same place as tail
+//        // do the data reads
+//        for (uint16_t i = 0; i < MS_WRITES_NUM; i++) {
+//          async_read_strong(head->next_key_id + i, (uint8_t *) &new_node[i],
+//                            sizeof(struct ms_node), real_sess_i);
+//        }
+//        // try the CAS
+//        new_head->next_key_id = first_node_ptr->next_key_id;
+//        new_head->counter = head->counter + 1;
+//        err_message_if_invalid_node_key(info, "head points to a different node than tail,"
+//                                          " but the node points to null, MS_READ_FIRST_NODE",
+//                                        head->next_key_id, first_node_ptr->next_key_id, t_id);
+//        info->last_req_id = (uint32_t) async_cas_strong(head_key_id, (uint8_t *) head, (uint8_t *) new_head,
+//                                                        sizeof(struct ms_ptr), &info->success, true, real_sess_i);
+//        info->state = MS_POTENTIAL_SUCCESS;
+//      }
+//      break;
+//    case MS_POTENTIAL_SUCCESS:
+//      poll_a_req_blocking(real_sess_i, info->last_req_id);
+//      if (info->success) {
+//        info->owned_key = head->next_key_id;
+//        info->owned_key_ptr = get_node_ptr_key_id(info->owned_key);
+//        if (CLIENT_ASSERTIONS) {
+//          assert(first_node_ptr->pushed);
+//          assert(first_node_ptr->my_key_id == info->owned_key_ptr);
+//          assert(first_node_ptr->queue_id == info->queue_id);
+//          err_message_if_invalid_node_key(info, "reading new_head when dequeuing in MS_POTENTIAL_SUCCESS",
+//                                          head_key_id, new_head->next_key_id, t_id);
+//          first_node_ptr->pushed = false;
+//          first_node_ptr->counter++;
+//          async_write_strong(first_node_ptr->my_key_id, (uint8_t *) first_node_ptr,
+//                             sizeof(struct ms_ptr), info->real_sess_i);
+//        }
+//        update_ms_file(t_id, 0, info, false);
+//        info->success = false;
+//        info->dequeue_num++;
+//        c_stats[t_id].microbench_pops++;
+//        if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes >= c_stats[t_id].microbench_pops);
+//        if (!MS_NO_CONFLICT) {
+//          info->queue_id = *queue_id_cntr;
+//          MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
+//        }
+//        info->enq_or_deq_state = MS_ENQUEUING;
+//        info->state = MS_INIT;
+//      }
+//      else {
+//        info->state = MS_LOOP_START;
+//        break;
+//      }
+//      break;
+//    default: if (CLIENT_ASSERTIONS) assert(false);
+//  }
+}
+
+// High-level State Machine for the Harris & Michael lists
+static inline void hm_insert_delete_multi_session(uint16_t t_id)
+{
+  if (machine_id == 0 && t_id == 0) {
+    hm_init_print();
+    hm_set_up_lists(t_id);
+  }
+  else hm_wait_for_init(t_id);
+
+  assert(sizeof(struct hm_ptr) == RMW_VALUE_SIZE);
+  assert(sizeof(struct hm_node) == VALUE_SIZE);
+  assert(NUM_OF_RMW_KEYS > LAST_MS_NODE_PTR);
+  assert(MS_WRITES_NUM > 0);
+  uint16_t s_i = 0;
+  uint32_t key_offset = (uint32_t) (MS_NODE_KEY_OFFSET + (SESSIONS_PER_MACHINE * machine_id));
+  uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
+  assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
+  struct hm_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct hm_sess_info));
+  uint32_t first_key = key_offset + sess_offset * MS_WRITES_NUM;
+  uint32_t last_key = key_offset + (sess_offset + (SESSIONS_PER_CLIENT -1)) * MS_WRITES_NUM;
+  uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
+  uint16_t min_wrkr = (uint16_t) (min_sess / SESSIONS_PER_THREAD),
+    max_wrkr = (uint16_t) (max_sess / SESSIONS_PER_THREAD);
+
+
+  printf("Client %u: sessions %u to %u, workers %u to %u, keys %u to %u, globally max key %u \n",
+         t_id, min_sess, max_sess, min_wrkr, max_wrkr,
+         first_key, last_key, MAX_TR_NODE_KEY);
+
+
+
+  for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
+    info[s_i].state = HM_INIT;
+    info[s_i].ins_or_del_state = HM_INSERTING;
+    info[s_i].s_i = s_i;
+    info[s_i].real_sess_i = sess_offset + s_i;
+    info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
+    info[s_i].owned_key = (uint32_t) (MS_NODE_KEY_OFFSET + (info[s_i].glob_sess_i * MS_WRITES_NUM));
+    info[s_i].owned_key_ptr = get_node_ptr_key_id(info[s_i].owned_key);
+    //printf("Session %u key %u \n", info[s_i].real_sess_i, info[s_i].owned_key_ptr);
+    if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
+//    info[s_i].new_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
+//    info[s_i].last_or_first_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
+    info[s_i].queue_id = info[s_i].glob_sess_i;
+    info[s_i].advance_tail_result = false;
+    info[s_i].tail_left_behind = false;
+    assert(info[s_i].queue_id < MS_QUEUES_NUM);
+  }
+
+  s_i = 0;
+  while(true) {
+    switch (info[s_i].ins_or_del_state) {
+      case HM_INSERTING:
+        hm_insert_state_machine(&info[s_i],  t_id);
+        break;
+      case HM_DELETING:
+        hm_delete_state_machine(&info[s_i], t_id);
+        break;
+      default: if (CLIENT_ASSERTIONS) assert(false);
+    }
+    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+  }
+}
+
+
+
+
+
 /* --------------------------------------------------------------------------------------
  * ----------------------------------CLIENT THREAD----------------------------------------
  * --------------------------------------------------------------------------------------*/
 
 void *client(void *arg) {
-  //uint32_t i = 0, j = 0;
   struct thread_params params = *(struct thread_params *) arg;
   uint16_t t_id = (uint16_t) params.id;
-
-  const uint16_t worker_num = (uint16_t)(WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE_);
-
-  uint16_t first_worker = worker_num * t_id;
-  uint16_t last_worker = (uint16_t) (first_worker + worker_num - 1);
-  uint32_t trace_ptr = 0;
-  bool done = false;
   struct trace_command *trace;
-  if (CLIENT_USE_TRACE)  trace_init((void **)&trace, t_id);
-  uint32_t dbg_cntr = 0;
   green_printf("Client %u reached loop \n", t_id);
-  //sleep(10);
   while (true) {
-    if (CLIENT_USE_TRACE)
-      trace_ptr = send_reqs_from_trace(worker_num, first_worker, trace,  trace_ptr, &dbg_cntr,  t_id);
-    else if (CLIENT_UI) {
-      user_interface();
-    }
-    else if (CLIENT_TEST_CASES) {
-      if (BLOCKING_TEST_CASE) rel_acq_circular_blocking();
-      else if (ASYNC_TEST_CASE) rel_acq_circular_async();
-      else if (TREIBER_BLOCKING) {
-          uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS + (NUM_OF_RMW_KEYS * machine_id));
-          uint32_t stack_id =  0;//machine_id;
-          for (int i = 0; i < 10; i++) {
-            treiber_push_blocking(0, stack_id, key_offset + i);
-          }
-        while (true) {
-          for (int i = 0; i < NUM_OF_RMW_KEYS; i++) {
-            uint32_t key_to_push = (uint32_t) treiber_pop_blocking(0, stack_id);
-            treiber_push_blocking(0, stack_id, key_to_push);
-          }
-        }
-      }
-      else if (TREIBER_ASYNC) {
+    switch (CLIENT_MODE) {
+      case CLIENT_USE_TRACE:
+        trace_init((void **)&trace, t_id);
+        send_reqs_from_trace(trace, t_id);
+        break;
+      case CLIENT_UI:
+        user_interface();
+        break;
+      case BLOCKING_TEST_CASE:
+        rel_acq_circular_blocking();
+        break;
+      case ASYNC_TEST_CASE:
+        rel_acq_circular_async();
+        break;
+      case TREIBER_BLOCKING:
+        treiber_push_pop_blocking();
+        break;
+      case TREIBER_ASYNC:
         treiber_push_pull_multi_session(t_id);
-//        while (true) {
-//
-//          if (t_id % 1 == 0)
-//            treiber_push_multi_session(t_id);
-//          else {
-//            sleep(5);
-//            treiber_pop_multi_session(t_id);
-//          }
-//          //c_stats[t_id].treiber_pushes += (uint64_t)SESSIONS_PER_CLIENT;
-//        }
-      }
-      else if (MSQ_ASYNC) {
-        if (machine_id == 0 && t_id == 0)
-          ms_set_up_tail_and_head(t_id);
-        else ms_wait_for_init(t_id);
+        break;
+      case MSQ_ASYNC:
         ms_enqueue_dequeue_multi_session(t_id);
-      }
+        break;
+      case HML_ASYNC:
+        hm_insert_delete_multi_session(t_id);
+        break;
+      default:
+        if (CLIENT_ASSERTIONS) assert(false);
     }
-    else assert(false);
-  } // while(true) loop
+  }
 }
