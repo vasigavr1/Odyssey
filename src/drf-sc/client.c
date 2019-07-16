@@ -1917,7 +1917,7 @@ static inline void ms_init_print()
 
 
 // Return the key_id of the pointer of a node
-static inline uint32_t get_node_ptr_key_id(uint32_t node_key_id)
+static inline uint32_t ms_get_node_ptr_key_id(uint32_t node_key_id)
 {
   return MS_NODE_PTR_OFFSET + ((node_key_id - DUMMY_KEY_ID_OFFSET) / MS_WRITES_NUM);
 }
@@ -1930,10 +1930,8 @@ static inline bool are_ms_ptrs_equal(struct ms_ptr *ptr1, struct ms_ptr *ptr2)
 }
 
 //
-static inline bool is_valid_node_key(uint32_t key_id)
+static inline bool ms_is_valid_node_key(uint32_t key_id)
 {
-  if (!(key_id >= DUMMY_KEY_ID_OFFSET && key_id < MS_INIT_DONE_FLAG_KEY))
-    ;//red_printf("Key invalid %u \n", key_id);
   return key_id >= DUMMY_KEY_ID_OFFSET && key_id < MS_INIT_DONE_FLAG_KEY &&
         ((key_id - DUMMY_KEY_ID_OFFSET) % MS_WRITES_NUM == 0);
 }
@@ -1942,7 +1940,7 @@ static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, ch
                                                    uint32_t node_id, uint32_t key_id, uint16_t t_id)
 {
   if (CLIENT_ASSERTIONS) {
-    if (!is_valid_node_key(key_id)) {
+    if (!ms_is_valid_node_key(key_id)) {
       red_printf("Client: %u Session %u: %s: in queue: %u, owned key %u, state %u, "
                    "checking key ptr %u from node %u: %s \n",
                  t_id, info->real_sess_i,
@@ -2013,7 +2011,7 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
 
     async_write_strong(head_key_id, (uint8_t *) &head,
                        sizeof(struct ms_ptr), 0);
-    uint32_t dummy_ptr_key = get_node_ptr_key_id(dummy_key);
+    uint32_t dummy_ptr_key = ms_get_node_ptr_key_id(dummy_key);
     dummy_ptr.next_key_id = 0;
     dummy_ptr.queue_id = q_i;
     dummy_ptr.my_key_id = dummy_ptr_key;
@@ -2054,7 +2052,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
      if (CLIENT_ASSERTIONS) {
        assert(!info->success);
        assert(info->enqueue_num == info->dequeue_num);
-       assert(info->owned_key_ptr == get_node_ptr_key_id(info->owned_key));
+       assert(info->owned_key_ptr == ms_get_node_ptr_key_id(info->owned_key));
      }
       new_node[0].node_id = info->owned_key;
       new_node[0].node_ptr_key_id = info->owned_key_ptr;
@@ -2090,7 +2088,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
       //printf("Session %u/%u read tail of %u, which points to %u/%u \n",
       //       info->glob_sess_i, t_id, info->queue_id, tail->next_key_id,
       //       get_node_ptr_key_id(tail->next_key_id));
-      async_acquire_strong(get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
+      async_acquire_strong(ms_get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
                         sizeof(struct ms_ptr), real_sess_i);
       // read tail again -- a second time
       info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) sec_tail,
@@ -2121,7 +2119,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
         err_message_if_invalid_node_key(info, "reading new last_node_ptr when enqueuing in MS_READ_LAST_NODE",
                                         new_last_node_ptr->my_key_id, new_last_node_ptr->next_key_id, t_id);
 
-        info->last_req_id = (uint32_t) async_cas_strong(get_node_ptr_key_id(tail->next_key_id),
+        info->last_req_id = (uint32_t) async_cas_strong(ms_get_node_ptr_key_id(tail->next_key_id),
                                                         (uint8_t *) last_node_ptr, (uint8_t *) new_last_node_ptr,
                                                         sizeof(struct ms_ptr), &info->success, true, real_sess_i);
         info->state = MS_POTENTIAL_SUCCESS;
@@ -2208,7 +2206,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
                                       head_key_id, head->next_key_id, t_id);
 
       // read first node
-      async_acquire_strong(get_node_ptr_key_id(head->next_key_id), (uint8_t *) first_node_ptr,
+      async_acquire_strong(ms_get_node_ptr_key_id(head->next_key_id), (uint8_t *) first_node_ptr,
                         sizeof(struct ms_ptr), real_sess_i);
       // read head again -- a second time
       info->last_req_id = (uint32_t) async_read_strong(head_key_id, (uint8_t *) sec_head,
@@ -2228,7 +2226,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
         if (CLIENT_ASSERTIONS && first_node_ptr->next_key_id == 0) { // If the queue is empty
           red_printf("Session %u/%u tries to dequeue from %u/%u, first node_ptr %u/%u points to 0 \n",
                      info->glob_sess_i, t_id, info->queue_id, head->counter, head->next_key_id,
-                     get_node_ptr_key_id(head->next_key_id));
+                     ms_get_node_ptr_key_id(head->next_key_id));
           exit(0);
           assert(false); // DUMMY has to point somewhere, because an enqueue has already happened
         }
@@ -2264,7 +2262,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
       poll_a_req_blocking(real_sess_i, info->last_req_id);
       if (info->success) {
         info->owned_key = head->next_key_id;
-        info->owned_key_ptr = get_node_ptr_key_id(info->owned_key);
+        info->owned_key_ptr = ms_get_node_ptr_key_id(info->owned_key);
         if (CLIENT_ASSERTIONS) {
           assert(first_node_ptr->pushed);
           assert(first_node_ptr->my_key_id == info->owned_key_ptr);
@@ -2310,12 +2308,16 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
   assert(NUM_OF_RMW_KEYS > LAST_MS_NODE_PTR);
   assert(MS_WRITES_NUM > 0);
   uint16_t s_i = 0;
-  uint32_t key_offset = (uint32_t) (MS_NODE_KEY_OFFSET + (SESSIONS_PER_MACHINE * machine_id));
   uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
   assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
   struct ms_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct ms_sess_info));
+
+
+
+  uint32_t key_offset = (uint32_t) (MS_NODE_KEY_OFFSET + (MS_WRITES_NUM * (SESSIONS_PER_MACHINE * machine_id)));
   uint32_t first_key = key_offset + sess_offset * MS_WRITES_NUM;
-  uint32_t last_key = key_offset + (sess_offset + (SESSIONS_PER_CLIENT -1)) * MS_WRITES_NUM;
+
+  uint32_t last_key = key_offset + ((sess_offset + (SESSIONS_PER_CLIENT -1)) * MS_WRITES_NUM);
   uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
   uint16_t min_wrkr = (uint16_t) (min_sess / SESSIONS_PER_THREAD),
     max_wrkr = (uint16_t) (max_sess / SESSIONS_PER_THREAD);
@@ -2323,7 +2325,7 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
   uint32_t queue_id_cntr = ((machine_id * 100) + last_key) % MS_QUEUES_NUM;
   printf("Client %u: sessions %u to %u, workers %u to %u, keys %u to %u, globally max key %u \n",
          t_id, min_sess, max_sess, min_wrkr, max_wrkr,
-         first_key, last_key, MAX_TR_NODE_KEY);
+         first_key, last_key, (MS_INIT_DONE_FLAG_KEY - 1));
   if (machine_id == 0 && t_id == 0) ms_init_print();
 
 
@@ -2334,7 +2336,7 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
     info[s_i].real_sess_i = sess_offset + s_i;
     info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
     info[s_i].owned_key = (uint32_t) (MS_NODE_KEY_OFFSET + (info[s_i].glob_sess_i * MS_WRITES_NUM));
-    info[s_i].owned_key_ptr = get_node_ptr_key_id(info[s_i].owned_key);
+    info[s_i].owned_key_ptr = ms_get_node_ptr_key_id(info[s_i].owned_key);
     //printf("Session %u key %u \n", info[s_i].real_sess_i, info[s_i].owned_key_ptr);
     if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
     info[s_i].new_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
@@ -2367,12 +2369,13 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 /* ------------------------------------------------------------------------------------------------------------------- */
 #define HM_INSERTING 0
 #define HM_DELETING 1
-#define HM_SEARCHING 2
+#define HM_SEARCHING_INS 2
+#define HM_SEARCHING_DEL 3
 
 //HM_STATES
 #define HM_INIT 0
-#define HM_LOOP_START 1
-#define HM_READ_TAIL 2
+#define HM_SEARCH_INNER_LOOP 1
+#define HM_TRY_INSERT 2
 #define HM_READ_LAST_NODE 3
 #define HM_POTENTIAL_SUCCESS 4
 
@@ -2384,27 +2387,33 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 
 
 // KEY ALLOCATION-- SIZES & OFFSETS
-#define HM_LISTS_NUM (2 *GLOBAL_SESSION_NUM)
-#define HM_NODE_NUM (HM_LISTS_NUM + GLOBAL_SESSION_NUM) // 1 inserted in each list to begin with and 1 per session beyond that
+#define HM_LISTS_NUM (2 * GLOBAL_SESSION_NUM)
+#define HM_PREINSERTED_NODE_NUM (HM_LISTS_NUM) // 1 inserted in each list to begin with and
+#define HM_FREE_NODE_NUM (GLOBAL_SESSION_NUM) // 1 per session beyond that
+#define HM_NODE_NUM (HM_PREINSERTED_NODE_NUM + HM_FREE_NODE_NUM)
 
 
 #define HM_HEAD_KEY_ID_OFFSET 0 // there is one head per list, totally: HM_LISTS_NUM heads
-#define HM_NODE_PTR_OFFSET (HM_HEAD_KEY_ID_OFFSET + HM_LISTS_NUM)
-#define LAST_HM_NODE_PTR (HM_NODE_PTR_OFFSET + HM_NODE_NUM)
+#define HM_PREINSERTED_NODE_PTR_OFFSET (HM_HEAD_KEY_ID_OFFSET + HM_LISTS_NUM)
+#define HM_FREE_NODE_PTR_OFFSET (HM_PREINSERTED_NODE_PTR_OFFSET + PREINSERTED_NODE_NUM)
+#define LAST_HM_NODE_PTR (HM_PREINSERTED_NODE_PTR_OFFSET + HM_NODE_NUM)
 
 
-#define HM_NODE_KEY_OFFSET (NUM_OF_RMW_KEYS)
-#define HM_INIT_DONE_FLAG_KEY (HM_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_NODE_NUM))
+#define HM_PREINSERTED_NODE_KEY_OFFSET (NUM_OF_RMW_KEYS)
+#define HM_FREE_NODE_KEY_OFFSET (HM_PREINSERTED_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_PREINSERTED_NODE_NUM))
+#define HM_INIT_DONE_FLAG_KEY (HM_FREE_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_FREE_NODE_NUM))
 
 #define HM_INIT_DONE_FLAG 162
 
 
 /* ----Key allocation----
  * 0 -> HM_LISTS_NUM                 : heads
- * HM_LISTS_NUM -> HM_LISTS_NUM + HM_NODE_NUM   : pointers of nodes
+ * HM_NODE_PTR_OFFSET -> HM_NODE_PTR_OFFSET + HM_PREINSERTED_NODE_NUM   : pointers of preinserted nodes
+ * HM_FREE_NODE_PTR_OFFSET -> HM_FREE_NODE_PTR_OFFSET + HM_FREE_NODE_NUM   : pointers of free nodes
  * ---NON-RMWABLE
- * HM_NODE_KEY_OFFSET -> HM_NODE_KEY_OFFSET + HM_NODE_NUM * HM_WRITES_NUM : bodies of nodes
- * HM_NODE_KEY_OFFSET + (HM_NODE_NUM * HM_WRITES_NUM) : init_done flag (INIT_DONE_FLAG_KEY)
+ * HM_PREINSERTED_NODE_KEY_OFFSET -> HM_PREINSERTED_NODE_KEY_OFFSET + (HM_PREINSERTED_NODE_NUM * HM_WRITES_NUM) : bodies of preinserted nodes
+ * HM_FREE_NODE_KEY_OFFSET : HM_FREE_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_FREE_NODE_NUM) : bodies of free nodes
+ * HM_FREE_NODE_KEY_OFFSET + (HM_WRITES_NUM * HM_FREE_NODE_NUM) : init_done flag (INIT_DONE_FLAG_KEY)
  *
  * */
 
@@ -2420,7 +2429,7 @@ struct hm_ptr {
 struct hm_node {
   uint8_t value[HM_NODE_SIZE];
   uint32_t node_id;
-  uint32_t node_ptr_key_id;
+  uint32_t node_ptr_key_id; // used for comparison when searching/inserting/deleting
 };
 
 struct hm_sess_info {
@@ -2436,20 +2445,26 @@ struct hm_sess_info {
   uint16_t glob_sess_i;
   uint16_t wrkr;
   uint32_t last_req_id;
-  uint32_t queue_id;
+  uint32_t list_id;
   uint32_t owned_key; // they key of the owned ms_node
   uint32_t owned_key_ptr;
-  uint32_t enqueue_num;
-  uint32_t dequeue_num;
+  uint32_t insert_num;
+  uint32_t delete_num;
   //uint32_t pop_dbg;
   //uint32_t push_dbg;
+  struct hm_node *new_node;
+  struct hm_ptr *new_node_ptr;
+  struct hm_ptr *curr_ptr;
+  struct hm_ptr *new_curr_ptr;
+  struct hm_node *next_node;
+  struct hm_ptr *next_ptr;
 //  struct ms_ptr tail;
 //  struct ms_ptr second_tail;
 //  struct ms_ptr new_tail;
 //  struct ms_ptr head;
 //  struct ms_ptr second_head;
 //  struct ms_ptr new_head;
-//  struct ms_node *new_node;
+
 //  struct ms_node *last_or_first_node;
 //  struct ms_ptr owned_node_ptr; // even though there are many new nodes, there is only one pointer for them
 //  struct ms_ptr last_or_first_node_ms_ptr;
@@ -2457,15 +2472,44 @@ struct hm_sess_info {
   //struct node *owned_node;
 };
 
+static inline bool hm_ptrs_are_equal(struct hm_ptr *ptr1, struct hm_ptr *ptr2)
+{
+  if (CLIENT_ASSERTIONS) {
+    assert(ptr1->my_key_id == ptr2->my_key_id);
+  }
+
+  return ptr1->next_key_id == ptr2->next_key_id &&
+         ptr1->counter == ptr2->counter &&
+         ptr1->marked == ptr2->marked;
+}
+
+// Return the key_id of the pointer of a node
+static inline uint32_t hm_get_node_ptr_key_id(uint32_t node_key_id)
+{
+  if (CLIENT_ASSERTIONS) assert(node_key_id >= HM_PREINSERTED_NODE_KEY_OFFSET);
+  return HM_PREINSERTED_NODE_PTR_OFFSET + ((node_key_id - HM_PREINSERTED_NODE_KEY_OFFSET) / HM_WRITES_NUM);
+}
+
+static inline bool hm_is_valid_node_key(uint32_t key_id)
+{
+  return key_id >= HM_PREINSERTED_NODE_KEY_OFFSET && key_id < HM_INIT_DONE_FLAG_KEY &&
+         ((key_id - HM_PREINSERTED_NODE_KEY_OFFSET) % HM_WRITES_NUM == 0);
+}
+
+static inline bool check_hm_is_valid_node_ptr_key(uint32_t key_id)
+{
+  if (CLIENT_ASSERTIONS)
+    assert(key_id >= HM_PREINSERTED_NODE_PTR_OFFSET && key_id < LAST_HM_NODE_PTR);
+}
 
 static inline void hm_init_print()
 {
   printf("Number of Lists: %d, available nodes: %d, RMWable: %d, HM_WRITES_NUM: %d \n",
          HM_LISTS_NUM, HM_NODE_NUM, NUM_OF_RMW_KEYS, HM_WRITES_NUM);
-  printf("%d --> %d: heads \n", HM_HEAD_KEY_ID_OFFSET, (HM_NODE_PTR_OFFSET - 1));
-  printf("%d --> %d: node keys  \n", HM_NODE_PTR_OFFSET, (LAST_HM_NODE_PTR - 1));
+  printf("%d --> %d: heads \n", HM_HEAD_KEY_ID_OFFSET, (HM_PREINSERTED_NODE_PTR_OFFSET - 1));
+  printf("%d --> %d: node keys  \n", HM_PREINSERTED_NODE_PTR_OFFSET, (LAST_HM_NODE_PTR - 1));
   printf("----------Non-RMWable---------\n");
-  printf("%d --> %d: nodes \n", HM_NODE_KEY_OFFSET, (HM_INIT_DONE_FLAG_KEY - 1));
+  printf("%d --> %d: nodes \n", HM_PREINSERTED_NODE_KEY_OFFSET, (HM_INIT_DONE_FLAG_KEY - 1));
   printf("%d: init done flag key \n", HM_INIT_DONE_FLAG_KEY);
 
 }
@@ -2475,42 +2519,48 @@ static inline void hm_set_up_lists(uint16_t t_id)
 {
   assert(NUM_OF_RMW_KEYS > (HM_LISTS_NUM + HM_NODE_NUM));
   struct hm_ptr head, node_ptr;
-  uint32_t node_key = HM_NODE_KEY_OFFSET,
+  struct hm_node node;
+  memset(node.value, 0, (uint32_t) HM_NODE_SIZE);
+  uint32_t node_key = HM_PREINSERTED_NODE_KEY_OFFSET,
     head_key_id = MS_HEAD_KEY_ID_OFFSET;
   //printf("Client %u uses sessions from %u to %u \n", t_id, sess_offset,  sess_offset + SESSIONS_PER_CLIENT -1);
   for(uint32_t l_i = 0; l_i < HM_LISTS_NUM; l_i++) {
+
+    // Write heads
     head.pushed = true;
     head.marked = false;
     head.list_id = l_i;
     head.my_key_id = l_i;
     head.next_key_id = node_key;
     head.counter = 0;
-
-
-    //printf("pushing a req for key %u \n", dummy_key);
-
     async_write_strong(head_key_id, (uint8_t *) &head,
                        sizeof(struct hm_ptr), 0);
-    uint32_t dummy_ptr_key = get_node_ptr_key_id(node_key);
+
+    // Write node ptrs ofr pre-inserted nodes
+    uint32_t node_ptr_key = hm_get_node_ptr_key_id(node_key);
     node_ptr.next_key_id = 0;
     node_ptr.list_id = l_i;
-    node_ptr.my_key_id = dummy_ptr_key;
+    node_ptr.my_key_id = node_ptr_key;
+    node_ptr.marked = false;
     node_ptr.pushed = true;
-    node_ptr.counter = 1;
-
+    node_ptr.counter = 0;
     //printf("%u %u %u \n", dummy_key, dummy_ptr_key, dummy_ptr.my_key_id);
-    async_write_strong(dummy_ptr_key, (uint8_t *) &dummy_ptr,
-                       sizeof(struct ms_ptr), 0);
+    async_write_strong(node_ptr_key, (uint8_t *) &node_ptr,
+                       sizeof(struct hm_ptr), 0);
+
+    // write preinserted nodes
+    node.node_ptr_key_id = node_ptr_key;
+    node.node_id = node_key;
+    async_write_strong(node_key, (uint8_t *) &node,
+                       sizeof(struct hm_node), 0);
 
 
-    node_key += MS_WRITES_NUM; tail_key_id++; head_key_id++;
-    //MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    node_key += HM_WRITES_NUM; head_key_id++;
   }
-  printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);
-  uint8_t init_done_flag = MS_INIT_DONE_FLAG;
 
-  async_release_strong(MS_INIT_DONE_FLAG_KEY, &init_done_flag, 1, 0);
-
+  printf("CLient %u initialiazed %u lists \n", t_id, HM_LISTS_NUM);
+  uint8_t init_done_flag = HM_INIT_DONE_FLAG;
+  async_release_strong(HM_INIT_DONE_FLAG_KEY, &init_done_flag, 1, 0);
 }
 
 
@@ -2523,151 +2573,177 @@ static inline void hm_wait_for_init(uint16_t t_id)
     usleep(2000);
     blocking_read(HM_INIT_DONE_FLAG_KEY, &init_done_flag, 1, real_session);
   } while (init_done_flag != HM_INIT_DONE_FLAG);
-  printf("CLient %u sees the INIT_DONE_FLAG raised %u \n", t_id, init_done_flag);
+  printf("Client %u sees the INIT_DONE_FLAG raised %u \n", t_id, init_done_flag);
 }
 
+// Searching for new_node
+static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t_id)
+{
+  struct hm_node *new_node = info->new_node;
+  struct hm_ptr *new_node_ptr = info->new_node_ptr;
+  struct hm_ptr *curr_ptr = info->curr_ptr;
+  struct hm_ptr *new_curr_ptr = info->new_curr_ptr;
+  struct hm_ptr *next_ptr = info->next_ptr;
+  struct hm_node *next_node = info->next_node;
+//  struct hm_ptr *tail = &info->tail;
+//  struct hm_ptr *sec_tail = &info->second_tail;
+//  struct hm_ptr *new_tail = &info->new_tail;
+  uint16_t real_sess_i = info->real_sess_i;
+  uint32_t head_key_id = info->list_id;
+  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 
+  switch (info->state) {
+    case HM_INIT:
+      info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) curr_ptr,
+                                                          sizeof(struct hm_ptr), real_sess_i);
 
-//ENQUEUE FSM
+    case HM_SEARCH_INNER_LOOP:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      if (curr_ptr->next_key_id == 0) { // searched value is bigger than anything int he list
+        info->ins_or_del_state = (uint8_t )(info->ins_or_del_state == HM_SEARCHING_INS ?
+                                 HM_INSERTING : HM_DELETING);
+      }
+
+      uint32_t next_ptr_key_id = hm_get_node_ptr_key_id(curr_ptr->next_key_id);
+      async_acquire_strong(next_ptr_key_id, (uint8_t *) next_ptr,
+                           sizeof(struct hm_ptr), real_sess_i);
+
+      if (CLIENT_ASSERTIONS) assert(hm_is_valid_node_key(curr_ptr->next_key_id));
+      async_read_strong(curr_ptr->next_key_id, (uint8_t *) next_node,
+                           sizeof(struct hm_node), real_sess_i);
+
+      info->last_req_id =
+        (uint32_t) async_acquire_strong(curr_ptr->my_key_id, (uint8_t *) new_curr_ptr,
+                                        sizeof(struct hm_ptr), real_sess_i);
+      break;
+    case MS_READ_LAST_NODE:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      if (CLIENT_ASSERTIONS) assert(!curr_ptr->marked);
+      if (!hm_ptrs_are_equal(curr_ptr, new_curr_ptr)) {
+        // start over
+        info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) curr_ptr,
+                                                            sizeof(struct hm_ptr), real_sess_i);
+        info->state = HM_SEARCH_INNER_LOOP;
+        break;
+      }
+      else { // curr and new curr are equal
+        if (next_ptr->marked) {
+          // attempt to reconnect
+          assert(false);
+        }
+        else {
+          check_hm_is_valid_node_ptr_key(next_node->node_ptr_key_id);
+          if (CLIENT_ASSERTIONS)
+            assert(next_node->node_ptr_key_id == hm_get_node_ptr_key_id(curr_ptr->next_key_id));
+          if (next_node->node_ptr_key_id >= )
+        }
+
+      }
+      break;
+    case MS_POTENTIAL_SUCCESS:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      break;
+    default: if (CLIENT_ASSERTIONS) assert(false);
+  }
+}
+
+//Insert FSM
 static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t_id)
 {
-//  struct ms_node *new_node = info->new_node;
-//  struct ms_ptr *tail = &info->tail;
-//  struct ms_ptr *sec_tail = &info->second_tail;
-//  struct ms_ptr *new_tail = &info->new_tail;
-//  uint16_t real_sess_i = info->real_sess_i;
-//  struct ms_ptr *new_node_ptr = &info->owned_node_ptr;
-//  struct ms_ptr *last_node_ptr = &info->last_or_first_node_ms_ptr;
-//  struct ms_ptr *new_last_node_ptr = &info->new_last_or_first_node_ms_ptr;
-//  uint32_t tail_key_id = info->queue_id;
-//  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+  struct hm_node *new_node = info->new_node;
+  struct hm_ptr *new_node_ptr = info->new_node_ptr;
+  struct hm_ptr *curr_ptr = info->curr_ptr;
+  struct hm_ptr *new_curr_ptr = info->new_curr_ptr;
+//  struct hm_ptr *tail = &info->tail;
+//  struct hm_ptr *sec_tail = &info->second_tail;
+//  struct hm_ptr *new_tail = &info->new_tail;
+  uint16_t real_sess_i = info->real_sess_i;
+  uint32_t head_key_id = info->list_id;
+  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 //
-//  switch (info->state) {
-//    case MS_INIT:
-//      if (CLIENT_ASSERTIONS) {
-//        assert(!info->success);
-//        assert(info->enqueue_num == info->dequeue_num);
-//        assert(info->owned_key_ptr == get_node_ptr_key_id(info->owned_key));
-//      }
-//      new_node[0].node_id = info->owned_key;
-//      new_node[0].node_ptr_key_id = info->owned_key_ptr;
-//      for (uint16_t i = 0; i < MS_WRITES_NUM; i++) {
-//        async_write_strong(info->owned_key + i, (uint8_t *) &new_node[i],
-//                           sizeof(struct ms_node), real_sess_i);
-//      }
-//
-//      // Set the ptr of the node to be pointing to null
-//      if (CLIENT_ASSERTIONS) {
-//        new_node_ptr->pushed = true;
-//        new_node_ptr->my_key_id = info->owned_key_ptr;
-//        new_node_ptr->counter++;
-//        new_node_ptr->queue_id = info->queue_id;
-//      }
-//      new_node_ptr->next_key_id = 0;
-//      async_write_strong(info->owned_key_ptr, (uint8_t *) new_node_ptr,
-//                         sizeof(struct ms_ptr), info->real_sess_i);
-//
-//      //break;
-//    case MS_LOOP_START:
-//      log_the_tail_advancement(info, true, t_id);
-//      // read tail -- this has to be acquire
-//      info->last_req_id = (uint32_t) async_acquire_strong(tail_key_id, (uint8_t *) tail,
-//                                                          sizeof(struct ms_ptr), real_sess_i);
-//      info->state = MS_READ_TAIL;
-//      break;
-//    case MS_READ_TAIL:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(tail->next_key_id));
-//      err_message_if_invalid_node_key(info, "reading tail when enqueuing in MS_READ_TAIL",
-//                                      tail_key_id, tail->next_key_id,  t_id);
-//      //printf("Session %u/%u read tail of %u, which points to %u/%u \n",
-//      //       info->glob_sess_i, t_id, info->queue_id, tail->next_key_id,
-//      //       get_node_ptr_key_id(tail->next_key_id));
-//      async_acquire_strong(get_node_ptr_key_id(tail->next_key_id), (uint8_t *) last_node_ptr,
-//                           sizeof(struct ms_ptr), real_sess_i);
-//      // read tail again -- a second time
-//      info->last_req_id = (uint32_t) async_read_strong(tail_key_id, (uint8_t *) sec_tail,
-//                                                       sizeof(struct ms_ptr), real_sess_i);
-//
-//      info->state = MS_READ_LAST_NODE;
-//      break;
-//    case MS_READ_LAST_NODE:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      if (!are_ms_ptrs_equal(tail, sec_tail)) {
-//        info->state = MS_LOOP_START;
-//        break;
-//      }
-//      //printf ("Tail and sec tail are consistent \n");
-//      if (CLIENT_ASSERTIONS) assert(are_ms_ptrs_equal(tail, sec_tail));
-//      if (last_node_ptr->next_key_id == 0) { // if it points to zero then, it is the last item in the queue
-//        //printf ("Tail is pointing to the last element \n");
-//        if (CLIENT_ASSERTIONS) {
-//          new_last_node_ptr->my_key_id = last_node_ptr->my_key_id;
-//          new_last_node_ptr->pushed = last_node_ptr->pushed;
-//          new_last_node_ptr->queue_id = last_node_ptr->queue_id;
-//          assert(last_node_ptr->queue_id == info->queue_id);
-//        }
-//
-//        new_last_node_ptr->next_key_id = info->owned_key;
-//        new_last_node_ptr->counter = last_node_ptr->counter + 1;
-//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_last_node_ptr->next_key_id));
-//        err_message_if_invalid_node_key(info, "reading new last_node_ptr when enqueuing in MS_READ_LAST_NODE",
-//                                        new_last_node_ptr->my_key_id, new_last_node_ptr->next_key_id, t_id);
-//
-//        info->last_req_id = (uint32_t) async_cas_strong(get_node_ptr_key_id(tail->next_key_id),
-//                                                        (uint8_t *) last_node_ptr, (uint8_t *) new_last_node_ptr,
-//                                                        sizeof(struct ms_ptr), &info->success, true, real_sess_i);
-//        info->state = MS_POTENTIAL_SUCCESS;
-//      }
-//      else { // if the read node does not point to zero then another node has been enqueued
-//        //printf ("Tail of %u is not pointing to the last element %u/%u --> %u \n", info->queue_id,
-//        //        tail->next_key_id, get_node_ptr_key_id(tail->next_key_id), last_node_ptr->next_key_id);
-//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(last_node_ptr->next_key_id));
-//        err_message_if_invalid_node_key(info, "reading last_node_ptr when enqueuing in MS_READ_LAST_NODE",
-//                                        last_node_ptr->my_key_id, last_node_ptr->next_key_id, t_id);
-//        new_tail->next_key_id = last_node_ptr->next_key_id;
-//        new_tail->counter = tail->counter + 1;
-//        info->advance_tail_result = false;
-//        info->tail_left_behind = true;
-//        info->last_req_id = (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
-//                                                        sizeof(struct ms_ptr), &info->advance_tail_result,
-//                                                        true, real_sess_i);
-//        info->state = MS_LOOP_START;
-//      }
-//      break;
-//    case MS_POTENTIAL_SUCCESS:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      if (info->success) {
-//        new_tail->next_key_id = info->owned_key;
-//        //if (CLIENT_ASSERTIONS) assert(is_valid_node_key(new_tail->next_key_id));
-//        err_message_if_invalid_node_key(info, "reading new_tail when enqueuing in MS_POTENTIAL_SUCCESS",
-//                                        tail_key_id, new_tail->next_key_id, t_id);
-//        new_tail->counter = tail->counter + 1;
-//        (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
-//                                    sizeof(struct ms_ptr), &info->advance_tail_result, true, real_sess_i);
-//
-//        //green_printf("Session %u/%u enqueues key %u to stack %u \n",
-//        //             info->glob_sess_i, t_id, info->owned_key, info->queue_id);
-//        update_ms_file(t_id, 0, info, true);
-//        info->success = false;
-//        info->enqueue_num++;
-//        c_stats[t_id].microbench_pushes++;
-//        if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes > c_stats[t_id].microbench_pops);
-//        info->enq_or_deq_state = MS_DEQUEUING;
-//        info->state = MS_INIT;
-//      }
-//      else {
-//        info->state = MS_LOOP_START;
-//        break;
-//      }
-//      break;
-//    default: if (CLIENT_ASSERTIONS) assert(false);
-//  }
+  switch (info->state) {
+    case HM_INIT:
+      if (CLIENT_ASSERTIONS) {
+        assert(!info->success);
+        assert(info->insert_num == info->delete_num);
+        assert(info->owned_key_ptr == hm_get_node_ptr_key_id(info->owned_key));
+      }
+      new_node[0].node_id = info->owned_key;
+      new_node[0].node_ptr_key_id = info->owned_key_ptr;
+      for (uint16_t i = 0; i < HM_WRITES_NUM; i++) {
+        async_write_strong(info->owned_key + i, (uint8_t *) &new_node[i],
+                           sizeof(struct hm_node), real_sess_i);
+      }
+      //go into searching
+      info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) curr_ptr,
+                                                          sizeof(struct hm_ptr), real_sess_i);
+      info->ins_or_del_state = HM_SEARCHING_INS;
+      info->state = HM_SEARCH_INNER_LOOP;
+      break;
+    case HM_TRY_INSERT:
+      //poll_a_req_blocking(real_sess_i, info->last_req_id);
+
+      // test curr and next
+      if (CLIENT_ASSERTIONS) {
+        assert(!curr_ptr->marked);
+        assert(!curr_ptr->pushed);
+      }
+
+      // fill new_node_ptr
+      new_node_ptr->pushed = true;
+      new_node_ptr->list_id = info->list_id;
+      new_node_ptr->my_key_id = info->owned_key_ptr;
+
+      new_node_ptr->counter = 0;
+      new_node_ptr->marked = false;
+      new_node_ptr->next_key_id = curr_ptr->next_key_id; // TODO check this
+
+      async_write_strong(info->owned_key_ptr,(uint8_t *) new_node_ptr,
+                         sizeof(struct hm_node_ptr), real_sess_i);
+
+
+      // CAS the immediately previous node to point to the newly inserted one
+      uint32_t curr_key_id = curr_ptr->my_key_id;
+      new_curr_ptr->pushed = true;
+      new_curr_ptr->list_id = info->list_id;
+      new_curr_ptr->my_key_id = curr_key_id;
+
+      new_curr_ptr->counter = curr_ptr->counter + 1;
+      new_curr_ptr->marked = false;
+      new_curr_ptr->next_key_id = info->owned_key; // TODO check this
+
+      info->last_req_id = (uint32_t) async_cas_strong(curr_key_id, (uint8_t *) curr_ptr, (uint8_t *) new_curr_ptr,
+                                                      sizeof(struct hm_ptr), &info->success,
+                                                      true, real_sess_i);
+
+      info->state = HM_POTENTIAL_SUCCESS;
+      break;
+    case HM_POTENTIAL_SUCCESS:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      if (info->success) {
+        info->insert_num++;
+        info->state = HM_INIT;
+        info->ins_or_del_state = HM_DELETING;
+        c_stats[t_id].microbench_pushes++;
+        if (CLIENT_ASSERTIONS)
+          assert(c_stats[t_id].microbench_pushes > c_stats[t_id].microbench_pops);
+      }
+      else {// if the CAS was not successful read the head and transition to searching
+        info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) curr_ptr,
+                                                            sizeof(struct hm_ptr), real_sess_i);
+        info->ins_or_del_state = HM_SEARCHING;
+        info->state = HM_SEARCH_INNER_LOOP;
+      }
+      break;
+    default: if (CLIENT_ASSERTIONS) assert(false);
+  }
 }
 
 static inline void hm_delete_state_machine(struct hm_sess_info *info,
                                             uint16_t t_id)
 {
+
+  while(true);
 //
 //  struct ms_ptr *tail = &info->tail;
 //  struct ms_ptr *new_tail = &info->new_tail;
@@ -2801,23 +2877,29 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
 
   assert(sizeof(struct hm_ptr) == RMW_VALUE_SIZE);
   assert(sizeof(struct hm_node) == VALUE_SIZE);
-  assert(NUM_OF_RMW_KEYS > LAST_MS_NODE_PTR);
-  assert(MS_WRITES_NUM > 0);
-  uint16_t s_i = 0;
-  uint32_t key_offset = (uint32_t) (MS_NODE_KEY_OFFSET + (SESSIONS_PER_MACHINE * machine_id));
-  uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
+  assert(NUM_OF_RMW_KEYS > LAST_HM_NODE_PTR);
+  assert(HM_WRITES_NUM > 0);
+  assert(HM_FREE_NODE_NUM >= GLOBAL_SESSION_NUM);
+  uint16_t s_i = 0, sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
   assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
   struct hm_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct hm_sess_info));
-  uint32_t first_key = key_offset + sess_offset * MS_WRITES_NUM;
-  uint32_t last_key = key_offset + (sess_offset + (SESSIONS_PER_CLIENT -1)) * MS_WRITES_NUM;
+
+
+  uint32_t key_offset = (uint32_t) (HM_FREE_NODE_KEY_OFFSET + (HM_WRITES_NUM * (SESSIONS_PER_MACHINE * machine_id)));
+  uint32_t first_key = key_offset + (sess_offset * HM_WRITES_NUM);
+
+  uint32_t last_key = key_offset + ((sess_offset + (SESSIONS_PER_CLIENT -1)) * HM_WRITES_NUM);
   uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
   uint16_t min_wrkr = (uint16_t) (min_sess / SESSIONS_PER_THREAD),
     max_wrkr = (uint16_t) (max_sess / SESSIONS_PER_THREAD);
 
+  uint32_t queue_id_cntr = ((machine_id * 100) + last_key) % HM_LISTS_NUM;
+
+
 
   printf("Client %u: sessions %u to %u, workers %u to %u, keys %u to %u, globally max key %u \n",
          t_id, min_sess, max_sess, min_wrkr, max_wrkr,
-         first_key, last_key, MAX_TR_NODE_KEY);
+         first_key, last_key, (HM_INIT_DONE_FLAG_KEY - 1));
 
 
 
@@ -2827,21 +2909,21 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
     info[s_i].s_i = s_i;
     info[s_i].real_sess_i = sess_offset + s_i;
     info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
-    info[s_i].owned_key = (uint32_t) (MS_NODE_KEY_OFFSET + (info[s_i].glob_sess_i * MS_WRITES_NUM));
-    info[s_i].owned_key_ptr = get_node_ptr_key_id(info[s_i].owned_key);
+    info[s_i].owned_key = (uint32_t) (HM_FREE_NODE_KEY_OFFSET + (info[s_i].glob_sess_i * HM_WRITES_NUM));
+    info[s_i].owned_key_ptr = hm_get_node_ptr_key_id(info[s_i].owned_key);
     //printf("Session %u key %u \n", info[s_i].real_sess_i, info[s_i].owned_key_ptr);
     if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
-//    info[s_i].new_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
-//    info[s_i].last_or_first_node = calloc(MS_WRITES_NUM, (sizeof(struct ms_node)));
-    info[s_i].queue_id = info[s_i].glob_sess_i;
-    info[s_i].advance_tail_result = false;
-    info[s_i].tail_left_behind = false;
-    assert(info[s_i].queue_id < MS_QUEUES_NUM);
+      // info[s_i].new_node = calloc(HM_WRITES_NUM, (sizeof(struct hm_node)));
+      // info[s_i].last_or_first_node = calloc(HM_WRITES_NUM, (sizeof(struct hm_node)));
+    info[s_i].list_id = info[s_i].glob_sess_i;
+    assert(info[s_i].list_id < HM_LISTS_NUM);
   }
 
   s_i = 0;
   while(true) {
     switch (info[s_i].ins_or_del_state) {
+      case HM_SEARCHING:
+        hm_search_state_machine(&info[s_i],  t_id);
       case HM_INSERTING:
         hm_insert_state_machine(&info[s_i],  t_id);
         break;
