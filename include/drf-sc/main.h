@@ -113,7 +113,7 @@
 #define MSQ_ASYNC 6 // Michael & Scott Queue
 #define HML_ASYNC 7 // Harris & Michael List
 
-#define CLIENT_MODE MSQ_ASYNC
+#define CLIENT_MODE HML_ASYNC
 
 #define TREIBER_WRITES_NUM 32
 #define TREIBER_NO_CONFLICTS 0
@@ -1324,5 +1324,13 @@ struct node {
 void *client(void *arg);
 void *worker(void *arg);
 void *print_stats(void*);
+
+
+// printf available colors
+#define WHITE_PRINTF 0
+#define RED_PRINTF 1
+#define YELLOW_PRINTF 1
+#define GREEN_PRINTF 1
+#define CYAN_PRINTF 1
 
 #endif
