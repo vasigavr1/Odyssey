@@ -2376,10 +2376,11 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 #define HM_INIT 0
 #define HM_SEARCH_INNER_LOOP 1
 #define HM_TRY_INSERT 2
+#define HM_TRY_DELETE 2
 #define HM_READ_CURR_PTR_AGAIN 3
 #define HM_POTENTIAL_SUCCESS 4
 #define HM_SEARCH_INNER_LOOP_AFTER_COPYING_PTRS 5 // this state is for when traversing the list, where the curr_ptr is copied from next ptr
-
+#define HM_MARKED_POTENTIAL_SUCCESS 6 // after the delete attempts to mark a node
 #define HM_READ_HEAD 2
 #define HM_READ_FIRST_NODE 3
 
@@ -2637,6 +2638,9 @@ static inline void hm_transition_to_searching(struct hm_sess_info *info)
   info->prev_ptr = head_key_id;
   info->last_req_id = (uint32_t) async_acquire_strong(info->prev_ptr, (uint8_t *) curr_ptr,
                                                       sizeof(struct hm_ptr), real_sess_i);
+  info->next_ptr.my_key_id = 0;
+  info->next_ptr.next_key_id = 0;
+
   info->state = HM_SEARCH_INNER_LOOP;
   if (info->ins_or_del_state == HM_INSERTING) info->ins_or_del_state = HM_SEARCHING_INS;
   else if (info->ins_or_del_state == HM_DELETING) info->ins_or_del_state = HM_SEARCHING_DEL;
@@ -2705,12 +2709,16 @@ static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t
           // attempt to reconnect
           assert(false);
         }
-        else {
+        else { // COMPARING
           check_hm_is_valid_node_ptr_key(next_node->node_ptr_key_id);
           if (CLIENT_ASSERTIONS)
             assert(next_node->node_ptr_key_id == hm_get_node_ptr_key_id(curr_ptr->next_key_id));
           if (next_node->node_ptr_key_id >= new_node_ptr->my_key_id) { //found a node with bigger id
-            if (CLIENT_ASSERTIONS) assert(next_node->node_ptr_key_id > new_node_ptr->my_key_id);
+            if (CLIENT_ASSERTIONS) {
+              if (next_node->node_ptr_key_id > new_node_ptr->my_key_id)
+                assert (info->ins_or_del_state == HM_SEARCHING_INS); // if unequal, it better be an insert
+              else assert (info->ins_or_del_state == HM_SEARCHING_DEL); // if equal it better be a delete
+            }
             reset_info_state_after_searching(info);
             break;
           }
@@ -2742,7 +2750,7 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
   switch (info->state) {
     case HM_INIT:
       if (CLIENT_ASSERTIONS) {
-        assert(!info->success);
+        //assert(!info->success);
         assert(info->insert_num == info->delete_num);
         assert(info->owned_key_ptr == hm_get_node_ptr_key_id(info->owned_key));
       }
@@ -2754,7 +2762,7 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
       }
       //go into searching
       hm_transition_to_searching(info);
-      info->ins_or_del_state = HM_SEARCHING_INS;
+      //info->ins_or_del_state = HM_SEARCHING_INS;
       new_node_ptr->my_key_id = info->owned_key_ptr;
       break;
     case HM_TRY_INSERT:
@@ -2792,131 +2800,88 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
   }
 }
 
+
+// Delete FSM
 static inline void hm_delete_state_machine(struct hm_sess_info *info,
                                             uint16_t t_id)
 {
+  struct hm_node *new_node = info->new_node;
+  struct hm_ptr *new_node_ptr = &info->new_node_ptr;
+  //struct hm_ptr *prev_ptr = &info->prev_ptr;
+  struct hm_ptr *curr_ptr = &info->curr_ptr;
+  struct hm_ptr *new_curr_ptr = &info->new_curr_ptr;
+  struct hm_node *next_node = &info->next_node;
+  struct hm_ptr *next_ptr = &info->next_ptr;
 
-  while(true);
+  uint16_t real_sess_i = info->real_sess_i;
+  uint32_t head_key_id = info->list_id;
+  uint32_t delete_node_ptr_id;
+  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 //
-//  struct ms_ptr *tail = &info->tail;
-//  struct ms_ptr *new_tail = &info->new_tail;
-//  struct ms_ptr *head = &info->head;
-//  struct ms_ptr *sec_head = &info->second_head;
-//  struct ms_ptr *new_head = &info->new_head;
-//  struct ms_node *new_node = info->new_node;
-//  struct ms_ptr *first_node_ptr = &info->owned_node_ptr;
-//
-//  uint16_t real_sess_i = info->real_sess_i;
-//  uint32_t head_key_id = info->queue_id + MS_HEAD_KEY_ID_OFFSET;
-//  uint32_t tail_key_id = info->queue_id;
-//
-//  if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
-//
-//  switch (info->state) {
-//    case MS_INIT:
-//      if (CLIENT_ASSERTIONS) assert(info->enqueue_num == info->dequeue_num + 1);
-//    case MS_LOOP_START:
-//      log_the_tail_advancement(info, false, t_id);
-//      // read head
-//      info->last_req_id = (uint32_t) async_acquire_strong(head_key_id, (uint8_t *) head,
-//                                                          sizeof(struct ms_ptr), real_sess_i);
-//      // read tail
-//      async_read_strong(tail_key_id, (uint8_t *) tail, sizeof(struct ms_ptr), real_sess_i);
-//      info->state = MS_READ_HEAD;
-//      break;
-//    case MS_READ_HEAD:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      err_message_if_invalid_node_key(info, "reading head when dequeuing in MS_READ_HEAD",
-//                                      head_key_id, head->next_key_id, t_id);
-//
-//      // read first node
-//      async_acquire_strong(get_node_ptr_key_id(head->next_key_id), (uint8_t *) first_node_ptr,
-//                           sizeof(struct ms_ptr), real_sess_i);
-//      // read head again -- a second time
-//      info->last_req_id = (uint32_t) async_read_strong(head_key_id, (uint8_t *) sec_head,
-//                                                       sizeof(struct ms_ptr), real_sess_i);
-//      info->state = MS_READ_FIRST_NODE;
-//      break;
-//    case MS_READ_FIRST_NODE:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      err_message_if_invalid_node_key(info, "reading sec_head when dequeuing in MS_READ_FIRST_NODE",
-//                                      head_key_id, sec_head->next_key_id, t_id);
-//      if (!are_ms_ptrs_equal(head, sec_head)) {
-//        info->state = MS_LOOP_START;
-//        break;
-//      }
-//      if (CLIENT_ASSERTIONS) assert(are_ms_ptrs_equal(head, sec_head));
-//      if (head->next_key_id == tail->next_key_id) {
-//        if (CLIENT_ASSERTIONS && first_node_ptr->next_key_id == 0) { // If the queue is empty
-//          red_printf("Session %u/%u tries to dequeue from %u/%u, first node_ptr %u/%u points to 0 \n",
-//                     info->glob_sess_i, t_id, info->queue_id, head->counter, head->next_key_id,
-//                     get_node_ptr_key_id(head->next_key_id));
-//          exit(0);
-//          assert(false); // DUMMY has to point somewhere, because an enqueue has already happened
-//        }
-//        else { //if tail is slacking advance it
-//          new_tail->next_key_id = first_node_ptr->next_key_id;
-//          new_tail->counter = tail->counter + 1;
-//          info->advance_tail_result = false;
-//          info->tail_left_behind = true;
-//          info->last_req_id = (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
-//                                                          sizeof(struct ms_ptr), &info->advance_tail_result,
-//                                                          true, real_sess_i);
-//        }
-//        info->state = MS_LOOP_START;
-//      }
-//      else { // if does not point to the same place as tail
-//        // do the data reads
-//        for (uint16_t i = 0; i < MS_WRITES_NUM; i++) {
-//          async_read_strong(head->next_key_id + i, (uint8_t *) &new_node[i],
-//                            sizeof(struct ms_node), real_sess_i);
-//        }
-//        // try the CAS
-//        new_head->next_key_id = first_node_ptr->next_key_id;
-//        new_head->counter = head->counter + 1;
-//        err_message_if_invalid_node_key(info, "head points to a different node than tail,"
-//                                          " but the node points to null, MS_READ_FIRST_NODE",
-//                                        head->next_key_id, first_node_ptr->next_key_id, t_id);
-//        info->last_req_id = (uint32_t) async_cas_strong(head_key_id, (uint8_t *) head, (uint8_t *) new_head,
-//                                                        sizeof(struct ms_ptr), &info->success, true, real_sess_i);
-//        info->state = MS_POTENTIAL_SUCCESS;
-//      }
-//      break;
-//    case MS_POTENTIAL_SUCCESS:
-//      poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      if (info->success) {
-//        info->owned_key = head->next_key_id;
-//        info->owned_key_ptr = get_node_ptr_key_id(info->owned_key);
-//        if (CLIENT_ASSERTIONS) {
-//          assert(first_node_ptr->pushed);
-//          assert(first_node_ptr->my_key_id == info->owned_key_ptr);
-//          assert(first_node_ptr->queue_id == info->queue_id);
-//          err_message_if_invalid_node_key(info, "reading new_head when dequeuing in MS_POTENTIAL_SUCCESS",
-//                                          head_key_id, new_head->next_key_id, t_id);
-//          first_node_ptr->pushed = false;
-//          first_node_ptr->counter++;
-//          async_write_strong(first_node_ptr->my_key_id, (uint8_t *) first_node_ptr,
-//                             sizeof(struct ms_ptr), info->real_sess_i);
-//        }
-//        update_ms_file(t_id, 0, info, false);
-//        info->success = false;
-//        info->dequeue_num++;
-//        c_stats[t_id].microbench_pops++;
-//        if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes >= c_stats[t_id].microbench_pops);
-//        if (!MS_NO_CONFLICT) {
-//          info->queue_id = *queue_id_cntr;
-//          MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
-//        }
-//        info->enq_or_deq_state = MS_ENQUEUING;
-//        info->state = MS_INIT;
-//      }
-//      else {
-//        info->state = MS_LOOP_START;
-//        break;
-//      }
-//      break;
-//    default: if (CLIENT_ASSERTIONS) assert(false);
-//  }
+  switch (info->state) {
+    case HM_INIT:
+      if (CLIENT_ASSERTIONS) {
+        //assert(!info->success);
+        assert(info->insert_num == info->delete_num + 1);
+        assert(info->owned_key_ptr == hm_get_node_ptr_key_id(info->owned_key));
+      }
+
+      //go into searching
+      hm_transition_to_searching(info);
+      //info->ins_or_del_state = HM_SEARCHING_DEL;
+      new_node_ptr->my_key_id = info->owned_key_ptr;
+      break;
+    case HM_TRY_DELETE:
+      // attempt to mark the node as deleted
+      delete_node_ptr_id = hm_get_node_ptr_key_id(curr_ptr->next_key_id);
+      assert(delete_node_ptr_id == info->owned_key_ptr);
+      assert(delete_node_ptr_id == next_ptr->my_key_id);
+      assert(next_ptr->my_key_id != 0);
+      assert(hm_is_valid_node_key(next_ptr->next_key_id));
+      new_node_ptr->my_key_id = delete_node_ptr_id;
+      new_node_ptr->pushed = true;
+      new_node_ptr->next_key_id = next_ptr->next_key_id;
+      new_node_ptr->marked = true;
+      new_node_ptr->list_id = info->list_id;
+
+      info->last_req_id =
+        (uint32_t) async_cas_strong(delete_node_ptr_id, (uint8_t *) next_ptr, (uint8_t *) new_node_ptr,
+                                    sizeof(struct hm_ptr), &info->success,
+                                    true, real_sess_i);
+      info->state = HM_MARKED_POTENTIAL_SUCCESS;
+      break;
+    case HM_MARKED_POTENTIAL_SUCCESS:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      assert(info->success);
+      if (info->success) { // attempt to link node out of the list
+        assert(!curr_ptr->marked);
+        memcpy(new_curr_ptr, curr_ptr, sizeof(struct hm_ptr));
+        assert(new_curr_ptr->next_key_id == info->owned_key);
+        new_curr_ptr->counter++;
+        new_curr_ptr->next_key_id = next_ptr->next_key_id;
+
+        info->last_req_id =
+          (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) curr_ptr, (uint8_t *) new_node_ptr,
+                                      sizeof(struct hm_ptr), &info->success,
+                                      true, real_sess_i);
+        info->state = HM_POTENTIAL_SUCCESS;
+      }
+      else {
+        hm_transition_to_searching(info);
+        new_node_ptr->my_key_id = info->owned_key_ptr;
+      }
+      break;
+    case HM_POTENTIAL_SUCCESS:
+      poll_a_req_blocking(real_sess_i, info->last_req_id);
+      assert(info->success);
+      if (info->success) {
+
+      }
+
+      break;
+    default: if (CLIENT_ASSERTIONS) assert(false);
+  }
+
 }
 
 // High-level State Machine for the Harris & Michael lists
