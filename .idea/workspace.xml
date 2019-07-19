@@ -16,7 +16,9 @@
   <component name="ChangeListManager">
     <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
+      <change beforePath="$PROJECT_DIR$/include/drf-sc/main.h" afterPath="$PROJECT_DIR$/include/drf-sc/main.h" />
       <change beforePath="$PROJECT_DIR$/src/drf-sc/client.c" afterPath="$PROJECT_DIR$/src/drf-sc/client.c" />
+      <change beforePath="$PROJECT_DIR$/src/drf-sc/drf-sc" afterPath="$PROJECT_DIR$/src/drf-sc/drf-sc" />
     </list>
     <ignored path="$PROJECT_DIR$/cmake-build-debug/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -28,7 +30,7 @@
   </component>
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.6486778">
+    <splitter split-orientation="horizontal" split-proportion="0.66594714">
       <split-first>
         <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
           <file leaf-file-name="stats.c" pinned="false" current-in-tab="false">
@@ -150,8 +152,8 @@
           <file leaf-file-name="client.c" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="936">
-                  <caret line="2875" column="28" lean-forward="false" selection-start-line="2875" selection-start-column="28" selection-end-line="2875" selection-end-column="28" />
+                <state relative-caret-position="573">
+                  <caret line="2857" column="74" lean-forward="false" selection-start-line="2857" selection-start-column="74" selection-end-line="2857" selection-end-column="74" />
                   <folding>
                     <element signature="e#0#2#0" expanded="false" />
                     <element signature="e#9770#9889#0" expanded="true" />
@@ -170,26 +172,22 @@
                     <element signature="e#74451#75383#1" expanded="false" />
                     <element signature="e#79390#79592#0" expanded="true" />
                     <element signature="e#79816#80018#0" expanded="true" />
-                    <element signature="e#103286#103581#0" expanded="true" />
-                    <element signature="e#103583#103883#0" expanded="true" />
-                    <element signature="e#103885#104190#0" expanded="true" />
-                    <element signature="e#104192#104500#0" expanded="true" />
-                    <element signature="e#104502#104724#0" expanded="true" />
-                    <element signature="e#104906#105294#0" expanded="true" />
-                    <element signature="e#108126#109097#0" expanded="true" />
-                    <element signature="e#109099#109806#0" expanded="true" />
-                    <element signature="e#109809#113293#0" expanded="true" />
-                    <element signature="e#113295#116074#0" expanded="true" />
-                    <element signature="e#119210#122108#0" expanded="true" />
-                    <element signature="e#122114#123405#0" expanded="true" />
-                    <marker date="1563463368000" expanded="false" signature="7567:9889" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="13843:15988" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="16076:18182" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="18456:20438" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="20806:24502" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="24870:30661" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="31029:72220" ph="..." />
-                    <marker date="1563463368000" expanded="true" signature="72587:99743" ph="..." />
+                    <element signature="e#103317#103612#0" expanded="true" />
+                    <element signature="e#103614#103914#0" expanded="true" />
+                    <element signature="e#103916#104221#0" expanded="true" />
+                    <element signature="e#104223#104531#0" expanded="true" />
+                    <element signature="e#104533#104755#0" expanded="true" />
+                    <element signature="e#104937#105425#0" expanded="true" />
+                    <element signature="e#121327#124241#0" expanded="true" />
+                    <element signature="e#124247#125538#0" expanded="true" />
+                    <marker date="1563552042000" expanded="false" signature="7567:9889" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="13843:15988" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="16076:18182" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="18456:20438" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="20806:24502" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="24870:30661" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="31029:72220" ph="..." />
+                    <marker date="1563552042000" expanded="true" signature="72587:99743" ph="..." />
                   </folding>
                 </state>
               </provider>
@@ -252,31 +250,31 @@
           <file leaf-file-name="main.h" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/include/drf-sc/main.h">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="900">
-                  <caret line="57" column="30" lean-forward="false" selection-start-line="57" selection-start-column="30" selection-end-line="57" selection-end-column="30" />
+                <state relative-caret-position="810">
+                  <caret line="121" column="24" lean-forward="false" selection-start-line="121" selection-start-column="24" selection-end-line="121" selection-end-column="24" />
                   <folding>
                     <element signature="e#39#58#0" expanded="true" />
-                    <element signature="e#22728#22837#1" expanded="false" />
-                    <element signature="e#22843#23072#1" expanded="false" />
-                    <element signature="e#24814#24854#1" expanded="false" />
-                    <element signature="e#25024#25277#1" expanded="false" />
-                    <element signature="e#28352#28635#1" expanded="false" />
-                    <element signature="e#29646#29915#1" expanded="false" />
-                    <element signature="e#34170#34321#1" expanded="false" />
-                    <element signature="e#34942#35114#1" expanded="false" />
-                    <element signature="e#35118#35207#1" expanded="false" />
-                    <element signature="e#41693#41726#1" expanded="false" />
-                    <element signature="e#41737#41802#0" expanded="false" />
-                    <element signature="e#41815#41959#1" expanded="false" />
-                    <element signature="e#41963#42204#1" expanded="false" />
-                    <element signature="e#42208#42319#1" expanded="false" />
-                    <marker date="1563372131000" expanded="false" signature="277:649" ph="..." />
-                    <marker date="1563372131000" expanded="true" signature="2363:2915" ph="..." />
-                    <marker date="1563372131000" expanded="true" signature="3375:3541" ph="..." />
-                    <marker date="1563372131000" expanded="true" signature="3553:3806" ph="..." />
-                    <marker date="1563372131000" expanded="true" signature="4120:4204" ph="..." />
-                    <marker date="1563372131000" expanded="true" signature="4654:4886" ph="..." />
-                    <marker date="1563372131000" expanded="false" signature="5046:5393" ph="..." />
+                    <element signature="e#22752#22861#1" expanded="false" />
+                    <element signature="e#22867#23096#1" expanded="false" />
+                    <element signature="e#24838#24878#1" expanded="false" />
+                    <element signature="e#25048#25301#1" expanded="false" />
+                    <element signature="e#28376#28659#1" expanded="false" />
+                    <element signature="e#29670#29939#1" expanded="false" />
+                    <element signature="e#34194#34345#1" expanded="false" />
+                    <element signature="e#34966#35138#1" expanded="false" />
+                    <element signature="e#35142#35231#1" expanded="false" />
+                    <element signature="e#41717#41750#1" expanded="false" />
+                    <element signature="e#41761#41826#0" expanded="false" />
+                    <element signature="e#41839#41983#1" expanded="false" />
+                    <element signature="e#41987#42228#1" expanded="false" />
+                    <element signature="e#42232#42343#1" expanded="false" />
+                    <marker date="1563551372000" expanded="false" signature="277:649" ph="..." />
+                    <marker date="1563551372000" expanded="true" signature="2362:2914" ph="..." />
+                    <marker date="1563551372000" expanded="true" signature="3374:3540" ph="..." />
+                    <marker date="1563551372000" expanded="true" signature="3552:3805" ph="..." />
+                    <marker date="1563551372000" expanded="true" signature="4119:4203" ph="..." />
+                    <marker date="1563551372000" expanded="true" signature="4653:4910" ph="..." />
+                    <marker date="1563551372000" expanded="false" signature="5070:5417" ph="..." />
                   </folding>
                 </state>
               </provider>
@@ -307,16 +305,6 @@
               </provider>
             </entry>
           </file>
-          <file leaf-file-name="copy-drf-sc-executables.sh" pinned="false" current-in-tab="false">
-            <entry file="file://$PROJECT_DIR$/bin/copy-drf-sc-executables.sh">
-              <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="180">
-                  <caret line="10" column="0" lean-forward="false" selection-start-line="10" selection-start-column="0" selection-end-line="10" selection-end-column="0" />
-                  <folding />
-                </state>
-              </provider>
-            </entry>
-          </file>
           <file leaf-file-name="mica.h" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/include/mica/mica.h">
               <provider selected="true" editor-type-id="text-editor">
@@ -330,8 +318,8 @@
           <file leaf-file-name="client.c" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="619">
-                  <caret line="2157" column="8" lean-forward="false" selection-start-line="2157" selection-start-column="8" selection-end-line="2157" selection-end-column="28" />
+                <state relative-caret-position="11628">
+                  <caret line="2281" column="8" lean-forward="false" selection-start-line="2281" selection-start-column="8" selection-end-line="2284" selection-end-column="9" />
                   <folding>
                     <element signature="e#0#2#0" expanded="false" />
                     <element signature="e#8927#9143#0" expanded="true" />
@@ -355,23 +343,28 @@
                     <element signature="e#79816#80018#0" expanded="true" />
                     <element signature="e#80020#81805#0" expanded="true" />
                     <element signature="e#82257#83851#0" expanded="true" />
+                    <element signature="e#83853#90861#0" expanded="true" />
                     <element signature="e#96941#99742#0" expanded="true" />
-                    <element signature="e#102318#102451#1" expanded="false" />
-                    <element signature="e#102454#102608#1" expanded="false" />
-                    <element signature="e#102611#103283#1" expanded="false" />
-                    <element signature="e#103286#103581#0" expanded="true" />
-                    <element signature="e#103885#104190#0" expanded="true" />
-                    <element signature="e#104502#104724#0" expanded="true" />
-                    <element signature="e#104726#104904#0" expanded="true" />
-                    <element signature="e#104906#105294#0" expanded="true" />
-                    <element signature="e#109099#109806#0" expanded="true" />
-                    <element signature="e#119210#122108#0" expanded="true" />
-                    <element signature="e#122114#123405#0" expanded="true" />
-                    <marker date="1563463368000" expanded="false" signature="13843:15988" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="16076:18182" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="18456:20438" ph="..." />
-                    <marker date="1563463368000" expanded="false" signature="31030:72219" ph="..." />
-                    <marker date="1563463368000" expanded="true" signature="72824:99742" ph="..." />
+                    <element signature="e#102319#102452#1" expanded="false" />
+                    <element signature="e#102455#102609#1" expanded="false" />
+                    <element signature="e#102612#103314#1" expanded="false" />
+                    <element signature="e#103317#103612#0" expanded="true" />
+                    <element signature="e#103614#103914#0" expanded="true" />
+                    <element signature="e#103916#104221#0" expanded="true" />
+                    <element signature="e#104223#104531#0" expanded="true" />
+                    <element signature="e#104533#104755#0" expanded="true" />
+                    <element signature="e#104757#104935#0" expanded="true" />
+                    <element signature="e#104937#105425#0" expanded="true" />
+                    <element signature="e#108257#109229#0" expanded="true" />
+                    <element signature="e#109231#109938#0" expanded="true" />
+                    <element signature="e#116998#121325#0" expanded="true" />
+                    <element signature="e#121327#124241#0" expanded="true" />
+                    <element signature="e#124247#125538#0" expanded="true" />
+                    <marker date="1563552042000" expanded="false" signature="13843:15988" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="16076:18182" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="18456:20438" ph="..." />
+                    <marker date="1563552042000" expanded="false" signature="31030:72219" ph="..." />
+                    <marker date="1563552042000" expanded="true" signature="72824:99742" ph="..." />
                   </folding>
                 </state>
               </provider>
@@ -383,7 +376,6 @@
   </component>
   <component name="FindInProjectRecents">
     <findStrings>
-      <find>client_op</find>
       <find>RMW_PLA</find>
       <find>tmp</find>
       <find>stats</find>
@@ -406,13 +398,14 @@
       <find>IB_MTU</find>
       <find>rtr</find>
       <find>seen_larger_ts</find>
-      <find>log</find>
       <find>read_pr</find>
       <find>red_pr</find>
-      <find>new_curr_ptr</find>
       <find>ms</find>
       <find>hm_transition_to_searching</find>
       <find>curr_ptr-&gt;next_key_id</find>
+      <find>microbench_pops</find>
+      <find>log</find>
+      <find>new_curr_ptr</find>
     </findStrings>
     <replaceStrings>
       <replace>op</replace>
@@ -484,7 +477,7 @@
   </component>
   <component name="OCFindUsagesOptions" text="false" ivars="false" properties="true" derivedClasses="false" />
   <component name="ProjectFrameBounds" extendedState="6">
-    <option name="x" value="162" />
+    <option name="x" value="-260" />
     <option name="y" value="-4" />
     <option name="width" value="1845" />
     <option name="height" value="1144" />
@@ -569,12 +562,12 @@
       <workItem from="1559660574616" duration="737000" />
       <workItem from="1559744554939" duration="3315000" />
       <workItem from="1559900879017" duration="5983000" />
-      <workItem from="1561631070458" duration="87664000" />
+      <workItem from="1561631070458" duration="96052000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="2009592000" />
+    <option name="totallyTimeSpent" value="2017980000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="67" y="-4" width="1853" height="1204" extended-state="6" />
@@ -700,7 +693,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/main.h</url>
-          <line>708</line>
+          <line>709</line>
           <option name="timeStamp" value="263" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
@@ -720,7 +713,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/main.h</url>
-          <line>325</line>
+          <line>326</line>
           <option name="timeStamp" value="294" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
@@ -775,7 +768,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/include/drf-sc/main.h</url>
-          <line>1070</line>
+          <line>1071</line>
           <option name="timeStamp" value="320" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
@@ -795,7 +788,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/src/drf-sc/client.c</url>
-          <line>2589</line>
+          <line>2592</line>
           <option name="timeStamp" value="332" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
@@ -1212,39 +1205,39 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/include/drf-sc/main.h">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="900">
-          <caret line="57" column="30" lean-forward="false" selection-start-line="57" selection-start-column="30" selection-end-line="57" selection-end-column="30" />
+        <state relative-caret-position="810">
+          <caret line="121" column="24" lean-forward="false" selection-start-line="121" selection-start-column="24" selection-end-line="121" selection-end-column="24" />
           <folding>
             <element signature="e#39#58#0" expanded="true" />
-            <element signature="e#22728#22837#1" expanded="false" />
-            <element signature="e#22843#23072#1" expanded="false" />
-            <element signature="e#24814#24854#1" expanded="false" />
-            <element signature="e#25024#25277#1" expanded="false" />
-            <element signature="e#28352#28635#1" expanded="false" />
-            <element signature="e#29646#29915#1" expanded="false" />
-            <element signature="e#34170#34321#1" expanded="false" />
-            <element signature="e#34942#35114#1" expanded="false" />
-            <element signature="e#35118#35207#1" expanded="false" />
-            <element signature="e#41693#41726#1" expanded="false" />
-            <element signature="e#41737#41802#0" expanded="false" />
-            <element signature="e#41815#41959#1" expanded="false" />
-            <element signature="e#41963#42204#1" expanded="false" />
-            <element signature="e#42208#42319#1" expanded="false" />
-            <marker date="1563372131000" expanded="false" signature="277:649" ph="..." />
-            <marker date="1563372131000" expanded="true" signature="2363:2915" ph="..." />
-            <marker date="1563372131000" expanded="true" signature="3375:3541" ph="..." />
-            <marker date="1563372131000" expanded="true" signature="3553:3806" ph="..." />
-            <marker date="1563372131000" expanded="true" signature="4120:4204" ph="..." />
-            <marker date="1563372131000" expanded="true" signature="4654:4886" ph="..." />
-            <marker date="1563372131000" expanded="false" signature="5046:5393" ph="..." />
+            <element signature="e#22752#22861#1" expanded="false" />
+            <element signature="e#22867#23096#1" expanded="false" />
+            <element signature="e#24838#24878#1" expanded="false" />
+            <element signature="e#25048#25301#1" expanded="false" />
+            <element signature="e#28376#28659#1" expanded="false" />
+            <element signature="e#29670#29939#1" expanded="false" />
+            <element signature="e#34194#34345#1" expanded="false" />
+            <element signature="e#34966#35138#1" expanded="false" />
+            <element signature="e#35142#35231#1" expanded="false" />
+            <element signature="e#41717#41750#1" expanded="false" />
+            <element signature="e#41761#41826#0" expanded="false" />
+            <element signature="e#41839#41983#1" expanded="false" />
+            <element signature="e#41987#42228#1" expanded="false" />
+            <element signature="e#42232#42343#1" expanded="false" />
+            <marker date="1563551372000" expanded="false" signature="277:649" ph="..." />
+            <marker date="1563551372000" expanded="true" signature="2362:2914" ph="..." />
+            <marker date="1563551372000" expanded="true" signature="3374:3540" ph="..." />
+            <marker date="1563551372000" expanded="true" signature="3552:3805" ph="..." />
+            <marker date="1563551372000" expanded="true" signature="4119:4203" ph="..." />
+            <marker date="1563551372000" expanded="true" signature="4653:4910" ph="..." />
+            <marker date="1563551372000" expanded="false" signature="5070:5417" ph="..." />
           </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="936">
-          <caret line="2875" column="28" lean-forward="false" selection-start-line="2875" selection-start-column="28" selection-end-line="2875" selection-end-column="28" />
+        <state relative-caret-position="573">
+          <caret line="2857" column="74" lean-forward="false" selection-start-line="2857" selection-start-column="74" selection-end-line="2857" selection-end-column="74" />
           <folding>
             <element signature="e#0#2#0" expanded="false" />
             <element signature="e#9770#9889#0" expanded="true" />
@@ -1263,26 +1256,22 @@
             <element signature="e#74451#75383#1" expanded="false" />
             <element signature="e#79390#79592#0" expanded="true" />
             <element signature="e#79816#80018#0" expanded="true" />
-            <element signature="e#103286#103581#0" expanded="true" />
-            <element signature="e#103583#103883#0" expanded="true" />
-            <element signature="e#103885#104190#0" expanded="true" />
-            <element signature="e#104192#104500#0" expanded="true" />
-            <element signature="e#104502#104724#0" expanded="true" />
-            <element signature="e#104906#105294#0" expanded="true" />
-            <element signature="e#108126#109097#0" expanded="true" />
-            <element signature="e#109099#109806#0" expanded="true" />
-            <element signature="e#109809#113293#0" expanded="true" />
-            <element signature="e#113295#116074#0" expanded="true" />
-            <element signature="e#119210#122108#0" expanded="true" />
-            <element signature="e#122114#123405#0" expanded="true" />
-            <marker date="1563463368000" expanded="false" signature="7567:9889" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="13843:15988" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="16076:18182" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="18456:20438" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="20806:24502" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="24870:30661" ph="..." />
-            <marker date="1563463368000" expanded="false" signature="31029:72220" ph="..." />
-            <marker date="1563463368000" expanded="true" signature="72587:99743" ph="..." />
+            <element signature="e#103317#103612#0" expanded="true" />
+            <element signature="e#103614#103914#0" expanded="true" />
+            <element signature="e#103916#104221#0" expanded="true" />
+            <element signature="e#104223#104531#0" expanded="true" />
+            <element signature="e#104533#104755#0" expanded="true" />
+            <element signature="e#104937#105425#0" expanded="true" />
+            <element signature="e#121327#124241#0" expanded="true" />
+            <element signature="e#124247#125538#0" expanded="true" />
+            <marker date="1563552042000" expanded="false" signature="7567:9889" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="13843:15988" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="16076:18182" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="18456:20438" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="20806:24502" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="24870:30661" ph="..." />
+            <marker date="1563552042000" expanded="false" signature="31029:72220" ph="..." />
+            <marker date="1563552042000" expanded="true" signature="72587:99743" ph="..." />
           </folding>
         </state>
       </provider>

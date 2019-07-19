@@ -19,7 +19,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 30
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 5
 #define WRITE_RATIO 50 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -55,7 +55,7 @@
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 4
+#define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
 
@@ -119,6 +119,7 @@
 #define TREIBER_NO_CONFLICTS 0
 #define MS_WRITES_NUM 1
 #define MS_NO_CONFLICT 0
+#define HM_NO_CONFLICT 0
 #define CLIENT_LOGS 0
 #define HM_WRITES_NUM 1
 #define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 2)
