@@ -2387,6 +2387,8 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 #define HM_CL_AFTER_SEARCH 2
 #define HM_READ_FIRST_NODE 3
 
+
+#define HM_MAX_WAIT_LOOPS 100
 #define HM_NODE_SIZE (VALUE_SIZE - 8)
 #define HM_PTR_SIZE 12;
 
@@ -2455,6 +2457,7 @@ struct hm_sess_info {
   uint32_t owned_key_ptr;
   uint32_t insert_num;
   uint32_t delete_num;
+  uint32_t wait_cntr;
   //uint32_t pop_dbg;
   //uint32_t push_dbg;
   struct hm_node *new_node;
@@ -2515,6 +2518,7 @@ static inline bool check_hm_is_valid_node_ptr_key(uint32_t key_id)
 static inline void reset_info_state_after_searching(struct hm_sess_info *info, uint16_t t_id)
 {
   struct hm_ptr *curr_ptr = &info->curr_ptr;
+  info->wait_cntr = 0;
   if (info->ins_or_del_state == HM_SEARCHING_INS) {
     info->ins_or_del_state = HM_INSERTING;
     info->state = HM_TRY_INSERT;
@@ -2527,23 +2531,12 @@ static inline void reset_info_state_after_searching(struct hm_sess_info *info, u
     //if (CLIENT_ASSERTIONS) assert(info->ins_or_del_state == HM_SEARCHING_DEL);
     info->ins_or_del_state = HM_DELETING;
     info->state = HM_TRY_DELETE;
-
-//    yellow_printf("Search-del: Cl %u/%u, curr_ptr->next_key_id %u, curr->my_key_id %u, list %u/%u \n",
-//           t_id, info->glob_sess_i, curr_ptr->next_key_id, curr_ptr->my_key_id,
-//           info->list_id, curr_ptr->list_id);
     if (CLIENT_ASSERTIONS) assert(info->curr_ptr.next_key_id != 0);
-    //info->state = // TODO
   }
   else {
     if (CLIENT_ASSERTIONS) assert(info->ins_or_del_state == HM_SEARCHING_CL);
     info->ins_or_del_state = HM_DELETING;
     info->state = HM_CL_AFTER_SEARCH;
-
-//    yellow_printf("Search-del: Cl %u/%u, curr_ptr->next_key_id %u, curr->my_key_id %u, list %u/%u \n",
-//           t_id, info->glob_sess_i, curr_ptr->next_key_id, curr_ptr->my_key_id,
-//           info->list_id, curr_ptr->list_id);
-    //if (CLIENT_ASSERTIONS) assert(info->curr_ptr.next_key_id != 0);
-    //info->state = // TODO
   }
 }
 
@@ -2677,17 +2670,13 @@ static inline void hm_transition_to_searching(struct hm_sess_info *info)
 // Searching for new_node_ptr->my_key_id
 static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t_id)
 {
-  struct hm_node *new_node = info->new_node;
   struct hm_ptr *new_node_ptr = &info->new_node_ptr;
-  //struct hm_ptr *prev_ptr = &info->prev_ptr;
   struct hm_ptr *curr_ptr = &info->curr_ptr;
-  struct hm_ptr *hlp_curr_ptr = &info->hlp_curr_ptr;
   struct hm_ptr *new_curr_ptr = &info->new_curr_ptr;
   struct hm_ptr *next_ptr = &info->next_ptr;
   struct hm_node *next_node = &info->next_node;
 
   uint16_t real_sess_i = info->real_sess_i;
-  uint32_t head_key_id = info->list_id;
   if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 
   switch (info->state) {
@@ -2698,11 +2687,8 @@ static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t
     case HM_SEARCH_INNER_LOOP:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
     case HM_SEARCH_INNER_LOOP_AFTER_COPYING_PTRS:
-      //print_hm_ptr(curr_ptr, "curr_ptr beginning of search");
-
       // if we reached the end of the list
       if (curr_ptr->next_key_id == 0) {
-        //if (CLIENT_ASSERTIONS) assert(info->ins_or_del_state == HM_SEARCHING_INS);
         info->search_found = false;
         reset_info_state_after_searching(info, t_id);
         break;
@@ -2749,24 +2735,25 @@ static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t
 
         if (next_ptr->marked) {
           // Attempt to help
+          if (next_ptr->my_key_id == info->owned_key_ptr ||
+              info->wait_cntr >= HM_MAX_WAIT_LOOPS) {
+            new_curr_ptr->counter++;
+            new_curr_ptr->next_key_id = next_ptr->next_key_id;
+            if (CLIENT_ASSERTIONS) {
+              assert(info->prev_ptr == curr_ptr->my_key_id);
+              assert(next_ptr->next_key_id != curr_ptr->next_key_id);
+            }
 
-          memcpy(hlp_curr_ptr, curr_ptr, sizeof(struct hm_ptr));
-          hlp_curr_ptr->counter++;
-          hlp_curr_ptr->next_key_id = next_ptr->next_key_id;
-          if (CLIENT_ASSERTIONS) {
-            assert(info->prev_ptr == curr_ptr->my_key_id);
-            assert(next_ptr->next_key_id != curr_ptr->next_key_id);
+            info->last_req_id =
+              (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) curr_ptr, (uint8_t *) new_curr_ptr,
+                                          sizeof(struct hm_ptr), &info->success, true, real_sess_i);
+            info->wait_cntr = 0;
           }
-
-          info->last_req_id =
-            (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) curr_ptr, (uint8_t *) hlp_curr_ptr,
-                                        sizeof(struct hm_ptr), &info->success, true, real_sess_i);
-//          info->state = HM_INIT;
+          else info->wait_cntr++;
           hm_transition_to_searching(info);
           break;
         }
         else { // COMPARING
-//          assert(next_ptr->list_id == info->list_id);
           check_hm_is_valid_node_ptr_key(next_node->node_ptr_key_id);
           if (CLIENT_ASSERTIONS)
             assert(next_node->node_ptr_key_id == hm_get_node_ptr_key_id(curr_ptr->next_key_id));
@@ -2805,18 +2792,15 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
 {
   struct hm_node *new_node = info->new_node;
   struct hm_ptr *new_node_ptr = &info->new_node_ptr;
-  //struct hm_ptr *prev_ptr = &info->prev_ptr;
   struct hm_ptr *curr_ptr = &info->curr_ptr;
   struct hm_ptr *new_curr_ptr = &info->new_curr_ptr;
 
   uint16_t real_sess_i = info->real_sess_i;
-  uint32_t head_key_id = info->list_id;
   if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
 //
   switch (info->state) {
     case HM_INIT:
       if (CLIENT_ASSERTIONS) {
-        //assert(!info->success);
         assert(info->insert_num == info->delete_num);
         assert(info->owned_key_ptr == hm_get_node_ptr_key_id(info->owned_key));
       }
@@ -2828,7 +2812,6 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
       }
       //go into searching
       hm_transition_to_searching(info);
-      //info->ins_or_del_state = HM_SEARCHING_INS;
       new_node_ptr->my_key_id = info->owned_key_ptr;
       break;
     case HM_TRY_INSERT:
@@ -2837,8 +2820,6 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
       async_write_strong(info->owned_key_ptr,(uint8_t *) new_node_ptr,
                          sizeof(struct hm_ptr), real_sess_i);
       // CAS the immediately previous node to point to the newly inserted one
-//      print_hm_ptr(curr_ptr, "Before CAS: curr_ptr");
-//      printf("CAsing on %u \n", info->prev_ptr);
       info->last_req_id = (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) curr_ptr, (uint8_t *) new_curr_ptr,
                                                       sizeof(struct hm_ptr), &info->success,
                                                       true, real_sess_i);
@@ -2847,7 +2828,6 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
       break;
     case HM_POTENTIAL_SUCCESS:
       poll_a_req_blocking(real_sess_i, info->last_req_id);
-//      printf("Client %u/%u, success %d \n", t_id, info->glob_sess_i, info->success);
       if (info->success) {
         info->insert_num++;
         info->state = HM_INIT;
@@ -2861,7 +2841,6 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
           assert(c_stats[t_id].microbench_pushes > c_stats[t_id].microbench_pops);
       }
       else {// if the CAS was not successful read the head and transition to searching
-//        print_hm_ptr(curr_ptr, "Failed CAS: curr_ptr");
         hm_transition_to_searching(info);
       }
       break;
@@ -2877,41 +2856,35 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
 {
   struct hm_node *new_node = info->new_node;
   struct hm_ptr *new_node_ptr = &info->new_node_ptr;
-  //struct hm_ptr *prev_ptr = &info->prev_ptr;
   struct hm_ptr *curr_ptr = &info->curr_ptr;
   struct hm_ptr *new_curr_ptr = &info->new_curr_ptr;
-  struct hm_ptr *hlp_curr_ptr = &info->hlp_curr_ptr;
-  struct hm_node *next_node = &info->next_node;
   struct hm_ptr *next_ptr = &info->next_ptr;
 
   uint16_t real_sess_i = info->real_sess_i;
-  uint32_t head_key_id = info->list_id;
+
   uint32_t delete_node_ptr_id;
   if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
-//
+
   switch (info->state) {
     case HM_INIT:
       if (CLIENT_ASSERTIONS) {
-        //assert(!info->success);
         assert(info->insert_num == info->delete_num + 1);
         assert(info->owned_key_ptr == hm_get_node_ptr_key_id(info->owned_key));
       }
-
       //go into searching
       hm_transition_to_searching(info);
-      //info->ins_or_del_state = HM_SEARCHING_DEL;
       new_node_ptr->my_key_id = info->owned_key_ptr;
       break;
     case HM_TRY_DELETE:
       // attempt to mark the node as deleted
-      poll_a_req_blocking(real_sess_i, info->last_req_id); // TODO needed?
-      assert(info->state == HM_TRY_DELETE && info->ins_or_del_state == HM_DELETING);
-//      assert(curr_ptr->next_key_id != 0);
-      if (curr_ptr->next_key_id == 0) {
-        printf("Client %u/%u, curr_ptr->next_key_id %u, curr->my_key_id %u, list %u/%u \n",
-               t_id, info->glob_sess_i, curr_ptr->next_key_id, curr_ptr->my_key_id,
-               info->list_id, curr_ptr->list_id );
-        assert(false);
+      if (CLIENT_ASSERTIONS) {
+        assert(info->state == HM_TRY_DELETE && info->ins_or_del_state == HM_DELETING);
+        if (curr_ptr->next_key_id == 0) {
+          printf("Client %u/%u, curr_ptr->next_key_id %u, curr->my_key_id %u, list %u/%u \n",
+                 t_id, info->glob_sess_i, curr_ptr->next_key_id, curr_ptr->my_key_id,
+                 info->list_id, curr_ptr->list_id);
+          assert(false);
+        }
       }
       delete_node_ptr_id = hm_get_node_ptr_key_id(curr_ptr->next_key_id);
       if (CLIENT_ASSERTIONS) {
@@ -2919,12 +2892,15 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
         assert(delete_node_ptr_id == next_ptr->my_key_id);
         assert(next_ptr->my_key_id != 0);
       }
-      //assert(hm_is_valid_node_key(next_ptr->next_key_id));
       new_node_ptr->my_key_id = delete_node_ptr_id;
       new_node_ptr->pushed = true;
       new_node_ptr->next_key_id = next_ptr->next_key_id;
       new_node_ptr->marked = true;
       new_node_ptr->list_id = info->list_id;
+
+      for (uint8_t i = 0; i < HM_WRITES_NUM; i++)
+        async_read_strong(curr_ptr->next_key_id + i, (uint8_t*) new_node,
+                          sizeof(struct hm_node), real_sess_i);
 
       info->last_req_id =
         (uint32_t) async_cas_strong(delete_node_ptr_id, (uint8_t *) next_ptr, (uint8_t *) new_node_ptr,
@@ -2937,7 +2913,6 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
       if (CLIENT_ASSERTIONS) assert(!next_ptr->marked);
       if (info->success) { // attempt to link node out of the list
         memcpy(new_curr_ptr, curr_ptr, sizeof(struct hm_ptr));
-        memcpy(hlp_curr_ptr, curr_ptr, sizeof(struct hm_ptr));
         if (CLIENT_ASSERTIONS) {
           assert(!curr_ptr->marked);
           assert(new_curr_ptr->next_key_id == info->owned_key);
@@ -2946,7 +2921,7 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
         new_curr_ptr->next_key_id = next_ptr->next_key_id;
 
         info->last_req_id =
-          (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) hlp_curr_ptr, (uint8_t *) new_curr_ptr,
+          (uint32_t) async_cas_strong(info->prev_ptr, (uint8_t *) curr_ptr, (uint8_t *) new_curr_ptr,
                                       sizeof(struct hm_ptr), &info->success,
                                       true, real_sess_i);
         info->state = HM_POTENTIAL_SUCCESS;
