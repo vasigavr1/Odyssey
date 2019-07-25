@@ -2363,7 +2363,6 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
 }
 
 
-
 /* ------------------------------------------------------------------------------------------------------------------- */
 /*------------------------------H&M LIST------------------------------------------------------------------------------*/
 /* ------------------------------------------------------------------------------------------------------------------- */
@@ -2444,13 +2443,8 @@ struct hm_sess_info {
   uint8_t ins_or_del_state;
   bool success;
   bool search_found;
-  bool tail_left_behind;
-  //bool valid_key_to_write;
-  //bool done_cas;
-  uint16_t s_i;
   uint16_t real_sess_i;
   uint16_t glob_sess_i;
-  uint16_t wrkr;
   uint32_t last_req_id;
   uint32_t list_id;
   uint32_t owned_key; // they key of the owned hm_node
@@ -2458,8 +2452,6 @@ struct hm_sess_info {
   uint32_t insert_num;
   uint32_t delete_num;
   uint32_t wait_cntr;
-  //uint32_t pop_dbg;
-  //uint32_t push_dbg;
   struct hm_node *new_node;
 
   struct hm_ptr new_node_ptr;
@@ -3007,7 +2999,6 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
   for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
     info[s_i].state = HM_INIT;
     info[s_i].ins_or_del_state = HM_INSERTING;
-    info[s_i].s_i = s_i;
     info[s_i].real_sess_i = sess_offset + s_i;
     info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
     info[s_i].owned_key = (uint32_t) (HM_FREE_NODE_KEY_OFFSET + (info[s_i].glob_sess_i * HM_WRITES_NUM));
@@ -3039,6 +3030,237 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
   }
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------------- */
+/*------------------------------PRODUCER CONSUMER LIST------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------------------------------------------------- */
+#define PCINSERTING 0
+#define PCDELETING 1
+#define PCCLEAN_UP 2
+#define PCSEARCHING_INS 3
+#define PCSEARCHING_DEL 4
+#define PC_SEARCHING_CL 5
+//
+//
+////PC_STATES
+#define PC_TRY_TO_ACQUIRE 0
+#define PC_POLL_LOCAL_STORE 1
+#define PC_TRY_INSERT 2
+#define PC_TRY_DELETE 12
+#define PC_READ_CURR_PTR_AGAIN 3
+#define PC_POTENTIAL_SUCCESS 4
+#define PC_SEARCH_INNER_LOOP_AFTER_COPYING_PTRS 5 // this state is for when traversing the list, where the curr_ptr is copied from next ptr
+#define PC_MARKED_POTENTIAL_SUCCESS 6 // after the delete attempts to mark a node
+#define PC_CL_AFTER_SEARCH 2
+#define PC_READ_FIRST_NODE 3
+//
+//
+#define PC_MAX_WAIT_LOOPS 100
+#define PC_NODE_SIZE (VALUE_SIZE - 12)
+#define PC_PTR_SIZE 12;
+//
+//
+//// KEY ALLOCATION-- SIZES & OFFSETS
+#define PC_FLAGS_NUM (GLOBAL_SESSION_NUM)
+#define PC_NODE_NUM (GLOBAL_SESSION_NUM * PC_WRITES_NUM)
+
+//
+#define PC_FLAG_KEY_ID_OFFSET (NUM_OF_RMW_KEYS) // Flag used by session 0 of machine 0
+#define PC_NODE_OFFSET (NUM_OF_RMW_KEYS + PC_FLAGS_NUM)
+#define LAST_PC_NODE_PTR (PC_NODE_OFFSET + PC_NODE_NUM)
+//
+
+
+/* ----Key allocation----
+ * NUM_OF_RMW_KEYS -> PC_FLAGS_NUM                 : flags
+ * PC_NODE_OFFSET -> PC_NODE_OFFSET + PC_NODE_NUM   : nodes
+ * */
+
+struct pc_ptr {
+  uint8_t value[PC_NODE_SIZE];
+  uint32_t owner; // owner's global_sess_id
+  uint64_t counter; // times released
+};
+
+struct pc_node {
+  uint8_t value[PC_NODE_SIZE];
+  uint32_t owner; // owner's global_sess_id
+  uint64_t times_written; //
+};
+
+struct pc_sess_info {
+  uint8_t state;
+  uint16_t real_sess_i;
+  uint16_t glob_sess_i;
+  uint16_t session_to_acquire_from; // the glob_sess
+  uint32_t last_req_id;
+  uint32_t flag_to_acquire;
+  uint32_t flag_to_release;
+  uint32_t w_key; // they key of the pc_node to be written
+  uint32_t r_key; // they key of the pc_node to be read
+
+  uint64_t acq_num;
+  uint64_t rel_num;
+
+  struct pc_node *node_to_read;
+  struct pc_node *node_to_write;
+  struct pc_ptr rel_flag;
+  struct pc_ptr acq_flag;
+
+};
+
+
+static inline void pc_init_flags(struct pc_sess_info *info_,
+                                 uint16_t t_id)
+{
+  for (uint32_t s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
+    struct pc_sess_info *info = &info_[s_i];
+    struct pc_node *w_node = info->node_to_write;
+    struct pc_ptr *rel_flag = &info->rel_flag;
+
+
+    w_node[0].owner = info->glob_sess_i;
+    w_node[0].times_written = 1;
+    for (uint8_t i = 0; i < PC_WRITES_NUM; i++)
+      async_write_strong(info->w_key + i, (uint8_t*) w_node,
+                        sizeof(struct pc_node), info->real_sess_i);
+
+    rel_flag->counter = 1;
+    rel_flag->owner = info->glob_sess_i;
+    async_release_strong(info->flag_to_release, (uint8_t *) rel_flag,
+                         (sizeof(struct pc_ptr)), info->real_sess_i);
+    info->rel_num = 1;
+
+  }
+}
+
+// Per-sessionProducer Consumer FSM
+static inline void pc_per_sess_state_machine(struct pc_sess_info *info_,
+                                             uint16_t t_id)
+{
+  uint16_t s_i = 0;
+
+  while(true) {
+
+    struct pc_sess_info *info = &info_[s_i];
+    struct pc_node *w_node = info->node_to_write;
+    struct pc_node *r_node = info->node_to_read;
+    struct pc_ptr *acq_flag = &info->acq_flag;
+    struct pc_ptr *rel_flag = &info->rel_flag;
+
+    uint16_t real_sess_i = info->real_sess_i;
+    uint32_t delete_node_ptr_id;
+    if (CLIENT_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
+
+    switch (info->state) {
+      case PC_POLL_LOCAL_STORE:
+        info->last_req_id = (uint32_t)  async_read_strong(info->flag_to_acquire, (uint8_t *) acq_flag,
+                                                          (sizeof(struct pc_ptr)), real_sess_i);
+        info->state = PC_TRY_TO_ACQUIRE;
+        break;
+      case PC_TRY_TO_ACQUIRE:
+        poll_a_req_blocking(real_sess_i, info->last_req_id);
+        if (acq_flag->counter != info->acq_num + 1) {
+          info->state = PC_POLL_LOCAL_STORE;
+          break;
+        }
+        // the flag is seen raised, do the acquire to ensure correctness and issue reads, writes and the release
+        async_acquire_strong(info->flag_to_acquire, (uint8_t *) acq_flag,
+                             (sizeof(struct pc_ptr)), real_sess_i);
+
+
+//        printf("%lu/%lu \n", w_node[0].times_written, info->rel_num);
+        assert(w_node[0].times_written == info->rel_num);
+        assert(w_node[0].owner == info->glob_sess_i);
+        if (info->acq_num > 0) {
+          assert(r_node[0].owner == info->session_to_acquire_from);
+          assert(r_node[0].times_written == info->acq_num);
+        }
+        w_node[0].times_written++;
+        for (uint8_t i = 0; i < PC_WRITES_NUM; i++) {
+          async_read_strong(info->r_key + i, (uint8_t *) r_node,
+                            sizeof(struct pc_node), real_sess_i);
+
+          async_write_strong(info->w_key + i, (uint8_t *) w_node,
+                            sizeof(struct pc_node), real_sess_i);
+        }
+
+        rel_flag->counter++;
+//        printf("polled flag %lu, releasing flag %lu\n",
+//               info->acq_num + 1, rel_flag->counter);
+        assert(rel_flag->counter == info->rel_num + 1);
+        async_release_strong(info->flag_to_release, (uint8_t *) rel_flag,
+                             (sizeof(struct pc_ptr)), real_sess_i);
+
+        info->acq_num++;
+        info->rel_num++;
+        c_stats[t_id].microbench_pushes++;
+        c_stats[t_id].microbench_pops++;
+        info->state = PC_POLL_LOCAL_STORE;
+        break;
+      default:
+        if (CLIENT_ASSERTIONS) assert(false);
+    }
+    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+  }
+
+}
+
+
+// High-level State Machine for the Producer Consumer benchmark
+static inline void pc_multi_session(uint16_t t_id)
+{
+
+
+  assert(sizeof(struct pc_ptr) <= VALUE_SIZE);
+  assert(sizeof(struct pc_node) == VALUE_SIZE);
+  assert(NUM_OF_RMW_KEYS == PC_FLAG_KEY_ID_OFFSET);
+  assert(PC_WRITES_NUM > 0);
+  assert(PC_NODE_NUM >= GLOBAL_SESSION_NUM);
+
+
+  uint16_t s_i = 0, sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
+  assert(sess_offset + SESSIONS_PER_CLIENT <= SESSIONS_PER_MACHINE);
+  struct pc_sess_info *info = calloc(SESSIONS_PER_CLIENT, sizeof(struct pc_sess_info));
+
+
+//  uint32_t key_offset = (uint32_t) (HM_FREE_NODE_KEY_OFFSET + (HM_WRITES_NUM * (SESSIONS_PER_MACHINE * machine_id)));
+//  uint32_t first_key = key_offset + (sess_offset * HM_WRITES_NUM);
+//
+//  uint32_t last_key = key_offset + ((sess_offset + (SESSIONS_PER_CLIENT -1)) * HM_WRITES_NUM);
+//  uint16_t min_sess = sess_offset, max_sess = (uint16_t) (sess_offset + (SESSIONS_PER_CLIENT -1));
+//  uint16_t min_wrkr = (uint16_t) (min_sess / SESSIONS_PER_THREAD),
+//    max_wrkr = (uint16_t) (max_sess / SESSIONS_PER_THREAD);
+//
+//  uint32_t queue_id_cntr = ((machine_id * 100) + last_key) % HM_LISTS_NUM;
+//
+//
+//
+//  printf("Client %u: sessions %u to %u, workers %u to %u, keys %u to %u, globally max key %u \n",
+//         t_id, min_sess, max_sess, min_wrkr, max_wrkr,
+//         first_key, last_key, (HM_INIT_DONE_FLAG_KEY - 1));
+
+  for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
+    info[s_i].state = PC_TRY_TO_ACQUIRE;
+    info[s_i].real_sess_i = sess_offset + s_i;
+    info[s_i].glob_sess_i = (uint16_t) (SESSIONS_PER_MACHINE * machine_id + info[s_i].real_sess_i);
+    info[s_i].session_to_acquire_from = (uint16_t) ((GLOBAL_SESSION_NUM + info[s_i].glob_sess_i - SESSIONS_PER_MACHINE) % GLOBAL_SESSION_NUM);
+    info[s_i].flag_to_acquire = PC_FLAG_KEY_ID_OFFSET + info[s_i].session_to_acquire_from;
+    info[s_i].flag_to_release = PC_FLAG_KEY_ID_OFFSET + info[s_i].glob_sess_i;
+    info[s_i].r_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].session_to_acquire_from * PC_WRITES_NUM));
+    info[s_i].w_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].glob_sess_i * PC_WRITES_NUM));
+    green_printf("%u/%u acquires from %u, flag/key %u/%u\n",
+                 t_id, info[s_i].glob_sess_i,  info[s_i].session_to_acquire_from, info[s_i].flag_to_acquire, info[s_i].r_key);
+
+    if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
+    info[s_i].node_to_write = calloc(PC_WRITES_NUM, (sizeof(struct pc_node)));
+    info[s_i].node_to_read = calloc(PC_WRITES_NUM, (sizeof(struct pc_node)));
+    info[s_i].node_to_write[0].owner = info[s_i].glob_sess_i;
+  }
+
+  if (machine_id == 0) pc_init_flags(info, t_id);
+  pc_per_sess_state_machine(info, t_id);
+}
 
 
 
@@ -3079,6 +3301,8 @@ void *client(void *arg) {
       case HML_ASYNC:
         hm_insert_delete_multi_session(t_id);
         break;
+      case PRODUCER_CONSUMER:
+        pc_multi_session(t_id);
       default:
         if (CLIENT_ASSERTIONS) assert(false);
     }

@@ -2127,6 +2127,8 @@ static inline void signal_completion_to_client(uint32_t sess_id,
   if (ENABLE_CLIENTS) {
     struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
+    if (req_array->state != IN_PROGRESS_REQ)
+      printf("op %u, state %u \n", req_array->opcode, req_array->state);
     check_state_with_allowed_flags(2, req_array->state, IN_PROGRESS_REQ);
 
     atomic_store_explicit(&req_array->state, (uint8_t) COMPLETED_REQ, memory_order_release);

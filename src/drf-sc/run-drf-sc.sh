@@ -11,8 +11,8 @@
 allIPs=(129.215.165.8 #houston
         129.215.165.9 #austin
         129.215.165.7 #sanantonio
-        129.215.165.1 #atlanta
         129.215.165.6 #indianapolis
+        129.215.165.1 #atlanta
         129.215.165.5 #philly
         192.168.5.13 )
 #localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
