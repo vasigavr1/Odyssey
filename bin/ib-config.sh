@@ -8,3 +8,6 @@ cat /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 #PCIe counter settings
 echo 0 > /proc/sys/kernel/nmi_watchdog
 modprobe msr
+# If a machine is using huge pages of 1GB instead of 2MB
+# open /etc/default/grub and write this: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash hugepagesz=2M default_hugepagesz=2M"
+# then run update-grub

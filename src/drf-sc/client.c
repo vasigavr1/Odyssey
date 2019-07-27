@@ -262,6 +262,7 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
                                   uint8_t *value_to_write, uint32_t val_len, bool *cas_result,
                                   bool rmw_is_weak, uint16_t session_id, uint8_t type)
 {
+  assert(false);
   int return_int = check_inputs(session_id, key_id, value_to_read, value_to_write, val_len, type);
   if (return_int < 0) return return_int;
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
@@ -338,6 +339,10 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, val_len, cas_result, rmw_is_weak);
 
   // Implicit assumption: other client threads are not racing for this slot
+  check_state_with_allowed_flags (2, cl_op->state, INVALID_REQ);
+
+  //green_printf("Sess %u Activating poll ptr %u for req %u at state %u \n",
+  //             s_i, push_ptr, cl_op->opcode, cl_op->state);
   atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
   MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
   last_pushed_req[session_id]++;
@@ -992,7 +997,7 @@ static inline void treiber_push_pop_blocking()
 
 
 #define TR_KEY_OFFSET NUM_OF_RMW_KEYS
-#define NUMBER_OF_STACKS 50000
+#define NUMBER_OF_STACKS GLOBAL_SESSION_NUM
 #define DEBUG_MAX 200
 
 
@@ -1741,7 +1746,7 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
 
 
 // KEY ALLOCATION-- SIZES & OFFSETS
-#define MS_QUEUES_NUM (2 *GLOBAL_SESSION_NUM)
+#define MS_QUEUES_NUM (GLOBAL_SESSION_NUM)
 #define MS_NODE_NUM (GLOBAL_SESSION_NUM) // 1 per session is enough, as each session only owns one at a time
 #define DUMMY_KEYS_NUM (MS_QUEUES_NUM)
 // all dummies point to 0 when starting
@@ -3249,8 +3254,8 @@ static inline void pc_multi_session(uint16_t t_id)
     info[s_i].flag_to_release = PC_FLAG_KEY_ID_OFFSET + info[s_i].glob_sess_i;
     info[s_i].r_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].session_to_acquire_from * PC_WRITES_NUM));
     info[s_i].w_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].glob_sess_i * PC_WRITES_NUM));
-    green_printf("%u/%u acquires from %u, flag/key %u/%u\n",
-                 t_id, info[s_i].glob_sess_i,  info[s_i].session_to_acquire_from, info[s_i].flag_to_acquire, info[s_i].r_key);
+    //green_printf("%u/%u acquires from %u, flag/key %u/%u\n",
+    //             t_id, info[s_i].glob_sess_i,  info[s_i].session_to_acquire_from, info[s_i].flag_to_acquire, info[s_i].r_key);
 
     if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
     info[s_i].node_to_write = calloc(PC_WRITES_NUM, (sizeof(struct pc_node)));

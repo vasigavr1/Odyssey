@@ -2127,8 +2127,14 @@ static inline void signal_completion_to_client(uint32_t sess_id,
   if (ENABLE_CLIENTS) {
     struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-    if (req_array->state != IN_PROGRESS_REQ)
-      printf("op %u, state %u \n", req_array->opcode, req_array->state);
+
+//    yellow_printf("Wrkr %u/%u completing poll ptr %u for req %u at state %u \n", t_id,
+//           sess_id, req_array_i, req_array->opcode, req_array->state);
+
+    if (ENABLE_ASSERTIONS) {
+      if (req_array->state != IN_PROGRESS_REQ)
+        printf("op %u, state %u slot %u/%u \n", req_array->opcode, req_array->state, sess_id, req_array_i);
+    }
     check_state_with_allowed_flags(2, req_array->state, IN_PROGRESS_REQ);
 
     atomic_store_explicit(&req_array->state, (uint8_t) COMPLETED_REQ, memory_order_release);
@@ -2143,10 +2149,10 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
                                                 uint32_t req_array_i, uint16_t t_id)
 {
   if (ENABLE_CLIENTS) {
-    //printf("Wrkr %u sess %u signals in progress for  poll ptr %u for req at state %u \n", t_id,
-    //       sess_id, req_array_i,
-    //       interface[t_id].req_array[sess_id][sess_id].state);
+
     struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
+    //cyan_printf("Wrkr %u/%u signals in progress for  poll ptr %u for req %u at state %u \n", t_id,
+    //       sess_id, req_array_i,req_array->opcode, req_array->state);
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
     if (ENABLE_ASSERTIONS) memset(&req_array->key, 0, TRUE_KEY_SIZE);
     check_state_with_allowed_flags(2, req_array->state, ACTIVE_REQ);
@@ -2635,6 +2641,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     //backward_ptr = (backward_ptr + write_i) % PENDING_WRITES;
     struct per_write_meta *w_meta = &p_ops->w_meta[backward_ptr];
     uint8_t *w_state = &w_meta->w_state;
+    if (ENABLE_ASSERTIONS) assert(w_meta->w_state == VALID);
     memcpy(w_meta->expected_ids, q_info->active_ids, q_info->active_num);
     struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
     switch (write->opcode) {
@@ -2759,6 +2766,7 @@ set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct cache_o
       add_request_to_sess_info(&p_ops->sess_info[sess_id], t_id);
       return;
     case RELEASE_THIRD: //source = FROM_WRITE || LIN_WRITE
+      p_ops->w_index_to_req_array[w_ptr] = p_ops->w_index_to_req_array[incoming_pull_ptr];
       return;
     default:
       if (ENABLE_ASSERTIONS) assert(false);
@@ -4433,6 +4441,8 @@ static inline void insert_write(struct pending_ops *p_ops, struct cache_op *op, 
     p_ops->sess_info[sess_id].writes_not_yet_inserted--;
   }
 
+
+
   struct write *write = (struct write *)
     get_w_ptr(p_ops, opcode, (uint16_t)p_ops->w_meta[w_ptr].sess_id, t_id);
 
@@ -4613,7 +4623,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
   else my_assert(false, "Wrong resp type in RMW");
 }
 
-// Fill the trace_op to be passed to the KVS. Returns whether the no more requests can be processed
+// Fill the trace_op to be passed to the KVS. Returns whether no more requests can be processed
 static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
                                  uint32_t trace_iter, struct trace_command *trace,
                                  uint16_t op_i, int working_session, uint16_t *writes_num_, uint16_t *reads_num_,
@@ -4638,7 +4648,9 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
       assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
       uint32_t next_pull_ptr = (pull_ptr + 1) % PER_SESSION_REQ_NUM;
       uint32_t prev_pull_ptr = (PER_SESSION_REQ_NUM + pull_ptr - 1) % PER_SESSION_REQ_NUM;
-      if (!is_client_req_active((uint32_t) working_session, next_pull_ptr, t_id))
+      // if the next req is not active, no request can be active, so check the previous
+      if (!is_client_req_active((uint32_t) working_session, next_pull_ptr, t_id) &&
+        next_pull_ptr != prev_pull_ptr && prev_pull_ptr != pull_ptr)
         assert(!is_client_req_active((uint32_t) working_session, prev_pull_ptr, t_id));
     }
     //printf("Wrkr %u sess %u saves poll ptr %u for req at state %u \n", t_id,
@@ -4748,8 +4760,11 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   }
   else if (ENABLE_ASSERTIONS ) assert(working_session != -1);
 
-   bool passed_over_all_sessions = false;
-  //green_printf("working session %d \n", working_session);
+  bool passed_over_all_sessions = false;
+  //if (!passed_over_all_sessions)
+  //  green_printf("Pulling from working session %d \n", working_session);
+
+
   while (op_i < MAX_OP_BATCH && !passed_over_all_sessions) {
     if (fill_trace_op(p_ops, &ops[op_i], trace_iter, trace, op_i, working_session, &writes_num,
                       &reads_num, ses_dbg, latency_info, sizes_dbg_cntr, t_id))
@@ -4793,6 +4808,8 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
     if (resp[i].type == CACHE_LOCAL_GET_SUCCESS) {
+      //check_state_with_allowed_flags(2, interface[t_id].req_array[ops[i].session_id][ops[i].index_to_req_array].state, IN_PROGRESS_REQ);
+      assert(interface[t_id].req_array[ops[i].session_id][ops[i].index_to_req_array].state == IN_PROGRESS_REQ);
       signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // Writes
@@ -7244,7 +7261,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
         (!read_info->seen_larger_ts)) {
         read_info->opcode = UPDATE_EPOCH_OP_GET;
       }
-      check_state_with_allowed_flags(2, read_info->opcode, OP_ACQUIRE);
+      //check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, UPDATE_EPOCH_OP_GET);
       if (read_info->seen_larger_ts)
         memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
       p_ops->ptrs_to_mes_ops[writes_for_cache] = (void *) &p_ops->read_info[pull_ptr];
@@ -7494,7 +7511,7 @@ static inline void clear_after_release_quorum(struct pending_ops *p_ops,
   uint32_t sess_id = p_ops->w_meta[w_ptr].sess_id;
   if (ENABLE_ASSERTIONS) assert( sess_id < SESSIONS_PER_THREAD);
   struct sess_info *sess_info = &p_ops->sess_info[sess_id];
-  if (!sess_info->stalled)
+  if (ENABLE_ASSERTIONS && !sess_info->stalled)
     printf("state %u ptr %u \n", p_ops->w_meta[w_ptr].w_state, w_ptr);
   // Releases, and Acquires/RMW-Acquires that needed a "write" round complete here
   signal_completion_to_client(sess_id, p_ops->w_index_to_req_array[w_ptr], t_id);
