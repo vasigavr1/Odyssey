@@ -3164,10 +3164,12 @@ static inline void pc_per_sess_state_machine(struct pc_sess_info *info_,
         info->state = PC_TRY_TO_ACQUIRE;
         break;
       case PC_TRY_TO_ACQUIRE:
-        poll_a_req_blocking(real_sess_i, info->last_req_id);
-        if (acq_flag->counter != info->acq_num + 1) {
-          info->state = PC_POLL_LOCAL_STORE;
-          break;
+        if (!PC_IDEAL) {
+          poll_a_req_blocking(real_sess_i, info->last_req_id);
+          if (acq_flag->counter != info->acq_num + 1) {
+            info->state = PC_POLL_LOCAL_STORE;
+            break;
+          }
         }
         // the flag is seen raised, do the acquire to ensure correctness and issue reads, writes and the release
         async_acquire_strong(info->flag_to_acquire, (uint8_t *) acq_flag,
@@ -3175,11 +3177,13 @@ static inline void pc_per_sess_state_machine(struct pc_sess_info *info_,
 
 
 //        printf("%lu/%lu \n", w_node[0].times_written, info->rel_num);
-        assert(w_node[0].times_written == info->rel_num);
-        assert(w_node[0].owner == info->glob_sess_i);
-        if (info->acq_num > 0) {
-          assert(r_node[0].owner == info->session_to_acquire_from);
-          assert(r_node[0].times_written == info->acq_num);
+        if (CLIENT_ASSERTIONS&& !PC_IDEAL) {
+          assert(w_node[0].times_written == info->rel_num);
+          assert(w_node[0].owner == info->glob_sess_i);
+          if (info->acq_num > 0) {
+            assert(r_node[0].owner == info->session_to_acquire_from);
+            assert(r_node[0].times_written == info->acq_num);
+          }
         }
         w_node[0].times_written++;
         for (uint8_t i = 0; i < PC_WRITES_NUM; i++) {
@@ -3201,7 +3205,8 @@ static inline void pc_per_sess_state_machine(struct pc_sess_info *info_,
         info->rel_num++;
         c_stats[t_id].microbench_pushes++;
         c_stats[t_id].microbench_pops++;
-        info->state = PC_POLL_LOCAL_STORE;
+        if (PC_IDEAL) info->state = PC_TRY_TO_ACQUIRE;
+        else info->state = PC_POLL_LOCAL_STORE;
         break;
       default:
         if (CLIENT_ASSERTIONS) assert(false);

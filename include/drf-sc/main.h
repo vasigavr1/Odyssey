@@ -19,10 +19,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 30
 #define MACHINE_NUM 5
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
+#define SESSIONS_PER_THREAD 50
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -112,9 +112,9 @@
 #define TREIBER_ASYNC 5 // Treiber Stack
 #define MSQ_ASYNC 6 // Michael & Scott Queue
 #define HML_ASYNC 7 // Harris & Michael List
-#define PRODUCER_CONSUMER 8
+#define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE CLIENT_USE_TRACE
+#define CLIENT_MODE PRODUCER_CONSUMER
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
@@ -126,7 +126,8 @@
 #define HM_NO_CONFLICT 1
 #define HM_WRITES_NUM 32
 
-#define PC_WRITES_NUM 32
+#define PC_WRITES_NUM 1
+#define PC_IDEAL 1
 
 #define PER_SESSION_REQ_NUM ((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
