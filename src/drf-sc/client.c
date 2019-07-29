@@ -262,7 +262,6 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
                                   uint8_t *value_to_write, uint32_t val_len, bool *cas_result,
                                   bool rmw_is_weak, uint16_t session_id, uint8_t type)
 {
-  assert(false);
   int return_int = check_inputs(session_id, key_id, value_to_read, value_to_write, val_len, type);
   if (return_int < 0) return return_int;
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);

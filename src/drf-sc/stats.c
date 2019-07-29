@@ -6,7 +6,7 @@ void print_latency_stats(void);
 void *print_stats(void* no_arg) {
   int j;
   uint16_t i, print_count = 0;
-  uint64_t  all_wrkr_completed_reqs = 0, all_wrkr_completed_zk_writes;
+  uint64_t  all_wrkr_completed_reqs = 0, all_wrkr_completed_zk_writes, all_wrkr_sync_percentage;
   double total_throughput = 0;
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 16;
@@ -29,7 +29,7 @@ void *print_stats(void* no_arg) {
     memcpy(curr_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
     memcpy(curr_c_stats, (void *) c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
     all_wrkr_completed_reqs = 0;
-    all_wrkr_completed_zk_writes = 0;
+    all_wrkr_completed_zk_writes = 0, all_wrkr_sync_percentage = 0;
     print_count++;
     if (EXIT_ON_PRINT  && print_count == PRINT_NUM) {
       if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE) print_latency_stats();
@@ -46,6 +46,11 @@ void *print_stats(void* no_arg) {
       all_wrkr_completed_zk_writes += (curr_w_stats[i].rmws_completed + curr_w_stats[i].releases_per_thread +
         curr_w_stats[i].writes_per_thread - (prev_w_stats[i].rmws_completed + prev_w_stats[i].releases_per_thread +
                                              prev_w_stats[i].writes_per_thread));
+
+      all_wrkr_sync_percentage += (curr_w_stats[i].rmws_completed + curr_w_stats[i].releases_per_thread +
+                                    curr_w_stats[i].acquires_per_thread  -
+                                      (prev_w_stats[i].rmws_completed + prev_w_stats[i].releases_per_thread +
+                                                                            prev_w_stats[i].acquires_per_thread));
 
 
       total_cancelled_rmws += curr_w_stats[i].cancelled_rmws - prev_w_stats[i].cancelled_rmws;
@@ -106,13 +111,14 @@ void *print_stats(void* no_arg) {
     memcpy(prev_c_stats, curr_c_stats, CLIENTS_PER_MACHINE * (sizeof(struct client_stats)));
     total_throughput = (all_wrkr_completed_reqs) / seconds;
     double zk_write_ratio = all_wrkr_completed_zk_writes / (double) all_wrkr_completed_reqs;
+    double sync_per = all_wrkr_sync_percentage / (double) all_wrkr_completed_reqs;
     double total_treiber_pushes = (all_client_microbench_pushes) / seconds;
     double total_treiber_pops = (all_client_microbench_pops) / seconds;
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f zk_wr: %.2f\n", print_count, total_throughput,
+    green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n", print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
                  total_treiber_pushes, total_treiber_pops,
-                 zk_write_ratio);
+                 zk_write_ratio, sync_per);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

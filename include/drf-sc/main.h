@@ -20,9 +20,9 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 30
-#define MACHINE_NUM 5
+#define MACHINE_NUM 3
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 50
+#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -38,7 +38,7 @@
 #define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 0
+#define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
 #define SC_RATIO_ 110// this is out of 1000, e.g. 10 means 1%
@@ -46,7 +46,7 @@
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 0
+#define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
@@ -114,7 +114,7 @@
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE PRODUCER_CONSUMER
+#define CLIENT_MODE TREIBER_ASYNC
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
@@ -124,12 +124,12 @@
 #define CLIENT_LOGS 0
 
 #define HM_NO_CONFLICT 1
-#define HM_WRITES_NUM 32
+#define HM_WRITES_NUM 4
 
 #define PC_WRITES_NUM 1
 #define PC_IDEAL 1
 
-#define PER_SESSION_REQ_NUM ((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM (HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -458,8 +458,8 @@ struct remote_qp {
 
 #define INVALID 0
 #define VALID 1
-#define SENT 2
-#define READY 3
+#define SENT 2 // for reads
+#define READY 3 // for reads
 #define SENT_PUT 4 // typical writes -- ALL acks
 #define SENT_RELEASE 5 // Release (could be the third round) -- All acks
 #define SENT_ACQUIRE 6 //second round of acquire -- Quorum

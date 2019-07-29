@@ -147,7 +147,11 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
             KVS_from_trace_releases(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                     p_ops, &r_push_ptr, t_id);
           }
-          else if (ENABLE_ASSERTIONS) assert(false);
+          else if (ENABLE_ASSERTIONS) {
+            red_printf("Wrkr %u: cache_batch_op_trace wrong opcode %d, for not-rmwable key,  req %d \n",
+                       t_id, op[op_i].opcode, op_i);
+            assert(false);
+          }
         }
         else if (ENABLE_RMWS) {
           if (opcode_is_rmw(op[op_i].opcode)) {

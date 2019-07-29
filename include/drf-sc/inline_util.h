@@ -2641,7 +2641,6 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     //backward_ptr = (backward_ptr + write_i) % PENDING_WRITES;
     struct per_write_meta *w_meta = &p_ops->w_meta[backward_ptr];
     uint8_t *w_state = &w_meta->w_state;
-    if (ENABLE_ASSERTIONS) assert(w_meta->w_state == VALID);
     memcpy(w_meta->expected_ids, q_info->active_ids, q_info->active_num);
     struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
     switch (write->opcode) {
