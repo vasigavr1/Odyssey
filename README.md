@@ -1,19 +1,55 @@
-# ABD Algorithm(Attiya, Bar-Noy, Dolev )
-ABD is an algorithm that implements consistency for DSM systems.
-The projects implements 2 variants of ABD: Lin-ABD which offers Linearizability(as described in  https://ieeexplore.ieee.org/abstract/document/614100/) and
-SC-ABD which offers Sequential Consistency (as described in https://link.springer.com/chapter/10.1007/978-3-319-46140-3_14)
-The protocols are implemented over RDMA.
+#Kite
+
+Kite is a replicated, RDMA-enabled Key-Value Store that enforces available Release Consistency.
+Kite implements a read/write/RMW API an uses:
+1. Eventual Store for relaxed reads  & writes
+2. MW-ABD (simply called ABD) for releases & acquires (i.e. linearizable reads/writes)
+3. Basic Paxos for RMWs.
+
+## Eventual Store (ES)
+Eventual Store is aprotocol that provides per-keu Sequential consistency.
+ES implements reads locally and incurs a broadcast round for writes.
+
+
+## ABD Algorithm(Attiya, Bar-Noy, Dolev )
+ABD is an algorithm that implements linearizable reads and writes
+Writes incur 2 broadcast rounds and reads incur 1 broadcast round with an conditional second round.
+
+## Paxos
+Paxos is implemented as such:
+* Basic Paxos (leaderless with 3rtts)
+* Key-granularity: Paxos commands to differnt keys do not interact
+* With both release and acquire semantics
+* Compare And Swaps can be weak: they can fail lcaolly if the comparison fails locally
+
+## Kite API
+Kite API contains two flavours (a blocking and a nonblocking) of the following commands
+1. read()
+2. write()
+3. release()
+4. acquire()
+5. CAS_strong()
+6. CAS_weak()
+7. FAA()
+
+The Kite API can be sued by the client threads. 
+./src/client.c already contains implementations of
+* The Treiber Stack
+* Michael & Scott Queues
+* Harris and Micahel Lists
+* A circular producer consumer pattern
+
+Also a User Interface to issue requests from the Command Line is available.
+
 
 ## Optimizations
 The protocol is implemented over UD Sends and Receives.
-All messages are batched, the stats will print out the batching of all messages.
-The Read will only perfrom a second round, if it detects that the value it is reading is not available to a write_quorum of machines.
-The read replies will not include a key or a timestamp, if the timestamp that is proposed to be read is smaller or equal to the local timestamp
+All messages are batched.
 
 
 ## Repository Contains
-1. A modified version of MICA that serves as the store for the ABD
-2. A layer that implements the protocol that runs over 1
+1. A modified version of MICA that serves as the store for Kite
+2. A layer that implements the protocols that run over MICA
 
 ## Requirments
 
@@ -34,5 +70,5 @@ The read replies will not include a key or a timestamp, if the timestamp that is
  * The following changes are temporary (i.e. need to be performed after a reboot)
 
 ## Tested on
-* Infiniband cluster of 9 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
-* OS: Ubuntu 14.04 (Kernel: 3.13.0-32-generic) 
+* Infiniband cluster of 5 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
+* OS: Ubuntu 18.04.1 LTS (Kernel: 4.15.0-55-generic) 
