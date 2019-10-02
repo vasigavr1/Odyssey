@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6"/>
+	<Project>
+		<Option title="drf-sc"/>
+		<Option makefile_is_custom="1"/>
+		<Option compiler="gcc"/>
+		<Option virtualFolders="CMake Files\;"/>
+		<Build>
+			<Target title="all">
+				<Option working_dir="/home/vasilis/Documents/houston/kite/cmake-build-debug"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 all"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="rebuild_cache">
+				<Option working_dir="/home/vasilis/Documents/houston/kite/cmake-build-debug"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 rebuild_cache"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="edit_cache">
+				<Option working_dir="/home/vasilis/Documents/houston/kite/cmake-build-debug"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 edit_cache"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="drf-sc">
+				<Option output="/home/vasilis/Documents/houston/kite/cmake-build-debug/drf-sc" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/vasilis/Documents/houston/kite/cmake-build-debug"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/libhrd"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/drf-sc"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/optik"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/mica"/>
+					<Add directory="/usr/include/c++/5"/>
+					<Add directory="/usr/include/x86_64-linux-gnu/c++/5"/>
+					<Add directory="/usr/include/c++/5/backward"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include"/>
+					<Add directory="/usr/local/include"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include-fixed"/>
+					<Add directory="/usr/include/x86_64-linux-gnu"/>
+					<Add directory="/usr/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 drf-sc"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="drf-sc/fast">
+				<Option output="/home/vasilis/Documents/houston/kite/cmake-build-debug/drf-sc" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/vasilis/Documents/houston/kite/cmake-build-debug"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/libhrd"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/drf-sc"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/optik"/>
+					<Add directory="/home/vasilis/Documents/houston/kite/include/mica"/>
+					<Add directory="/usr/include/c++/5"/>
+					<Add directory="/usr/include/x86_64-linux-gnu/c++/5"/>
+					<Add directory="/usr/include/c++/5/backward"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include"/>
+					<Add directory="/usr/local/include"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include-fixed"/>
+					<Add directory="/usr/include/x86_64-linux-gnu"/>
+					<Add directory="/usr/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 drf-sc/fast"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/kite/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+		</Build>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/drf-sc/cache.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/drf-sc/inline_util.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/drf-sc/main.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/drf-sc/util.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/libhrd/hrd.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/libhrd/hrd_sizes.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/mica/city.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/mica/mica.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/atomic_ops_if.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/getticks.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/measurements.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/optik_mod.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/random.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/ssalloc.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/include/optik/utils.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/PaxosVerifier/PaxosVerifier.cpp">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/cache.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/client.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/main.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/stats.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/util.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/drf-sc/worker.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/libhrd/hrd_conn.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/libhrd/hrd_util.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/mica/city.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/mica/mica.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/src/mica/test.c">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/usr/include/infiniband/verbs.h">
+			<Option target="drf-sc"/>
+		</Unit>
+		<Unit filename="/home/vasilis/Documents/houston/kite/CMakeLists.txt">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
+	</Project>
+</CodeBlocks_project_file>
