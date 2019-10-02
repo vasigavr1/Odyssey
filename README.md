@@ -1,4 +1,5 @@
-#Kite
+
+# Kite
 
 Kite is a replicated, RDMA-enabled Key-Value Store that enforces available Release Consistency.
 Kite implements a read/write/RMW API an uses:

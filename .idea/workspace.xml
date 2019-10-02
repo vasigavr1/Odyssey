@@ -14,7 +14,9 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="" />
+    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="">
+      <change beforePath="$PROJECT_DIR$/README.md" afterPath="$PROJECT_DIR$/README.md" />
+    </list>
     <ignored path="$PROJECT_DIR$/cmake-build-debug/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -25,7 +27,7 @@
   </component>
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.6189962">
+    <splitter split-orientation="horizontal" split-proportion="0.29087967">
       <split-first>
         <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
           <file leaf-file-name="stats.c" pinned="false" current-in-tab="false">
@@ -308,8 +310,8 @@
             <entry file="file://$PROJECT_DIR$/README.md">
               <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
                 <state split_layout="SPLIT">
-                  <first_editor relative-caret-position="396">
-                    <caret line="22" column="86" lean-forward="false" selection-start-line="22" selection-start-column="86" selection-end-line="22" selection-end-column="86" />
+                  <first_editor relative-caret-position="18">
+                    <caret line="1" column="2" lean-forward="false" selection-start-line="1" selection-start-column="2" selection-end-line="1" selection-end-column="2" />
                     <folding />
                   </first_editor>
                   <second_editor />
@@ -606,12 +608,12 @@
       <workItem from="1564153806584" duration="22880000" />
       <workItem from="1564492626308" duration="1544000" />
       <workItem from="1565267223550" duration="362000" />
-      <workItem from="1570031879577" duration="80000" />
+      <workItem from="1570031879577" duration="563000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="2072470000" />
+    <option name="totallyTimeSpent" value="2072953000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="67" y="-4" width="1853" height="1204" extended-state="6" />
@@ -1173,8 +1175,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="43398">
-          <caret line="2411" column="49" lean-forward="false" selection-start-line="2411" selection-start-column="49" selection-end-line="2411" selection-end-column="49" />
+        <state relative-caret-position="2844">
+          <caret line="158" column="89" lean-forward="false" selection-start-line="158" selection-start-column="74" selection-end-line="158" selection-end-column="89" />
           <folding>
             <element signature="e#0#2#0" expanded="false" />
             <element signature="e#1046#3702#0" expanded="true" />
@@ -1268,23 +1270,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/README.md">
-      <provider editor-type-id="text-editor">
-        <state relative-caret-position="0">
-          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-          <folding />
-        </state>
-      </provider>
-      <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
-        <state split_layout="SPLIT">
-          <first_editor relative-caret-position="396">
-            <caret line="22" column="86" lean-forward="false" selection-start-line="22" selection-start-column="86" selection-end-line="22" selection-end-column="86" />
-            <folding />
-          </first_editor>
-          <second_editor />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/include/drf-sc/inline_util.h">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="357">
@@ -1336,6 +1321,23 @@
             <marker date="1564408712000" expanded="true" signature="315473:337412" ph="..." />
             <marker date="1564408712000" expanded="true" signature="353982:385003" ph="..." />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/README.md">
+      <provider editor-type-id="text-editor">
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding />
+        </state>
+      </provider>
+      <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
+        <state split_layout="SPLIT">
+          <first_editor relative-caret-position="18">
+            <caret line="1" column="2" lean-forward="false" selection-start-line="1" selection-start-column="2" selection-end-line="1" selection-end-column="2" />
+            <folding />
+          </first_editor>
+          <second_editor />
         </state>
       </provider>
     </entry>
