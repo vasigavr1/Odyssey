@@ -14,7 +14,10 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="" />
+    <list default="true" id="17be8afa-c72d-45d5-bbb6-2f687786c816" name="Default" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
+      <change beforePath="$PROJECT_DIR$/README.md" afterPath="$PROJECT_DIR$/README.md" />
+    </list>
     <ignored path="$PROJECT_DIR$/cmake-build-debug/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="TRACKING_ENABLED" value="true" />
@@ -25,7 +28,7 @@
   </component>
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.29087967">
+    <splitter split-orientation="horizontal" split-proportion="0.1">
       <split-first>
         <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
           <file leaf-file-name="stats.c" pinned="false" current-in-tab="false">
@@ -41,10 +44,9 @@
           <file leaf-file-name="worker.c" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/src/drf-sc/worker.c">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="4446">
-                  <caret line="247" column="12" lean-forward="false" selection-start-line="247" selection-start-column="12" selection-end-line="247" selection-end-column="12" />
+                <state relative-caret-position="2430">
+                  <caret line="135" column="7" lean-forward="false" selection-start-line="135" selection-start-column="7" selection-end-line="153" selection-end-column="21" />
                   <folding>
-                    <element signature="e#0#17#0" expanded="false" />
                     <marker date="1554987031000" expanded="true" signature="71:7344" ph="..." />
                     <marker date="1554987031000" expanded="false" signature="7599:9139" ph="..." />
                   </folding>
@@ -52,32 +54,21 @@
               </provider>
             </entry>
           </file>
-          <file leaf-file-name="util.c" pinned="false" current-in-tab="false">
+          <file leaf-file-name="util.c" pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/src/drf-sc/util.c">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="3348">
+                <state relative-caret-position="828">
                   <caret line="186" column="51" lean-forward="false" selection-start-line="186" selection-start-column="51" selection-end-line="186" selection-end-column="51" />
-                  <folding>
-                    <element signature="e#19#5232#0" expanded="false" />
-                    <element signature="e#11082#11824#0" expanded="false" />
-                    <element signature="e#14398#16225#0" expanded="false" />
-                    <element signature="e#23540#24926#0" expanded="false" />
-                    <element signature="e#25523#26902#0" expanded="false" />
-                    <element signature="e#30789#31068#0" expanded="false" />
-                    <element signature="e#31070#35851#0" expanded="false" />
-                    <element signature="e#36414#36676#0" expanded="false" />
-                    <element signature="e#40499#41459#0" expanded="false" />
-                    <element signature="e#42190#42632#0" expanded="false" />
-                  </folding>
+                  <folding />
                 </state>
               </provider>
             </entry>
           </file>
-          <file leaf-file-name="inline_util.h" pinned="false" current-in-tab="true">
+          <file leaf-file-name="inline_util.h" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/include/drf-sc/inline_util.h">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="285">
-                  <caret line="635" column="34" lean-forward="false" selection-start-line="635" selection-start-column="34" selection-end-line="635" selection-end-column="34" />
+                <state relative-caret-position="11574">
+                  <caret line="643" column="82" lean-forward="false" selection-start-line="643" selection-start-column="82" selection-end-line="643" selection-end-column="82" />
                   <folding>
                     <element signature="e#47#65#0" expanded="true" />
                     <element signature="e#8215#8416#0" expanded="true" />
@@ -274,10 +265,9 @@
           <file leaf-file-name="main.h" pinned="false" current-in-tab="false">
             <entry file="file://$PROJECT_DIR$/include/drf-sc/main.h">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="2088">
+                <state relative-caret-position="1035">
                   <caret line="116" column="33" lean-forward="false" selection-start-line="116" selection-start-column="33" selection-end-line="116" selection-end-column="33" />
                   <folding>
-                    <element signature="e#39#58#0" expanded="false" />
                     <element signature="e#22884#22993#1" expanded="false" />
                     <element signature="e#22999#23228#1" expanded="false" />
                     <element signature="e#24970#25010#1" expanded="false" />
@@ -308,8 +298,8 @@
             <entry file="file://$PROJECT_DIR$/README.md">
               <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
                 <state split_layout="SPLIT">
-                  <first_editor relative-caret-position="252">
-                    <caret line="14" column="41" lean-forward="true" selection-start-line="14" selection-start-column="41" selection-end-line="14" selection-end-column="41" />
+                  <first_editor relative-caret-position="833">
+                    <caret line="78" column="69" lean-forward="false" selection-start-line="78" selection-start-column="69" selection-end-line="78" selection-end-column="69" />
                     <folding />
                   </first_editor>
                   <second_editor />
@@ -541,7 +531,7 @@
   <component name="PropertiesComponent">
     <property name="nodejs_interpreter_path.stuck_in_default_project" value="undefined stuck path" />
     <property name="WebServerToolWindowFactoryState" value="false" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../ccKVS" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
     <property name="settings.editor.selected.configurable" value="CPPToolchains" />
   </component>
   <component name="RunDashboard">
@@ -607,14 +597,18 @@
       <workItem from="1564492626308" duration="1544000" />
       <workItem from="1565267223550" duration="362000" />
       <workItem from="1570031879577" duration="1167000" />
+      <workItem from="1570702414521" duration="133000" />
+      <workItem from="1571315141642" duration="114000" />
+      <workItem from="1574948290635" duration="510000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="2073557000" />
+    <option name="totallyTimeSpent" value="2074314000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="67" y="-4" width="1853" height="1204" extended-state="6" />
+    <editor active="true" />
     <layout>
       <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32973558" sideWeight="0.5" order="0" side_tool="false" content_ui="combo" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
@@ -1068,18 +1062,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/libhrd/hrd_util.c">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="5436">
-          <caret line="302" column="5" lean-forward="false" selection-start-line="302" selection-start-column="5" selection-end-line="302" selection-end-column="5" />
-          <folding>
-            <element signature="e#5456#8114#0" expanded="true" />
-            <element signature="e#8951#9754#0" expanded="true" />
-            <element signature="e#11335#12101#0" expanded="true" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/bin/copy-paxos-logs-and-run-verifier.sh">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="0">
@@ -1102,37 +1084,6 @@
         <state relative-caret-position="324">
           <caret line="18" column="93" lean-forward="false" selection-start-line="18" selection-start-column="10" selection-end-line="18" selection-end-column="93" />
           <folding />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/src/drf-sc/util.c">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="3348">
-          <caret line="186" column="51" lean-forward="false" selection-start-line="186" selection-start-column="51" selection-end-line="186" selection-end-column="51" />
-          <folding>
-            <element signature="e#19#5232#0" expanded="false" />
-            <element signature="e#11082#11824#0" expanded="false" />
-            <element signature="e#14398#16225#0" expanded="false" />
-            <element signature="e#23540#24926#0" expanded="false" />
-            <element signature="e#25523#26902#0" expanded="false" />
-            <element signature="e#30789#31068#0" expanded="false" />
-            <element signature="e#31070#35851#0" expanded="false" />
-            <element signature="e#36414#36676#0" expanded="false" />
-            <element signature="e#40499#41459#0" expanded="false" />
-            <element signature="e#42190#42632#0" expanded="false" />
-          </folding>
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/src/drf-sc/worker.c">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="4446">
-          <caret line="247" column="12" lean-forward="false" selection-start-line="247" selection-start-column="12" selection-end-line="247" selection-end-column="12" />
-          <folding>
-            <element signature="e#0#17#0" expanded="false" />
-            <marker date="1554987031000" expanded="true" signature="71:7344" ph="..." />
-            <marker date="1554987031000" expanded="false" signature="7599:9139" ph="..." />
-          </folding>
         </state>
       </provider>
     </entry>
@@ -1170,57 +1121,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="43398">
-          <caret line="2411" column="49" lean-forward="false" selection-start-line="2411" selection-start-column="49" selection-end-line="2411" selection-end-column="49" />
-          <folding>
-            <element signature="e#0#2#0" expanded="false" />
-            <element signature="e#1046#3702#0" expanded="true" />
-            <element signature="e#3984#5115#0" expanded="true" />
-            <element signature="e#5117#5300#0" expanded="true" />
-            <element signature="e#7568#8628#0" expanded="true" />
-            <element signature="e#9145#9768#0" expanded="true" />
-            <element signature="e#9770#9889#0" expanded="true" />
-            <element signature="e#9990#11565#0" expanded="true" />
-            <element signature="e#11567#13686#0" expanded="true" />
-            <element signature="e#14153#14456#0" expanded="true" />
-            <element signature="e#16369#16669#0" expanded="true" />
-            <element signature="e#16671#16977#0" expanded="true" />
-            <element signature="e#16979#17283#0" expanded="true" />
-            <element signature="e#17285#17592#0" expanded="true" />
-            <element signature="e#17594#18027#0" expanded="true" />
-            <element signature="e#18029#18385#0" expanded="true" />
-            <element signature="e#18662#18957#0" expanded="true" />
-            <element signature="e#27643#30866#0" expanded="true" />
-            <element signature="e#31235#31698#1" expanded="false" />
-            <element signature="e#74445#74564#1" expanded="false" />
-            <element signature="e#74566#74663#1" expanded="false" />
-            <element signature="e#74666#75598#1" expanded="false" />
-            <element signature="e#79605#79807#0" expanded="true" />
-            <element signature="e#80031#80233#0" expanded="true" />
-            <element signature="e#102619#102752#1" expanded="false" />
-            <element signature="e#102755#102909#1" expanded="false" />
-            <element signature="e#102912#103478#1" expanded="false" />
-            <element signature="e#104080#104385#0" expanded="true" />
-            <element signature="e#128318#129123#0" expanded="true" />
-            <element signature="e#129125#132050#0" expanded="true" />
-            <element signature="e#132053#134800#0" expanded="true" />
-            <element signature="e#134805#136158#0" expanded="true" />
-            <marker date="1564408182000" expanded="true" signature="7567:9889" ph="..." />
-            <marker date="1564408182000" expanded="true" signature="14048:16193" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="16281:18387" ph="..." />
-            <marker date="1564408182000" expanded="true" signature="18661:20643" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="21011:24707" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="25075:30866" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="31234:72438" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="72805:99958" ph="..." />
-            <marker date="1564408182000" expanded="false" signature="100325:125963" ph="..." />
-            <marker date="1564408182000" expanded="true" signature="126345:134801" ph="..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/drf-sc/cache.c">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="1152">
@@ -1238,10 +1138,9 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/include/drf-sc/main.h">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="2088">
+        <state relative-caret-position="1035">
           <caret line="116" column="33" lean-forward="false" selection-start-line="116" selection-start-column="33" selection-end-line="116" selection-end-column="33" />
           <folding>
-            <element signature="e#39#58#0" expanded="false" />
             <element signature="e#22884#22993#1" expanded="false" />
             <element signature="e#22999#23228#1" expanded="false" />
             <element signature="e#24970#25010#1" expanded="false" />
@@ -1267,27 +1166,21 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/README.md">
-      <provider editor-type-id="text-editor">
-        <state relative-caret-position="0">
-          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-          <folding />
-        </state>
-      </provider>
-      <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
-        <state split_layout="SPLIT">
-          <first_editor relative-caret-position="252">
-            <caret line="14" column="41" lean-forward="true" selection-start-line="14" selection-start-column="41" selection-end-line="14" selection-end-column="41" />
-            <folding />
-          </first_editor>
-          <second_editor />
+    <entry file="file://$PROJECT_DIR$/src/drf-sc/worker.c">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="2430">
+          <caret line="135" column="7" lean-forward="false" selection-start-line="135" selection-start-column="7" selection-end-line="153" selection-end-column="21" />
+          <folding>
+            <marker date="1554987031000" expanded="true" signature="71:7344" ph="..." />
+            <marker date="1554987031000" expanded="false" signature="7599:9139" ph="..." />
+          </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/include/drf-sc/inline_util.h">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="285">
-          <caret line="635" column="34" lean-forward="false" selection-start-line="635" selection-start-column="34" selection-end-line="635" selection-end-column="34" />
+        <state relative-caret-position="11574">
+          <caret line="643" column="82" lean-forward="false" selection-start-line="643" selection-start-column="82" selection-end-line="643" selection-end-column="82" />
           <folding>
             <element signature="e#47#65#0" expanded="true" />
             <element signature="e#8215#8416#0" expanded="true" />
@@ -1335,6 +1228,94 @@
             <marker date="1564408712000" expanded="true" signature="315473:337412" ph="..." />
             <marker date="1564408712000" expanded="true" signature="353982:385003" ph="..." />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/drf-sc/client.c">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="2844">
+          <caret line="158" column="89" lean-forward="false" selection-start-line="158" selection-start-column="74" selection-end-line="158" selection-end-column="89" />
+          <folding>
+            <element signature="e#0#2#0" expanded="false" />
+            <element signature="e#1046#3702#0" expanded="true" />
+            <element signature="e#3984#5115#0" expanded="true" />
+            <element signature="e#5117#5300#0" expanded="true" />
+            <element signature="e#7568#8628#0" expanded="true" />
+            <element signature="e#9145#9768#0" expanded="true" />
+            <element signature="e#9770#9889#0" expanded="true" />
+            <element signature="e#9990#11565#0" expanded="true" />
+            <element signature="e#11567#13686#0" expanded="true" />
+            <element signature="e#14153#14456#0" expanded="true" />
+            <element signature="e#16369#16669#0" expanded="true" />
+            <element signature="e#16671#16977#0" expanded="true" />
+            <element signature="e#16979#17283#0" expanded="true" />
+            <element signature="e#17285#17592#0" expanded="true" />
+            <element signature="e#17594#18027#0" expanded="true" />
+            <element signature="e#18029#18385#0" expanded="true" />
+            <element signature="e#18662#18957#0" expanded="true" />
+            <element signature="e#27643#30866#0" expanded="true" />
+            <element signature="e#31235#31698#1" expanded="false" />
+            <element signature="e#74445#74564#1" expanded="false" />
+            <element signature="e#74566#74663#1" expanded="false" />
+            <element signature="e#74666#75598#1" expanded="false" />
+            <element signature="e#79605#79807#0" expanded="true" />
+            <element signature="e#80031#80233#0" expanded="true" />
+            <element signature="e#102619#102752#1" expanded="false" />
+            <element signature="e#102755#102909#1" expanded="false" />
+            <element signature="e#102912#103478#1" expanded="false" />
+            <element signature="e#104080#104385#0" expanded="true" />
+            <element signature="e#128318#129123#0" expanded="true" />
+            <element signature="e#129125#132050#0" expanded="true" />
+            <element signature="e#132053#134800#0" expanded="true" />
+            <element signature="e#134805#136158#0" expanded="true" />
+            <marker date="1564408182000" expanded="true" signature="7567:9889" ph="..." />
+            <marker date="1564408182000" expanded="true" signature="14048:16193" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="16281:18387" ph="..." />
+            <marker date="1564408182000" expanded="true" signature="18661:20643" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="21011:24707" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="25075:30866" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="31234:72438" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="72805:99958" ph="..." />
+            <marker date="1564408182000" expanded="false" signature="100325:125963" ph="..." />
+            <marker date="1564408182000" expanded="true" signature="126345:134801" ph="..." />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/libhrd/hrd_util.c">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="5436">
+          <caret line="302" column="5" lean-forward="false" selection-start-line="302" selection-start-column="5" selection-end-line="302" selection-end-column="5" />
+          <folding>
+            <element signature="e#5456#8114#0" expanded="true" />
+            <element signature="e#8951#9754#0" expanded="true" />
+            <element signature="e#11335#12101#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/drf-sc/util.c">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="828">
+          <caret line="186" column="51" lean-forward="false" selection-start-line="186" selection-start-column="51" selection-end-line="186" selection-end-column="51" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/README.md">
+      <provider editor-type-id="text-editor">
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding />
+        </state>
+      </provider>
+      <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
+        <state split_layout="SPLIT">
+          <first_editor relative-caret-position="833">
+            <caret line="78" column="69" lean-forward="false" selection-start-line="78" selection-start-column="69" selection-end-line="78" selection-end-column="69" />
+            <folding />
+          </first_editor>
+          <second_editor />
         </state>
       </provider>
     </entry>
