@@ -19,15 +19,15 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 30
-#define MACHINE_NUM 3
+#define WORKERS_PER_MACHINE 25
+#define MACHINE_NUM 5
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 8 //
+#define R_CREDITS 4 //
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
@@ -44,7 +44,7 @@
 #define SC_RATIO_ 110// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -54,10 +54,11 @@
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
+#define ENABLE_ALL_ABOARD 1
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -81,7 +82,7 @@
 
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 0
+#define EXIT_ON_PRINT 1
 #define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
@@ -114,7 +115,7 @@
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE TREIBER_ASYNC
+#define CLIENT_MODE CLIENT_USE_TRACE
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
@@ -163,8 +164,8 @@
 #define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
-#define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 50000
+#define SHOW_STATS_LATENCY_STYLE 0
+#define NUM_OF_RMW_KEYS 70000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -901,6 +902,7 @@ struct rmw_rep_info {
   uint8_t ts_stale;
   uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
+  uint8_t nacks;
   // used to know whether to help after a prop-- if you have seen a higher acc,
   // then you should not try to help a lower accept, and thus dont try at all
   bool seen_higher_acc;
@@ -920,6 +922,7 @@ struct rmw_local_entry {
   bool killable; // can the RMW (if CAS) be killed early
   bool must_release;
   bool rmw_is_successful; // was the RMW (if CAS) successful
+	bool all_aboard;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   uint8_t *compare_val; //for CAS- add value for FAA

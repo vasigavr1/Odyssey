@@ -11,7 +11,7 @@ void *print_stats(void* no_arg) {
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 16;
   struct thread_stats curr_w_stats[WORKERS_PER_MACHINE], prev_w_stats[WORKERS_PER_MACHINE];
-  struct client_stats curr_c_stats[WORKERS_PER_MACHINE], prev_c_stats[WORKERS_PER_MACHINE];
+  struct client_stats curr_c_stats[CLIENTS_PER_MACHINE], prev_c_stats[CLIENTS_PER_MACHINE];
   struct stats all_stats;
   sleep(4);
   memcpy(prev_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));

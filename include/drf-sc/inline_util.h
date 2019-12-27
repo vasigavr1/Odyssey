@@ -363,6 +363,10 @@ static inline bool opcode_is_compare_rmw(uint8_t opcode)
   return opcode == COMPARE_AND_SWAP_WEAK || opcode == COMPARE_AND_SWAP_STRONG;
 }
 
+
+static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
+                                              uint16_t t_id);
+
 static inline struct key create_key(uint32_t key_id)
 {
   uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
@@ -2340,7 +2344,13 @@ static inline void fill_commit_message_from_r_info(struct commit *com,
   }
 }
 
-
+// calcualte how many reps an accept is waiting for
+static inline uint8_t calculate_required_reps(struct rmw_local_entry *loc_entry)
+{
+  uint8_t remote_quorum = (uint8_t) (loc_entry->all_aboard ?
+                                     MACHINE_NUM - 1 : REMOTE_QUORUM);
+  return loc_entry->rmw_reps.nacks ? (uint8_t) 1 : remote_quorum;
+}
 
 
 /* --------------------SESSION INFO---------------------------------- */
@@ -3191,6 +3201,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   loc_entry->fp_detected = false;
   loc_entry->rmw_val_len = prop->real_val_len;
   loc_entry->rmw_is_successful = false;
+  loc_entry->all_aboard = false;
   memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   loc_entry->index_to_rmw = resp->rmw_entry;
@@ -4614,10 +4625,16 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
     loc_entry->help_rmw->log_no = resp->log_no;
   }
   else if (resp->type == RMW_SUCCESS) { // the RMW has gotten an entry and is to be sent
+    if (ENABLE_ASSERTIONS) assert(prop->ts.version == 2);
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->ts.version,
                                           PROPOSED, session_id, t_id);
     loc_entry->log_no = resp->log_no;
-    insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
+
+    if (ENABLE_ALL_ABOARD) {
+      act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
+      if (loc_entry->state == ACCEPTED) loc_entry->all_aboard = true;
+    }
+    else insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
   }
   else my_assert(false, "Wrong resp type in RMW");
 }
@@ -5561,7 +5578,7 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
            loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED);
   }
   loc_entry->rmw_reps.tot_replies++;
-
+  if (prop_rep->opcode != RMW_ACK) loc_entry->rmw_reps.nacks++;
   switch (prop_rep->opcode) {
     case RMW_ACK:
       loc_entry->rmw_reps.acks++;
@@ -5636,6 +5653,7 @@ static inline void handle_accept_reply(struct pending_ops *p_ops, struct rmw_rep
 {
   if (ENABLE_ASSERTIONS) assert(loc_entry->state == ACCEPTED);
   loc_entry->rmw_reps.tot_replies++;
+  if (acc_rep->opcode != RMW_ACK) loc_entry->rmw_reps.nacks++;
   switch (acc_rep->opcode) {
     case RMW_ACK:
       loc_entry->rmw_reps.acks++;
@@ -6096,6 +6114,7 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
   }
   // TS_STALE
   else if (loc_entry->rmw_reps.ts_stale > 0) {
+    assert(false);
     debug_fail_help(loc_entry, " ts stale", t_id);
     update_KVS_on_receiving_a_TS_stale_rep(p_ops, loc_entry, t_id);
     loc_entry->state = RETRY_WITH_BIGGER_TS;
@@ -6174,6 +6193,9 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
   if (ENABLE_ASSERTIONS)
     memcpy(dbg_loc_entry, loc_entry, sizeof(struct rmw_local_entry));
 
+  uint8_t remote_quorum = (uint8_t) (loc_entry->all_aboard ?
+                          MACHINE_NUM - 1 : REMOTE_QUORUM);
+
   uint32_t new_version = 0;
   if (loc_entry->helping_flag != NOT_HELPING) {
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == HELPING);
@@ -6197,6 +6219,7 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
   }
   // TS_STALE
   else if (loc_entry->rmw_reps.ts_stale > 0) {
+    assert(false);
     update_KVS_on_receiving_a_TS_stale_rep(p_ops, loc_entry, t_id);
     loc_entry->state = RETRY_WITH_BIGGER_TS;
     new_version = loc_entry->rmw_reps.kvs_higher_ts.version;
@@ -6212,12 +6235,13 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);
   }
   // ACK QUORUM
-  else if (loc_entry->rmw_reps.acks >= REMOTE_QUORUM) {
+  else if (loc_entry->rmw_reps.acks >= remote_quorum) {
     assert(loc_entry->state != COMMITTED);
     loc_entry->state = (uint8_t) (loc_entry->helping_flag == HELPING ?
                        MUST_BCAST_COMMITS_FROM_HELP : MUST_BCAST_COMMITS);
   }
   else if (ENABLE_ASSERTIONS) assert(false);
+
 
   // CLEAN_UP
   if (loc_entry->state == RETRY_WITH_BIGGER_TS) {
@@ -6258,11 +6282,15 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     if (state == ACCEPTED) {
       check_sum_of_reps(loc_entry);
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
-      if (loc_entry->rmw_reps.tot_replies >= REMOTE_QUORUM) {
+      if (loc_entry->rmw_reps.tot_replies >= calculate_required_reps(loc_entry)) {
         advance_loc_entry_l_id(p_ops, loc_entry, t_id);
         inspect_accepts(p_ops, loc_entry, t_id);
-        check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
-                                       MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
+        check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
+                                       MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP, ACCEPTED);
+      }
+      else if (loc_entry->all_aboard && loc_entry->rmw_reps.nacks == 0) {
+          //TODO Implement the ALL-ABOARD timeout
+
       }
     }
     /* =============== BROADCAST COMMITS ======================== */
@@ -7907,6 +7935,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     if (glob_entry->state == INVALID_RMW) {
       if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
         new_version = MAX((kv_ptr->key.meta.version + 1), glob_entry->new_ts.version);
+        new_version = 2;
         // remember that key is locked and thus this entry is also locked
         activate_RMW_entry(PROPOSED, new_version, glob_entry, op->opcode,
                            (uint8_t) machine_id, rmw_l_id,
@@ -8060,7 +8089,7 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
   if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id,
                                            t_id, &entry, acc_rep)) {
     // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-    if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
+    //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
       // 4. If the kv-pair has not been RMWed before grab an entry and ack
       // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
       // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
@@ -8078,7 +8107,7 @@ static inline void KVS_updates_accepts(struct cache_op *op, struct cache_op *kv_
           glob_entry->last_registered_log_no = log_no -1;
         }
       }
-    }
+    //}
   }
   uint64_t number_of_reqs = 0;
   if (ENABLE_DEBUG_GLOBAL_ENTRY) {
@@ -8167,8 +8196,7 @@ static inline void KVS_reads_get_TS(struct cache_op *op, struct cache_op *kv_ptr
   finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
 }
 
-// Handle remote reads, acquires and acquires-fp
-// (acquires-fp are acquires renamed by the receiver when a false positive is detected)
+// Handle remote proposes
 static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_ptr,
                                       struct pending_ops *p_ops, uint16_t op_i,
                                       uint16_t t_id)
@@ -8198,7 +8226,7 @@ static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_p
                                            prop_rep)) {
     if (!is_log_too_high(log_no, kv_ptr, entry, t_id, prop_rep)) {
       // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-      if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->ts, prop_m_id, t_id, prop_rep)) {
+      //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->ts, prop_m_id, t_id, prop_rep)) {
         // 4. If the kv-pair has not been RMWed before grab an entry and ack
         // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
         // 6. Else check the global entry and send a response depending on whether there is an ongoing RMW and what that is
@@ -8214,7 +8242,7 @@ static inline void KVS_reads_proposes(struct cache_op *op, struct cache_op *kv_p
           assert(rmw.entry[entry].new_ts.version >= prop->ts.version);
           check_keys_with_one_cache_op(&prop->key, kv_ptr, entry);
         }
-      }
+      //}
     }
   }
   uint64_t number_of_reqs = 0;
