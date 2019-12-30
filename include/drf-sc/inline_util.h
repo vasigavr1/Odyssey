@@ -1735,7 +1735,7 @@ static inline void check_last_registered_rmw_id(struct rmw_local_entry *loc_entr
 
 static inline void check_that_the_rmw_ids_match(struct rmw_entry *glob_entry, uint64_t rmw_id,
                                                 uint16_t glob_sess_id, uint32_t log_no, uint32_t version,
-                                                uint8_t m_id, const char * message, uint16_t t_id)
+                                                uint8_t m_id, const char *message, uint16_t t_id)
 {
   if (!rmw_id_is_equal_with_id_and_glob_sess_id(&glob_entry->last_committed_rmw_id, rmw_id, glob_sess_id)) {
     red_printf("~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, %s ~~~~~~~~ \n", t_id, glob_entry->key.bkt, message);
@@ -2651,13 +2651,21 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     //backward_ptr = (backward_ptr + write_i) % PENDING_WRITES;
     struct per_write_meta *w_meta = &p_ops->w_meta[backward_ptr];
     uint8_t *w_state = &w_meta->w_state;
-    memcpy(w_meta->expected_ids, q_info->active_ids, q_info->active_num);
+
+//    memcpy(w_meta->expected_ids, q_info->active_ids, q_info->active_num);
+    for (uint8_t m_i = 0; m_i < q_info->active_num; m_i++)
+      w_meta->expected_ids[m_i] = q_info->active_ids[m_i];
+
+    if (machine_id == 0 && q_info->active_num == 3) assert(w_meta->expected_ids[0] != 1);
+    else if (q_info->active_num == 3) assert(w_meta->expected_ids[1] != 1);
+
     struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
     switch (write->opcode) {
       case ACCEPT_OP:
       case ACCEPT_OP_BIT_VECTOR:
         if (ACCEPT_IS_RELEASE) reset_sess_info_on_accept(sess_info, t_id);
         checks_when_forging_an_accept((struct accept *) write, send_sgl, br_i, i, coalesce_num, t_id);
+        // accept gets a custom response from r_rep and need not set the w_state
         break;
       case CACHE_OP_PUT:
         checks_when_forging_a_write(write, send_sgl, br_i, i, coalesce_num, t_id);
@@ -3197,7 +3205,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   else if (prop->opcode == FETCH_AND_ADD)
     loc_entry->compare_val = prop->value_to_write; // value to be added
 
-  loc_entry->must_release = true; // TODO That can be a programmer input
+  loc_entry->must_release = ACCEPT_IS_RELEASE != 0; // TODO That can be a programmer input
   loc_entry->fp_detected = false;
   loc_entry->rmw_val_len = prop->real_val_len;
   loc_entry->rmw_is_successful = false;
@@ -4589,6 +4597,16 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 }
 
 
+// Do all aboard iff you were able to ACCEPT locally and you are able to reach all machines of the configuration
+static inline void attempt_to_perform_all_aboard(struct quorum_info *q_info,
+                                                 struct rmw_local_entry *loc_entry,
+                                                 uint16_t t_id)
+{
+  if (loc_entry->state == ACCEPTED && q_info->missing_num == 0)
+    loc_entry->all_aboard = true;
+}
+
+
 // Insert an RMW in the local RMW structs
 static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
                               struct cache_resp *resp, uint16_t t_id)
@@ -4629,10 +4647,12 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->ts.version,
                                           PROPOSED, session_id, t_id);
     loc_entry->log_no = resp->log_no;
-
-    if (ENABLE_ALL_ABOARD) {
+    if (ENABLE_ALL_ABOARD && p_ops->q_info->missing_num == 0) {
       act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
-      if (loc_entry->state == ACCEPTED) loc_entry->all_aboard = true;
+      //if the flag is ACCEPTED, that means that accept messages
+      // are already lined up to be broadcast, and thus you MUST do All aboard
+      if (loc_entry->state == ACCEPTED)
+        loc_entry->all_aboard = true;
     }
     else insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
   }
@@ -6037,8 +6057,11 @@ static inline void take_global_entry_with_higher_TS(struct pending_ops *p_ops,
       loc_entry->log_no = glob_entry->last_committed_log_no + 1;
       loc_entry->new_ts.version = MAX((loc_entry->ptr_to_kv_pair->version + 1),
                                       (MAX(new_version, glob_entry->new_ts.version) + 2));
+
+
+      loc_entry->new_ts.version = MAX(new_version, glob_entry->new_ts.version) + 2;
       if (ENABLE_ASSERTIONS) {
-        assert(loc_entry->new_ts.version > loc_entry->ptr_to_kv_pair->version);
+        //assert(loc_entry->new_ts.version > loc_entry->ptr_to_kv_pair->version);
         assert(loc_entry->new_ts.version > glob_entry->new_ts.version);
       }
       loc_entry->new_ts.m_id = (uint8_t) machine_id;
@@ -6183,6 +6206,42 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
 /* The loc_entry can be in Proposed only when it retried with bigger TS */
 }
 
+
+static inline void clean_up_after_inspecting_accept(struct pending_ops *p_ops,
+                                                    struct rmw_local_entry *loc_entry,
+                                                    uint32_t new_version,
+                                                    struct rmw_local_entry *dbg_loc_entry,
+                                                    uint16_t t_id)
+{
+  // CLEAN_UP
+  if (ENABLE_ALL_ABOARD && loc_entry->all_aboard) {
+    if (ENABLE_STAT_COUNTING) {
+      t_stats[t_id].all_aboard_rmws++;
+    }
+    loc_entry->all_aboard = false;
+  }
+  if (loc_entry->state == RETRY_WITH_BIGGER_TS) {
+    check_version(new_version, "inspect_accepts: loc_entry->state == RETRY_WITH_BIGGER_TS");
+    take_global_entry_with_higher_TS(p_ops, loc_entry, (new_version + 2), false, t_id);
+    check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL);
+    zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
+    if (loc_entry->state == PROPOSED) {
+      insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
+    }
+  }
+  else if (loc_entry->state != PROPOSED)
+    zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
+
+  if (loc_entry->state == INVALID_RMW || loc_entry->state == NEEDS_GLOBAL) {
+    if (ENABLE_ASSERTIONS) {
+      assert(dbg_loc_entry->log_no == loc_entry->log_no);
+      assert(rmw_ids_are_equal(&dbg_loc_entry->rmw_id, &loc_entry->rmw_id));
+      assert(compare_ts(&dbg_loc_entry->new_ts, &loc_entry->new_ts));
+    }
+  }
+  /* The loc_entry can be in Proposed only when it retried with bigger TS */
+}
+
 // Inspect each propose that has gathered a quorum of replies
 static inline void inspect_accepts(struct pending_ops *p_ops,
                                    struct rmw_local_entry *loc_entry,
@@ -6219,7 +6278,7 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
   }
   // TS_STALE
   else if (loc_entry->rmw_reps.ts_stale > 0) {
-    assert(false);
+    if (ENABLE_ASSERTIONS) assert(false);
     update_KVS_on_receiving_a_TS_stale_rep(p_ops, loc_entry, t_id);
     loc_entry->state = RETRY_WITH_BIGGER_TS;
     new_version = loc_entry->rmw_reps.kvs_higher_ts.version;
@@ -6236,34 +6295,29 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
   }
   // ACK QUORUM
   else if (loc_entry->rmw_reps.acks >= remote_quorum) {
-    assert(loc_entry->state != COMMITTED);
+    if (ENABLE_ASSERTIONS) {
+      assert(loc_entry->state != COMMITTED);
+      if (loc_entry->helping_flag == HELPING) assert(!loc_entry->all_aboard);
+    }
     loc_entry->state = (uint8_t) (loc_entry->helping_flag == HELPING ?
                        MUST_BCAST_COMMITS_FROM_HELP : MUST_BCAST_COMMITS);
   }
+  else if (ENABLE_ALL_ABOARD){ // all-aboard
+    if (ENABLE_ASSERTIONS) assert(loc_entry->all_aboard);
+    loc_entry->back_off_cntr++;
+    assert(loc_entry->new_ts.version == 2);
+    if (loc_entry->back_off_cntr > ALL_ABOARD_TIMEOUT_CNT) {
+      // printf("Wrkr %u, Timing out on key %u \n", t_id, loc_entry->key.bkt);
+      loc_entry->state = RETRY_WITH_BIGGER_TS;
+      new_version = 2;
+    }
+    else return; // avoid zeroing out the responses
+  }
   else if (ENABLE_ASSERTIONS) assert(false);
 
+  advance_loc_entry_l_id(p_ops, loc_entry, t_id);
+  clean_up_after_inspecting_accept(p_ops, loc_entry, new_version, dbg_loc_entry, t_id);
 
-  // CLEAN_UP
-  if (loc_entry->state == RETRY_WITH_BIGGER_TS) {
-    check_version(new_version, "inspect_accepts: loc_entry->state == RETRY_WITH_BIGGER_TS");
-    take_global_entry_with_higher_TS(p_ops, loc_entry, (new_version + 2), false, t_id);
-    check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL);
-    zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
-    if (loc_entry->state == PROPOSED) {
-      insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
-    }
-  }
-  else if (loc_entry->state != PROPOSED)
-    zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
-
-  if (loc_entry->state == INVALID_RMW || loc_entry->state == NEEDS_GLOBAL) {
-    if (ENABLE_ASSERTIONS) {
-      assert(dbg_loc_entry->log_no == loc_entry->log_no);
-      assert(rmw_ids_are_equal(&dbg_loc_entry->rmw_id, &loc_entry->rmw_id));
-      assert(compare_ts(&dbg_loc_entry->new_ts, &loc_entry->new_ts));
-    }
-  }
-  /* The loc_entry can be in Proposed only when it retried with bigger TS */
 }
 
 // Worker inspects its local RMW entries
@@ -6282,15 +6336,10 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     if (state == ACCEPTED) {
       check_sum_of_reps(loc_entry);
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
-      if (loc_entry->rmw_reps.tot_replies >= calculate_required_reps(loc_entry)) {
-        advance_loc_entry_l_id(p_ops, loc_entry, t_id);
+      if (loc_entry->rmw_reps.tot_replies >= REMOTE_QUORUM) {
         inspect_accepts(p_ops, loc_entry, t_id);
         check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_GLOBAL,
                                        MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP, ACCEPTED);
-      }
-      else if (loc_entry->all_aboard && loc_entry->rmw_reps.nacks == 0) {
-          //TODO Implement the ALL-ABOARD timeout
-
       }
     }
     /* =============== BROADCAST COMMITS ======================== */
@@ -6529,6 +6578,9 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
         if (DEBUG_QUORUM)
           red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
+        printf("Wrkr %u, after reviving, active num %u, active_id %u, %u, %u, %u \n",
+        t_id, q_info->active_num, q_info->active_ids[0], q_info->active_ids[1],
+               q_info->active_ids[2],q_info->active_ids[3]);
         update_bcast_wr_links(q_info, r_send_wr, t_id);
         update_bcast_wr_links(q_info, w_send_wr, t_id);
       }
@@ -6550,7 +6602,6 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
 
 // Form the Broadcast work request for the write
 static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
-                              struct quorum_info *q_info,
                               struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                               struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
@@ -6568,7 +6619,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
     adaptive_inlining(send_sgl[br_i].length, &send_wr[br_i * MESSAGES_IN_BCAST], MESSAGES_IN_BCAST);
   // Set the w_state for each write and perform checks
 
-  set_w_state_for_each_write(p_ops, info, w_mes, backward_ptr, coalesce_num, send_sgl, br_i, q_info, t_id);
+  set_w_state_for_each_write(p_ops, info, w_mes, backward_ptr, coalesce_num,
+                             send_sgl, br_i, p_ops->q_info, t_id);
 
   if (DEBUG_WRITES)
     green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u,"
@@ -6591,7 +6643,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   if ((*w_br_tx) % W_BCAST_SS_BATCH == 0) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u Sending signaled the first message, total %lu, br_i %u \n", t_id, *w_br_tx, br_i);
-    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
+    send_wr[p_ops->q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
   }
   (*w_br_tx)++;
   if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
@@ -6601,8 +6653,8 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0) {
-    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next =
-      &send_wr[(br_i * MESSAGES_IN_BCAST) + q_info->first_active_rm_id];
+    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + p_ops->q_info->last_active_rm_id].next =
+      &send_wr[(br_i * MESSAGES_IN_BCAST) + p_ops->q_info->first_active_rm_id];
   }
 }
 
@@ -6638,7 +6690,7 @@ static inline bool release_not_ready(struct pending_ops *p_ops,
 }
 
 // Broadcast Writes
-static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_info *q_info,
+static inline void broadcast_writes(struct pending_ops *p_ops,
                                     uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
                                     uint32_t *release_rdy_dbg_cnt, uint32_t *time_out_cnt,
                                     struct ibv_sge *w_send_sgl, struct ibv_send_wr *r_send_wr,
@@ -6655,7 +6707,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
   if (release_not_ready(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr], (struct w_message *)
     &p_ops->w_fifo->w_message[bcast_pull_ptr], release_rdy_dbg_cnt, t_id))
     return;
-  if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+  if (!check_bcast_credits(credits, p_ops->q_info, time_out_cnt, vc,
                            &available_credits, r_send_wr, w_send_wr,
                            1, t_id))
     return;
@@ -6670,7 +6722,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     if (DEBUG_WRITES)
       printf("Wrkr %d has %u write bcasts to send credits %d\n",t_id, p_ops->w_fifo->bcast_size, available_credits);
     // Create the broadcast messages
-    forge_w_wr(bcast_pull_ptr, p_ops, q_info, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
+    forge_w_wr(bcast_pull_ptr, p_ops, cb,  w_send_sgl, w_send_wr, w_br_tx, br_i, credits, vc, t_id);
 
     br_i++;
     struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[bcast_pull_ptr];
@@ -6685,7 +6737,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     if (br_i == MAX_BCAST_BATCH) {
       post_receives_for_r_reps_for_accepts(r_rep_recv_info, t_id);
       post_quorum_broadasts_and_recvs(ack_recv_info, MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
-                                      q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
+                                      p_ops->q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
                                       W_ENABLE_INLINING);
       br_i = 0;
     }
@@ -6694,13 +6746,13 @@ static inline void broadcast_writes(struct pending_ops *p_ops, struct quorum_inf
     if (ENABLE_ASSERTIONS) assert(MAX_BCAST_BATCH > 1);
     post_receives_for_r_reps_for_accepts(r_rep_recv_info, t_id);
     post_quorum_broadasts_and_recvs(ack_recv_info, MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
-                                    q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
+                                    p_ops->q_info, br_i, *w_br_tx, w_send_wr, cb->dgram_qp[W_QP_ID],
                                     W_ENABLE_INLINING);
   }
 
   p_ops->w_fifo->bcast_pull_ptr = bcast_pull_ptr;
   if (ENABLE_ASSERTIONS) assert(mes_sent <= available_credits && mes_sent <= W_CREDITS);
-  if (mes_sent > 0) decrease_credits(credits, q_info, mes_sent, vc);
+  if (mes_sent > 0) decrease_credits(credits, p_ops->q_info, mes_sent, vc);
 }
 
 // Form the Broadcast work request for the red
@@ -6771,7 +6823,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
 // Broadcast Reads
 static inline void broadcast_reads(struct pending_ops *p_ops,
                                    uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
-                                   struct quorum_info *q_info, uint32_t *credit_debug_cnt,
+                                   uint32_t *credit_debug_cnt,
                                    uint32_t *time_out_cnt,
                                    struct ibv_sge *r_send_sgl, struct ibv_send_wr *r_send_wr,
                                    struct ibv_send_wr *w_send_wr,
@@ -6785,7 +6837,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
 
   if (p_ops->r_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits, q_info, time_out_cnt, vc,
+    if (!check_bcast_credits(credits, p_ops->q_info, time_out_cnt, vc,
                              &available_credits, r_send_wr, w_send_wr, 1,  t_id))
       return;
   }
@@ -6796,7 +6848,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
     if (DEBUG_READS)
       printf("Wrkr %d has %u read bcasts to send credits %d\n",t_id, p_ops->r_fifo->bcast_size, credits[R_VC][0]);
     // Create the broadcast messages
-    forge_r_wr(bcast_pull_ptr, p_ops, q_info, cb, r_send_sgl, r_send_wr, r_br_tx, br_i, credits, vc, t_id);
+    forge_r_wr(bcast_pull_ptr, p_ops, p_ops->q_info, cb, r_send_sgl, r_send_wr, r_br_tx, br_i, credits, vc, t_id);
     br_i++;
     struct r_message * r_mes = (struct r_message *) &p_ops->r_fifo->r_message[bcast_pull_ptr];
       uint8_t coalesce_num = r_mes->coalesce_num;
@@ -6811,17 +6863,17 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
     MOD_ADD(bcast_pull_ptr, R_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
       post_quorum_broadasts_and_recvs(r_rep_recv_info, MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs,
-                                      q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
+                                      p_ops->q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
                                       R_ENABLE_INLINING);
       br_i = 0;
     }
   }
   if (br_i > 0)
     post_quorum_broadasts_and_recvs(r_rep_recv_info, MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs,
-                                    q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
+                                    p_ops->q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
                                     R_ENABLE_INLINING);
   p_ops->r_fifo->bcast_pull_ptr = bcast_pull_ptr;
-  if (mes_sent > 0) decrease_credits(credits, q_info, mes_sent, vc);
+  if (mes_sent > 0) decrease_credits(credits, p_ops->q_info, mes_sent, vc);
 }
 
 
@@ -7621,6 +7673,9 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
     bool ack_m_id_found = false;
     if (ENABLE_ASSERTIONS) assert(w_meta->acks_expected >= REMOTE_QUORUM);
 
+    if (machine_id == 0 && q_info->active_num == 3) assert(w_meta->expected_ids[0] != 1);
+    else if (q_info->active_num == 3) assert(w_meta->expected_ids[1] != 1);
+
     for (uint8_t i = 0; i < w_meta->acks_expected; i++) {
       if (ack_m_id == w_meta->expected_ids[i]) {
         ack_m_id_found = true;
@@ -7630,10 +7685,15 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
     }
     if (w_meta->w_state == SENT_PUT || w_meta->w_state == SENT_COMMIT ||
         w_meta->w_state == SENT_RELEASE) {
-      if (!ack_m_id_found)
-        red_printf("Wrkr %u, received ack from m_i %u, state %u, received/expected %u/%u \n",
+      if (!ack_m_id_found) {
+        red_printf("Wrkr %u, received ack from m_i %u, state %u, received/expected %u/%u "
+                     "active-machines/acks-seen: \n",
                    t_id, ack_m_id, w_meta->w_state, w_meta->acks_seen, w_meta->acks_expected);
-      assert(ack_m_id_found);
+        for (uint8_t i = 0; i < w_meta->acks_expected; i++) {
+          red_printf("%u/%u \n", w_meta->expected_ids[i], w_meta->seen_expected[i]);
+        }
+        assert(ack_m_id_found);
+      }
     }
 
 
@@ -7695,7 +7755,6 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
                              uint16_t credits[][MACHINE_NUM],
                              struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
                              struct recv_info *ack_recv_info,
-                             struct quorum_info *q_info,
                              struct latency_flags *latency_info,
                              uint16_t t_id, uint32_t *dbg_counter,
                              uint32_t *outstanding_writes)
@@ -7735,7 +7794,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
     }
     // Apply the acks that refer to stored writes
     apply_acks(p_ops, ack_num, ack_ptr, ack->m_id,  outstanding_writes, l_id,
-               pull_lid, q_info,  latency_info, t_id);
+               pull_lid, p_ops->q_info,  latency_info, t_id);
     if (ENABLE_ASSERTIONS) assert(credits[W_VC][ack->m_id] <= W_CREDITS);
     ack->opcode = INVALID_OPCODE;
     ack->ack_num = 0;

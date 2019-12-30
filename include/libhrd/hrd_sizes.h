@@ -2,7 +2,7 @@
 *
 * Adapted from https://github.com/efficient/rdma_bench
 */
-
+#define K_16 65536
 
 #define K_32 32768
 

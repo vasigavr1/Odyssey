@@ -762,6 +762,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 {
   uint32_t i, j;
   (*p_ops) = (struct pending_ops *) calloc(1, sizeof(struct pending_ops));
+  set_up_q_info(&(*p_ops)->q_info);
 
   //(*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
   (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
@@ -860,8 +861,7 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 // Initialize the quorum info that contains the system configuration
 void set_up_q_info(struct quorum_info **q_info)
 {
-  (*q_info) = (struct quorum_info *) malloc(sizeof(struct quorum_info));
-  memset((*q_info), 0, sizeof(struct quorum_info));
+  (*q_info) = (struct quorum_info *) calloc(1, sizeof(struct quorum_info));
   (*q_info)->active_num = REM_MACH_NUM;
   (*q_info)->first_active_rm_id = 0;
   (*q_info)->last_active_rm_id = REM_MACH_NUM - 1;

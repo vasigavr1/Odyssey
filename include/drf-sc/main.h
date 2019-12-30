@@ -31,7 +31,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -50,8 +50,8 @@
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define ACCEPT_IS_RELEASE 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 0
@@ -59,6 +59,7 @@
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
 #define ENABLE_ALL_ABOARD 1
+#define ALL_ABOARD_TIMEOUT_CNT K_16
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -82,7 +83,7 @@
 
 // PRINTS -- STATS
 #define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 1
+#define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
@@ -164,7 +165,7 @@
 #define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
-#define SHOW_STATS_LATENCY_STYLE 0
+#define SHOW_STATS_LATENCY_STYLE 1
 #define NUM_OF_RMW_KEYS 70000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
@@ -1027,6 +1028,7 @@ struct pending_ops {
   uint32_t full_w_q_fifo;
   //bool *session_has_pending_op;
   bool all_sessions_stalled;
+  struct quorum_info *q_info;
 };
 
 // A helper to debug sessions by remembering which write holds a given session
@@ -1145,6 +1147,7 @@ struct thread_stats { // 2 cache lines
   uint64_t releases_per_thread;
 
 
+
 	long long reads_sent;
 	long long acks_sent;
 	long long r_reps_sent;
@@ -1191,6 +1194,7 @@ struct thread_stats { // 2 cache lines
   uint64_t commits_sent;
   uint64_t rmws_completed;
   uint64_t cancelled_rmws;
+  uint64_t all_aboard_rmws; // completed ones
 
 
 

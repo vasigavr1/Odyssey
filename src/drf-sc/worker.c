@@ -119,10 +119,6 @@ void *worker(void *arg)
                          cb, r_rep_mr, acks, t_id);
   set_up_credits(credits);
   assert(credits[R_VC][0] == R_CREDITS && credits[W_VC][0] == W_CREDITS);
-  struct quorum_info *q_info;
-  set_up_q_info(&q_info);
-
-
 
 	// TRACE
 	struct trace_command *trace;
@@ -166,8 +162,8 @@ void *worker(void *arg)
 
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
-      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 5000000) && (!slept)) {
-      uint seconds = 4;
+      (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 4000000) && (!slept)) {
+      uint seconds = 10;
       //if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
       sleep(seconds); slept = true;
       //yellow_printf("Worker %u is back\n", t_id);
@@ -242,7 +238,7 @@ void *worker(void *arg)
     ------------------------------ POLL FOR ACKS--------------------------------
     ---------------------------------------------------------------------------*/
     poll_acks(ack_buffer, &ack_buf_pull_ptr, p_ops, credits, cb->dgram_recv_cq[ACK_QP_ID],
-              ack_recv_wc, ack_recv_info, q_info, &latency_info,
+              ack_recv_wc, ack_recv_info, &latency_info,
               t_id, waiting_dbg_counter, &outstanding_writes);
 
     remove_writes(p_ops, &latency_info, t_id);
@@ -262,7 +258,7 @@ void *worker(void *arg)
 		------------------------------BROADCAST READS--------------------------
 		---------------------------------------------------------------------------*/
     // Perform the r_rep broadcasts
-    broadcast_reads(p_ops, credits, cb, q_info, credit_debug_cnt, time_out_cnt,
+    broadcast_reads(p_ops, credits, cb, credit_debug_cnt, time_out_cnt,
                     r_send_sgl, r_send_wr, w_send_wr,
                     &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
 
@@ -270,7 +266,7 @@ void *worker(void *arg)
 		------------------------------BROADCAST WRITES--------------------------
 		---------------------------------------------------------------------------*/
     // Perform the write broadcasts
-    broadcast_writes(p_ops, q_info, credits, cb, &release_rdy_dbg_cnt, time_out_cnt,
+    broadcast_writes(p_ops, credits, cb, &release_rdy_dbg_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                      ack_recv_info, r_rep_recv_info, t_id, &outstanding_writes, &debug_lids);
 	}
