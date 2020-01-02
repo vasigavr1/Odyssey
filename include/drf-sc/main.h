@@ -19,9 +19,9 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 25
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -31,7 +31,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -41,17 +41,17 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 110// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 0
@@ -70,12 +70,6 @@
 #define WORKERS_PER_CLIENT (ENABLE_CLIENTS ? (WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE ) : 0)
 #define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
-
-//#define ENABLE_FIXED_RMW 1
-//#define DESIRED_TOTAL_WRITE_RATIO WRITE_RATIO_
-//#define REMAINING_WRITE_RATIO (DESIRED_TOTAL_WRITE_RATIO - RMW_RATIO)
-//#define WRITE_RATIO_FIXED_RMW (1000 / ((1000 - RMW_RATIO) / (REMAINING_WRITE_RATIO)))
-//#define WRITE_RATIO (ENABLE_FIXED_RMW ? WRITE_RATIO_FIXED_RMW :  WRITE_RATIO_)
 
 
 // Where to BIND the KVS
@@ -166,7 +160,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 70000
+#define NUM_OF_RMW_KEYS 5000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -852,7 +846,7 @@ struct dbg_glob_entry {
 };
 
 
-#define ENABLE_DEBUG_GLOBAL_ENTRY 1
+#define ENABLE_DEBUG_GLOBAL_ENTRY 0
 
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
@@ -935,6 +929,7 @@ struct rmw_local_entry {
   uint16_t sess_id;
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
+  uint32_t all_aboard_time_out;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno

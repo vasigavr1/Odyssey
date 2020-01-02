@@ -163,8 +163,8 @@ void *worker(void *arg)
 
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
       (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 4000000) && (!slept)) {
-      uint seconds = 10;
-      //if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
+      uint seconds = 15;
+      if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
       sleep(seconds); slept = true;
       //yellow_printf("Worker %u is back\n", t_id);
     }
@@ -195,6 +195,8 @@ void *worker(void *arg)
 		---------------------------------------------------------------------------*/
     poll_for_writes(w_buffer, &w_buf_pull_ptr, p_ops, cb->dgram_recv_cq[W_QP_ID],
                     w_recv_wc, w_recv_info, acks, &completed_but_not_polled_writes, t_id);
+
+
 
     /* ---------------------------------------------------------------------------
        ------------------------------ SEND ACKS----------------------------------
@@ -254,6 +256,7 @@ void *worker(void *arg)
                                        p_ops, resp, &latency_info,
                                        ses_dbg, &last_session, &sizes_dbg_cntr);
 
+
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST READS--------------------------
 		---------------------------------------------------------------------------*/
@@ -262,6 +265,7 @@ void *worker(void *arg)
                     r_send_sgl, r_send_wr, w_send_wr,
                     &r_br_tx, r_rep_recv_info, t_id, &outstanding_reads);
 
+
     /* ---------------------------------------------------------------------------
 		------------------------------BROADCAST WRITES--------------------------
 		---------------------------------------------------------------------------*/
@@ -269,6 +273,7 @@ void *worker(void *arg)
     broadcast_writes(p_ops, credits, cb, &release_rdy_dbg_cnt, time_out_cnt,
                      w_send_sgl, r_send_wr, w_send_wr, &w_br_tx,
                      ack_recv_info, r_rep_recv_info, t_id, &outstanding_writes, &debug_lids);
+
 	}
 	return NULL;
 }
