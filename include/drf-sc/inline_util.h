@@ -4271,8 +4271,6 @@ static inline void insert_read(struct pending_ops *p_ops, struct cache_op *op,
     t_stats[t_id].reads_sent ++;
     if (r_mes->coalesce_num == 1) t_stats[t_id].reads_sent_mes_num++;
   }
-
-
 }
 
 

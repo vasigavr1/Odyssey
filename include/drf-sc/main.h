@@ -21,7 +21,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define WRITE_RATIO 000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -41,10 +41,10 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 50// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 10// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -1136,65 +1136,65 @@ extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 // Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
-  uint64_t reads_per_thread;
-  uint64_t writes_per_thread;
-  uint64_t acquires_per_thread;
-  uint64_t releases_per_thread;
+	uint64_t reads_per_thread;
+	uint64_t writes_per_thread;
+	uint64_t acquires_per_thread;
+	uint64_t releases_per_thread;
 
 
 
 	long long reads_sent;
 	long long acks_sent;
 	long long r_reps_sent;
-  uint64_t writes_sent;
-  uint64_t writes_asked_by_clients;
+	uint64_t writes_sent;
+	uint64_t writes_asked_by_clients;
 
 
-  long long reads_sent_mes_num;
-  long long acks_sent_mes_num;
-  long long r_reps_sent_mes_num;
-  long long writes_sent_mes_num;
+	long long reads_sent_mes_num;
+	long long acks_sent_mes_num;
+	long long r_reps_sent_mes_num;
+	long long writes_sent_mes_num;
 
 
-  long long received_reads;
+	long long received_reads;
 	long long received_acks;
 	long long received_r_reps;
-  long long received_writes;
+	long long received_writes;
 
-  long long received_r_reps_mes_num;
-  long long received_acks_mes_num;
-  long long received_reads_mes_num;
-  long long received_writes_mes_num;
+	long long received_r_reps_mes_num;
+	long long received_acks_mes_num;
+	long long received_reads_mes_num;
+	long long received_writes_mes_num;
 
 
-  uint64_t per_worker_acks_sent[MACHINE_NUM];
-  uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
-  uint64_t per_worker_writes_received[MACHINE_NUM];
-  uint64_t per_worker_acks_received[MACHINE_NUM];
-  uint64_t per_worker_acks_mes_received[MACHINE_NUM];
+	uint64_t per_worker_acks_sent[MACHINE_NUM];
+	uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
+	uint64_t per_worker_writes_received[MACHINE_NUM];
+	uint64_t per_worker_acks_received[MACHINE_NUM];
+	uint64_t per_worker_acks_mes_received[MACHINE_NUM];
 
-  uint64_t per_worker_reads_received[MACHINE_NUM];
-  uint64_t per_worker_r_reps_received[MACHINE_NUM];
+	uint64_t per_worker_reads_received[MACHINE_NUM];
+	uint64_t per_worker_r_reps_received[MACHINE_NUM];
 
 
 	uint64_t read_to_write;
-  uint64_t failed_rem_writes;
-  uint64_t total_writes;
-  uint64_t quorum_reads;
-  uint64_t rectified_keys;
-  uint64_t q_reads_with_low_epoch;
+	uint64_t failed_rem_writes;
+	uint64_t total_writes;
+	uint64_t quorum_reads;
+	uint64_t rectified_keys;
+	uint64_t q_reads_with_low_epoch;
 
-  uint64_t proposes_sent; // number of broadcast
-  uint64_t accepts_sent; // number of broadcast
-  uint64_t commits_sent;
-  uint64_t rmws_completed;
-  uint64_t cancelled_rmws;
-  uint64_t all_aboard_rmws; // completed ones
+	uint64_t proposes_sent; // number of broadcast
+	uint64_t accepts_sent; // number of broadcast
+	uint64_t commits_sent;
+	uint64_t rmws_completed;
+	uint64_t cancelled_rmws;
+	uint64_t all_aboard_rmws; // completed ones
 
 
 
-  uint64_t stalled_ack;
-  uint64_t stalled_r_rep;
+	uint64_t stalled_ack;
+	uint64_t stalled_r_rep;
 
 	//long long unused[3]; // padding to avoid false sharing
 };

@@ -27,16 +27,6 @@
 					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 				</MakeCommands>
 			</Target>
-			<Target title="edit_cache">
-				<Option working_dir="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug"/>
-				<Option type="4"/>
-				<MakeCommands>
-					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 edit_cache"/>
-					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
-					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
-					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
-				</MakeCommands>
-			</Target>
 			<Target title="drf-sc">
 				<Option output="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/drf-sc" prefix_auto="0" extension_auto="0"/>
 				<Option working_dir="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug"/>
@@ -86,6 +76,16 @@
 				</Compiler>
 				<MakeCommands>
 					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 drf-sc/fast"/>
+					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="edit_cache">
+				<Option working_dir="/home/vasilis/Documents/houston/drf-sc/cmake-build-debug"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 edit_cache"/>
 					<CompileFile command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
 					<Clean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 					<DistClean command="/usr/bin/make -j4 -f &quot;/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
