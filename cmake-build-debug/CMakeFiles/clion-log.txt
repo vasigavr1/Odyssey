@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /home/vasilis/Documents/clion/clion-2017.3.1/bin/cmake/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /home/vasilis/Documents/houston/kite
+=======
+/home/vasilis/Documents/clion/clion-2019.3.2/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /home/vasilis/Documents/houston/drf-sc
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
 -- The C compiler identification is GNU 5.4.0
 -- The CXX compiler identification is GNU 5.4.0
 -- Check for working C compiler: /usr/bin/cc
@@ -15,4 +19,8 @@
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
+<<<<<<< HEAD
 -- Build files have been written to: /home/vasilis/Documents/houston/kite/cmake-build-debug
+=======
+-- Build files have been written to: /home/vasilis/Documents/houston/drf-sc/cmake-build-debug
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a

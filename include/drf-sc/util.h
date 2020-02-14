@@ -55,7 +55,7 @@ struct stats {
 	double received_acks[WORKERS_PER_MACHINE];
 	double received_r_reps[WORKERS_PER_MACHINE];
   double cancelled_rmws[WORKERS_PER_MACHINE];
-
+	double all_aboard_rmws[WORKERS_PER_MACHINE];
 	double reads_that_become_writes[WORKERS_PER_MACHINE];
   //double zookeeper_writes[WORKERS_PER_MACHINE];
 };

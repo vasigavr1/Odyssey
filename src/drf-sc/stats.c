@@ -11,7 +11,7 @@ void *print_stats(void* no_arg) {
 
   uint sleep_time = SHOW_STATS_LATENCY_STYLE ? 8 : 16;
   struct thread_stats curr_w_stats[WORKERS_PER_MACHINE], prev_w_stats[WORKERS_PER_MACHINE];
-  struct client_stats curr_c_stats[WORKERS_PER_MACHINE], prev_c_stats[WORKERS_PER_MACHINE];
+  struct client_stats curr_c_stats[CLIENTS_PER_MACHINE], prev_c_stats[CLIENTS_PER_MACHINE];
   struct stats all_stats;
   sleep(4);
   memcpy(prev_w_stats, (void *) t_stats, WORKERS_PER_MACHINE * (sizeof(struct thread_stats)));
@@ -39,7 +39,7 @@ void *print_stats(void* no_arg) {
       exit(0);
     }
     seconds *= MILLION;//1000; // compute only MIOPS
-    uint64_t total_cancelled_rmws =  0, total_rmws = 0;
+    uint64_t total_cancelled_rmws =  0, total_rmws = 0, total_all_aboard_rmws = 0;
     for (i = 0; i < WORKERS_PER_MACHINE; i++) {
 
       all_wrkr_completed_reqs += curr_w_stats[i].cache_hits_per_thread - prev_w_stats[i].cache_hits_per_thread;
@@ -55,6 +55,8 @@ void *print_stats(void* no_arg) {
 
       total_cancelled_rmws += curr_w_stats[i].cancelled_rmws - prev_w_stats[i].cancelled_rmws;
       total_rmws += curr_w_stats[i].rmws_completed - prev_w_stats[i].rmws_completed;
+      total_all_aboard_rmws += curr_w_stats[i].all_aboard_rmws - prev_w_stats[i].all_aboard_rmws;
+
       all_stats.cache_hits_per_thread[i] =
         (curr_w_stats[i].cache_hits_per_thread - prev_w_stats[i].cache_hits_per_thread) / seconds;
 
@@ -64,6 +66,7 @@ void *print_stats(void* no_arg) {
         (curr_w_stats[i].stalled_r_rep - prev_w_stats[i].stalled_r_rep) / seconds;
       all_stats.reads_sent[i] = (curr_w_stats[i].reads_sent - prev_w_stats[i].reads_sent) / (seconds);
       all_stats.rmws_completed[i] = (curr_w_stats[i].rmws_completed - prev_w_stats[i].rmws_completed) / (seconds);
+      all_stats.all_aboard_rmws[i] = (curr_w_stats[i].all_aboard_rmws - prev_w_stats[i].all_aboard_rmws) / (seconds);
       all_stats.proposes_sent[i] = (curr_w_stats[i].proposes_sent - prev_w_stats[i].proposes_sent) / (seconds);
       all_stats.accepts_sent[i] = (curr_w_stats[i].accepts_sent - prev_w_stats[i].accepts_sent) / (seconds);
       all_stats.commits_sent[i] = (curr_w_stats[i].commits_sent - prev_w_stats[i].commits_sent) / (seconds);
@@ -114,11 +117,15 @@ void *print_stats(void* no_arg) {
     double sync_per = all_wrkr_sync_percentage / (double) all_wrkr_completed_reqs;
     double total_treiber_pushes = (all_client_microbench_pushes) / seconds;
     double total_treiber_pops = (all_client_microbench_pops) / seconds;
+    double per_s_all_aboard_rmws = (total_all_aboard_rmws) / seconds;
+
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f, %.2f, t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n", print_count, total_throughput,
+    green_printf("%u %.2f, canc: %.2f, all-aboard: %.2f\n", // t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n",
+                 print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
-                 total_treiber_pushes, total_treiber_pops,
-                 zk_write_ratio, sync_per);
+                 per_s_all_aboard_rmws);
+                 //total_treiber_pushes, total_treiber_pops,
+                 //zk_write_ratio, sync_per);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

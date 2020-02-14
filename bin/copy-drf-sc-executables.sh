@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+<<<<<<< HEAD
 HOSTS=( "houston" "sanantonio")
 HOSTS=( "houston" "sanantonio" "philly")
 HOSTS=( "houston" "sanantonio" "austin")
@@ -6,6 +7,15 @@ HOSTS=( "houston" "sanantonio" "austin")
 #HOSTS=( "houston" "sanantonio" "austin" "indianapolis")
 HOSTS=( "austin" "houston" "sanantonio")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" )
+=======
+#HOSTS=( "houston" "sanantonio")
+#HOSTS=( "houston" "sanantonio" "philly")
+#HOSTS=( "houston" "sanantonio" "austin")
+#HOSTS=( "houston" "austin")
+#HOSTS=( "houston" "sanantonio" "austin" "indianapolis")
+#HOSTS=( "austin" "houston" "sanantonio")
+HOSTS=( "austin" "houston" "sanantonio" "atlanta" "philly" )
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" "baltimore" "chicago" "atlanta" "detroit")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "chicago" "atlanta" "detroit")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "atlanta")

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # Install script for directory: /home/vasilis/Documents/houston/kite
+=======
+# Install script for directory: /home/vasilis/Documents/houston/drf-sc
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -32,6 +36,14 @@ if(NOT DEFINED CMAKE_INSTALL_SO_NO_EXE)
   set(CMAKE_INSTALL_SO_NO_EXE "1")
 endif()
 
+<<<<<<< HEAD
+=======
+# Is this installation the result of a crosscompile?
+if(NOT DEFINED CMAKE_CROSSCOMPILING)
+  set(CMAKE_CROSSCOMPILING "FALSE")
+endif()
+
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
 if(CMAKE_INSTALL_COMPONENT)
   set(CMAKE_INSTALL_MANIFEST "install_manifest_${CMAKE_INSTALL_COMPONENT}.txt")
 else()
@@ -40,5 +52,9 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
+<<<<<<< HEAD
 file(WRITE "/home/vasilis/Documents/houston/kite/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
+=======
+file(WRITE "/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

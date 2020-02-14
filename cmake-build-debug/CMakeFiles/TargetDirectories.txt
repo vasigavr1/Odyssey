@@ -1,3 +1,9 @@
+<<<<<<< HEAD
 /home/vasilis/Documents/houston/kite/cmake-build-debug/CMakeFiles/rebuild_cache.dir
 /home/vasilis/Documents/houston/kite/cmake-build-debug/CMakeFiles/edit_cache.dir
 /home/vasilis/Documents/houston/kite/cmake-build-debug/CMakeFiles/drf-sc.dir
+=======
+/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/CMakeFiles/drf-sc.dir
+/home/vasilis/Documents/houston/drf-sc/cmake-build-debug/CMakeFiles/edit_cache.dir
+>>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a

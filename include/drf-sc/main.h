@@ -19,15 +19,15 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 30
-#define MACHINE_NUM 3
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WORKERS_PER_MACHINE 20
+#define MACHINE_NUM 5
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 8 //
+#define R_CREDITS 4 //
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
@@ -41,23 +41,25 @@
 #define ENABLE_STAT_COUNTING 1
 #define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 110// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 100// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 1
+#define ACCEPT_IS_RELEASE 0
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
+#define ENABLE_ALL_ABOARD 1
+#define ALL_ABOARD_TIMEOUT_CNT K_16
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -68,12 +70,6 @@
 #define WORKERS_PER_CLIENT (ENABLE_CLIENTS ? (WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE ) : 0)
 #define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
-
-//#define ENABLE_FIXED_RMW 1
-//#define DESIRED_TOTAL_WRITE_RATIO WRITE_RATIO_
-//#define REMAINING_WRITE_RATIO (DESIRED_TOTAL_WRITE_RATIO - RMW_RATIO)
-//#define WRITE_RATIO_FIXED_RMW (1000 / ((1000 - RMW_RATIO) / (REMAINING_WRITE_RATIO)))
-//#define WRITE_RATIO (ENABLE_FIXED_RMW ? WRITE_RATIO_FIXED_RMW :  WRITE_RATIO_)
 
 
 // Where to BIND the KVS
@@ -114,7 +110,7 @@
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE TREIBER_ASYNC
+#define CLIENT_MODE CLIENT_USE_TRACE
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
@@ -164,7 +160,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 50000
+#define NUM_OF_RMW_KEYS 5000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -850,7 +846,7 @@ struct dbg_glob_entry {
 };
 
 
-#define ENABLE_DEBUG_GLOBAL_ENTRY 1
+#define ENABLE_DEBUG_GLOBAL_ENTRY 0
 
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
@@ -901,6 +897,7 @@ struct rmw_rep_info {
   uint8_t ts_stale;
   uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
+  uint8_t nacks;
   // used to know whether to help after a prop-- if you have seen a higher acc,
   // then you should not try to help a lower accept, and thus dont try at all
   bool seen_higher_acc;
@@ -920,6 +917,7 @@ struct rmw_local_entry {
   bool killable; // can the RMW (if CAS) be killed early
   bool must_release;
   bool rmw_is_successful; // was the RMW (if CAS) successful
+	bool all_aboard;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   uint8_t *compare_val; //for CAS- add value for FAA
@@ -931,6 +929,7 @@ struct rmw_local_entry {
   uint16_t sess_id;
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
+  uint32_t all_aboard_time_out;
   uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
@@ -1024,6 +1023,7 @@ struct pending_ops {
   uint32_t full_w_q_fifo;
   //bool *session_has_pending_op;
   bool all_sessions_stalled;
+  struct quorum_info *q_info;
 };
 
 // A helper to debug sessions by remembering which write holds a given session
@@ -1136,63 +1136,66 @@ extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 // Store statistics from the workers, for the stats thread to use
 struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
-  uint64_t reads_per_thread;
-  uint64_t writes_per_thread;
-  uint64_t acquires_per_thread;
-  uint64_t releases_per_thread;
+
+	uint64_t reads_per_thread;
+	uint64_t writes_per_thread;
+	uint64_t acquires_per_thread;
+	uint64_t releases_per_thread;
+
 
 
 	long long reads_sent;
 	long long acks_sent;
 	long long r_reps_sent;
-  uint64_t writes_sent;
-  uint64_t writes_asked_by_clients;
+	uint64_t writes_sent;
+	uint64_t writes_asked_by_clients;
 
 
-  long long reads_sent_mes_num;
-  long long acks_sent_mes_num;
-  long long r_reps_sent_mes_num;
-  long long writes_sent_mes_num;
+	long long reads_sent_mes_num;
+	long long acks_sent_mes_num;
+	long long r_reps_sent_mes_num;
+	long long writes_sent_mes_num;
 
 
-  long long received_reads;
+	long long received_reads;
 	long long received_acks;
 	long long received_r_reps;
-  long long received_writes;
+	long long received_writes;
 
-  long long received_r_reps_mes_num;
-  long long received_acks_mes_num;
-  long long received_reads_mes_num;
-  long long received_writes_mes_num;
+	long long received_r_reps_mes_num;
+	long long received_acks_mes_num;
+	long long received_reads_mes_num;
+	long long received_writes_mes_num;
 
 
-  uint64_t per_worker_acks_sent[MACHINE_NUM];
-  uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
-  uint64_t per_worker_writes_received[MACHINE_NUM];
-  uint64_t per_worker_acks_received[MACHINE_NUM];
-  uint64_t per_worker_acks_mes_received[MACHINE_NUM];
+	uint64_t per_worker_acks_sent[MACHINE_NUM];
+	uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
+	uint64_t per_worker_writes_received[MACHINE_NUM];
+	uint64_t per_worker_acks_received[MACHINE_NUM];
+	uint64_t per_worker_acks_mes_received[MACHINE_NUM];
 
-  uint64_t per_worker_reads_received[MACHINE_NUM];
-  uint64_t per_worker_r_reps_received[MACHINE_NUM];
+	uint64_t per_worker_reads_received[MACHINE_NUM];
+	uint64_t per_worker_r_reps_received[MACHINE_NUM];
 
 
 	uint64_t read_to_write;
-  uint64_t failed_rem_writes;
-  uint64_t total_writes;
-  uint64_t quorum_reads;
-  uint64_t rectified_keys;
-  uint64_t q_reads_with_low_epoch;
+	uint64_t failed_rem_writes;
+	uint64_t total_writes;
+	uint64_t quorum_reads;
+	uint64_t rectified_keys;
+	uint64_t q_reads_with_low_epoch;
 
-  uint64_t proposes_sent; // number of broadcast
-  uint64_t accepts_sent; // number of broadcast
-  uint64_t commits_sent;
-  uint64_t rmws_completed;
-  uint64_t cancelled_rmws;
+	uint64_t proposes_sent; // number of broadcast
+	uint64_t accepts_sent; // number of broadcast
+	uint64_t commits_sent;
+	uint64_t rmws_completed;
+	uint64_t cancelled_rmws;
+	uint64_t all_aboard_rmws; // completed ones
 
 
 
-  uint64_t stalled_ack;
-  uint64_t stalled_r_rep;
+	uint64_t stalled_ack;
+	uint64_t stalled_r_rep;
 
 	//long long unused[3]; // padding to avoid false sharing
 };
