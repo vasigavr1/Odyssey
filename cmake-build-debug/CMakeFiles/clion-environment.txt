@@ -1,7 +1,0 @@
-<<<<<<< HEAD
-Options: 
-=======
-ToolSet: 1.0 (local)Options: 
->>>>>>> 981ca3cc793d69cad9416f16c45fcf7cbacfaa9a
-
-Options:
