@@ -18,7 +18,6 @@ Writes incur 2 broadcast rounds and reads incur 1 broadcast round with an condit
 
 ## Paxos
 Paxos is implemented as such:
-<<<<<<< HEAD
 * Basic Paxos (leaderless with 3 rtts)
 * Key-granularity: Paxos commands to different keys do not interact
 * With both release and acquire semantics
@@ -54,7 +53,6 @@ All messages are batched.
 1. A modified version of MICA that serves as the store for Kite
 2. A layer that implements the protocols that run over MICA
 
-<<<<<<< HEAD
 ## Requirements
 RDMA capable NICs and Infiniband switch
 
@@ -69,7 +67,6 @@ RDMA capable NICs and Infiniband switch
 
 ### Settings
 1. Run subnet-manager in one of the nodes: '/etc/init.d/opensmd start'
-<<<<<<< HEAD
 2. On every node apply the following:
 3. echo 8192 | tee /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages > /dev/null
 4. echo 10000000001 | tee /proc/sys/kernel/shmmax /proc/sys/kernel/shmall > /dev/null
