@@ -1,4 +1,4 @@
-#Kite
+# Kite
 
 Kite is a replicated, RDMA-enabled Key-Value Store that enforces available Release Consistency.
 Kite implements a read/write/RMW API an uses:
@@ -7,7 +7,6 @@ Kite implements a read/write/RMW API an uses:
 3. Basic Paxos for RMWs.
 
 ## Eventual Store (ES)
-<<<<<<< HEAD
 Eventual Store is a protocol that provides per-keu Sequential consistency.
 ES implements reads locally and incurs a broadcast round for writes.
 
