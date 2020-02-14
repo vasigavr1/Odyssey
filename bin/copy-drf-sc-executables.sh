@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 #HOSTS=( "houston" "sanantonio")
 #HOSTS=( "houston" "sanantonio" "philly")
 #HOSTS=( "houston" "sanantonio" "austin")
