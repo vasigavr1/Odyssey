@@ -32,7 +32,7 @@ uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 uint64_t time_approx;
 
 //struct epoch_info epoch;
-
+atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 int main(int argc, char *argv[])
 {
@@ -41,6 +41,7 @@ int main(int argc, char *argv[])
   static_assert_compile_parameters();
 	num_threads = -1;
 	is_roce = -1; machine_id = -1;
+	workers_with_filled_qp_attr = 0;
   init_globals();
 	/* Handle Inputs */
   handle_program_inputs(argc, argv);

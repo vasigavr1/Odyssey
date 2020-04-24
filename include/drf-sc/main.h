@@ -20,8 +20,8 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
-#define MACHINE_NUM 5
+#define WORKERS_PER_MACHINE 1
+#define MACHINE_NUM 3
 #define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
@@ -1268,6 +1268,13 @@ extern uint64_t time_approx;
 
 
 
+
+
+//extern struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
+extern atomic_uint_fast32_t workers_with_filled_qp_attr;
+
+
+
 struct thread_params {
 	int id;
 };
@@ -1338,11 +1345,6 @@ void *worker(void *arg);
 void *print_stats(void*);
 
 
-// printf available colors
-#define WHITE_PRINTF 0
-#define RED_PRINTF 1
-#define YELLOW_PRINTF 1
-#define GREEN_PRINTF 1
-#define CYAN_PRINTF 1
+
 
 #endif

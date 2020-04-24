@@ -1,4 +1,7 @@
+#include <util.h>
 #include "util.h"
+
+//struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
 
 void static_assert_compile_parameters()
 {
@@ -150,7 +153,7 @@ void init_globals()
 {
   uint32_t i = 0;
   time_approx = 0;
-  remote_IP = (char *) malloc(16 * sizeof(char));
+//  remote_IP = (char *) malloc(16 * sizeof(char));
   dev_name = (char *) malloc(16 * sizeof(char));
   epoch_id = MEASURE_SLOW_PATH ? 1 : 0;
   // This (sadly) seems to be the only way to initialize the locks
@@ -207,9 +210,11 @@ void init_globals()
 void handle_program_inputs(int argc, char *argv[])
 {
   int c;
+  char *tmp_ip;
   static struct option opts[] = {
     { .name = "machine-id",			.has_arg = 1, .val = 'm' },
     { .name = "is-roce",			.has_arg = 1, .val = 'r' },
+    { .name = "all-ips",       .has_arg = 1, .val ='a'},
     { .name = "remote-ips",			.has_arg = 1, .val = 'i' },
     { .name = "local-ip",			.has_arg = 1, .val = 'l' },
     { .name = "device_name",			.has_arg = 1, .val = 'd'},
@@ -229,11 +234,14 @@ void handle_program_inputs(int argc, char *argv[])
       case 'r':
         is_roce = atoi(optarg);
         break;
+      case 'a':
+        tmp_ip = optarg;
+        break;
       case 'i':
-        remote_IP = optarg;
+        //remote_IP = optarg;
         break;
       case 'l':
-        local_IP = optarg;
+        local_ip = optarg;
         break;
       case 'd':
         dev_name = optarg;
@@ -243,6 +251,29 @@ void handle_program_inputs(int argc, char *argv[])
         assert(false);
     }
   }
+  if (machine_id == -1) assert(false);
+  char* chars_array = strtok(tmp_ip, ",");
+  remote_ips = malloc(REM_MACH_NUM * sizeof(char*));
+  int rm_id = 0;
+  for ( int m_id = 0; m_id < MACHINE_NUM; m_id++) {
+    assert(chars_array != NULL); // not enough IPs were passed
+    printf("ip %s \n", chars_array);
+    if (m_id ==  machine_id) {
+      local_ip = malloc(16);
+      memcpy(local_ip, chars_array, strlen(chars_array) + 1);
+      printf("local_ip = %s  \n", local_ip);
+    }
+    else {
+      remote_ips[rm_id] = malloc(16);
+      memcpy(remote_ips[rm_id], chars_array, strlen(chars_array) + 1);
+      printf("remote_ip[%d] = %s  \n", rm_id, remote_ips[rm_id]);
+      rm_id++;
+    }
+
+    //else remote_ip_vector.push_back(chars_array);
+    chars_array = strtok(NULL, ",");
+  }
+
 }
 
 void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
@@ -678,43 +709,6 @@ int pin_threads_avoiding_collisions(int c_id) {
 }
 
 
-// Used by all kinds of threads to publish their QPs
-void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb)
-{
-  uint32_t qp_i;
-  //cyan_printf("Wrkr attempting to %d publish its dgrams \n", global_id);
-  for (qp_i = 0; qp_i < qp_num; qp_i++) {
-    char dgram_qp_name[QP_NAME_SIZE];
-    sprintf(dgram_qp_name, "%s-%d-%d", qp_name, global_id, qp_i);
-    hrd_publish_dgram_qp(cb, qp_i, dgram_qp_name, DEFAULT_SL);
-    // yellow_printf("Wrkr %d published dgram %s \n", global_id, dgram_qp_name);
-  }
-  //yellow_printf("Wrkr %d published its dgrams \n", global_id);
-}
-
-// Followers and leaders both use this to establish connections
-void setup_connections_and_spawn_stats_thread(uint32_t global_id, struct hrd_ctrl_blk *cb)
-{
-
-    int t_id = global_id % WORKERS_PER_MACHINE;
-    publish_qps(QP_NUM, global_id, "worker-dgram", cb);
-
-    if (t_id == 0) {
-      get_qps_from_all_other_machines(global_id, cb);
-      assert(!qps_are_set_up);
-      // Spawn a thread that prints the stats
-      if (CLIENT_MODE != CLIENT_UI) {
-        if (spawn_stats_thread() != 0)
-          red_printf("Stats thread was not successfully spawned \n");
-      }
-      atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
-    }
-    else {
-        while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
-    }
-    assert(qps_are_set_up);
-//    printf("Thread %d has all the needed ahs\n", global_id );
-}
 
 /* ---------------------------------------------------------------------------
 ------------------------------DRF--------------------------------------
@@ -1092,7 +1086,7 @@ void resolve_addresses(struct mcast_info *mcast_data)
     char mcast_addr[40];
     // Source addresses (i.e. local IPs)
     mcast_data->src_addr = (struct sockaddr*)&mcast_data->src_in;
-    ret = get_addr(local_IP, ((struct sockaddr *)&mcast_data->src_in)); // to bind
+    ret = get_addr(local_ip, ((struct sockaddr *)&mcast_data->src_in)); // to bind
     if (ret) printf("Client: failed to get src address \n");
     for (i = 0; i < MCAST_QPS; i++) {
         ret = rdma_bind_addr(mcast_data->cm_qp[i].cma_id, mcast_data->src_addr);
@@ -1237,4 +1231,284 @@ void multicast_testing(struct mcast_essentials *mcast, int clt_gid, struct hrd_c
     printf("Client %d imm data recved %d \n", clt_gid, mcast_wc.imm_data);
 
     exit(0);
+}
+
+//////////////////////////////////
+////PUBLISHING QPS///////////////
+//////////////////////////////////
+
+
+//Handle the addresses
+void resolve_cm_addresses(connect_cm_info_t *cm_info, bool server)
+{
+  int ret, i;
+  // Source addresses (i.e. local IPs)
+  if (server) {
+    cm_info->src_addr = (struct sockaddr *) &cm_info->src_in;
+    ret = get_addr(local_ip, ((struct sockaddr *) &cm_info->src_in)); // to bind
+    if (ret) printf("Failed to get src address \n");
+    for (i = 0; i < REM_MACH_NUM; i++) {
+      ret = rdma_bind_addr(cm_info->cm_qp[i].cma_id, cm_info->src_addr);
+      if (ret) perror("Src address bind failed");
+    }
+  }
+  else {
+    // Destination addresses(only for client)
+    for (i = 0; i < REM_MACH_NUM; i++) {
+      cm_info->dst_addr[i] = (struct sockaddr *) &cm_info->dst_in[i];
+      ret = get_addr(remote_ips[i], ((struct sockaddr *) &cm_info->dst_in[i]));
+      if (ret) printf("Failed to get dst address \n");
+    }
+  }
+}
+
+
+void set_up_rdma_cm_server(struct hrd_qp_attr *qp_attr)
+{
+  static enum rdma_port_space port_space = RDMA_PS_UDP;
+  connect_cm_info_t *cm_info = calloc(1, sizeof(connect_cm_info_t));
+  cm_info->channel = rdma_create_event_channel();
+  if (!cm_info->channel) {
+    printf("Failed to create event channel\n");
+    exit(1);
+  }
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++ ) {
+    int ret = rdma_create_id(cm_info->channel, &cm_info->cm_qp[i].cma_id, &cm_info->cm_qp[i], port_space);
+    if (ret) printf("Machine %u Failed to create cma_id for machine %u \n", machine_id, i);
+  }
+  resolve_cm_addresses(cm_info, true);
+  //after  calling  rdma_listen,  the  user  waits
+  // for  an  RDMA_CM_EVENT_CONNECT_REQUESTevent to occur
+//  for (uint8_t i = 0; i < REM_MACH_NUM; i++ ) {
+//    rdma_listen(cm_info->->cm_qp[i].cma_id, 4); // the second argument is the backlog
+//  }
+
+  struct rdma_cm_event* event;
+//  for (uint8_t i = 0; i < REM_MACH_NUM; i ++) {
+//    int qp_i = i;
+////    ret = rdma_resolve_addr(mcast_data->cm_qp[i].cma_id, mcast_data->src_addr, mcast_data->dst_addr[i], 20000);
+////    if (ret) printf("Client %d: failed to resolve address: %d, qp_i %d \n", clt_id, i, qp_i);
+////    if (ret) perror("Reason");
+//    while (rdma_get_cm_event(cm_info->channel, &event) == 0) {
+//      if (cm_info
+//    }
+//      switch (event->event) {
+//        case RDMA_CM_EVENT_CONNECT_REQUEST:
+//          printf("RDMA_CM_EVENT_CONNECT_REQUEST \n");
+//
+//
+//      rdma_ack_cm_event(event);
+//
+//    }
+//    //if (i != RECV_MCAST_QP) {
+//    // destroying the QPs works fine but hurts performance...
+//    //  rdma_destroy_qp(mcast_data->cm_qp[i].cma_id);
+//    //  rdma_destroy_id(mcast_data->cm_qp[i].cma_id);
+//    //}
+//  }
+
+
+
+}
+
+void connect_with_rdma_cm_(struct hrd_qp_attr *qp_attr)
+{
+  if (machine_id == 0) set_up_rdma_cm_server(qp_attr);
+
+
+}
+
+
+#define PORT 8080
+int set_up_client(qp_attr_message_t *qp_attr_mes)
+{
+  int sock = 0, valread;
+  struct sockaddr_in serv_addr;
+//  char *hello = "Hello from client";
+  char buffer[1024] = {0};
+  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+  {
+    printf("\n Socket creation error \n");
+    return -1;
+  }
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(PORT + machine_id -1);
+
+  // Convert IPv4 and IPv6 addresses from text to binary form
+  if(inet_pton(AF_INET, remote_ips[0], &serv_addr.sin_addr)<=0)
+  {
+    printf("\nInvalid address/ Address not supported \n");
+    return -1;
+  }
+
+  if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+  {
+    printf("\nConnection Failed \n");
+    return -1;
+  }
+  send(sock, qp_attr_mes, sizeof(qp_attr_message_t), 0);
+  printf("Atributes sent\n");
+  valread = read(sock, buffer, 1024);
+  printf("%s\n",buffer );
+  return 0;
+}
+
+void set_up_server(qp_attr_message_t *qp_attr_mes)
+{
+  int server_fd[REM_MACH_NUM], new_socket[REM_MACH_NUM], valread;
+  struct sockaddr_in address;
+  int opt = 1;
+  int addrlen = sizeof(address);
+  qp_attr_message_t buffer;
+  char *hello = "Hello from server";
+
+  for (int rm_i = 0; rm_i < REM_MACH_NUM; rm_i++) {
+
+    // Creating socket file descriptor
+    if ((server_fd[rm_i] = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+      perror("socket failed");
+      exit(EXIT_FAILURE);
+    }
+
+    // Forcefully attaching socket to the port 8080
+    if (setsockopt(server_fd[rm_i], SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
+                   &opt, sizeof(opt))) {
+      perror("setsockopt");
+      exit(EXIT_FAILURE);
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT + rm_i);
+
+    // Forcefully attaching socket to the port 8080
+    if (bind(server_fd[rm_i], (struct sockaddr *) &address,
+             sizeof(address)) < 0) {
+      perror("bind failed");
+      exit(EXIT_FAILURE);
+    }
+    printf("Succesful bind \n");
+    if (listen(server_fd[rm_i], 3) < 0) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+    printf("Succesful listen \n");
+    if ((new_socket[rm_i] = accept(server_fd[rm_i], (struct sockaddr *) &address,
+                             (socklen_t *) &addrlen)) < 0) {
+      perror("accept");
+      exit(EXIT_FAILURE);
+    }
+    printf("Succesful accept \n");
+    read(new_socket[rm_i], &buffer, sizeof(qp_attr_message_t));
+    printf("Server received qp_attributes from machine %u size %ld \n",
+           buffer.m_id, sizeof(qp_attr_message_t));
+
+    send(new_socket[rm_i] , hello , strlen(hello) , 0 );
+  }
+
+//  printf("%s\n", buffer);
+
+
+
+  printf("Hello message sent\n");
+//  return 0;
+}
+
+void connect_with_sockets(qp_attr_message_t *qp_attr_mes)
+{
+
+}
+
+
+inline void fill_dgram_qp_attr(struct hrd_ctrl_blk *cb, int qp_i,
+                               uint32_t global_id, qp_attr_message_t *qp_attr_mes,
+                               const char *qp_name, uint8_t sl)
+{
+  assert(cb != NULL);
+  assert(qp_i >= 0 && qp_i < cb->num_dgram_qps);
+
+  assert(qp_name != NULL && strlen(qp_name) < QP_NAME_SIZE - 1);
+  assert(strstr(qp_name, HRD_RESERVED_NAME_PREFIX) == NULL);
+  int t_id = global_id % WORKERS_PER_MACHINE;
+
+  size_t len = strlen(qp_name);
+  int i;
+  for(i = 0; i < len; i++) {
+    if(qp_name[i] == ' ') {
+      fprintf(stderr, "HRD: Space not allowed in QP name\n");
+      exit(-1);
+    }
+  }
+
+  struct hrd_qp_attr *qp_attr = &qp_attr_mes->all_qp_attr[t_id][qp_i];
+  memcpy(qp_attr->name, qp_name, len);
+  qp_attr->name[len] = 0;	/* Add the null terminator */
+  qp_attr->lid = hrd_get_local_lid(cb->dgram_qp[qp_i]->context, cb->dev_port_id);
+  qp_attr->qpn = cb->dgram_qp[qp_i]->qp_num;
+  qp_attr->sl = sl;
+
+  //   ---ROCE----------
+  if (is_roce == 1) {
+    union ibv_gid ret_gid;
+    ibv_query_gid(cb->ctx, IB_PHYS_PORT, 0, &ret_gid);
+    qp_attr->gid_global_interface_id = ret_gid.global.interface_id;
+    qp_attr->gid_global_subnet_prefix = ret_gid.global.subnet_prefix;
+  }
+  //printf("Publishing datagram qp with name %s \n", qp_attr.name);
+  //
+  //connect_with_rdma_cm_(&qp_attr);
+  //hrd_publish(qp_attr.name, &qp_attr, sizeof(struct hrd_qp_attr)); // removing the memcached dependency
+   //  connect_with_sockets(&qp_attr);
+}
+
+
+// Used by all kinds of threads to publish their QPs
+void fill_qps(uint32_t qp_num, uint32_t global_id,
+              qp_attr_message_t *qp_attr_mes,
+              const char *qp_name,
+              struct hrd_ctrl_blk *cb)
+{
+  uint32_t qp_i;
+  //cyan_printf("Wrkr attempting to %d publish its dgrams \n", global_id);
+  for (qp_i = 0; qp_i < qp_num; qp_i++) {
+    char dgram_qp_name[QP_NAME_SIZE];
+    sprintf(dgram_qp_name, "%s-%d-%d", qp_name, global_id, qp_i);
+    fill_dgram_qp_attr(cb, qp_i, global_id, qp_attr_mes, dgram_qp_name, DEFAULT_SL);
+//    yellow_printf("Wrkr %d filled dgram %s \n", global_id, dgram_qp_name);
+  }
+
+  atomic_fetch_add_explicit(&workers_with_filled_qp_attr, 1, memory_order_relaxed);
+  //yellow_printf("Wrkr %d published its dgrams \n", global_id);
+}
+
+// Followers and leaders both use this to establish connections
+void setup_connections_and_spawn_stats_thread(uint32_t global_id,
+                                              struct hrd_ctrl_blk *cb)
+{
+  int t_id = global_id % WORKERS_PER_MACHINE;
+  qp_attr_message_t *qp_attr_mes = calloc(1, sizeof(qp_attr_message_t));
+  qp_attr_mes->m_id = (uint8_t) machine_id;
+  fill_qps(QP_NUM, global_id, qp_attr_mes, "worker-dgram", cb);
+
+
+
+
+  if (t_id == 0) {
+    while(workers_with_filled_qp_attr != WORKERS_PER_MACHINE);
+    if (machine_id == 0) set_up_server(qp_attr_mes);
+    else set_up_client(qp_attr_mes);
+    get_qps_from_all_other_machines(global_id, cb);
+    assert(!qps_are_set_up);
+    // Spawn a thread that prints the stats
+    if (CLIENT_MODE != CLIENT_UI) {
+      if (spawn_stats_thread() != 0)
+        red_printf("Stats thread was not successfully spawned \n");
+    }
+    atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
+  }
+  else {
+    while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
+  }
+  assert(qps_are_set_up);
+//    printf("Thread %d has all the needed ahs\n", global_id );
 }

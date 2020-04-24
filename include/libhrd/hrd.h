@@ -125,8 +125,13 @@
 #define TEST_NZ(x) do { if ( (x)) die("error: " #x " failed (returned non-zero)." ); } while (0)
 #define TEST_Z(x)  do { if (!(x)) die("error: " #x " failed (returned zero/null)."); } while (0)
 
+
+//typedef struct ip_t {
+//	char ip[16];
+//};
+
 extern int is_roce, machine_id, num_threads;
-extern char *remote_IP, *local_IP, *dev_name;
+extern char **remote_ips, *local_ip, *dev_name;
 
 
 struct key {

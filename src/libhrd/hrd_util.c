@@ -2,7 +2,7 @@
 #include "hrd.h"
 
 int is_roce, machine_id, num_threads;
-char *remote_IP, *local_IP, *dev_name;
+char **remote_ips, *local_ip, *dev_name;
 
 /* Every thread creates a TCP connection to the registry only once. */
 __thread memcached_st *memc = NULL;
@@ -11,21 +11,21 @@ __thread memcached_st *memc = NULL;
 // returns the number of remote IP addresses and fills the remote_IPs array with them
 int getRemoteIPs(char*** remote_IPs)
 {
-	(*remote_IPs) = (char **)malloc(2 * sizeof(char *));
-	int i, count = 1;
-	for (i = 0; remote_IP[i]; i++) { count += (remote_IP[i] == ',');}
-	//printf("Found %d IPs\n", count);
-	//printf("Remote IPs: %s\n", remote_IP);
-	(*remote_IPs)[0] = (char *)malloc(16 * sizeof(char));
-	(*remote_IPs)[0] = strtok(remote_IP, ",");
-	printf("Remote IP: %s\n", (*remote_IPs)[0]);
-
-	for (i = 1; i < count; i++) {
-		(*remote_IPs)[i] = (char *)malloc(16 * sizeof(char));
-		(*remote_IPs)[i] = strtok(NULL, ",");
-		//printf("Remote IP: %s\n", (*remote_IPs)[i]);
-	}
-	return count;
+//	(*remote_IPs) = (char **)malloc(2 * sizeof(char *));
+//	int i, count = 1;
+//	for (i = 0; remote_IP[i]; i++) { count += (remote_IP[i] == ',');}
+//	//printf("Found %d IPs\n", count);
+//	//printf("Remote IPs: %s\n", remote_IP);
+//	(*remote_IPs)[0] = (char *)malloc(16 * sizeof(char));
+//	(*remote_IPs)[0] = strtok(remote_IP, ",");
+//	printf("Remote IP: %s\n", (*remote_IPs)[0]);
+//
+//	for (i = 1; i < count; i++) {
+//		(*remote_IPs)[i] = (char *)malloc(16 * sizeof(char));
+//		(*remote_IPs)[i] = strtok(NULL, ",");
+//		//printf("Remote IP: %s\n", (*remote_IPs)[i]);
+//	}
+//	return count;
 }
 
 void die(const char *reason)

@@ -64,19 +64,41 @@ int spawn_stats_thread();
 void print_latency_stats(void);
 
 
+typedef struct {
+  uint8_t m_id;
+  struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
+} qp_attr_message_t;
+
+
+
 /* ---------------------------------------------------------------------------
 ------------------------------MULTICAST --------------------------------------
 ---------------------------------------------------------------------------*/
+
+
 // This helps us set up the necessary rdma_cm_ids for the multicast groups
 struct cm_qps
 {
 	int receive_q_depth;
 	struct rdma_cm_id* cma_id;
+  bool accepted;
+  bool established;
 	struct ibv_pd* pd;
 	struct ibv_cq* cq;
 	struct ibv_mr* mr;
 	void *mem;
 };
+
+typedef struct  {
+  struct rdma_event_channel *channel;
+  struct sockaddr_storage dst_in[REM_MACH_NUM];
+  struct sockaddr *dst_addr[REM_MACH_NUM];
+  struct sockaddr_storage src_in;
+  struct sockaddr *src_addr;
+  struct cm_qps cm_qp[REM_MACH_NUM];
+  //Send-only stuff
+  struct rdma_ud_param mcast_ud_param[MACHINE_NUM];
+} connect_cm_info_t;
 
 // This helps us set up the multicasts
 struct mcast_info
@@ -131,7 +153,7 @@ struct opcode_info {
 // Worker calls this function to connect with all workers
 void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
 // Used by all kinds of threads to publish their QPs
-void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
+//void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
 
 uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed);
 int parse_trace(char* path, struct trace_command **cmds, int t_id);
