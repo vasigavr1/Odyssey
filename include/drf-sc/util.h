@@ -1,5 +1,5 @@
-#ifndef ARMONIA_UTILS_H
-#define ARMONIA_UTILS_H
+#ifndef KITE_UTILS_H
+#define KITE_UTILS_H
 
 #include "cache.h"
 #include <stdlib.h>
@@ -143,7 +143,7 @@ void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct 
 // Connect with Workers and Clients
 void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
 /* ---------------------------------------------------------------------------
-------------------------------ABD--------------------------------------
+-----------------------------------------------------------------------------
 ---------------------------------------------------------------------------*/
 
 //Set up the depths of all QPs
@@ -200,4 +200,4 @@ void print_latency_stats(void);
 
 
 
-#endif /* ARMONIA_UTILS_H */
+#endif /* KITE_UTILS_H */

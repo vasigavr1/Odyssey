@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint-gcc.h>
 #include "city.h"
 #include "hrd.h"
 //-------------------------------------------

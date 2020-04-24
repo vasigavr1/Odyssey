@@ -145,8 +145,8 @@ struct hrd_qp_attr {
 	char name[QP_NAME_SIZE];
 
 	// ROCE
-	uint64_t gid_global_interface_id;	// Store the gid fields separately because I
-	uint64_t gid_global_subnet_prefix; 	// don't like unions. Needed for RoCE only
+	uint64_t gid_global_interface_id;	// Needed for RoCE only
+	uint64_t gid_global_subnet_prefix; 	// Needed for RoCE only
 
 	/* Info about the RDMA buffer associated with this QP */
 	uintptr_t buf_addr;
