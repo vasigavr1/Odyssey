@@ -20,7 +20,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 1
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 3
 #define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -1271,7 +1271,7 @@ extern uint64_t time_approx;
 
 
 //extern struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
-extern atomic_uint_fast32_t workers_with_filled_qp_attr;
+
 
 
 

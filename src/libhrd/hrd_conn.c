@@ -563,6 +563,7 @@ void hrd_connect_qp(struct hrd_ctrl_blk *cb,
 	return;
 }
 
+/*
 void hrd_publish_conn_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name)
 {
 	assert(cb != NULL);
@@ -583,7 +584,7 @@ void hrd_publish_conn_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name)
 
 	struct hrd_qp_attr qp_attr;
 	memcpy(qp_attr.name, qp_name, len);
-	qp_attr.name[len] = 0;	/* Add the null terminator */
+	qp_attr.name[len] = 0;	// Add the null terminator
 
   //   ---ROCE----------
 	if (is_roce == 1) {
@@ -603,6 +604,7 @@ void hrd_publish_conn_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name)
 
 	hrd_publish(qp_attr.name, &qp_attr, sizeof(struct hrd_qp_attr));
 }
+*/
 
 void hrd_publish_dgram_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name, uint8_t sl)
 {
@@ -612,18 +614,18 @@ void hrd_publish_dgram_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name, u
 	assert(qp_name != NULL && strlen(qp_name) < QP_NAME_SIZE - 1);
 	assert(strstr(qp_name, HRD_RESERVED_NAME_PREFIX) == NULL);
 
-	int len = strlen(qp_name);
-	int i;
-	for(i = 0; i < len; i++) {
-		if(qp_name[i] == ' ') {
-			fprintf(stderr, "HRD: Space not allowed in QP name\n");
-			exit(-1);
-		}
-	}
+//	int len = strlen(qp_name);
+//	int i;
+//	for(i = 0; i < len; i++) {
+//		if(qp_name[i] == ' ') {
+//			fprintf(stderr, "HRD: Space not allowed in QP name\n");
+//			exit(-1);
+//		}
+//	}
 
 	struct hrd_qp_attr qp_attr;
-	memcpy(qp_attr.name, qp_name, len);
-	qp_attr.name[len] = 0;	/* Add the null terminator */
+//	memcpy(qp_attr.name, qp_name, len);
+//	qp_attr.name[len] = 0;	/* Add the null terminator */
 	qp_attr.lid = hrd_get_local_lid(cb->dgram_qp[n]->context, cb->dev_port_id);
 	qp_attr.qpn = cb->dgram_qp[n]->qp_num;
 	qp_attr.sl = sl;

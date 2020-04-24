@@ -32,7 +32,7 @@ uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 uint64_t time_approx;
 
 //struct epoch_info epoch;
-atomic_uint_fast32_t workers_with_filled_qp_attr;
+
 
 int main(int argc, char *argv[])
 {

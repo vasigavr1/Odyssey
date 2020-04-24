@@ -64,12 +64,17 @@ int spawn_stats_thread();
 void print_latency_stats(void);
 
 
+//typedef struct {
+//  uint8_t m_id;
+//  struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
+//} qp_attr_message_t;
+
 typedef struct {
-  uint8_t m_id;
-  struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
-} qp_attr_message_t;
+  struct hrd_qp_attr wrkr_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
+} all_qp_attr_t;
 
-
+extern all_qp_attr_t *all_qp_attr;
+extern atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 /* ---------------------------------------------------------------------------
 ------------------------------MULTICAST --------------------------------------
@@ -151,7 +156,7 @@ struct opcode_info {
 };
 
 // Worker calls this function to connect with all workers
-void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
+//void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
 // Used by all kinds of threads to publish their QPs
 //void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
 
