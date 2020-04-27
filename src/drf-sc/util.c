@@ -20,7 +20,7 @@ void static_assert_compile_parameters()
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
   static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + RMW_BYTE_OFFSET), "RMW requires the value to be at least this many bytes");
-  static_assert(MACHINE_NUM <= 255, ""); // cache meta has 1 B for machine id
+  static_assert(MACHINE_NUM <= 255, ""); // kvs meta has 1 B for machine id
 
   // WRITES
   static_assert(W_SEND_SIZE >= W_MES_SIZE &&
@@ -218,8 +218,6 @@ void handle_program_inputs(int argc, char *argv[])
     { .name = "machine-id",			.has_arg = 1, .val = 'm' },
     { .name = "is-roce",			.has_arg = 1, .val = 'r' },
     { .name = "all-ips",       .has_arg = 1, .val ='a'},
-    { .name = "remote-ips",			.has_arg = 1, .val = 'i' },
-    { .name = "local-ip",			.has_arg = 1, .val = 'l' },
     { .name = "device_name",			.has_arg = 1, .val = 'd'},
     { 0 }
   };
@@ -239,12 +237,6 @@ void handle_program_inputs(int argc, char *argv[])
         break;
       case 'a':
         tmp_ip = optarg;
-        break;
-      case 'i':
-        //remote_IP = optarg;
-        break;
-      case 'l':
-        local_ip = optarg;
         break;
       case 'd':
         dev_name = optarg;
@@ -394,7 +386,7 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
     //parse file line by line and insert trace to cmd.
     for (i = 0; i < cmd_count; i++) {
         if ((read = getline(&line, &len, fp)) == -1)
-            die("ERROR: Problem while reading the trace\n");
+          my_printf(red, "ERROR: Problem while reading the trace\n");
         word_count = 0;
         word = strtok_r (line, " ", &saveptr);
         (*cmds)[i].opcode = 0;
@@ -638,7 +630,7 @@ int pin_threads_avoiding_collisions(int c_id) {
         if (c_id < WORKERS_PER_MACHINE) c_core = PHYSICAL_CORE_DISTANCE * c_id + 2;
         else c_core = (WORKERS_PER_MACHINE * 2) + (c_id * 2);
 
-        //if (DISABLE_CACHE == 1) c_core = 4 * i + 2; // when bypassing the cache
+        //if (DISABLE_CACHE == 1) c_core = 4 * i + 2; // when bypassing the kvs
         //if (DISABLE_HYPERTHREADING == 1) c_core = (FOLLOWERS_PER_MACHINE * 4) + (c_id * 4);
         if (c_core > TOTAL_CORES_) { //spawn clients to numa node 1 if you run out of cores in 0
             c_core -= TOTAL_CORES_;
@@ -1197,7 +1189,7 @@ void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
       /* Compute the control block and physical port index for client @i */
       int local_port_i = ib_port_index;// + cb_i;
 
-      struct hrd_qp_attr *wrkr_qp = &all_qp_attr->wrkr_qp[m_i][w_i][qp_i];
+      struct qp_attr *wrkr_qp = &all_qp_attr->wrkr_qp[m_i][w_i][qp_i];
       struct ibv_ah_attr ah_attr = {
         //-----INFINIBAND----------
         .is_global = 0,
@@ -1218,7 +1210,7 @@ void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
       }
       remote_qp[m_i][w_i][qp_i].ah = ibv_create_ah(cb->pd, &ah_attr);
       remote_qp[m_i][w_i][qp_i].qpn = wrkr_qp->qpn;
-      printf("%d %d %d success\n", m_i, w_i, qp_i );
+      // printf("%d %d %d success\n", m_i, w_i, qp_i );
       assert(remote_qp[m_i][w_i][qp_i].ah != NULL);
 
     }
@@ -1229,40 +1221,39 @@ void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
 #define BASE_SOCKET_PORT 8080
 
 // Machines with id higher than 0 connect with machine-id 0.
-// First they sent it their qps-attrs and then receive everyones
-int set_up_qp_attr_client()
+// First they sent it their qps-attrs and then receive everyone's
+void set_up_qp_attr_client()
 {
   int sock = 0, valread;
   struct sockaddr_in serv_addr;
   if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
   {
     printf("\n Socket creation error \n");
-    return -1;
+    assert(false);
   }
 
   serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(BASE_SOCKET_PORT + machine_id -1);
+  serv_addr.sin_port = htons((uint16_t)(BASE_SOCKET_PORT + machine_id - 1));
 
   // Convert IPv4 and IPv6 addresses from text to binary form
-  if(inet_pton(AF_INET, remote_ips[0], &serv_addr.sin_addr)<=0)
+  if(inet_pton(AF_INET, remote_ips[0], &serv_addr.sin_addr) <= 0)
   {
     printf("\nInvalid address/ Address not supported \n");
-    return -1;
+    assert(false);
   }
 
   while (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0);
-  struct hrd_qp_attr *qp_attr_to_send = &all_qp_attr->wrkr_qp[machine_id][0][0];
-  size_t mes_size = WORKERS_PER_MACHINE * QP_NUM * sizeof(struct hrd_qp_attr);
+  struct qp_attr *qp_attr_to_send = &all_qp_attr->wrkr_qp[machine_id][0][0];
+  size_t mes_size = WORKERS_PER_MACHINE * QP_NUM * sizeof(struct qp_attr);
   send(sock, qp_attr_to_send, mes_size, 0);
-  struct hrd_qp_attr tmp[WORKERS_PER_MACHINE][QP_NUM];
+  struct qp_attr tmp[WORKERS_PER_MACHINE][QP_NUM];
   memcpy(tmp, qp_attr_to_send, mes_size);
-  printf("Attributes sent\n");
+  // printf("Attributes sent\n");
   valread = (int) recv(sock, all_qp_attr, sizeof(all_qp_attr_t), MSG_WAITALL);
   assert(valread == sizeof(all_qp_attr_t));
   int cmp = memcmp(qp_attr_to_send, qp_attr_to_send, mes_size);
   assert(cmp == 0);
-  printf("Received all attributes, size %ld \n", sizeof(all_qp_attr_t));
-  return 0;
+  // printf("Received all attributes, size %ld \n", sizeof(all_qp_attr_t));
 }
 
 // Machine 0 acts as a "server"; it receives all qp attributes,
@@ -1275,48 +1266,46 @@ void set_up_qp_attr_server()
   int addrlen = sizeof(address);
 
   for (int rm_i = 0; rm_i < REM_MACH_NUM; rm_i++) {
-
     // Creating socket file descriptor
     if ((server_fd[rm_i] = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-      perror("socket failed");
-      exit(EXIT_FAILURE);
+      printf("socket failed \n");
+      assert(false);
     }
 
     // Forcefully attaching socket to the port 8080
     if (setsockopt(server_fd[rm_i], SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
                    &opt, sizeof(opt))) {
-      perror("setsockopt");
-      exit(EXIT_FAILURE);
+      printf("setsockopt \n");
+      assert(false);
     }
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(BASE_SOCKET_PORT + rm_i);
+    address.sin_port = htons((uint16_t)(BASE_SOCKET_PORT + rm_i));
 
     // Forcefully attaching socket to the port 8080
     if (bind(server_fd[rm_i], (struct sockaddr *) &address,
              sizeof(address)) < 0) {
-      perror("bind failed");
-      exit(EXIT_FAILURE);
+      printf("bind failed \n");
+      assert(false);
     }
-    printf("Succesful bind \n");
+    // printf("Succesful bind \n");
     if (listen(server_fd[rm_i], 3) < 0) {
-      perror("listen");
-      exit(EXIT_FAILURE);
+      printf("listen");
+      assert(false);
     }
-    printf("Succesful listen \n");
+    // printf("Succesful listen \n");
     if ((new_socket[rm_i] = accept(server_fd[rm_i], (struct sockaddr *) &address,
                              (socklen_t *) &addrlen)) < 0) {
-      perror("accept");
-      exit(EXIT_FAILURE);
+      printf("accept");
+      assert(false);
     }
-    printf("Successful accept \n");
-    size_t mes_size = WORKERS_PER_MACHINE * QP_NUM * sizeof(struct hrd_qp_attr);
+    // printf("Successful accept \n");
+    size_t mes_size = WORKERS_PER_MACHINE * QP_NUM * sizeof(struct qp_attr);
     valread = (int) recv(new_socket[rm_i], &all_qp_attr->wrkr_qp[rm_i + 1][0][0], mes_size, MSG_WAITALL);
     assert(valread == mes_size);
-    printf("Server received qp_attributes from machine %u size %ld \n",
-           rm_i + 1, mes_size);
+    //printf("Server received qp_attributes from machine %u size %ld \n",
+    //       rm_i + 1, mes_size);
   }
-//  sleep(10);
   for (int rm_i = 0; rm_i < REM_MACH_NUM; rm_i++) {
     send(new_socket[rm_i], all_qp_attr, sizeof(all_qp_attr_t), 0);
   }
@@ -1328,7 +1317,7 @@ void fill_qps(int t_id, struct hrd_ctrl_blk *cb)
 {
   uint32_t qp_i;
   for (qp_i = 0; qp_i < QP_NUM; qp_i++) {
-    struct hrd_qp_attr *qp_attr = &all_qp_attr->wrkr_qp[machine_id][t_id][qp_i];
+    struct qp_attr *qp_attr = &all_qp_attr->wrkr_qp[machine_id][t_id][qp_i];
     qp_attr->lid = hrd_get_local_lid(cb->dgram_qp[qp_i]->context, cb->dev_port_id);
     qp_attr->qpn = cb->dgram_qp[qp_i]->qp_num;
     qp_attr->sl = DEFAULT_SL;
@@ -1340,6 +1329,7 @@ void fill_qps(int t_id, struct hrd_ctrl_blk *cb)
       qp_attr->gid_global_subnet_prefix = ret_gid.global.subnet_prefix;
     }
   }
+  // Signal to other threads that you have filled your qp attributes
   atomic_fetch_add_explicit(&workers_with_filled_qp_attr, 1, memory_order_seq_cst);
 }
 
@@ -1352,11 +1342,8 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id,
 
   if (t_id == 0) {
     while(workers_with_filled_qp_attr != WORKERS_PER_MACHINE);
-//    sleep(10);
-    // printf("%u",workers_with_filled_qp_attr );
     if (machine_id == 0) set_up_qp_attr_server();
     else set_up_qp_attr_client();
-//    sleep(10);
     get_qps_from_all_other_machines(cb);
     assert(!qps_are_set_up);
     // Spawn a thread that prints the stats

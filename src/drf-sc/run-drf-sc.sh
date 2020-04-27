@@ -52,8 +52,6 @@ for i in "${!allIPs[@]}"; do
 		machine_id=$i
 	fi
 	if [ "${allIPs[i]}" !=  "$firstIP" ]; then
-#        remoteIPs=("$firstIP")
-#    else
         remoteIPs="${remoteIPs},${allIPs[i]}"
 	fi
 done
@@ -64,11 +62,11 @@ echo RemoteIPs: "${remoteIPs[@]}"
 echo Machine-Id "$machine_id"
 
 
-export REGISTRY_IP="129.215.165.8" # I.E. HOUSTON
+
 export MLX5_SINGLE_THREADED=1
 export MLX5_SCATTER_TO_CQE=1
 
-sudo killall memcached
+
 sudo killall drf-sc
 
 # A function to echo in blue color
@@ -95,8 +93,6 @@ for i in `seq 0 28`; do
 	sudo ipcrm -M $key 2>/dev/null
 done
 
-: ${REGISTRY_IP:?"Need to set REGISTRY_IP non-empty"}
-
 
 blue "Removing hugepages"
 #shm-rm.sh 1>/dev/null 2>/dev/null
@@ -117,8 +113,6 @@ blue "Running  worker threads"
  sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
 	./drf-sc \
 	--all-ips ${remoteIPs[@]} \
-	--local-ip $localIP \
-	--remote-ips $remoteIPs \
 	--machine-id $machine_id \
     --device_name "mlx5_0" \
 	2>&1

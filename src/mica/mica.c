@@ -3,7 +3,7 @@
 * Adapted from https://github.com/efficient/rdma_bench
 */
 
-#include "cache.h"
+#include "kvs.h"
 
 int is_power_of_2(int x)
 {
@@ -218,7 +218,7 @@ void mica_insert_one(struct mica_kv *kv,
 //				 */
 //				kv_ptr[I] = (struct mica_op *) &kv->ht_log[log_offset];
 //
-//				/* Small values (1--64 bytes) can span 2 cache lines */
+//				/* Small values (1--64 bytes) can span 2 kvs lines */
 //				__builtin_prefetch(kv_ptr[I], 0, 0);
 //				__builtin_prefetch((uint8_t *) kv_ptr[I] + 64, 0, 0);
 //

@@ -1,7 +1,8 @@
 #ifndef KITE_UTILS_H
 #define KITE_UTILS_H
 
-#include "cache.h"
+#include "kvs.h"
+#include "hrd.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -64,13 +65,19 @@ int spawn_stats_thread();
 void print_latency_stats(void);
 
 
-//typedef struct {
-//  uint8_t m_id;
-//  struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
-//} qp_attr_message_t;
+/* info about a QP that msut be shared in intit phase */
+struct qp_attr {
+	// ROCE
+	uint64_t gid_global_interface_id;	// Needed for RoCE only
+	uint64_t gid_global_subnet_prefix; 	// Needed for RoCE only
+	//
+	int lid;
+	int qpn;
+	uint8_t sl;
+};
 
 typedef struct {
-  struct hrd_qp_attr wrkr_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
+  struct qp_attr wrkr_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 } all_qp_attr_t;
 
 extern all_qp_attr_t *all_qp_attr;

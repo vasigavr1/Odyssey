@@ -1,7 +1,9 @@
 #ifndef INLINE_UTILS_H
 #define INLINE_UTILS_H
 
-#include "cache.h"
+#include "kvs.h"
+#include "hrd.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -437,7 +439,7 @@ static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *sen
 static inline void KVS_locate_all_buckets(uint16_t op_num, uint *bkt, struct cache_op *op,
                                           struct mica_bkt **bkt_ptr, uint *tag,
                                           struct cache_op **kv_ptr, uint8_t *key_in_store,
-                                          struct cache *KVS)
+                                          struct kvs *KVS)
 {
   for(uint16_t op_i = 0; op_i < op_num; op_i++) {
     bkt[op_i] = op[op_i].key.bkt & KVS->hash_table.bkt_mask;
@@ -454,7 +456,7 @@ static inline void KVS_locate_all_buckets(uint16_t op_num, uint *bkt, struct cac
 static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct cache_op *op,
                                          struct mica_bkt **bkt_ptr, uint *tag,
                                          struct cache_op **kv_ptr, uint8_t *key_in_store,
-                                         struct cache *KVS)
+                                         struct kvs *KVS)
 {
   bkt[op_i] = op->key.bkt & KVS->hash_table.bkt_mask;
   bkt_ptr[op_i] = &KVS->hash_table.ht_index[bkt[op_i]];
@@ -468,7 +470,7 @@ static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct cache_
 static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, struct key *op_key,
                                                   struct mica_bkt **bkt_ptr, uint *tag,
                                                   struct cache_op **kv_ptr,
-                                                  uint8_t *key_in_store, struct cache *KVS)
+                                                  uint8_t *key_in_store, struct kvs *KVS)
 {
   bkt[op_i] = op_key->bkt & KVS->hash_table.bkt_mask;
   bkt_ptr[op_i] = &KVS->hash_table.ht_index[bkt[op_i]];
@@ -480,7 +482,7 @@ static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, stru
 
 // After locating the buckets locate all kv pairs
 static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mica_bkt **bkt_ptr,
-                                           struct cache_op **kv_ptr, struct cache *KVS)
+                                           struct cache_op **kv_ptr, struct kvs *KVS)
 {
   for(uint16_t op_i = 0; op_i < op_num; op_i++) {
     for (uint8_t j = 0; j < 8; j++) {
@@ -494,7 +496,7 @@ static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mi
                  */
         kv_ptr[op_i] = (struct cache_op *) &KVS->hash_table.ht_log[log_offset];
 
-        /* Small values (1--64 bytes) can span 2 cache lines */
+        /* Small values (1--64 bytes) can span 2 kvs lines */
         __builtin_prefetch(kv_ptr[op_i], 0, 0);
         __builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
 
@@ -511,7 +513,7 @@ static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mi
 
 // Locate a kv_pair inside a bucket: used in a loop for all kv-pairs
 static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt **bkt_ptr,
-                                          struct cache_op **kv_ptr, struct cache *KVS)
+                                          struct cache_op **kv_ptr, struct kvs *KVS)
 {
   for(uint8_t j = 0; j < 8; j++) {
     if(bkt_ptr[op_i]->slots[j].in_use == 1 &&
@@ -524,7 +526,7 @@ static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt *
                */
       kv_ptr[op_i] = (struct cache_op *) &KVS->hash_table.ht_log[log_offset];
 
-      /* Small values (1--64 bytes) can span 2 cache lines */
+      /* Small values (1--64 bytes) can span 2 kvs lines */
       __builtin_prefetch(kv_ptr[op_i], 0, 0);
       __builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
 
@@ -962,11 +964,11 @@ static inline void debug_checks_when_inserting_a_write
     }
     // Check that the buffer is not occupied
     if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE  || p_ops->w_size >= MAX_ALLOWED_W_SIZE)
-      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size/virt_w_size %u/%u, source %u\n",
+      red_printf("Worker %u w_state %d at w_ptr %u, kvs hits %lu, w_size/virt_w_size %u/%u, source %u\n",
                  t_id, p_ops->w_meta[w_ptr].w_state, w_ptr,
                  t_stats[t_id].cache_hits_per_thread, p_ops->w_size, p_ops->virt_w_size, source);
     if (unlikely(p_ops->w_meta[w_ptr].w_state != INVALID))
-      red_printf("Worker %u w_state %d at w_ptr %u, cache hits %lu, w_size %u \n",
+      red_printf("Worker %u w_state %d at w_ptr %u, kvs hits %lu, w_size %u \n",
                  t_id, p_ops->w_meta[w_ptr].w_state, w_ptr,
                  t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
     //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
@@ -1416,7 +1418,7 @@ static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t 
 {
   if (ENABLE_ASSERTIONS) {
     if (p_ops->r_state[r_ptr] != INVALID)
-      red_printf("Worker %u r_state %d at r_ptr %u, cache hits %lu, r_size %u \n",
+      red_printf("Worker %u r_state %d at r_ptr %u, kvs hits %lu, r_size %u \n",
                  t_id, p_ops->r_state[r_ptr], r_ptr,
                  t_stats[t_id].cache_hits_per_thread, p_ops->r_size);
     //printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
@@ -1553,16 +1555,16 @@ static inline void check_keys_with_one_cache_op(struct key *com_key, struct cach
   }
 }
 
-// Before batching to cache we give all ops an odd version, check if it were changed
+// Before batching to kvs we give all ops an odd version, check if it were changed
 static inline void check_version_after_batching_trace_to_cache(struct trace_op* op,
                                                                struct cache_resp* resp, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS && resp->type != RMW_FAILURE) {
     if (op->ts.version % 2 != 0) {
-      red_printf("Wrkr %u, Trace to cache: Version not even: %u, opcode %u, resp %u \n",
+      red_printf("Wrkr %u, Trace to kvs: Version not even: %u, opcode %u, resp %u \n",
       t_id, op->ts.version, op->opcode, resp->type);
     }
-    my_assert(op->ts.version % 2 == 0, "Trace to cache: Version must be even after cache");
+    my_assert(op->ts.version % 2 == 0, "Trace to kvs: Version must be even after kvs");
   }
 }
 
@@ -7002,10 +7004,10 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   (*pull_ptr) = index;
 
   if (writes_for_kvs > 0) {
-    if (DEBUG_WRITES) yellow_printf("Worker %u is going with %u writes to the cache \n", t_id, writes_for_kvs);
+    if (DEBUG_WRITES) yellow_printf("Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);
     cache_batch_op_updates((uint16_t) writes_for_kvs, t_id, (struct write **) p_ops->ptrs_to_mes_ops,
                            p_ops, 0, (uint32_t)MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
-    if (DEBUG_WRITES) yellow_printf("Worker %u propagated %u writes to the cache \n", t_id, writes_for_kvs);
+    if (DEBUG_WRITES) yellow_printf("Worker %u propagated %u writes to the kvs \n", t_id, writes_for_kvs);
   }
 }
 
@@ -7034,7 +7036,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
       if (is_propose) {
         struct propose *prop = (struct propose *) read;
         check_state_with_allowed_flags(2, prop->opcode, PROPOSE_OP);
-        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) prop) -3); //align with the cache op
+        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) prop) -3); //align with the kvs op
       }
       else {
         check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
@@ -7046,7 +7048,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
         if (read->opcode == OP_ACQUIRE_FLIP_BIT)
           raise_conf_bit_iff_owned(*(uint64_t *) &read->key, (uint16_t) r_mes->m_id, false, t_id);
 
-        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) read) - 3); //align with the cache op
+        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) read) - 3); //align with the kvs op
 
       }
       p_ops->ptrs_to_mes_headers[polled_reads] = r_mes;
@@ -7333,7 +7335,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
   /* Because it's possible for a read to insert another read i.e OP_ACQUIRE->OP_ACQUIRE_FLIP_BIT
    * we need to make sure that even if all requests do that, the fifo will have enough space to:
-   * 1) not deadlock and 2) not overwrite a read_info that will later get taken to the cache
+   * 1) not deadlock and 2) not overwrite a read_info that will later get taken to the kvs
    * That means that the fifo must have free slots equal to SESSION_PER_THREADS because
    * this many acquires can possibly exist in the fifo*/
   if (ENABLE_ASSERTIONS) assert(p_ops->virt_r_size < PENDING_READS);
@@ -7353,7 +7355,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
        // (acq_second_round_to_flip_bit) && (p_ops->virt_r_size >= MAX_ALLOWED_R_SIZE))
       break;
 
-    //CACHE: Reads that need to go to cache
+    //CACHE: Reads that need to go to kvs
     if (write_local_kvs) {
       // if a read did not see a larger ts it should only change the epoch
       if (read_info->opcode == CACHE_OP_GET &&

@@ -246,7 +246,7 @@ void *worker(void *arg)
     ------------------------------PROBE THE CACHE--------------------------------------
     ---------------------------------------------------------------------------*/
 
-    // Get a new batch from the trace, pass it through the cache and create
+    // Get a new batch from the trace, pass it through the kvs and create
     // the appropriate write/r_rep messages
     trace_iter = batch_requests_to_KVS(t_id,
                                        trace_iter, trace, ops,

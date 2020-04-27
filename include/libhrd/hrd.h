@@ -6,163 +6,16 @@
 #ifndef HRD_H
 #define HRD_H
 
-#include <assert.h>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <numaif.h>
+#include "../drf-sc/common_func.h"
 
-#include <malloc.h>
-#include <time.h>
-#include <infiniband/verbs.h>
-#include <libmemcached/memcached.h>
-#include "hrd_sizes.h"
-
-
-// Multicast
-#include <rdma/rdma_cma.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <byteswap.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <stdbool.h>
-
-
-#define HRD_Q_DEPTH 0	/* Used only by wrappers we do not care about */
-
-#define USE_BIG_OBJECTS 0
-#define EXTRA_CACHE_LINES 0
-#define BASE_VALUE_SIZE 32
-#define SHIFT_BITS (USE_BIG_OBJECTS == 1 ? 3 : 0) // number of bits to shift left or right to calculate the value length
 #define HRD_DEFAULT_PSN 3185	/* PSN for all queues */ // starting Packet Sequence Number
 #define HRD_DEFAULT_QKEY 0x11111111
 #define HRD_MAX_LID 256
-
-#define QP_NAME_SIZE 200	/* Size (in bytes) of a queue pair name */
-#define HRD_RESERVED_NAME_PREFIX "__HRD_RESERVED_NAME_PREFIX"
-
-#define HRD_CONNECT_IB_ATOMICS 0
 #define HERD_LOG_CAP  (1024 * 1024 * 1024)
-#define VALUE_SIZE (USE_BIG_OBJECTS ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
-
-/* Request sizes */
-#define KEY_SIZE 16
-#define TRUE_KEY_SIZE 8 // the key that is actually used by MICA
-#define GRH_SIZE 40 // Global Routing Header
-
 #define HUGE_PAGE_SIZE 2097152
 #define LEVERAGE_TLB_COALESCING 1
-
-#define MTU 4096
-
-/*
- * Small max_inline_data reduces the QP's max WQE w_size, which reduces the
- * DMA w_size in doorbell method of WQE fetch.
- */
-#define HRD_MAX_INLINE  188//(USE_BIG_OBJECTS == 1 ? ((EXTRA_CACHE_LINES * 64) + 60) : 60) //60 is what kalia had here//
-// This is required for ROCE not sure yet why
-
 #define IB_PHYS_PORT 1
 #define USE_HUGE_PAGES 1
-
-/* Useful when `x = (x + 1) % N` is done in a loop */
-#define MOD_ADD(x, N) do { \
-	x = x + 1; \
-	if(x == N) { \
-		x = 0; \
-	} \
-} while(0)
-
-#define MOD_ADD_WITH_BASE(x, N, B) do { \
-	x = x + 1; \
-	if(x == B + N) { \
-		x = B; \
-	} \
-} while(0)
-
-
-
-/* Compile time assert. !!(@condition) converts @condition into a 0/1 bool. */
-#define ct_assert(condition) ((void) sizeof(char[-1 + 2 * !!(condition)]))
-
-/* Ensure that x is between a and b, inclusive */
-#define range_assert(x, a, b) (assert(x >= a && x <= b))
-
-#ifndef likely
-#  define likely(x)       __builtin_expect((x), 1)
-#endif
-
-#ifndef unlikely
-#  define unlikely(x)       __builtin_expect((x), 0)
-#endif
-
-/* Compare, print, and exit */
-#define CPE(val, msg, err_code) \
-	if(unlikely(val)) { fprintf(stderr, msg); fprintf(stderr, " Error %d \n", err_code); \
-	exit(err_code);}
-
-
-#define CEILING(x,y) (((x) + (y) - 1) / (y))
-#define MAX(x,y) ((x) > (y) ? (x) : (y))
-#define MIN(x,y) (x < y ? x : y)
-
-
-#define forceinline inline __attribute__((always_inline))
-#define _unused(x) ((void)(x))	/* Make production build happy */
-
-/* Is pointer x aligned to A-byte alignment? */
-#define is_aligned(x, A) (((uint64_t) x) % A == 0)
-
-
-#define TEST_NZ(x) do { if ( (x)) die("error: " #x " failed (returned non-zero)." ); } while (0)
-#define TEST_Z(x)  do { if (!(x)) die("error: " #x " failed (returned zero/null)."); } while (0)
-
-
-//typedef struct ip_t {
-//	char ip[16];
-//};
-
-extern int is_roce, machine_id, num_threads;
-extern char **remote_ips, *local_ip, *dev_name;
-
-
-struct key {
-  unsigned int bkt			:32;
-  unsigned int server			:16;
-  unsigned int tag			:16;
-};
-
-
-// returns the number of remote IP addresses and fills the remoteIPs array with them
-int getRemoteIPs(char***);
-void die(const char *);
-
-/* Registry info about a QP */
-struct hrd_qp_attr {
-	char name[QP_NAME_SIZE];
-
-	// ROCE
-	uint64_t gid_global_interface_id;	// Needed for RoCE only
-	uint64_t gid_global_subnet_prefix; 	// Needed for RoCE only
-
-	/* Info about the RDMA buffer associated with this QP */
-	uintptr_t buf_addr;
-	uint32_t buf_size;
-	uint32_t rkey;
-
-	int lid;
-	int qpn;
-	uint8_t sl;
-};
-
 
 
 struct hrd_ctrl_blk {
@@ -202,7 +55,7 @@ struct hrd_ctrl_blk {
 	//struct ibv_wc *wc;	/* Array of work completions */
 };
 
-/* Major initialzation functions */
+/* Major initialization functions */
 struct hrd_ctrl_blk* hrd_ctrl_blk_init(int local_hid,
 									   int port_index, int numa_node_id,
 									   int num_conn_qps, int use_uc,
@@ -221,11 +74,8 @@ struct ibv_device* hrd_resolve_port_index(struct hrd_ctrl_blk *cb,
 
 uint16_t hrd_get_local_lid(struct ibv_context *ctx, int port_id);
 
-void hrd_create_conn_qps(struct hrd_ctrl_blk *cb);
 void hrd_create_dgram_qps(struct hrd_ctrl_blk *cb);
 
-void hrd_connect_qp(struct hrd_ctrl_blk *cb,
-					int conn_qp_idx, struct hrd_qp_attr *remote_qp_attr);
 
 /* Post 1 RECV for this queue pair for this buffer. Low performance. */
 void hrd_post_dgram_recv(struct ibv_qp *qp, void *buf_addr, int len, int lkey);
@@ -286,20 +136,6 @@ hrd_poll_cq_ret(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc)
 	return 0;	/* Success */
 }
 
-/* Registry functions */
-void hrd_publish(const char *key, void *value, int len);
-int hrd_get_published(const char *key, void **value);
-
-/* Publish the nth connected queue pair from this cb with this name */
-void hrd_publish_conn_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name);
-
-/* Publish the nth datagram queue pair from this cb with this name */
-void hrd_publish_dgram_qp(struct hrd_ctrl_blk *cb, int n, const char *qp_name, uint8_t sl);
-
-struct hrd_qp_attr* hrd_get_published_qp(const char *qp_name);
-
-void hrd_publish_ready(const char *qp_name);
-void hrd_wait_till_ready(const char *qp_name);
 
 /* Utility functions */
 static inline uint32_t hrd_fastrand(uint64_t *seed)

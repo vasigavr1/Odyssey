@@ -8,7 +8,6 @@
 #define CORE_NUM 8
 #endif
 #include "optik_mod.h"
-#include "hrd.h"
 #include "main.h"
 #include "mica.h"
 #define CACHE_DEBUG 0
@@ -179,7 +178,7 @@ struct extended_cache_meta_stats {
 };
 
 
-struct cache {
+struct kvs {
 	int num_threads;
 	struct mica_kv hash_table;
 	long long total_ops_issued; ///this is only for get and puts
@@ -187,6 +186,7 @@ struct cache {
 	struct cache_meta_stats* meta;
 };
 
+extern struct kvs KVS;
 
 void str_to_binary(uint8_t* value, char* str, int size);
 void print_cache_stats(struct timespec start, int id);
@@ -210,7 +210,7 @@ void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read
                                      struct pending_ops *p_ops,
                                      uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
-// Send an isolated write to the cache-no batching
+// Send an isolated write to the kvs-no batching
 void cache_isolated_op(int t_id, struct write *write);
 
 #endif

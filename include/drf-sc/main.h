@@ -6,7 +6,7 @@
 #include <stdatomic.h>
 #include <stdint-gcc.h>
 #include "city.h"
-#include "hrd.h"
+#include "common_func.h"
 //-------------------------------------------
 /* ----------SYSTEM------------------------ */
 //-------------------------------------------
@@ -40,7 +40,6 @@
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
-#define MAXIMUM_INLINE_SIZE 188
 #define MAX_OP_BATCH_ 51
 #define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
@@ -441,7 +440,7 @@ struct trace_command {
 };
 
 /* ah pointer and qpn are accessed together in the critical path
-   so we are putting them in the same cache line */
+   so we are putting them in the same kvs line */
 struct remote_qp {
 	struct ibv_ah *ah;
 	int qpn;
@@ -1135,7 +1134,7 @@ extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
 // Store statistics from the workers, for the stats thread to use
-struct thread_stats { // 2 cache lines
+struct thread_stats { // 2 kvs lines
 	long long cache_hits_per_thread;
 
 	uint64_t reads_per_thread;
@@ -1265,13 +1264,6 @@ extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 extern FILE* client_log[CLIENTS_PER_MACHINE];
 extern uint64_t time_approx;
-
-
-
-
-
-//extern struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
-
 
 
 
