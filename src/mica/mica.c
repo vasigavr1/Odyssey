@@ -311,26 +311,26 @@ void mica_insert_one(struct mica_kv *kv,
 //	}
 //}
 
-void mica_print_op(struct mica_op *op)
-{
-	assert(op != NULL);
-
-	int i;
-	long long *key = (long long *) &op->key;
-
-	if(op->opcode == MICA_OP_GET) {
-		printf("mica: GET for key %llx %llx\n", key[0], key[1]);
-	}
-
-	if(op->opcode == MICA_OP_PUT) {
-		printf("mica: PUT for key %llx %llx. Value = ", key[0], key[1]);
-		assert(op->val_len > 0 && op->val_len <= MICA_MAX_VALUE);
-		for(i = 0; i < op->val_len; i++) {
-			printf("%d ", op->value[i]);
-		}
-		printf("\n");
-	}
-}
+//void mica_print_op(struct mica_op *op)
+//{
+//	assert(op != NULL);
+//
+//	int i;
+//	long long *key = (long long *) &op->key;
+//
+//	if(op->opcode == MICA_OP_GET) {
+//		printf("mica: GET for key %llx %llx\n", key[0], key[1]);
+//	}
+//
+//	if(op->opcode == MICA_OP_PUT) {
+//		printf("mica: PUT for key %llx %llx. Value = ", key[0], key[1]);
+//		assert(op->val_len > 0 && op->val_len <= MICA_MAX_VALUE);
+//		for(i = 0; i < op->val_len; i++) {
+//			printf("%d ", op->value[i]);
+//		}
+//		printf("\n");
+//	}
+//}
 
 /* A fast deterministic way to generate @n ~randomly distributed 16-byte keys */
 uint128* mica_gen_keys(int n)

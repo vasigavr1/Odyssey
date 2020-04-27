@@ -3,94 +3,12 @@
 
 #include <stdint.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdint-gcc.h>
 #include "city.h"
 #include "common_func.h"
-//-------------------------------------------
-/* ----------SYSTEM------------------------ */
-//-------------------------------------------
-#define TOTAL_CORES 40
-#define TOTAL_CORES_ (TOTAL_CORES - 1)
-#define SOCKET_NUM 2
-#define PHYSICAL_CORES_PER_SOCKET 10
-#define LOGICAL_CORES_PER_SOCKET 20
-#define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
-#define WORKER_HYPERTHREADING 0 // schedule two threads on the same core
-#define MAX_SERVER_PORTS 1 // better not change that
-
-// CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
-#define MACHINE_NUM 3
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 40
-#define MEASURE_LATENCY 0
-#define LATENCY_MACHINE 0
-#define LATENCY_THREAD 15
-#define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 4 //
-#define W_CREDITS 8
-#define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
-#define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
-#define USE_QUORUM 1
-#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define WRITE_FIFO_TIMEOUT M_1
-#define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
-#define ENABLE_ADAPTIVE_INLINING 0 // This did not help
-#define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 1
-#define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 1
-#define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
-#define ENABLE_RMWS_ 1
-#define ENABLE_RMW_ACQUIRES_ 1
-#define EMULATE_ABD 0
-#define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 0
-#define PUT_A_MACHINE_TO_SLEEP 0
-#define MACHINE_THAT_SLEEPS 1
-#define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-#define ENABLE_CLIENTS 0
-#define CLIENTS_PER_MACHINE_ 5
-#define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
-#define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 1
-#define ALL_ABOARD_TIMEOUT_CNT K_16
-
-// HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
-#define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
-#define REM_MACH_NUM (MACHINE_NUM - 1) // Number of remote machines
-#define SESSIONS_PER_MACHINE (WORKERS_PER_MACHINE * SESSIONS_PER_THREAD)
-#define SESSIONS_PER_CLIENT_ (SESSIONS_PER_MACHINE / CLIENTS_PER_MACHINE_)
-#define SESSIONS_PER_CLIENT MAX(1, SESSIONS_PER_CLIENT_)
-#define WORKERS_PER_CLIENT (ENABLE_CLIENTS ? (WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE ) : 0)
-#define GLOBAL_SESSION_NUM (MACHINE_NUM * SESSIONS_PER_MACHINE)
-#define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
 
-// Where to BIND the KVS
-#define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
-// PRINTS -- STATS
-#define ENABLE_CACHE_STATS 0
-#define EXIT_ON_PRINT 0
-#define PRINT_NUM 4
-#define VERIFY_PAXOS 0
-#define PRINT_LOGS 0
-#define COMMIT_LOGS 0
-#define DUMP_STATS_2_FILE 0
-
-// MACROS
-#define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
-#define MY_ASSERT(COND, STR, ARGS...) \
-  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
-#define FIND_PADDING(size) ((64 - (size % 64)) % 64)
-#define MAX_OF_3(x1, y1, x2) (MAX(x1, y1) > (x2) ? (MAX(x1, y1)) : (x2))
-#define MAX_OF_4(x1, y1, x2, y2) (MAX(x1, y1) > MAX(x2, y2) ? (MAX(x1, y1)) : (MAX(x2, y2)))
 
 /*-------------------------------------------------
 	-----------------TRACE-----------------
@@ -414,6 +332,7 @@
 #define DEBUG_SESS_COUNTER M_16
 #define DEBUG_LOG 0
 #define ENABLE_INFO_DUMP_ON_STALL 0
+#define DEBUG_SEQLOCKS 1
 
 #define POLL_CQ_R 0
 #define POLL_CQ_W 1
@@ -502,56 +421,14 @@ struct remote_qp {
 #define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
 
 
-//enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
-enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
 
-struct quorum_info {
-	uint8_t missing_num;
-	uint8_t missing_ids[REM_MACH_NUM];
-	uint8_t active_num;
-	uint8_t active_ids[REM_MACH_NUM];
-  bool send_vector[REM_MACH_NUM];
-	// These are not a machine_ids, they ranges= from 0 to REM_MACH_NUM -1
-	// to facilitate usage with the ib_send_wrs
-	uint8_t first_active_rm_id;
-	uint8_t last_active_rm_id;
-};
-
-// unique RMW id-- each machine must remember how many
-// RMW each thread has committed, to avoid committing an RMW twice
- struct rmw_id {
-   uint16_t glob_sess_id; // global session id
-   uint64_t id; // the local rmw id of the source
- };
-
-struct net_rmw_id {
-  uint16_t glob_sess_id; // global session id
-  uint64_t id; // the local rmw id of the source
-}__attribute__((__packed__));
-
-
-// flags that help to compare TS
-#define REGULAR_TS 0
-#define NETW_TS 1
-#define META_TS 2
-
-// format of a Timestamp tuple (Lamport clock)
-struct network_ts_tuple {
-  uint8_t m_id;
-  uint32_t version;
-} __attribute__((__packed__));
-
-struct ts_tuple {
-  uint8_t m_id;
-  uint32_t version;
-};
 
 struct cache_resp {
   uint8_t type;
   uint8_t glob_entry_state;
   uint32_t rmw_entry; // index into global rmw entries
   uint32_t log_no; // the log_number of an RMW
-  cache_meta *kv_pair_ptr;
+  mica_op_t *kv_pair_ptr;
   struct ts_tuple glob_ts;
   struct rmw_id glob_entry_rmw_id;
 };
@@ -906,6 +783,7 @@ struct rmw_rep_info {
 
 };
 
+
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
 struct rmw_local_entry {
   struct ts_tuple new_ts;
@@ -934,7 +812,7 @@ struct rmw_local_entry {
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
   uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases
-  cache_meta *ptr_to_kv_pair;
+  mica_op_t *ptr_to_kv_pair;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
 };

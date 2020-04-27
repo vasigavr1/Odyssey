@@ -1,13 +1,13 @@
 LD      := gcc
-LDFLAGS := -O3 -std=gnu11 -flto  -libverbs -lrt -lpthread -lnuma -lrdmacm
+LDFLAGS := -O3 -std=gnu11 -flto  -libverbs -lpthread -lnuma -lrdmacm
 CC  = gcc
-CFLAGS   = -O3 -std=gnu11 -g -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc -I../../include/optik
+CFLAGS   = -O3 -std=gnu11 -g -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc
 APPS    := drf-sc clean-o
 PROF    := -g -fno-omit-frame-pointer
 
 all: ${APPS}
 
-drf-sc: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o ../mica/mica.o ../mica/city.o main.o client.o worker.o kvs.o util.o stats.o
+drf-sc: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o  ../mica/city.o main.o client.o worker.o kvs.o util.o stats.o
 	${LD} -o $@ $^ ${LDFLAGS}
 
 

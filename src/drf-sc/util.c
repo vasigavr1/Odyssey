@@ -1,5 +1,6 @@
-#include <util.h>
 #include "util.h"
+#include <getopt.h>
+//#include "util.h"
 
 //struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
 all_qp_attr_t *all_qp_attr;
@@ -7,6 +8,8 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 void static_assert_compile_parameters()
 {
+
+//  static_assert(MICA_OP_SIZE == sizeof(mica_op_t), "Please fix constexpr MICA_OP_SIZE");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
@@ -73,7 +76,7 @@ void static_assert_compile_parameters()
   // RMWs
   static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
   static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
-  static_assert(NUM_OF_RMW_KEYS < CACHE_NUM_KEYS, "");
+  static_assert(NUM_OF_RMW_KEYS < KVS_NUM_KEYS, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
   static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
@@ -179,7 +182,7 @@ void init_globals()
   memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
   memset((struct client_stats*) c_stats, 0, CLIENTS_PER_MACHINE * sizeof(struct client_stats));
   qps_are_set_up = false;
-  cache_init(0, WORKERS_PER_MACHINE);
+  custom_mica_init(0);
   uint16_t per_machine_s_i = 0;
   for (uint16_t w_i = 0; w_i < WORKERS_PER_MACHINE; w_i++) {
     for (uint16_t s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
@@ -327,7 +330,7 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
       opc_info->sc_writes++;
     }
     else {
-      opcode = CACHE_OP_PUT;
+      opcode = KVS_OP_PUT;
       opc_info->writes++;
     }
   }
@@ -337,7 +340,7 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
       opc_info->sc_reads++;
     }
     else {
-      opcode = CACHE_OP_GET;
+      opcode = KVS_OP_GET;
       opc_info->reads++;
     }
   }
@@ -481,7 +484,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
     else {
       bool found = false;
       do {
-        key_id = (uint32) rand() % CACHE_NUM_KEYS; //rand_r(&seed) % CACHE_NUM_KEYS;
+        key_id = (uint32) rand() % KVS_NUM_KEYS; //rand_r(&seed) % CACHE_NUM_KEYS;
         found = false;
         for (uint32_t j = 0; j < NUM_OF_RMW_KEYS; j++)
           if (key_id == keys_that_get_rmwed[j]) found = true;

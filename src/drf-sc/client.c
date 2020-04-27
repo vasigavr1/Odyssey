@@ -119,7 +119,7 @@ static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * v
       break;
     default: return ERROR_WRONG_REQ_TYPE;
   }
- if (key_id >= CACHE_NUM_KEYS)
+ if (key_id >= KVS_NUM_KEYS)
    return ERROR_KEY_ID_DOES_NOT_EXIST;
 
  if (key_id < NUM_OF_RMW_KEYS) {
@@ -145,14 +145,14 @@ static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint
   switch (type) {
     case RLXD_READ_BLOCKING:
       cl_op->value_to_read = value_to_read;
-      cl_op->opcode = (uint8_t) CACHE_OP_GET;
+      cl_op->opcode = (uint8_t) KVS_OP_GET;
       break;
     case ACQUIRE_BLOCKING:
       cl_op->value_to_read = value_to_read;
       cl_op->opcode = (uint8_t) OP_ACQUIRE;
       break;
     case RLXD_WRITE_BLOCKING:
-      cl_op->opcode = (uint8_t) (key_id >= NUM_OF_RMW_KEYS ? CACHE_OP_PUT : RMW_PLAIN_WRITE);
+      cl_op->opcode = (uint8_t) (key_id >= NUM_OF_RMW_KEYS ? KVS_OP_PUT : RMW_PLAIN_WRITE);
       memcpy(cl_op->value_to_write, value_to_write, val_len);
       break;
     case RELEASE_BLOCKING:
@@ -183,7 +183,7 @@ static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint
 static inline void check_return_values(struct client_op *cl_op)
 {
   switch (cl_op->opcode) {
-    case CACHE_OP_PUT:
+    case KVS_OP_PUT:
       if (ENABLE_ASSERTIONS) {
         assert(cl_op->val_len <= VALUE_SIZE);
         memset(cl_op->value_to_write, 255, cl_op->val_len);
@@ -905,7 +905,7 @@ static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id,
   uint32_t top_key_id = stack_id;
   assert(top_key_id < NUM_OF_RMW_KEYS);
   assert(key_id_to_push >= NUM_OF_RMW_KEYS);
-  assert(key_id_to_push < CACHE_NUM_KEYS);
+  assert(key_id_to_push < KVS_NUM_KEYS);
   assert(session_id < SESSIONS_PER_MACHINE);
   assert(sizeof(struct top) <= RMW_VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);

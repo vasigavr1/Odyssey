@@ -10,24 +10,8 @@
 #include "hrd.h"
 #include <stdint.h>
 
-/*
- * The polling logic in HERD requires the following:
- * 1. 0 < MICA_OP_GET < MICA_OP_PUT < HERD_OP_GET < HERD_OP_PUT
- * 2. HERD_OP_GET = MICA_OP_GET + HERD_MICA_OFFSET
- * 3. HERD_OP_PUT = MICA_OP_PUT + HERD_MICA_OFFSET
- *
- * This allows us to detect HERD requests by checking if the request region
- * opcode is more than MICA_OP_PUT. And then we can convert a HERD opcode to
- * a MICA opcode by subtracting HERD_MICA_OFFSET from it.
- */
-#define MICA_OP_GET 111
-#define MICA_OP_PUT 112
-#define MICA_OP_MULTI_GET 117
-#define MICA_MAX_BATCH_SIZE 512
 
-#define MICA_RESP_GET_SUCCESS 113
-#define MICA_RESP_PUT_SUCCESS 114
-#define MICA_RESP_GET_FAIL 115
+
 
 /* Ensure that a mica_op is cacheline aligned */
 #define MICA_OP_METADATA (sizeof(struct mica_key) + sizeof(uint8_t) + sizeof(uint8_t))

@@ -6,12 +6,11 @@
 #ifndef HRD_H
 #define HRD_H
 
-#include "../drf-sc/common_func.h"
+#include "common_func.h"
 
 #define HRD_DEFAULT_PSN 3185	/* PSN for all queues */ // starting Packet Sequence Number
 #define HRD_DEFAULT_QKEY 0x11111111
 #define HRD_MAX_LID 256
-#define HERD_LOG_CAP  (1024 * 1024 * 1024)
 #define HUGE_PAGE_SIZE 2097152
 #define LEVERAGE_TLB_COALESCING 1
 #define IB_PHYS_PORT 1
