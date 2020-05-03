@@ -366,6 +366,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
            //     kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
 			resp[op_i].type = KVS_MISS;
 		}
+    else printf("hit \n");
 	}
 }
 

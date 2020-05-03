@@ -9,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
-//#include <optik_mod.h>
+
 
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
@@ -44,30 +44,6 @@ static inline void optik_lock(seqlock_t *seqlock)
 
 }
 
-// TODO refactor name
-static inline void
-optik_unlock_decrement_version(seqlock_t *seqlock)
-{
-  if (WORKERS_PER_MACHINE == 1) return;
-  uint64_t new_lock = ((uint64_t) (*seqlock) + 1);
-  if (DEBUG_SEQLOCKS) assert(is_even(new_lock));
-  atomic_store_explicit(seqlock, new_lock, memory_order_release);
-}
-
-static inline void
-optik_unlock_write(seqlock_t* seqlock, uint32_t* resp_version)
-{
-  uint64_t tmp = *seqlock;
-  if (DEBUG_SEQLOCKS) {
-    assert(tmp % 2 == 1);
-  }
-
-  // doing this with the  ++ opeartor will result in an RMW
-  atomic_store_explicit(seqlock, tmp + 1, memory_order_release);
-  (*resp_version) = (uint32_t) (tmp + 1);
-}
-
-
 static inline void optik_unlock(seqlock_t* seqlock)
 {
   uint64_t tmp = *seqlock;
@@ -86,8 +62,7 @@ static inline uint64_t read_seqlock_lock_free(seqlock_t *seqlock)
   }
   uint64_t tmp_lock;
   do {
-    tmp_lock = (uint64_t) atomic_load_explicit
-    (seqlock, memory_order_acquire);
+    tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
   } while (is_odd(tmp_lock));
 
   return tmp_lock;
@@ -98,34 +73,11 @@ static inline bool check_seqlock_lock_free(seqlock_t *seqlock,
                                            uint64_t tmp_lock)
 {
   if (!ENABLE_LOCK_FREE_READING) {
-    optik_unlock_decrement_version(seqlock);
+    optik_unlock(seqlock);
     return true;
   }
   COMPILER_BARRIER();
-  return  tmp_lock == (uint64_t) atomic_load_explicit
-  (seqlock, memory_order_acquire);
-}
-
-
-// TODO this is wrong
-static inline int optik_is_greater_version(struct ts_tuple curr,
-                                           struct ts_tuple receiv)
-{
-  return curr.version < receiv.version ||
-         ((curr.version - 1) == receiv.version && curr.m_id < receiv.m_id);
-}
-
-static inline int optik_is_greater_than_netw_ts(struct ts_tuple curr,
-                                                struct network_ts_tuple receiv)
-{
-  return curr.version < receiv.version ||
-         ((curr.version - 1) == receiv.version && curr.m_id < receiv.m_id);
-}
-
-static inline bool
-optik_is_same_version_and_valid_netw_ts_meta(struct network_ts_tuple v1, volatile cache_meta v2)
-{
-  return v1.version == v2.version && v1.m_id == v2.m_id && v1.version % 2 == 0;
+  return  tmp_lock == (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
 }
 
 
@@ -162,12 +114,6 @@ static inline void circulate_pointers(void** ptr_1, void** ptr_2, void** ptr_3)
 	*ptr_3 = tmp;
 }
 
-// Check whether 2 key hashes are equal
-static inline bool keys_are_equal(struct cache_key* key1, struct cache_key* key2) {
-	return (key1->bkt    == key2->bkt &&
-			key1->server == key2->server &&
-			key1->tag    == key2->tag);
-}
 
 // Check whether 2 key hashes are equal
 static inline bool true_keys_are_equal(struct key* key1, struct key* key2) {
@@ -228,39 +174,6 @@ static inline enum ts_compare compare_netw_ts_with_ts(struct network_ts_tuple *t
 
   return ERROR;
 }
-
-static inline enum ts_compare compare_meta_ts_with_ts(cache_meta *ts1, struct ts_tuple *ts2) {
-  if ((ts1->version == ts2->version) &&
-      (ts1->m_id == ts2->m_id))
-    return EQUAL;
-  else if ((ts1->version < ts2->version) ||
-           ((ts1->version == ts2->version) &&
-            (ts1->m_id < ts2->m_id)))
-    return SMALLER;
-  else if ((ts1->version > ts2->version) ||
-           ((ts1->version == ts2->version)) &&
-           (ts1->m_id > ts2->m_id))
-    return GREATER;
-
-  return ERROR;
-}
-
-static inline enum ts_compare compare_meta_ts_with_flat(cache_meta *ts1, uint32_t version2, uint8_t m_id2) {
-  if ((ts1->version == version2) &&
-      (ts1->m_id == m_id2))
-    return EQUAL;
-  else if ((ts1->version < version2) ||
-           ((ts1->version == version2) &&
-            (ts1->m_id < m_id2)))
-    return SMALLER;
-  else if ((ts1->version > version2) ||
-           ((ts1->version == version2)) &&
-           (ts1->m_id > m_id2))
-    return GREATER;
-
-  return ERROR;
-}
-
 
 static inline enum ts_compare compare_ts_with_flat(struct ts_tuple *ts1, uint32_t version2, uint8_t m_id2) {
   if ((ts1->version == version2) &&
@@ -358,14 +271,6 @@ static inline void assign_netw_ts_to_ts(struct ts_tuple *ts1, struct network_ts_
   ts1->version = ts2->version;
 }
 
-
-// Check whether 2 keys (including the metadata) are equal
-static inline uint8_t keys_and_meta_are_equal(struct cache_key* key1, struct cache_key* key2) {
-	return (uint8_t) ((key1->bkt    == key2->bkt &&
-			key1->server == key2->server &&
-			key1->tag    == key2->tag &&
-			key1->meta.version == key2->meta.version) ? 1 : 0);
-}
 
 // A condition to be used to trigger periodic (but rare) measurements
 static inline bool trigger_measurement(uint16_t local_client_id)
@@ -1175,10 +1080,6 @@ static inline void print_verbouse_debug_info(struct pending_ops *p_ops, uint16_t
   print_for_debug = false;
 }
 
-static inline void print_mica_key(struct cache_key *key)
-{
-
-}
 
 static inline void print_true_key(struct key *key)
 {
@@ -1624,7 +1525,7 @@ static inline void check_keys_with_two_cache_ops(struct trace_op* op, mica_op_t*
 {
   if (ENABLE_ASSERTIONS) {
     struct key *rmw_entry_key = &rmw.entry[entry].key;
-    struct key *op_key = (struct key *) (((void *) op) + sizeof(cache_meta));
+    struct key *op_key = &op->key;
     struct key *kv_key = &kv_ptr->key;
     if (!(true_keys_are_equal(rmw_entry_key, kv_key) &&
           (true_keys_are_equal(rmw_entry_key, op_key)) &&
@@ -2031,7 +1932,7 @@ static inline void free_glob_entry_if_rmw_failed(struct rmw_local_entry *loc_ent
         assert(false);
     }
     check_log_nos_of_glob_entry(glob_entry, "free_glob_entry_if_prop_failed", t_id);
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   }
 }
 
@@ -3561,12 +3462,12 @@ static inline uint32_t grab_RMW_entry(uint8_t state, mica_op_t *kv_ptr,
       assert(state == PROPOSED || state == ACCEPTED);
     }
   }
-  glob_entry->key = *((struct key *) (((void *) kv_ptr) + sizeof(cache_meta)));
+  glob_entry->key = kv_ptr->key; //*((struct key *) (((void *) kv_ptr) + sizeof(cache_meta)));
   //cyan_printf("Global Rmw entry %u/%u kv_ptr %lu got key: ", next_entry, *(uint32_t *) kv_ptr->value, kv_ptr->value);
   //print_true_key(&glob_entry->key);
   glob_entry->log_no = log_no; // not necessarily 1 if a remote machine is grabbing here
   if (ENABLE_ASSERTIONS) {
-    true_keys_are_equal(&glob_entry->key, (struct key*) (((void*) kv_ptr) + sizeof(cache_meta)));
+    true_keys_are_equal(&glob_entry->key, &kv_ptr->key);
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
   }
   return next_entry;
@@ -5146,7 +5047,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
   optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return NACK_ALREADY_COMMITTED;
   }
 
@@ -5184,7 +5085,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
       glob_entry->dbg->proposed_rmw_id = loc_entry->rmw_id;
     }
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept and succeed", t_id);
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return_flag = ACCEPT_ACK;
   }
   else { // the entry stores a different rmw_id and thus our proposal has been won by another
@@ -5214,7 +5115,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
 
 
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept and fail", t_id);
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   }
   return return_flag;
 }
@@ -5235,7 +5136,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
   optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   if (help_loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[help_loc_entry->rmw_id.glob_sess_id]) {
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     //if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
      // cyan_printf("Sess %u aborts because the rmw-id is already registered \n", loc_entry->sess_id);
     return ABORT_HELP;
@@ -5295,7 +5196,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     glob_entry->accepted_rmw_id = glob_entry->rmw_id;
     memcpy(glob_entry->value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept_to_help and succeed", t_id);
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return_flag = ACCEPT_ACK;
   }
   else {
@@ -5310,7 +5211,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
 
 
     check_log_nos_of_glob_entry(glob_entry, "attempt_local_accept_to_help and fail", t_id);
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   }
   return return_flag;
 }
@@ -5392,7 +5293,7 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
                                                 loc_entry_to_commit->rmw_id.glob_sess_id,
                                                 "attempt_local_commit", t_id);
 
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (DEBUG_RMW)
     green_printf("Wrkr %u will broadcast commits for rmw id %u, glob sess %u, "
                  "global entry rmw id %u, glob sess %u, state %u \n",
@@ -5459,7 +5360,7 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
   register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
   check_registered_against_glob_last_registered(glob_entry, new_rmw_id, new_glob_sess_id,
                                                 "attempt_local_commit_from_rep", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
 
   if (DEBUG_LOG)
@@ -5575,7 +5476,7 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   check_registered_against_glob_last_registered(glob_entry, rmw_l_id, glob_sess_id,
                                                 "handle remote commit", t_id);
 
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
   return number_of_reqs;
 
 }
@@ -5950,7 +5851,7 @@ static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_
     kv_pair->ts.m_id = loc_entry->rmw_reps.kvs_higher_ts.m_id;
   }
   check_log_nos_of_glob_entry(glob_entry, "update_KVS_on_receiving_a_TS_stale_rep", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
 }
 
 //------------------------------HELP STUCK RMW------------------------------------------
@@ -5967,7 +5868,7 @@ static inline bool attempt_to_grab_global_entry_after_waiting(struct pending_ops
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
   optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return true;
   }
   if (glob_entry->state == INVALID_RMW) {
@@ -6024,7 +5925,7 @@ static inline bool attempt_to_grab_global_entry_after_waiting(struct pending_ops
     loc_entry->back_off_cntr = 0;
   }
   check_log_nos_of_glob_entry(glob_entry, "attempt_to_grab_global_entry_after_waiting", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (global_entry_was_grabbed) {
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, version,
                                           PROPOSED, sess_i, t_id);
@@ -6072,7 +5973,7 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
     help = true;
   }
   check_log_nos_of_glob_entry(glob_entry, "attempt_to_help_a_locally_accepted_value", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   loc_entry->back_off_cntr = 0;
   if (help) {
@@ -6091,7 +5992,7 @@ static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *
   bool global_entry_was_grabbed = false;
   optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return ;
   }
   uint32_t new_version = 0;
@@ -6122,7 +6023,7 @@ static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *
   }
   else if (ENABLE_ASSERTIONS) assert(false);
   check_log_nos_of_glob_entry(glob_entry, "attempt_to_steal_a_proposed_global_entry", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
   loc_entry->back_off_cntr = 0;
   if (global_entry_was_grabbed) {
     if (DEBUG_RMW)
@@ -6146,7 +6047,7 @@ static inline void take_global_entry_with_higher_TS(struct pending_ops *p_ops,
   struct rmw_entry* glob_entry = &rmw.entry[loc_entry->index_to_rmw];
   optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-    optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return;
   }
   bool is_still_proposed = rmw_ids_are_equal(&glob_entry->rmw_id, &loc_entry->rmw_id) &&
@@ -6207,7 +6108,7 @@ static inline void take_global_entry_with_higher_TS(struct pending_ops *p_ops,
                     glob_entry->rmw_id.id, glob_entry->rmw_id.glob_sess_id, glob_entry->state);
   }
   check_log_nos_of_glob_entry(glob_entry, "take_global_entry_with_higher_TS", t_id);
-  optik_unlock_decrement_version(&loc_entry->ptr_to_kv_pair->seqlock);
+  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   if (global_entry_was_grabbed) {
     if (DEBUG_RMW)
@@ -7952,7 +7853,8 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
                                                      uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-  cache_meta prev_meta;
+  uint16_t kv_epoch = 0;
+  struct ts_tuple kvs_tuple;
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
   //Lock free reads through versioning (successful when version is even)
@@ -7970,7 +7872,8 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
   if (!value_forwarded) {
     uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
     do {
-//      prev_meta = kv_ptr->key.meta;
+      kv_epoch = kv_ptr->epoch_id;
+      kvs_tuple = kv_ptr->ts;
       debug_stalling_on_lock(&debug_cntr, "trace read/acquire", t_id);
       //memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr->value, VALUE_SIZE);
       if (ENABLE_ASSERTIONS) assert(op->value_to_read != NULL);
@@ -7980,17 +7883,17 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
   }
   // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
   if (!value_forwarded &&
-      (*(uint16_t *)prev_meta.epoch_id < epoch_id || op->opcode == OP_ACQUIRE)) {
+      (kv_epoch < epoch_id || op->opcode == OP_ACQUIRE)) {
     r_info->opcode = op->opcode;
-    r_info->ts_to_read.m_id = prev_meta.m_id;
-    r_info->ts_to_read.version = prev_meta.version;
+    r_info->ts_to_read.m_id = kvs_tuple.m_id;
+    r_info->ts_to_read.version = kvs_tuple.version;
     r_info->key = op->key;
     r_info->r_ptr = r_push_ptr;
     // Copy the value in the read info too.
     memcpy(r_info->value, op->value_to_read, op->real_val_len);
     r_info->value_to_read = op->value_to_read;
     r_info->val_len = op->real_val_len;
-    if (ENABLE_ASSERTIONS) op->ts.version = prev_meta.version;
+    if (ENABLE_ASSERTIONS) op->ts.version = kvs_tuple.version;
     resp->type = KVS_GET_SUCCESS;
     if (ENABLE_STAT_COUNTING && op->opcode == KVS_OP_GET) {
       t_stats[t_id].quorum_reads++;
@@ -8021,8 +7924,8 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     uint32_t r_push_ptr = *r_push_ptr_;
     struct read_info *r_info = &p_ops->read_info[r_push_ptr];
     r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
-    r_info->ts_to_read.version = kv_ptr->ts.version - 1;
-    optik_unlock_decrement_version(&kv_ptr->seqlock);
+    r_info->ts_to_read.version = kv_ptr->ts.version;
+    optik_unlock(&kv_ptr->seqlock);
     r_info->opcode = op->opcode;
     r_info->key = op->key;
     r_info->r_ptr = r_push_ptr;
@@ -8049,7 +7952,9 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     // This also writes the new version to op
     kv_ptr->ts.m_id = (uint8_t) machine_id;
-    optik_unlock_write(&kv_ptr->seqlock, (uint32_t *) &op->ts.version);
+    kv_ptr->ts.version++;
+    op->ts.version = kv_ptr->ts.version;
+    optik_unlock(&kv_ptr->seqlock);
     resp->type = KVS_PUT_SUCCESS;
   }
 }
@@ -8062,19 +7967,19 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
                                            uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-  cache_meta prev_meta;
+  struct ts_tuple kvs_tuple;
   uint32_t r_push_ptr = *r_push_ptr_;
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
   uint32_t debug_cntr = 0;
   uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
   do {
-//    prev_meta = kv_ptr->key.meta;
+    kvs_tuple = kv_ptr->ts;
     debug_stalling_on_lock(&debug_cntr, "trace releases", t_id);
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, tmp_lock)));
 
-  if (ENABLE_ASSERTIONS) op->ts.version = prev_meta.version;
-  r_info->ts_to_read.m_id = prev_meta.m_id;
-  r_info->ts_to_read.version = prev_meta.version;
+  if (ENABLE_ASSERTIONS) op->ts.version = kvs_tuple.version;
+  r_info->ts_to_read.m_id = kvs_tuple.m_id;
+  r_info->ts_to_read.version = kvs_tuple.version;
   r_info->key = op->key;
   r_info->opcode = op->opcode;
   r_info->r_ptr = r_push_ptr;
@@ -8103,7 +8008,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
       // sess_id is stored in the first bytes of op
       uint32_t new_log_no = 1;
-      new_version = kv_ptr->ts.version + 1;
+      new_version = 2; //kv_ptr->ts.version + 1;
       entry = grab_RMW_entry(PROPOSED, kv_ptr, op->opcode,
                              (uint8_t) machine_id, new_version,
                              rmw_l_id, new_log_no,
@@ -8151,7 +8056,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
       if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) assert(rmw.entry[entry].state == INVALID_RMW);
     }
   }
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
   resp->rmw_entry = entry;
   if (resp->type != RMW_FAILURE) (*rmw_l_id_)++;
 }
@@ -8181,7 +8086,7 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, mica_op_t *kv
   r_info->ts_to_read.version = kv_ptr->ts.version - 1;
   r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
   memcpy(op->value_to_read, &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len);
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
 
   // Copy the value to the read_info too
   memcpy(r_info->value, op->value_to_read, op->real_val_len);
@@ -8208,7 +8113,7 @@ static inline void KVS_from_trace_rmw_rlxd_read(struct trace_op *op, mica_op_t *
   struct read_info *r_info = &p_ops->read_info[r_push_ptr];
   optik_lock(&kv_ptr->seqlock);
   memcpy(op->value_to_read, &kv_ptr->value[RMW_BYTE_OFFSET], op->real_val_len);
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
   resp->type = KVS_LOCAL_GET_SUCCESS;
   // this is needed to trick the version check in batch_from_trace_to_cache()
   if (ENABLE_ASSERTIONS) op->ts.version = 0;
@@ -8224,7 +8129,7 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct trace_op *o
   //red_printf("received op %u with value %u \n", op->opcode, op->value[0]);
 //  if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
   optik_lock(&kv_ptr->seqlock);
-  if (optik_is_greater_than_netw_ts(kv_ptr->ts, op->ts)) {
+  if (compare_netw_ts_with_ts(&op->ts, &kv_ptr->ts) == GREATER) {
     update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
                        op->value, "rem write", LOG_WS);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
@@ -8234,7 +8139,7 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct trace_op *o
     optik_unlock(&kv_ptr->seqlock);
 
   } else {
-    optik_unlock_decrement_version(&kv_ptr->seqlock);
+    optik_unlock(&kv_ptr->seqlock);
     if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
   }
 }
@@ -8306,7 +8211,7 @@ static inline void KVS_updates_accepts(struct trace_op *op, mica_op_t *kv_ptr,
     number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
   }
   check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received accept", t_id);
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
   if (PRINT_LOGS)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",
@@ -8446,7 +8351,7 @@ static inline void KVS_reads_proposes(struct trace_op *op, mica_op_t *kv_ptr,
     number_of_reqs = rmw.entry[entry].dbg->prop_acc_num;
   }
   check_log_nos_of_glob_entry(&rmw.entry[entry], "Unlocking after received propose", t_id);
-  optik_unlock_decrement_version(&kv_ptr->seqlock);
+  optik_unlock(&kv_ptr->seqlock);
   if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",  kv_ptr->key.bkt, log_no, number_of_reqs, prop_m_id,
@@ -8487,7 +8392,7 @@ static inline void KVS_reads_rmw_acquires(struct trace_op *op, mica_op_t *kv_ptr
       acq_rep->glob_sess_id = glob_entry->last_committed_rmw_id.glob_sess_id;
       memcpy(acq_rep->value, &kv_ptr->value[RMW_BYTE_OFFSET], (size_t) RMW_VALUE_SIZE);
       acq_rep->log_no = glob_entry->last_committed_log_no;
-      acq_rep->ts.version = kv_ptr->ts.version - 1;
+      acq_rep->ts.version = kv_ptr->ts.version;
       acq_rep->ts.m_id = kv_ptr->ts.m_id;
     }
     else if (glob_entry->last_committed_log_no < acq_log_no) {
@@ -8511,8 +8416,8 @@ static inline void KVS_out_of_epoch_writes(struct read_info *op, mica_op_t *kv_p
   optik_lock(&kv_ptr->seqlock);
   rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
   // find the the max ts and write it in the kvs
-  if (!optik_is_greater_version(kv_ptr->ts, op->ts_to_read))
-    op->ts_to_read.version = kv_ptr->ts.version + 1;
+  if (kv_ptr->ts.version > op->ts_to_read.version)
+    op->ts_to_read.version = kv_ptr->ts.version;
   memcpy(kv_ptr->value, op->value, op->val_len);
   kv_ptr->ts.m_id = op->ts_to_read.m_id;
   kv_ptr->ts.version = op->ts_to_read.version;
@@ -8533,10 +8438,10 @@ static inline void KVS_out_of_epoch_writes(struct read_info *op, mica_op_t *kv_p
 static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, mica_op_t *kv_ptr,
                                                        uint16_t t_id)
 {
-  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
+//  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
   optik_lock(&kv_ptr->seqlock);
 
-  if (optik_is_greater_version(kv_ptr->ts, op->ts_to_read)) {
+  if (compare_ts(&kv_ptr->ts, &op->ts_to_read) == SMALLER) {
     rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
     memcpy(kv_ptr->value, op->value, op->val_len);
     kv_ptr->ts.m_id =  op->ts_to_read.m_id;

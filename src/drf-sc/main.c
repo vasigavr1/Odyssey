@@ -36,6 +36,9 @@ uint64_t time_approx;
 
 int main(int argc, char *argv[])
 {
+	printf("MICA OP size %ld \n", sizeof(mica_op_t));
+
+
 	uint16_t i = 0;
   print_parameters_in_the_start();
   static_assert_compile_parameters();

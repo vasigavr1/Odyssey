@@ -13,8 +13,8 @@ void static_assert_compile_parameters()
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
-  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
-  static_assert(sizeof(cache_meta) == 8, "");
+//  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
+//  static_assert(sizeof(cache_meta) == 8, "");
 
   static_assert(SESSIONS_PER_THREAD < K_64, "");
   static_assert(SESSIONS_PER_THREAD > 0, "");

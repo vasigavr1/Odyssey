@@ -74,7 +74,7 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 3
 #define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
@@ -274,7 +274,7 @@ struct ts_tuple {
 };
 
 typedef atomic_uint_fast64_t seqlock_t;
-#define MICA_OP_SIZE_  (128 + (2 * (VALUE_SIZE)))
+#define MICA_OP_SIZE_  (144 + (2 * (VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
 typedef struct  {
