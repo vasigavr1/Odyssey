@@ -28,12 +28,12 @@
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE CLIENT_USE_TRACE
+#define CLIENT_MODE MSQ_ASYNC
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
 
-#define MS_WRITES_NUM 1
+#define MS_WRITES_NUM 4
 #define MS_NO_CONFLICT 0
 #define CLIENT_LOGS 0
 
@@ -78,7 +78,7 @@
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 5000
+#define NUM_OF_RMW_KEYS 50000
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0

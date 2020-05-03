@@ -14,6 +14,26 @@
 
 mica_kv_t *KVS;
 
+
+uint128* mica_gen_keys(int n)
+{
+  int i;
+  assert(n > 0 && n <= M_1024 / sizeof(uint128));
+  assert(sizeof(uint128) == 16);
+
+  // printf("mica: Generating %d keys\n", n);
+
+  uint128 *key_arr = malloc(n * sizeof(uint128));
+  assert(key_arr != NULL);
+
+  for(i = 0; i < n; i++) {
+    key_arr[i] = CityHash128((char *) &i, 4);
+  }
+
+  return key_arr;
+}
+
+
 int is_power_of_2(int x)
 {
   return (
@@ -208,13 +228,17 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   mica_op_t * saved_kv_ptr = (mica_op_t *) log_ptr;
   mica_op_t * first_kv_ptr = (mica_op_t *) kvs->ht_log;
 
+  //my_printf(green, "Inserting key:bkt %u, server %u, tag %u, in position %lu/%p in bkt %u \n",
+  //          saved_kv_ptr->key.bkt, saved_kv_ptr->key.server, saved_kv_ptr->key.tag,
+  //          KVS->log_head, log_ptr, bkt);
+
 
   /*my_printf(green, "New key:bkt %u, server %u, tag %u, in position %lu/%p \n",
             saved_kv_ptr->key.bkt, saved_kv_ptr->key.server, saved_kv_ptr->key.tag,
-            kv->log_head, log_ptr);
+            KVS->log_head, log_ptr);
   my_printf(green, "First key:bkt %u, server %u, tag %u, in position %lu/%p \n",
             first_kv_ptr->key.bkt, first_kv_ptr->key.server, first_kv_ptr->key.tag,
-            0, kv->ht_log);*/
+            0, KVS->ht_log);*/
 
 
 
@@ -252,20 +276,26 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
   assert(kvs->num_insert_op == 0 && kvs->num_index_evictions == 0);
 
   int i;
-  mica_op_t * op = (mica_op_t *) calloc(1, sizeof(mica_op_t));
-  unsigned long long * op_key = (unsigned long long *) &op->key;
+  mica_op_t *op = (mica_op_t *) calloc(1, sizeof(mica_op_t));
+  unsigned long *op_key = (unsigned long *) &op->key;
 
   /* Generate the keys to insert */
-  uint128 *key_arr = mica_gen_keys(n);
+//  uint128 *key_arr = mica_gen_keys(n);
 
-  for(i = n - 1; i >= 0; i--) {
-    (*op_key) = key_arr[i].second;
+//  for(i = n - 1; i >= 0; i--) {
+  for(uint32_t key_id = 0; key_id < KVS_NUM_KEYS; key_id++) {
+    uint128 key_hash = CityHash128((char *) &(key_id), 4);
+    (*op_key) = key_hash.second;
+    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
+      op->opcode = KEY_HAS_NEVER_BEEN_RMWED;
+    else op->opcode = KEY_IS_NOT_RMWABLE;
     //printf("%u \n", sizeof(decltype(op_key[1])));
     //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
     //op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
     //uint8_t val = 0;//(uint8_t) (op_key[1] & 0xff);
     //memset(op.value, val, (uint32_t) val_len);
-    // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
+//    green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",
+//                 key_id, op->key.bkt, op->key.server, op->key.tag);
     mica_insert_one(kvs, op);
   }
 
@@ -302,7 +332,7 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
 	 */
   for(op_i = 0; op_i < op_num; op_i++) {
 //    struct cache_op *c_op = (struct cache_op*) &op[op_i];
-    KVS_locate_one_bucket(op_i, bkt, op->key, bkt_ptr, tag, kv_ptr,
+    KVS_locate_one_bucket(op_i, bkt, op[op_i].key, bkt_ptr, tag, kv_ptr,
                           key_in_store, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
@@ -310,12 +340,14 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
   uint64_t rmw_l_id = p_ops->prop_info->l_id;
   uint32_t r_push_ptr = p_ops->r_push_ptr;
 	for(op_i = 0; op_i < op_num; op_i++) {
+    if (kv_ptr[op_i] == NULL) assert(false);
 		if(kv_ptr[op_i] != NULL) {
 			/* We had a tag match earlier. Now compare log entry. */
-			long long *key_ptr_log = (long long *) kv_ptr[op_i];
-			long long *key_ptr_req = (long long *) &op[op_i];
-
-			if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &op[op_i].key, TRUE_KEY_SIZE) == 0;
+			if(key_found) { //Cache Hit
+//        red_printf("Cache_hit %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+//                   op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
+//                   kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
         key_in_store[op_i] = 1;
         if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
           if (op[op_i].opcode == KVS_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
@@ -358,15 +390,19 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
         }
         else if (ENABLE_ASSERTIONS) assert(false);
       }
+      else {
+        red_printf("Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+                op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
+                kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
+      }
 		}
 		if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-      red_printf("miss\n");
-      //red_printf("Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
-            //    op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
-           //     kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
+//      red_printf("miss\n");
+//      red_printf("Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+//                op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
+//                kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
 			resp[op_i].type = KVS_MISS;
 		}
-    else printf("hit \n");
 	}
 }
 
@@ -403,9 +439,8 @@ inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write 
     if (unlikely (op->opcode == OP_RELEASE_BIT_VECTOR)) continue;
     if (kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      long long *key_ptr_log = (long long *) kv_ptr[op_i];
-      long long *key_ptr_req = (long long *) op;
-      if (key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+      if (key_found) { //Cache Hit
         key_in_store[op_i] = 1;
         if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
           if (op->opcode == KVS_OP_PUT || op->opcode == OP_RELEASE ||
@@ -488,9 +523,8 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
     }
     if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      long long *key_ptr_log = (long long *) kv_ptr[op_i];
-      long long *key_ptr_req = (long long *) op;
-      if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+      if(key_found) { //Cache Hit
         key_in_store[op_i] = 1;
         if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
           check_state_with_allowed_flags(5, op->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
@@ -570,9 +604,8 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
     struct read_info *op = writes[(pull_ptr + op_i) % max_op_size];
     if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      long long *key_ptr_log = (long long *) kv_ptr[op_i];
-      long long *key_ptr_req = (long long *) &op->key;
-      if(key_ptr_log[1] == key_ptr_req[0]) { //Cache Hit
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+      if(key_found) { //Cache Hit
         key_in_store[op_i] = 1;
         if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
           // The write must be performed with the max TS out of the one stored in the KV and read_info
@@ -678,9 +711,8 @@ inline void cache_isolated_op(int t_id, struct write *write)
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   if(kv_ptr != NULL) {
     /* We had a tag match earlier. Now compare log entry. */
-    long long *key_ptr_log = (long long *) kv_ptr;
-    long long *key_ptr_req = (long long *) op;
-    if(key_ptr_log[1] == key_ptr_req[1]) { //Cache Hit
+    bool key_found = memcmp(&kv_ptr->key, &op->key, TRUE_KEY_SIZE) == 0;
+    if(key_found) { //Cache Hit
       key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
         if (op->opcode != OP_RELEASE) {
@@ -708,24 +740,6 @@ inline void cache_isolated_op(int t_id, struct write *write)
 
 }
 
-
-uint128* mica_gen_keys(int n)
-{
-  int i;
-  assert(n > 0 && n <= M_1024 / sizeof(uint128));
-  assert(sizeof(uint128) == 16);
-
-  // printf("mica: Generating %d keys\n", n);
-
-  uint128 *key_arr = malloc(n * sizeof(uint128));
-  assert(key_arr != NULL);
-
-  for(i = 0; i < n; i++) {
-    key_arr[i] = CityHash128((char *) &i, 4);
-  }
-
-  return key_arr;
-}
 
 
 

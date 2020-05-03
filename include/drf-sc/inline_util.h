@@ -46,6 +46,7 @@ static inline void optik_lock(seqlock_t *seqlock)
 
 static inline void optik_unlock(seqlock_t* seqlock)
 {
+  if (WORKERS_PER_MACHINE == 1) return;
   uint64_t tmp = *seqlock;
   if (DEBUG_SEQLOCKS) {
     assert(is_odd(tmp));
@@ -70,14 +71,19 @@ static inline uint64_t read_seqlock_lock_free(seqlock_t *seqlock)
 
 // return true if the check was successful (loop while it returns false!)
 static inline bool check_seqlock_lock_free(seqlock_t *seqlock,
-                                           uint64_t tmp_lock)
+                                           uint64_t *read_lock)
 {
   if (!ENABLE_LOCK_FREE_READING) {
     optik_unlock(seqlock);
     return true;
   }
   COMPILER_BARRIER();
-  return  tmp_lock == (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
+  uint64_t tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
+  if (*read_lock == tmp_lock) return true;
+  else {
+    *read_lock = tmp_lock;
+    return false;
+  }
 }
 
 
@@ -117,9 +123,7 @@ static inline void circulate_pointers(void** ptr_1, void** ptr_2, void** ptr_3)
 
 // Check whether 2 key hashes are equal
 static inline bool true_keys_are_equal(struct key* key1, struct key* key2) {
-  return (key1->bkt    == key2->bkt &&
-          key1->server == key2->server &&
-          key1->tag    == key2->tag) ? true : false;
+  return memcmp(key1, key2, TRUE_KEY_SIZE) == 0;
 }
 
 // Compares two network timestamps, returns SMALLER if ts1 < ts2
@@ -480,6 +484,7 @@ static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key op
 {
   bkt[op_i] = op_key.bkt & KVS->bkt_mask;
   bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
+//  printf("bkt %u \n", bkt[op_i]);
   __builtin_prefetch(bkt_ptr[op_i], 0, 0);
   tag[op_i] = op_key.tag;
   key_in_store[op_i] = 0;
@@ -514,6 +519,8 @@ static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mi
                  * We can interpret the log entry as mica_op, even though it
                  * may not contain the full MICA_MAX_VALUE value.
                  */
+//        printf("kv_ptr[%u]: offset %lu : %p \n",
+//               op_i, log_offset, (void *)&KVS->ht_log[log_offset]);
         kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
 
         /* Small values (1--64 bytes) can span 2 kvs lines */
@@ -524,7 +531,6 @@ static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mi
         if (KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
           kv_ptr[op_i] = NULL;  /* If so, we mark it "not found" */
         }
-
         break;
       }
     }
@@ -747,11 +753,11 @@ static inline void check_version(uint32_t version, const char *message) {
   if (ENABLE_ASSERTIONS) {
 
 
-    if (version == 0 || version % 2 != 0) {
-      red_printf("Version %u %s\n", version, message);
-    }
+//    if (version == 0 || version % 2 != 0) {
+//      red_printf("Version %u %s\n", version, message);
+//    }
     assert(version > 0);
-    assert(version % 2 == 0);
+//    assert(version % 2 == 0);
   }
 }
 
@@ -977,11 +983,11 @@ static inline void debug_checks_when_inserting_a_write
     }
     // Check the versions
     assert (write->version < B_4_EXACT);
-    if (write->version % 2 != 0) {
-      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
-                 write->version, source);
-      assert (false);
-    }
+//    if (write->version % 2 != 0) {
+//      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
+//                 write->version, source);
+//      assert (false);
+//    }
     // Check that the buffer is not occupied
     if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE  || p_ops->w_size >= MAX_ALLOWED_W_SIZE)
       red_printf("Worker %u w_state %d at w_ptr %u, kvs hits %lu, w_size/virt_w_size %u/%u, source %u\n",
@@ -1288,9 +1294,9 @@ static inline void check_a_polled_write(struct write* write, uint16_t w_i,
         write->opcode != OP_RELEASE_BIT_VECTOR && write->opcode != COMMIT_OP &&
         write->opcode != NO_OP_RELEASE && write->opcode != ACCEPT_OP_BIT_VECTOR)
       red_printf("Wrkr %u Receiving write : Opcode %u, i %u/%u \n", t_id, write->opcode, w_i, w_num);
-    if (write->version % 2 != 0) {
-      red_printf("Wrkr %u :Odd version %u, m_id %u \n", t_id, write->version, write->m_id);
-    }
+//    if (write->version % 2 != 0) {
+//      red_printf("Wrkr %u :Odd version %u, m_id %u \n", t_id, write->version, write->m_id);
+//    }
   }
 }
 
@@ -1605,9 +1611,9 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
 {
   if (ENABLE_ASSERTIONS) {
     assert(rmw_rep->opcode == RMW_ID_COMMITTED || rmw_rep->opcode == LOG_TOO_SMALL);
-    if ((rmw_rep->ts.version % 2  != 0) )
-      red_printf("Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
-    assert(rmw_rep->ts.version % 2  == 0 );
+//    if ((rmw_rep->ts.version % 2  != 0) )
+//      red_printf("Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
+//    assert(rmw_rep->ts.version % 2  == 0 );
     if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // it can be 0 if LOG_TOO_SMALL and the other side has not yet committed log 0
     assert(rmw_rep->glob_sess_id < GLOBAL_SESSION_NUM);
   }
@@ -3458,11 +3464,11 @@ static inline uint32_t grab_RMW_entry(uint8_t state, mica_op_t *kv_ptr,
       glob_entry->accepted_rmw_id = glob_entry->rmw_id;
     }
     if (ENABLE_ASSERTIONS) {
-      assert(glob_entry->new_ts.version % 2 == 0);
+      // assert(glob_entry->new_ts.version % 2 == 0);
       assert(state == PROPOSED || state == ACCEPTED);
     }
   }
-  glob_entry->key = kv_ptr->key; //*((struct key *) (((void *) kv_ptr) + sizeof(cache_meta)));
+  memcpy(&glob_entry->key, &kv_ptr->key, TRUE_KEY_SIZE);
   //cyan_printf("Global Rmw entry %u/%u kv_ptr %lu got key: ", next_entry, *(uint32_t *) kv_ptr->value, kv_ptr->value);
   //print_true_key(&glob_entry->key);
   glob_entry->log_no = log_no; // not necessarily 1 if a remote machine is grabbing here
@@ -3513,7 +3519,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, struc
       //           glob_entry->rmw_id.glob_sess_id, state, message);
     }
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
-    assert(glob_entry->new_ts.version % 2 == 0);
+    //assert(glob_entry->new_ts.version % 2 == 0);
     assert(state == PROPOSED || state == ACCEPTED); // TODO accepted is allowed?
     assert(glob_entry->last_committed_log_no < glob_entry->log_no);
   }
@@ -4862,7 +4868,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
       clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
       continue;
     }
-    check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
+    // check_version_after_batching_trace_to_cache(&ops[i], &resp[i], t_id);
     // Local reads
     if (resp[i].type == KVS_LOCAL_GET_SUCCESS) {
       //check_state_with_allowed_flags(2, interface[t_id].req_array[ops[i].session_id][ops[i].index_to_req_array].state, IN_PROGRESS_REQ);
@@ -4871,7 +4877,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     }
     // Writes
     else if (resp[i].type == KVS_PUT_SUCCESS) {
-      insert_write(p_ops, (void *) &ops[i], FROM_TRACE, 0, t_id);
+      insert_write(p_ops, &ops[i], FROM_TRACE, 0, t_id);
       signal_completion_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     }
     // RMWS
@@ -5886,7 +5892,7 @@ static inline bool attempt_to_grab_global_entry_after_waiting(struct pending_ops
         //           glob_entry->log_no, glob_entry->new_ts.version);
       }
       loc_entry->log_no = glob_entry->last_committed_log_no + 1;
-      version = MAX((kv_pair->ts.version + 1), (glob_entry->new_ts.version + 2));
+      version = MAX((kv_pair->ts.version + 2), (glob_entry->new_ts.version + 2));
       activate_RMW_entry(PROPOSED, version, glob_entry, loc_entry->opcode,
                          (uint8_t) machine_id, loc_entry->rmw_id.id,
                          loc_entry->rmw_id.glob_sess_id, loc_entry->log_no, t_id,
@@ -6000,7 +6006,7 @@ static inline void attempt_to_steal_a_proposed_global_entry(struct pending_ops *
   if (glob_entry->state == INVALID_RMW || glob_state_has_not_changed(glob_entry, loc_entry->help_rmw)) {
     check_the_proposed_log_no(glob_entry, loc_entry, t_id);
     loc_entry->log_no = glob_entry->last_committed_log_no + 1;
-    new_version = MAX((loc_entry->ptr_to_kv_pair->ts.version + 1), (glob_entry->new_ts.version + 2));
+    new_version = MAX((loc_entry->ptr_to_kv_pair->ts.version + 2), (glob_entry->new_ts.version + 2));
     activate_RMW_entry(PROPOSED, new_version, glob_entry, loc_entry->opcode,
                        (uint8_t) machine_id, loc_entry->rmw_id.id,
                        loc_entry->rmw_id.glob_sess_id, loc_entry->log_no, t_id,
@@ -7879,7 +7885,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
       if (ENABLE_ASSERTIONS) assert(op->value_to_read != NULL);
       memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
       //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
-    } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, tmp_lock)));
+    } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
   }
   // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
   if (!value_forwarded &&
@@ -7975,7 +7981,7 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
   do {
     kvs_tuple = kv_ptr->ts;
     debug_stalling_on_lock(&debug_cntr, "trace releases", t_id);
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, tmp_lock)));
+  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
 
   if (ENABLE_ASSERTIONS) op->ts.version = kvs_tuple.version;
   r_info->ts_to_read.m_id = kvs_tuple.m_id;
@@ -8269,7 +8275,7 @@ static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct trace_op *op
                         (struct network_ts_tuple *) &op->ts.m_id) == GREATER) {
       memcpy(r_rep->value, kv_ptr->value, VALUE_SIZE);
     }
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, tmp_lock)));
+  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
   set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, false, t_id);
   finish_r_rep_bookkeeping(p_ops, r_rep, op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
   //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode leaves \n");
@@ -8291,7 +8297,7 @@ static inline void KVS_reads_get_TS(struct trace_op *op, mica_op_t *kv_ptr,
     debug_stalling_on_lock(&debug_cntr, "reads: get-TS-read version", t_id);
     r_rep->ts.m_id = kv_ptr->ts.m_id;
     r_rep->ts.version = kv_ptr->ts.version;
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, tmp_lock)));
+  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
   set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, true, t_id);
   finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
 }
