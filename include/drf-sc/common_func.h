@@ -44,6 +44,7 @@
 // Generic header files
 #include "hrd_sizes.h"
 #include "opcodes.h"
+#include "generic_macros.h"
 
 #define USE_BIG_OBJECTS 0
 #define EXTRA_CACHE_LINES 0
@@ -82,7 +83,7 @@
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
-#define R_CREDITS 4 //
+#define R_CREDITS 8 //
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
@@ -104,15 +105,15 @@
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 0
+#define ACCEPT_IS_RELEASE 1
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 1
-#define CLIENTS_PER_MACHINE_ 5
+#define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 1
+#define ENABLE_ALL_ABOARD 0
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define ENABLE_LOCK_FREE_READING 1
 
@@ -141,64 +142,7 @@
 
 
 
-//////////////////////////////////////////////////////
-/////////////~~~~MACROS~~~~~~/////////////////////////
-//////////////////////////////////////////////////////
 
-#define COMPILER_BARRIER() asm volatile ("" ::: "memory")
-#define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
-#define MY_ASSERT(COND, STR, ARGS...) \
-  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
-#define FIND_PADDING(size) ((64 - (size % 64)) % 64)
-#define MAX_OF_3(x1, y1, x2) (MAX(x1, y1) > (x2) ? (MAX(x1, y1)) : (x2))
-#define MAX_OF_4(x1, y1, x2, y2) (MAX(x1, y1) > MAX(x2, y2) ? (MAX(x1, y1)) : (MAX(x2, y2)))
-
-/* Useful when `x = (x + 1) % N` is done in a loop */
-#define MOD_ADD(x, N) do { \
-	x = x + 1; \
-	if(x == N) { \
-		x = 0; \
-	} \
-} while(0)
-
-#define MOD_ADD_WITH_BASE(x, N, B) do { \
-	x = x + 1; \
-	if(x == B + N) { \
-		x = B; \
-	} \
-} while(0)
-
-/* Compile time assert. !!(@condition) converts @condition into a 0/1 bool. */
-#define ct_assert(condition) ((void) sizeof(char[-1 + 2 * !!(condition)]))
-
-/* Ensure that x is between a and b, inclusive */
-#define range_assert(x, a, b) (assert(x >= a && x <= b))
-
-#ifndef likely
-#  define likely(x)       __builtin_expect((x), 1)
-#endif
-
-#ifndef unlikely
-#  define unlikely(x)       __builtin_expect((x), 0)
-#endif
-
-
-/* Compare, print, and exit */
-#define CPE(val, msg, err_code) \
-	if(unlikely(val)) { fprintf(stderr, msg); fprintf(stderr, " Error %d \n", err_code); \
-	exit(err_code);}
-
-
-#define CEILING(x,y) (((x) + (y) - 1) / (y))
-#define MAX(x,y) ((x) > (y) ? (x) : (y))
-#define MIN(x,y) (x < y ? x : y)
-
-
-#define forceinline inline __attribute__((always_inline))
-#define _unused(x) ((void)(x))	/* Make production build happy */
-
-/* Is pointer x aligned to A-byte alignment? */
-#define is_aligned(x, A) (((uint64_t) x) % A == 0)
 
 
 

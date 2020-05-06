@@ -3984,6 +3984,7 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
   struct top *top =(struct top*) &kv_pair->value[RMW_BYTE_OFFSET];
   struct top *comp_top =(struct top*) loc_entry->compare_val;
   struct top *new_top =(struct top*) loc_entry->value_to_write;
+  // if (top->push_counter == top->pop_counter) assert(top->key_id == 0);
   loc_entry->rmw_is_successful = true;
   switch (loc_entry->opcode) {
    case RMW_PLAIN_WRITE:
@@ -4200,6 +4201,7 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
                  t_id, r_mes_ptr, r_mes->coalesce_num);
 //  struct propose *prop = &p_mes->prop[inside_r_ptr];
   assign_ts_to_netw_ts(&prop->ts, &loc_entry->new_ts);
+
   memcpy(&prop->key, (void *)&loc_entry->key, TRUE_KEY_SIZE);
   prop->opcode = PROPOSE_OP;
   prop->l_id = loc_entry->l_id;
@@ -4212,7 +4214,8 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
   p_ops->r_fifo->bcast_size++;
 
   if (ENABLE_ASSERTIONS) {
-    check_version(prop->ts.version, "insert_prop_to_read_fifo");
+    assert(prop->ts.version >= PAXOS_TS);
+    //check_version(prop->ts.version, "insert_prop_to_read_fifo");
     assert(r_mes->coalesce_num > 0);
     assert(r_mes->m_id == (uint8_t) machine_id);
   }
@@ -4331,7 +4334,7 @@ static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w
 
 }
 
-// Return a pointer, where the next request can be created -- Proposes, reads, acquires
+// Return a pointer, where the next request can be created -- Accepts, commits, writes, releases
 static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
                               uint16_t session_id, uint16_t t_id)
 {
@@ -4623,16 +4626,6 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 }
 
 
-// Do all aboard iff you were able to ACCEPT locally and you are able to reach all machines of the configuration
-static inline void attempt_to_perform_all_aboard(struct quorum_info *q_info,
-                                                 struct rmw_local_entry *loc_entry,
-                                                 uint16_t t_id)
-{
-  if (loc_entry->state == ACCEPTED && q_info->missing_num == 0)
-    loc_entry->all_aboard = true;
-}
-
-
 // Insert an RMW in the local RMW structs
 static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
                               struct cache_resp *resp, uint16_t t_id)
@@ -4668,11 +4661,11 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
     loc_entry->help_rmw->log_no = resp->log_no;
   }
   else if (resp->type == RMW_SUCCESS) { // the RMW has gotten an entry and is to be sent
-    if (ENABLE_ASSERTIONS) assert(prop->ts.version == 2);
     fill_loc_rmw_entry_on_grabbing_global(p_ops, loc_entry, prop->ts.version,
                                           PROPOSED, session_id, t_id);
     loc_entry->log_no = resp->log_no;
-    if (ENABLE_ALL_ABOARD && p_ops->q_info->missing_num == 0) {
+    if (ENABLE_ALL_ABOARD && prop->attempt_all_aboard) {
+      if (ENABLE_ASSERTIONS) assert(prop->ts.version == ALL_ABOARD_TS);
       act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
       //if the flag is ACCEPTED, that means that accept messages
       // are already lined up to be broadcast, and thus you MUST do All aboard
@@ -4681,7 +4674,10 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
         loc_entry->all_aboard_time_out = 0;
       }
     }
-    else insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
+    else {
+      if (ENABLE_ASSERTIONS) assert(prop->ts.version == PAXOS_TS);
+      insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
+    }
   }
   else my_assert(false, "Wrong resp type in RMW");
 }
@@ -4756,12 +4752,18 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
                     opcode == (uint8_t) OP_RELEASE);
   bool is_rmw = opcode_is_rmw(opcode);
   bool is_read = !is_update && !is_rmw;
+
   if (ENABLE_ASSERTIONS) assert(is_read || is_update || is_rmw);
   if (is_update || is_rmw) op->value_to_write = value_to_write;
   if (is_read || is_rmw ) {
     op->value_to_read = value_to_read;
   }
   op->real_val_len = real_val_len;
+
+  if (is_rmw && ENABLE_ALL_ABOARD) {
+      op->attempt_all_aboard = p_ops->q_info->missing_num == 0 ? true : false;
+  }
+
   if (opcode == KVS_OP_PUT) {
     add_request_to_sess_info(&p_ops->sess_info[working_session], t_id);
   }
@@ -6330,10 +6332,12 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
     loc_entry->state = (uint8_t) (loc_entry->helping_flag == HELPING ?
                        MUST_BCAST_COMMITS_FROM_HELP : MUST_BCAST_COMMITS);
   }
-  else if (ENABLE_ALL_ABOARD){ // all-aboard
+  // if a quorum of messages have been received but
+  // we are waiting for more, then we are doing all aboard
+  else if (ENABLE_ALL_ABOARD) {
     if (ENABLE_ASSERTIONS) assert(loc_entry->all_aboard);
     loc_entry->all_aboard_time_out++;
-    assert(loc_entry->new_ts.version == 2);
+    if (ENABLE_ASSERTIONS) assert(loc_entry->new_ts.version == 2);
     if (loc_entry->all_aboard_time_out > ALL_ABOARD_TIMEOUT_CNT) {
       // printf("Wrkr %u, Timing out on key %u \n", t_id, loc_entry->key.bkt);
       loc_entry->state = RETRY_WITH_BIGGER_TS;
@@ -7383,7 +7387,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
       if (read_info->opcode == OP_RELEASE ||
           read_info->opcode == KVS_OP_PUT) {
         read_info->ts_to_read.m_id = (uint8_t) machine_id;
-        read_info->ts_to_read.version += 2;
+        read_info->ts_to_read.version++;
         if (read_info->opcode == OP_RELEASE)
           memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
       }
@@ -8006,7 +8010,8 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
   uint64_t rmw_l_id = *rmw_l_id_;
   if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, op_i);
   uint32_t entry = 0;
-  uint32_t new_version = 0;
+  uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
+                         ALL_ABOARD_TS : PAXOS_TS;
   optik_lock(&kv_ptr->seqlock);
 
   // if it's the first RMW
@@ -8014,7 +8019,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
       // sess_id is stored in the first bytes of op
       uint32_t new_log_no = 1;
-      new_version = 2; //kv_ptr->ts.version + 1;
+      //new_version = 2; //kv_ptr->ts.version + 1;
       entry = grab_RMW_entry(PROPOSED, kv_ptr, op->opcode,
                              (uint8_t) machine_id, new_version,
                              rmw_l_id, new_log_no,
@@ -8034,12 +8039,13 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     struct rmw_entry *glob_entry = &rmw.entry[entry];
     if (glob_entry->state == INVALID_RMW) {
       if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
-        new_version = MAX((kv_ptr->ts.version + 1), glob_entry->new_ts.version);
-        new_version = 2;
+        //new_version = MAX((kv_ptr->ts.version + 1), glob_entry->new_ts.version);
+        //new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ? 2 : 3;
+        //assert(new_version == 3);
         // remember that key is locked and thus this entry is also locked
         activate_RMW_entry(PROPOSED, new_version, glob_entry, op->opcode,
                            (uint8_t) machine_id, rmw_l_id,
-                           get_glob_sess_id((uint8_t) machine_id, t_id, *((uint16_t *) op)),
+                           get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
                            glob_entry->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
         resp->type = RMW_SUCCESS;
         if (ENABLE_ASSERTIONS) assert(glob_entry->log_no == glob_entry->last_committed_log_no + 1);

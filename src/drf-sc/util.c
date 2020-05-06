@@ -9,7 +9,8 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 void static_assert_compile_parameters()
 {
 
-//  static_assert(MICA_OP_SIZE == sizeof(mica_op_t), "Please fix constexpr MICA_OP_SIZE");
+  static_assert(MICA_OP_SIZE == sizeof(mica_op_t), "Please fix  MICA_OP_SIZE");
+  static_assert(PAXOS_TS > ALL_ABOARD_TS, "Paxos TS must be bigger than ALL Aboard TS");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");

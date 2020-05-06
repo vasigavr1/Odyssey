@@ -3,6 +3,10 @@
 * Adapted from https://github.com/efficient/rdma_bench
 */
 
+#define K_1 1024
+#define K_2 2048
+#define K_4 4096
+#define K_8  8142
 #define K_16 65536
 
 

@@ -120,12 +120,12 @@ void *print_stats(void* no_arg) {
     double per_s_all_aboard_rmws = (total_all_aboard_rmws) / seconds;
 
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f, canc: %.2f, all-aboard: %.2f\n", // t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n",
+    green_printf("%u %.2f, canc: %.2f, all-aboard: %.2f t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n",
                  print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
-                 per_s_all_aboard_rmws);
-                 //total_treiber_pushes, total_treiber_pops,
-                 //zk_write_ratio, sync_per);
+                 per_s_all_aboard_rmws,
+                 total_treiber_pushes, total_treiber_pops,
+                 zk_write_ratio, sync_per);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
     green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);

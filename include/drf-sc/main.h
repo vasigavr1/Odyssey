@@ -40,10 +40,10 @@
 #define HM_NO_CONFLICT 1
 #define HM_WRITES_NUM 4
 
-#define PC_WRITES_NUM 1
-#define PC_IDEAL 1
+#define PC_WRITES_NUM 5
+#define PC_IDEAL 0
 
-#define PER_SESSION_REQ_NUM (HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -60,6 +60,11 @@
 #define COM_MCAST_QP 1 //
 #define MCAST_GROUPS_NUM 2
 
+/*-------------------------------------------------
+	-----------------Paxos-------------------------
+--------------------------------------------------*/
+#define ALL_ABOARD_TS 2
+#define PAXOS_TS 3
 //ABD
 
 // ABD EMULATION
@@ -958,7 +963,7 @@ struct fifo {
 //#define TRACE_OP_SIZE (18 + VALUE_SIZE  + 8 + 4)
 struct trace_op {
   uint16_t session_id;
-  uint8_t unused;
+  bool attempt_all_aboard;
   struct network_ts_tuple ts;
   struct key key;	/* This must be the 1st field and 16B aligned */
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
