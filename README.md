@@ -59,11 +59,9 @@ RDMA capable NICs and Infiniband switch
 
 ### Dependencies
 1. numactl
-1. libgsl0-dev
-1. libnuma-dev
-1. libatmomic_ops
-1. libmemcached-dev
-1. MLNX_OFED_LINUX-4.1-1.0.2.0
+2. libgsl0-dev
+3. libnuma-dev
+4. MLNX_OFED_LINUX-4.1-1.0.2.0
 
 ### Settings
 1. Run subnet-manager in one of the nodes: '/etc/init.d/opensmd start'
