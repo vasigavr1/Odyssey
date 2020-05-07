@@ -482,7 +482,8 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
-    else {
+    else
+    {
       bool found = false;
       do {
         key_id = (uint32) rand() % KVS_NUM_KEYS; //rand_r(&seed) % CACHE_NUM_KEYS;
@@ -685,11 +686,11 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 // Initialize the rmw struct
 void set_up_rmw_struct()
 {
-  memset(&rmw, 0, sizeof(struct rmw_info));
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-    for (int i = 0; i < RMW_ENTRIES_NUM; i++)
-      rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
-  }
+//  memset(&rmw, 0, sizeof(struct rmw_info));
+//  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+//    for (int i = 0; i < RMW_ENTRIES_NUM; i++)
+//      rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
+//  }
 }
 
 // Initialize the pending ops struct

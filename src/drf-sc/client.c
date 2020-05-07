@@ -113,7 +113,7 @@ static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * v
       break;
     case CAS_BLOCKING:
     case FAA_BLOCKING:
-      if (key_id >= NUM_OF_RMW_KEYS) return ERROR_KEY_IS_NOT_RMWABLE;
+      // if (key_id >= NUM_OF_RMW_KEYS) return ERROR_KEY_IS_NOT_RMWABLE;
       if (value_to_read == NULL) return ERROR_NULL_READ_VALUE_PTR;
       if (value_to_write == NULL) return ERROR_NULL_WRITE_VALUE_PTR;
       break;
@@ -122,10 +122,11 @@ static inline int check_inputs(uint16_t session_id, uint32_t key_id, uint8_t * v
  if (key_id >= KVS_NUM_KEYS)
    return ERROR_KEY_ID_DOES_NOT_EXIST;
 
- if (key_id < NUM_OF_RMW_KEYS) {
-   if (val_len > RMW_VALUE_SIZE) return ERROR_RMW_VAL_LEN_TOO_BIG;
- }
-  else if (val_len > VALUE_SIZE) return ERROR_VAL_LEN_TOO_BIG;
+// if (key_id < NUM_OF_RMW_KEYS) {
+//   if (val_len > RMW_VALUE_SIZE) return ERROR_RMW_VAL_LEN_TOO_BIG;
+// }
+//  else
+ if (val_len > VALUE_SIZE) return ERROR_VAL_LEN_TOO_BIG;
 
  return 1;
 }

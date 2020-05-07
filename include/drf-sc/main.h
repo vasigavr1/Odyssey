@@ -28,7 +28,7 @@
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE MSQ_ASYNC
+#define CLIENT_MODE HML_ASYNC
 
 #define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
@@ -108,7 +108,7 @@
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
-#define RMW_BYTE_OFFSET 4 // the value starts 4 bytes in
+#define RMW_BYTE_OFFSET 0 // the value starts 4 bytes in
 #define RMW_VALUE_SIZE 24 // (VALUE_SIZE - RMW_BYTE_OFFSET)
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
@@ -241,8 +241,8 @@
 // RMWs
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-#define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
-#define KEY_IS_NOT_RMWABLE 0
+//#define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
+
 #define KEY_HAS_NEVER_BEEN_RMWED 1
 #define KEY_HAS_BEEN_RMWED 2
 
@@ -430,12 +430,11 @@ struct remote_qp {
 
 struct cache_resp {
   uint8_t type;
-  uint8_t glob_entry_state;
-  uint32_t rmw_entry; // index into global rmw entries
+  uint8_t kv_ptr_state;
   uint32_t log_no; // the log_number of an RMW
   mica_op_t *kv_pair_ptr;
-  struct ts_tuple glob_ts;
-  struct rmw_id glob_entry_rmw_id;
+  struct ts_tuple kv_ptr_ts;
+  struct rmw_id kv_ptr_rmw_id;
 };
 
 // The format of an ack message
@@ -732,7 +731,7 @@ struct dbg_glob_entry {
 
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
-struct rmw_entry {
+struct rmw_entbry {
   uint8_t opcode; // what kind of RMW
   struct key key;
   uint8_t state;
@@ -742,9 +741,9 @@ struct rmw_entry {
   struct rmw_id accepted_rmw_id; // not really needed, but good for debug
   struct dbg_glob_entry *dbg;
   //struct ts_tuple old_ts;
-  struct ts_tuple new_ts;
+  struct ts_tuple prop_ts;
   struct ts_tuple accepted_ts; // really needed
-  uint8_t value[RMW_VALUE_SIZE]; // last accepted
+  uint8_t last_accepted_value[RMW_VALUE_SIZE]; // last accepted
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_committed_log_no;
   uint32_t last_registered_log_no;
@@ -813,7 +812,7 @@ struct rmw_local_entry {
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
   uint32_t all_aboard_time_out;
-  uint32_t index_to_rmw; // this is an index into the global rmw structure
+  // uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
   uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases
@@ -923,12 +922,12 @@ struct session_dbg {
 // Global struct that holds the RMW information
 // Cannot be a FIFO because the incoming commit messages must be processed, such that
 // acks to the commits mean that the RMW has happened
-struct rmw_info {
-  struct rmw_entry entry[RMW_ENTRIES_NUM];
-};
+//struct rmw_info {
+//  struct rmw_entry entry[RMW_ENTRIES_NUM];
+//};
 
 //typedef _Atomic struct rmw_info atomic_rmw_info;
-extern struct rmw_info rmw;
+//extern struct rmw_info rmw;
 
 extern atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 

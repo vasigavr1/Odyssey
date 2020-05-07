@@ -278,6 +278,7 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
   int i;
   mica_op_t *op = (mica_op_t *) calloc(1, sizeof(mica_op_t));
   unsigned long *op_key = (unsigned long *) &op->key;
+  op->state = INVALID_RMW;
 
   /* Generate the keys to insert */
 //  uint128 *key_arr = mica_gen_keys(n);
@@ -286,9 +287,9 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
   for(uint32_t key_id = 0; key_id < KVS_NUM_KEYS; key_id++) {
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
     (*op_key) = key_hash.second;
-    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
-      op->opcode = KEY_HAS_NEVER_BEEN_RMWED;
-    else op->opcode = KEY_IS_NOT_RMWABLE;
+//    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
+//      op->opcode = KEY_HAS_NEVER_BEEN_RMWED;
+//    else op->opcode = KEY_IS_NOT_RMWABLE;
     //printf("%u \n", sizeof(decltype(op_key[1])));
     //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
     //op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
@@ -349,25 +350,18 @@ inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op
 //                   op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
 //                   kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
         key_in_store[op_i] = 1;
-        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
-          if (op[op_i].opcode == KVS_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
-            KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
-                                              p_ops, &r_push_ptr, t_id);
-          }
-            // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
-          else if (op[op_i].opcode == KVS_OP_PUT) {
-            KVS_from_trace_writes(&op[op_i], kv_ptr[op_i], &resp[op_i],
+        if (op[op_i].opcode == KVS_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
+          KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                                            p_ops, &r_push_ptr, t_id);
+        }
+          // Put has to be 2 rounds (readTS + write) if it is out-of-epoch
+        else if (op[op_i].opcode == KVS_OP_PUT) {
+          KVS_from_trace_writes(&op[op_i], kv_ptr[op_i], &resp[op_i],
+                                p_ops, &r_push_ptr, t_id);
+        }
+        else if (op[op_i].opcode == OP_RELEASE) { // read the timestamp
+          KVS_from_trace_releases(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                   p_ops, &r_push_ptr, t_id);
-          }
-          else if (op[op_i].opcode == OP_RELEASE) { // read the timestamp
-            KVS_from_trace_releases(&op[op_i], kv_ptr[op_i], &resp[op_i],
-                                    p_ops, &r_push_ptr, t_id);
-          }
-          else if (ENABLE_ASSERTIONS) {
-            red_printf("Wrkr %u: cache_batch_op_trace wrong opcode %d, for not-rmwable key,  req %d \n",
-                       t_id, op[op_i].opcode, op_i);
-            assert(false);
-          }
         }
         else if (ENABLE_RMWS) {
           if (opcode_is_rmw(op[op_i].opcode)) {
@@ -442,18 +436,10 @@ inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write 
       bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
       if (key_found) { //Cache Hit
         key_in_store[op_i] = 1;
-        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
-          if (op->opcode == KVS_OP_PUT || op->opcode == OP_RELEASE ||
-              op->opcode == OP_ACQUIRE) {
-            KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
-          }
-          else if (ENABLE_ASSERTIONS) {
-            red_printf("Wrkr %u, kvs batch update: wrong opcode in kvs: %d, req %d, "
-                         "m_id %u, val_len %u, version %u , \n",
-                       t_id, op->opcode, op_i, op->ts.m_id,
-                       op->val_len, op->ts.version);
-            assert(0);
-          }
+
+        if (op->opcode == KVS_OP_PUT || op->opcode == OP_RELEASE ||
+            op->opcode == OP_ACQUIRE) {
+          KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
         }
         else if (ENABLE_RMWS) {
           if (op->opcode == ACCEPT_OP) {
@@ -526,24 +512,17 @@ inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_
       bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
       if(key_found) { //Cache Hit
         key_in_store[op_i] = 1;
-        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
-          check_state_with_allowed_flags(5, op->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
-                                         CACHE_OP_GET_TS);
-          if (op->opcode == KVS_OP_GET || op->opcode == OP_ACQUIRE ||
-              op->opcode == OP_ACQUIRE_FP) {
-            KVS_reads_gets_or_acquires_or_acquires_fp(op, kv_ptr[op_i], p_ops, op_i, t_id);
-          }
-          else if (op->opcode == CACHE_OP_GET_TS) {
-            KVS_reads_get_TS(op, kv_ptr[op_i], p_ops, op_i, t_id);
-          }
-          else if (ENABLE_ASSERTIONS) {
-            red_printf("Wrkr %u wrong Opcode in kvs: %d, req %d \n",
-                       t_id, op->opcode, op_i);
-             assert(false);
-          }
+
+        check_state_with_allowed_flags(6, op->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
+                                       CACHE_OP_GET_TS, PROPOSE_OP);
+        if (op->opcode == KVS_OP_GET || op->opcode == OP_ACQUIRE ||
+            op->opcode == OP_ACQUIRE_FP) {
+          KVS_reads_gets_or_acquires_or_acquires_fp(op, kv_ptr[op_i], p_ops, op_i, t_id);
+        }
+        else if (op->opcode == CACHE_OP_GET_TS) {
+          KVS_reads_get_TS(op, kv_ptr[op_i], p_ops, op_i, t_id);
         }
         else if (ENABLE_RMWS) {
-          check_state_with_allowed_flags(3, kv_ptr[op_i]->opcode, KEY_HAS_BEEN_RMWED, KEY_HAS_NEVER_BEEN_RMWED);
           if (op->opcode == PROPOSE_OP) {
             KVS_reads_proposes(op, kv_ptr[op_i], p_ops, op_i, t_id);
           }
@@ -607,35 +586,25 @@ inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, stru
       bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
       if(key_found) { //Cache Hit
         key_in_store[op_i] = 1;
-        if (kv_ptr[op_i]->opcode == KEY_IS_NOT_RMWABLE) {
-          // The write must be performed with the max TS out of the one stored in the KV and read_info
-          if (op->opcode == KVS_OP_PUT) {
-            KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
-          } else if (op->opcode == OP_ACQUIRE ||
-                     op->opcode == KVS_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-            KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
-          } else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-            if (!MEASURE_SLOW_PATH && op->epoch_id > kv_ptr[op_i]->epoch_id) {
-              optik_lock(&kv_ptr[op_i]->seqlock);
-              kv_ptr[op_i]->epoch_id = op->epoch_id;
-              optik_unlock(&kv_ptr[op_i]->seqlock);
-              if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
-            }
-          } else {
-            red_printf("Wrkr %u: read-first-round wrong opcode in kvs: %d, req %d, m_id %u,version %u , \n",
-                       t_id, op->opcode, op_i, writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.m_id,
-                       writes[(pull_ptr + op_i) % max_op_size]->ts_to_read.version);
-            assert(0);
+        // The write must be performed with the max TS out of the one stored in the KV and read_info
+        if (op->opcode == KVS_OP_PUT) {
+          KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
+        } else if (op->opcode == OP_ACQUIRE ||
+                   op->opcode == KVS_OP_GET) { // a read resulted on receiving a higher timestamp than expected
+          KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
+        } else if (op->opcode == UPDATE_EPOCH_OP_GET) {
+          if (!MEASURE_SLOW_PATH && op->epoch_id > kv_ptr[op_i]->epoch_id) {
+            optik_lock(&kv_ptr[op_i]->seqlock);
+            kv_ptr[op_i]->epoch_id = op->epoch_id;
+            optik_unlock(&kv_ptr[op_i]->seqlock);
+            if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
           }
         }
         else if (ENABLE_RMWS) {
           if (op->opcode == OP_ACQUIRE) {
-            //assert(op->is_rmw);
             KVS_rmw_acquire_commits(op, kv_ptr[op_i], op_i, t_id);
           }
-          else if (ENABLE_ASSERTIONS){
-            assert(false);
-          }
+          else if (ENABLE_ASSERTIONS) assert(false);
         }
         else if (ENABLE_ASSERTIONS) assert(false);
       }

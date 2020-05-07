@@ -105,15 +105,15 @@
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 1
+#define ACCEPT_IS_RELEASE 0
 #define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 0
+#define ENABLE_ALL_ABOARD 1
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define ENABLE_LOCK_FREE_READING 1
 
@@ -233,12 +233,11 @@ typedef struct  {
   uint32_t last_registered_log_no;
   uint32_t accepted_log_no; // not really needed, but good for debug
   struct ts_tuple ts;
-  struct ts_tuple new_ts;
+  struct ts_tuple prop_ts;
   struct ts_tuple accepted_ts; // really needed
 
 
   struct rmw_id rmw_id;
-
   struct rmw_id last_registered_rmw_id;
   struct rmw_id accepted_rmw_id; // not really needed, but good for debug
   uint32_t dbg_cntr_1;
