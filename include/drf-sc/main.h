@@ -108,8 +108,7 @@
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
-#define RMW_BYTE_OFFSET 0 // the value starts 4 bytes in
-#define RMW_VALUE_SIZE 24 // (VALUE_SIZE - RMW_BYTE_OFFSET)
+#define RMW_VALUE_SIZE 24 //
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
@@ -241,22 +240,12 @@
 // RMWs
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
-//#define RMW_ENTRIES_NUM NUM_OF_RMW_KEYS
 
-#define KEY_HAS_NEVER_BEEN_RMWED 1
-#define KEY_HAS_BEEN_RMWED 2
 
-// RMW entry states for local and global entries
-#define INVALID_RMW 0
-#define PROPOSED 1 // has seen a propose || has been proposed
-#define ACCEPTED 2 // has acked an accept || has fired accepts
-#define NEEDS_GLOBAL 3  // there is already an entry for the key
-#define RETRY_WITH_BIGGER_TS 4
-#define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
 
 // Broadcast Commits from helps in 2 occassions:
 // 1. You are helping someone
-// 2. You ahve received an already committed message
+// 2. You have received an already committed message
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
 #define TS_STALE_ON_REMOTE_KVS 8
@@ -370,62 +359,6 @@ struct remote_qp {
 	int qpn;
 	// no padding needed- false sharing is not an issue, only fragmentation
 };
-
-/*
- *  SENT means the message has been sent
- *  READY means all acks have been gathered // OR a commit has been received
- * */
-
-#define INVALID 0
-#define VALID 1
-#define SENT 2 // for reads
-#define READY 3 // for reads
-#define SENT_PUT 4 // typical writes -- ALL acks
-#define SENT_RELEASE 5 // Release (could be the third round) -- All acks
-#define SENT_ACQUIRE 6 //second round of acquire -- Quorum
-#define SENT_COMMIT 7 // For commits -- All acks
-#define SENT_RMW_ACQ_COMMIT 8 // -- Quorum
-#define SENT_BIT_VECTOR 9 // -- Quorum
-// Coalesced release that detected failure,
-// but is behind other release that carries the bit vector
-#define SENT_NO_OP_RELEASE 10 // -- Quorum
-
-
-#define W_STATE_OFFSET 7
-#define READY_PUT (SENT_PUT + W_STATE_OFFSET)
-#define READY_RELEASE (SENT_RELEASE + W_STATE_OFFSET) // Release
-#define READY_ACQUIRE (SENT_ACQUIRE + W_STATE_OFFSET) // second round of acquire
-#define READY_COMMIT (SENT_COMMIT + W_STATE_OFFSET)
-#define READY_RMW_ACQ_COMMIT (SENT_RMW_ACQ_COMMIT + W_STATE_OFFSET)
-#define READY_BIT_VECTOR (SENT_BIT_VECTOR + W_STATE_OFFSET)
-#define READY_NO_OP_RELEASE (SENT_NO_OP_RELEASE + W_STATE_OFFSET)
-
-
-// Possible write sources
-#define FROM_TRACE 0
-#define FROM_READ 1
-//#define RELEASE_SECOND 2 // after the read ts for a release
-#define RELEASE_THIRD 3 // for the third round of a release
-#define FOR_ACCEPT 4
-#define FROM_ACQUIRE 5
-#define FROM_COMMIT 6
-
-// Possible flags when accepting locally
-#define ACCEPT_ACK 1
-#define NACK_ACCEPT_SEEN_HIGHER_TS 2
-#define NACK_ACCEPT_LOG_OUT_OF_DATE 3
-#define BROADCAST_COMMITS 4
-#define DO_NOT_BROAD_CAST_COMMITS 5
-#define ABORT_HELP 6
-#define NACK_ALREADY_COMMITTED 7
-
-// Possible Helping flags
-#define NOT_HELPING 0
-#define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
-#define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
-#define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
-
-
 
 
 struct cache_resp {
@@ -700,7 +633,7 @@ struct read_info {
   uint8_t value[VALUE_SIZE]; //
   uint8_t *value_to_read;
   bool fp_detected; //detected false positive
-  uint16_t epoch_id;
+  uint64_t epoch_id;
   bool is_rmw;
   bool complete_flag; // denotes whether completion must be signaled to the client
   uint32_t r_ptr; // reverse ptr to the p_ops
@@ -807,7 +740,7 @@ struct rmw_local_entry {
   struct rmw_id rmw_id; // this is implicitly the l_id
   struct rmw_id last_registered_rmw_id;
   struct rmw_rep_info rmw_reps;
-  uint16_t epoch_id;
+  uint64_t epoch_id;
   uint16_t sess_id;
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
@@ -834,7 +767,7 @@ struct sess_info {
   bool ready_to_release;
   uint8_t missing_num;
   uint8_t missing_ids[REM_MACH_NUM];
-  uint16_t epoch_id;
+  uint64_t epoch_id;
   // live writes: writes that have not been acked-
   // could be ooe-writes in their read phase
   uint32_t live_writes;
@@ -1138,11 +1071,10 @@ extern atomic_bool qps_are_set_up;
 extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
 extern struct client_stats c_stats[CLIENTS_PER_MACHINE];
 struct mica_op;
-extern atomic_uint_fast16_t epoch_id;
+extern atomic_uint_fast64_t epoch_id;
 extern const uint16_t machine_bit_id[16];
 
 extern atomic_bool print_for_debug;
-extern atomic_uint_fast32_t next_rmw_entry_available;
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 extern FILE* client_log[CLIENTS_PER_MACHINE];
 extern uint64_t time_approx;

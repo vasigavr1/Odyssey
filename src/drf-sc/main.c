@@ -14,12 +14,11 @@ struct bit_vector send_bit_vector;
 struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 
 atomic_bool qps_are_set_up;
-atomic_uint_fast16_t epoch_id;
+atomic_uint_fast64_t epoch_id;
 atomic_bool print_for_debug;
 const uint16_t machine_bit_id[SEND_CONF_VEC_SIZE * 8] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
 																		 1024, 2048, 4096, 8192, 16384, 32768};
 //struct rmw_info rmw;
-atomic_uint_fast32_t next_rmw_entry_available;
 atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 FILE* client_log[CLIENTS_PER_MACHINE];
@@ -36,7 +35,8 @@ uint64_t time_approx;
 
 int main(int argc, char *argv[])
 {
-	printf("MICA OP size %ld \n", sizeof(mica_op_t));
+	printf("MICA OP size %ld/%d added padding %d  \n",
+         sizeof(mica_op_t), MICA_OP_SIZE, MICA_OP_PADDING_SIZE);
 
 
 	uint16_t i = 0;

@@ -64,4 +64,6 @@
 /* Is pointer x aligned to A-byte alignment? */
 #define is_aligned(x, A) (((uint64_t) x) % A == 0)
 
+#define IS_WRITE(X) (((X) == KVS_OP_PUT || (X) == OP_RELEASE) ? 1 : 0)
+
 #endif //KITE_GENERIC_MACROS_H

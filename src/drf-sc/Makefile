@@ -1,7 +1,7 @@
 LD      := gcc
-LDFLAGS := -O3 -std=gnu11 -flto  -libverbs -lpthread -lnuma -lrdmacm
+LDFLAGS := -O3 -std=gnu2x -flto  -libverbs -lpthread -lnuma -lrdmacm
 CC  = gcc
-CFLAGS   = -O3 -std=gnu11 -g -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc
+CFLAGS   = -O3 -std=gnu2x -Wno-address-of-packed-member  -Wno-format-truncation -g -march=native -I../../include/mica -I../../include/libhrd -I../../include/drf-sc
 APPS    := drf-sc clean-o
 PROF    := -g -fno-omit-frame-pointer
 

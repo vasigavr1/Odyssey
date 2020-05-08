@@ -47,58 +47,40 @@ int is_power_of_2(int x)
     x == 268435456 || x == 536870912 || x == 1073741824);
 }
 
-/*
- * Initialize the kvs using a Mica instances and adding the timestamps
- * and locks to the keys of mica structure
- */
-//void kvs_init(int cache_id, int num_threads) {
-//	int i;
-//	assert(sizeof(cache_meta) == 8); //make sure that the kvs meta are 8B and thus can fit in mica unused key
-//	mica_init(&KVS, cache_id, KVS_SOCKET, KVS_NUM_BKTS, KVS_LOG_CAP);
-//	cache_populate_fixed_len(&KVS, KVS_NUM_KEYS, VALUE_SIZE);
-//}
+inline void check_mica_op_t_allignement(mica_op_t *kv_ptr)
+{
+  if (kv_ptr->key.bkt == 2173420268 && kv_ptr->key.server == 36126 &&
+      kv_ptr->key.tag == 13372) {
+    uint64_t key_al = ((uint64_t) &kv_ptr->key) % MICA_OP_SIZE;
+    uint64_t opc_al = ((uint64_t) &kv_ptr->opcode) % MICA_OP_SIZE;
+    uint64_t state_al = ((uint64_t) &kv_ptr->state) % MICA_OP_SIZE;
+    uint64_t log_no = ((uint64_t) &kv_ptr->log_no) % MICA_OP_SIZE;
+    uint64_t last_registered_log_no = ((uint64_t) &kv_ptr->last_registered_log_no) % MICA_OP_SIZE;
+    uint64_t accepted_log_no = ((uint64_t) &kv_ptr->accepted_log_no) % MICA_OP_SIZE;
+    uint64_t last_committed_log_no = ((uint64_t) &kv_ptr->last_committed_log_no) % MICA_OP_SIZE;
 
-//void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len) {
-//  //assert(KVS != NULL);
-//  assert(n > 0);
-//  assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
-//
-//  /* This is needed for the eviction message below to make sense */
-//  assert(kv->num_insert_op == 0 && kv->num_index_evictions == 0);
-//
-//  int i;
-//  struct cache_op op;
-//  struct mica_resp resp;
-//  unsigned long long *op_key = (unsigned long long *) &op.key;
-//
-//  /* Generate the keys to insert */
-//  uint128 *key_arr = mica_gen_keys(n);
-//
-//  for(i = n - 1; i >= 0; i--) {
-//    optik_init(&op.key.meta);
-//    memset((void *)op.key.meta.epoch_id, 0, EPOCH_BYTES);
-////		op.key.meta.state = VALID_STATE;
-//    op_key[1] = key_arr[i].second;
-//    if (ENABLE_RMWS && i < NUM_OF_RMW_KEYS)
-//      op.opcode = KEY_HAS_NEVER_BEEN_RMWED;
-//    else op.opcode = KEY_IS_NOT_RMWABLE;
-//
-//    //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
-//    op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
-//    uint8_t val = 0;//(uint8_t) (op_key[1] & 0xff);
-//    memset(op.value, val, (uint32_t) val_len);
-//    //if (i < NUM_OF_RMW_KEYS)
-//    // green_printf("Inserting key %d: bkt %u, server %u, tag %u \n",i, op.key.bkt, op.key.server, op.key.tag);
-//    mica_insert_one(kv, (mica_op_t *) &op, &resp);
-//  }
-//
-//  assert(kv->num_insert_op == n);
-//  // printf("Cache: Populated instance %d with %d keys, length = %d. "
-//  // 			   "Index eviction fraction = %.4f.\n",
-//  // 	   KVS->instance_id, n, val_len,
-//  // 	   (double) KVS->num_index_evictions / KVS->num_insert_op);
-//}
+    uint64_t seq_lock = ((uint64_t) &kv_ptr->seqlock) % MICA_OP_SIZE;
+    uint64_t ts = ((uint64_t) &kv_ptr->ts) % MICA_OP_SIZE;
+    uint64_t prop_ts = ((uint64_t) &kv_ptr->prop_ts) % MICA_OP_SIZE;
+    uint64_t accepted_ts = ((uint64_t) &kv_ptr->accepted_ts) % MICA_OP_SIZE;
 
+
+    uint64_t rmw_id = ((uint64_t) &kv_ptr->rmw_id) % MICA_OP_SIZE;
+    uint64_t last_registered_rmw_id = ((uint64_t) &kv_ptr->last_registered_rmw_id) % MICA_OP_SIZE;
+    uint64_t last_committed_rmw_id = ((uint64_t) &kv_ptr->last_committed_rmw_id) % MICA_OP_SIZE;
+    uint64_t accepted_rmw_id = ((uint64_t) &kv_ptr->accepted_rmw_id) % MICA_OP_SIZE;
+
+
+    printf(" key: %lu \n opc %lu \n state %lu \n log %lu \n"
+             "last reg log %lu \n accepted log %lu \n last committed log %lu \n"
+             "seq_lock %lu \n ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
+             "rmw_id %lu \nlast_registered_rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
+           key_al, opc_al, state_al, log_no, last_registered_log_no, accepted_log_no, last_committed_log_no,
+           seq_lock, ts, prop_ts, accepted_ts,
+           rmw_id, last_registered_rmw_id, last_committed_rmw_id, accepted_rmw_id);
+
+  }
+}
 
 void mica_init(mica_kv_t *kvs, int instance_id,
                int node_id, int num_bkts, uint64_t log_cap)
@@ -225,22 +207,13 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   memcpy(log_ptr, op, len_to_copy);
 
 
-  mica_op_t * saved_kv_ptr = (mica_op_t *) log_ptr;
-  mica_op_t * first_kv_ptr = (mica_op_t *) kvs->ht_log;
 
-  //my_printf(green, "Inserting key:bkt %u, server %u, tag %u, in position %lu/%p in bkt %u \n",
-  //          saved_kv_ptr->key.bkt, saved_kv_ptr->key.server, saved_kv_ptr->key.tag,
-  //          KVS->log_head, log_ptr, bkt);
+  mica_op_t * kv_ptr = (mica_op_t *) log_ptr;
+  assert(is_aligned(&kv_ptr->key, 64));
+  assert(is_aligned(&kv_ptr->rmw_id, 64));
+  assert(is_aligned(&kv_ptr->value, 64));
 
-
-  /*my_printf(green, "New key:bkt %u, server %u, tag %u, in position %lu/%p \n",
-            saved_kv_ptr->key.bkt, saved_kv_ptr->key.server, saved_kv_ptr->key.tag,
-            KVS->log_head, log_ptr);
-  my_printf(green, "First key:bkt %u, server %u, tag %u, in position %lu/%p \n",
-            first_kv_ptr->key.bkt, first_kv_ptr->key.server, first_kv_ptr->key.tag,
-            0, KVS->ht_log);*/
-
-
+  //check_mica_op_t_allignement(kv_ptr);
 
   kvs->log_head += len_to_copy;
 
@@ -280,13 +253,14 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
   unsigned long *op_key = (unsigned long *) &op->key;
   op->state = INVALID_RMW;
 
-  /* Generate the keys to insert */
-//  uint128 *key_arr = mica_gen_keys(n);
 
-//  for(i = n - 1; i >= 0; i--) {
   for(uint32_t key_id = 0; key_id < KVS_NUM_KEYS; key_id++) {
     uint128 key_hash = CityHash128((char *) &(key_id), 4);
+    struct key *tmp = (struct key *) &key_hash.second;
     (*op_key) = key_hash.second;
+    assert(tmp->bkt == op->key.bkt);
+
+
 //    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
 //      op->opcode = KEY_HAS_NEVER_BEEN_RMWED;
 //    else op->opcode = KEY_IS_NOT_RMWABLE;

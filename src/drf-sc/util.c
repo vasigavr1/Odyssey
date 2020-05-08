@@ -9,7 +9,7 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 void static_assert_compile_parameters()
 {
 
-  static_assert(MICA_OP_SIZE == sizeof(mica_op_t), "Please fix  MICA_OP_SIZE");
+  assert(MICA_OP_SIZE == sizeof(mica_op_t));
   static_assert(PAXOS_TS > ALL_ABOARD_TS, "Paxos TS must be bigger than ALL Aboard TS");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
@@ -22,8 +22,8 @@ void static_assert_compile_parameters()
   static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
   static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
-  static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
-  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE + RMW_BYTE_OFFSET), "RMW requires the value to be at least this many bytes");
+  //static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
+  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE), "RMW requires the value to be at least this many bytes");
   static_assert(MACHINE_NUM <= 255, ""); // kvs meta has 1 B for machine id
 
   // WRITES
@@ -178,7 +178,6 @@ void init_globals()
   //send_bit_vector.state_lock = ATOMIC_FLAG_INIT; // this does not compile
   send_bit_vector.state = UP_STABLE;
   print_for_debug = false;
-  next_rmw_entry_available = 0;
   memset(committed_glob_sess_rmw_id, 0, GLOBAL_SESSION_NUM * sizeof(uint64_t));
   memset((struct thread_stats*) t_stats, 0, WORKERS_PER_MACHINE * sizeof(struct thread_stats));
   memset((struct client_stats*) c_stats, 0, CLIENTS_PER_MACHINE * sizeof(struct client_stats));
@@ -477,7 +476,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
         key_id = (uint32_t) t_id;
       else if (ENABLE_NO_CONFLICT_RMW)
         key_id = (uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
-      else key_id = (uint32_t) (rand_r(&seed) % NUM_OF_RMW_KEYS);
+      else key_id = (uint32_t) (rand_r(&seed) % KVS_NUM_KEYS); //NUM_OF_RMW_KEYS);
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
