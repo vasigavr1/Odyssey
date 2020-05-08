@@ -34,7 +34,7 @@ Kite API contains two flavours (a blocking and a nonblocking) of the following c
 6. CAS_weak()
 7. FAA()
 
-The Kite API can be sued by the client threads. 
+The Kite API can be used by the client threads. 
 ./src/client.c already contains implementations of
 * The Treiber Stack
 * Michael & Scott Queues
