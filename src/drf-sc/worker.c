@@ -1,5 +1,5 @@
 #include "util.h"
-#include "inline_util.h"
+#include "../../include/kite_inline_util/inline_util.h"
 
 void *worker(void *arg)
 {
@@ -8,10 +8,10 @@ void *worker(void *arg)
   uint16_t gid = (uint16_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
 
 	if (ENABLE_MULTICAST == 1 && t_id == 0) {
-		cyan_printf("MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
+		my_printf(cyan, "MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
 		assert(false);
 	}
-  //cyan_printf("Worker %u is running \n", t_id);
+  //my_printf(cyan, "Worker %u is running \n", t_id);
 
 	int *recv_q_depths, *send_q_depths;
   set_up_queue_depths(&recv_q_depths, &send_q_depths);
@@ -145,7 +145,7 @@ void *worker(void *arg)
   // it may be that not all avaialble writes can be polled due to the unavailability of the acks
   uint32_t completed_but_not_polled_writes = 0, loop_counter = 0;
 
-	if (t_id == 0) green_printf("Worker %d  reached the loop \n", t_id);
+	if (t_id == 0) my_printf(green, "Worker %d  reached the loop \n", t_id);
   bool slept = false;
   //fprintf(stderr, "Worker %d  reached the loop \n", t_id);
 
@@ -163,9 +163,9 @@ void *worker(void *arg)
     if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
       (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 4000000) && (!slept)) {
       uint seconds = 15;
-      if (t_id == 0) yellow_printf("Workers are going to sleep for %u secs\n", seconds);
+      if (t_id == 0) my_printf(yellow, "Workers are going to sleep for %u secs\n", seconds);
       sleep(seconds); slept = true;
-      if (t_id == 0) green_printf("Worker %u is back\n", t_id);
+      if (t_id == 0) my_printf(green, "Worker %u is back\n", t_id);
     }
     if (ENABLE_INFO_DUMP_ON_STALL && print_for_debug) {
       print_verbouse_debug_info(p_ops, t_id, credits);

@@ -141,6 +141,9 @@
 #define DUMP_STATS_2_FILE 0
 
 
+// DEBUG
+#define DEBUG_SEQLOCKS 1
+
 
 
 
@@ -303,10 +306,12 @@ static void my_printf(Color color, const char *format, ...)
       snprintf(buf2, 1000, "\033[31m%s\033[0m", buf1);
       break;
     case green:
-      snprintf(buf2, 1000, "\033[32m%s\033[0m", buf1);
+      // snprintf(buf2, 1000, "\033[32m%s\033[0m", buf1); // darker green
+      snprintf(buf2, 1000, "\033[1m\033[32m%s\033[0m", buf1);
       break;
     case cyan :
-      snprintf(buf2, 1000, "\033[36m%s\033[0m", buf1);
+      snprintf(buf2, 1000, "\033[1m\033[36m%s\033[0m", buf1);
+      //snprintf(buf2, 1000, "\033[36m%s\033[0m", buf1); //darker cyan
       break;
     case magenta:
       snprintf(buf2, 1000, "\033[35m%s\033[0m", buf1);

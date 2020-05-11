@@ -1,5 +1,5 @@
 #include "util.h"
-#include "inline_util.h"
+#include "../../include/kite_inline_util/inline_util.h"
 
 void print_latency_stats(void);
 
@@ -120,7 +120,7 @@ void *print_stats(void* no_arg) {
     double per_s_all_aboard_rmws = (total_all_aboard_rmws) / seconds;
 
   if (SHOW_STATS_LATENCY_STYLE)
-    green_printf("%u %.2f, canc: %.2f, all-aboard: %.2f t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n",
+    my_printf(green, "%u %.2f, canc: %.2f, all-aboard: %.2f t_push: %.2f, t_pop: %.2f zk_wr: %.2f, sync_per %.2f\n",
                  print_count, total_throughput,
                  (total_cancelled_rmws / (double) total_rmws),
                  per_s_all_aboard_rmws,
@@ -128,11 +128,11 @@ void *print_stats(void* no_arg) {
                  zk_write_ratio, sync_per);
   else {
     printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
-    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+    my_printf(green, "SYSTEM MIOPS: %.2f \n", total_throughput);
 
     for (i = 0; i < WORKERS_PER_MACHINE; i++) {
-      cyan_printf("T%d: ", i);
-      yellow_printf("%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s, "
+      my_printf(cyan, "T%d: ", i);
+      my_printf(yellow, "%.2f MIOPS,  R/S %.2f/s, W/S %.2f/s, QR/S %.2f/s, "
                     "RMWS: %.2f/s, P/S %.2f/s, A/S %.2f/s, C/S %.2f/s ",
                     all_stats.cache_hits_per_thread[i],
                     all_stats.reads_sent[i],
@@ -142,19 +142,19 @@ void *print_stats(void* no_arg) {
                     all_stats.proposes_sent[i],
                     all_stats.accepts_sent[i],
                     all_stats.commits_sent[i]);
-      yellow_printf(", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
+      my_printf(yellow, ", BATCHES: Acks %.2f, Ws %.2f, Rs %.2f, R_REPs %.2f",
                     all_stats.ack_batch_size[i],
                     all_stats.write_batch_size[i],
                     all_stats.r_batch_size[i],
                     all_stats.r_rep_batch_size[i]);
-      yellow_printf(", RtoW %.2f%%, FW %.2f%%",
+      my_printf(yellow, ", RtoW %.2f%%, FW %.2f%%",
                     100 * all_stats.reads_that_become_writes[i],
                     100 * all_stats.failed_rem_write[i]);
       printf("\n");
     }
     printf("\n");
     printf("---------------------------------------\n");
-    green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+    my_printf(green, "SYSTEM MIOPS: %.2f \n", total_throughput);
   }
     if (ENABLE_CACHE_STATS == 1)
       print_cache_stats(start, machine_id);

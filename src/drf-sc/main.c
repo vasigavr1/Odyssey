@@ -4,6 +4,7 @@
 
 
 //Global Vars
+int is_roce, machine_id, num_threads;
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct client_stats c_stats[CLIENTS_PER_MACHINE];
@@ -23,8 +24,6 @@ atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
 FILE* client_log[CLIENTS_PER_MACHINE];
 
-//struct client_op req_array[WORKERS_PER_MACHINE][SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
-//atomic_uint_fast8_t buffer_state[SESSIONS_PER_THREAD];
 struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 uint64_t last_pushed_req[SESSIONS_PER_MACHINE];

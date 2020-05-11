@@ -1,11 +1,8 @@
 //#include <zconf.h>
 #include "hrd.h"
 
-int is_roce, machine_id, num_threads;
+
 char **remote_ips, *local_ip, *dev_name;
-
-
-
 
 
 /* Print information about all IB devices in the system */
@@ -16,7 +13,7 @@ void hrd_ibv_devinfo(void)
 	struct ibv_context *ctx;
 	struct ibv_device_attr device_attr;
 
-  red_printf("HRD: printing IB dev info\n");
+  my_printf(red, "HRD: printing IB dev info\n");
 
 	dev_list = ibv_get_device_list(&num_devices);
 	CPE(!dev_list, "Failed to get IB devices list", 0);
@@ -79,7 +76,7 @@ hrd_resolve_port_index(struct hrd_ctrl_blk *cb, int port_index)
       device_given_found = true;
   }
   if (!device_given_found) {
-    red_printf("DEVICE NAME GIVEN NOT FOUND (%s)\n", dev_name);
+    my_printf(red, "DEVICE NAME GIVEN NOT FOUND (%s)\n", dev_name);
   }
 
 	for(dev_i = 0; dev_i < num_devices; dev_i++) {
@@ -167,40 +164,40 @@ void* hrd_malloc_socket(int shm_key, int size, int socket_id)
 	if(shmid == -1) {
 		switch(errno) {
 			case EACCES:
-        red_printf("HRD: SHM malloc error: Insufficient permissions."
+        my_printf(red, "HRD: SHM malloc error: Insufficient permissions."
                        " (SHM key = %d)\n", shm_key);
 				break;
 			case EEXIST:
-        red_printf("HRD: SHM malloc error: Already exists."
+        my_printf(red, "HRD: SHM malloc error: Already exists."
                        " (SHM key = %d)\n", shm_key);
 				break;
 			case EINVAL:
-        red_printf("HRD: SHM malloc error: SHMMAX/SHMIN mismatch."
+        my_printf(red, "HRD: SHM malloc error: SHMMAX/SHMIN mismatch."
                        " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			case ENOMEM:
-        red_printf("HRD: SHM malloc error: Insufficient memory."
+        my_printf(red, "HRD: SHM malloc error: Insufficient memory."
                        " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			case ENOENT:
-        red_printf("HRD: SHM malloc error: No segment exists for the given key, and IPC_CREAT was not specified."
+        my_printf(red, "HRD: SHM malloc error: No segment exists for the given key, and IPC_CREAT was not specified."
                        " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			case ENOSPC:
-        red_printf(
+        my_printf(red,
             "HRD: SHM malloc error: All possible shared memory IDs have been taken or the limit of shared memory is exceeded."
                 " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			case EPERM:
-        red_printf("HRD: SHM malloc error: The SHM_HUGETLB flag was specified, but the caller was not privileged"
+        my_printf(red, "HRD: SHM malloc error: The SHM_HUGETLB flag was specified, but the caller was not privileged"
                        " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			case ENFILE:
-        red_printf("HRD: SHM malloc error: The system-wide limit on the total number of open files has been reached."
+        my_printf(red, "HRD: SHM malloc error: The system-wide limit on the total number of open files has been reached."
                        " (SHM key = %d, w_size = %d)\n", shm_key, size);
 				break;
 			default:
-        red_printf("HRD: SHM malloc error: A wild SHM error: %s.\n",
+        my_printf(red, "HRD: SHM malloc error: A wild SHM error: %s.\n",
                    strerror(errno));
 				break;
 		}
@@ -268,144 +265,6 @@ int hrd_free(int shm_key, void *shm_buf)
 	}
 
 	return 0;
-}
-
-/* Like printf, but red. Limited to 1000 characters. */
-void red_printf(const char *format, ...)
-{
-	#define RED_LIM 1000
-	va_list args;
-	int i;
-
-	char buf1[RED_LIM], buf2[RED_LIM];
-	memset(buf1, 0, RED_LIM);
-	memset(buf2, 0, RED_LIM);
-
-    va_start(args, format);
-
-	/* Marshal the stuff to print in a buffer */
-	vsnprintf(buf1, RED_LIM, format, args);
-
-	/* Probably a bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf1[i] == 0);
-	}
-
-	/* Add markers for red color and reset color */
-	// snprintf(buf2, 1000, "\033[31m%s\033[0m", buf1);
-	snprintf(buf2, 1000, "\033[31m%s\033[0m", buf1);
-
-	/* Probably another bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf2[i] == 0);
-	}
-
-	printf("%s", buf2);
-
-    va_end(args);
-}
-
-/* Like printf, but yellow. Limited to 1000 characters. */
-void yellow_printf(const char *format, ...)
-{
-	#define RED_LIM 1000
-	va_list args;
-	int i;
-
-	char buf1[RED_LIM], buf2[RED_LIM];
-	memset(buf1, 0, RED_LIM);
-	memset(buf2, 0, RED_LIM);
-
-    va_start(args, format);
-
-	/* Marshal the stuff to print in a buffer */
-	vsnprintf(buf1, RED_LIM, format, args);
-
-	/* Probably a bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf1[i] == 0);
-	}
-
-	/* Add markers for yellow color and reset color */
-	// snprintf(buf2, 1000, "\033[31m%s\033[0m", buf1);
-	snprintf(buf2, 1000, "\033[33m%s\033[0m", buf1);
-
-	/* Probably another bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf2[i] == 0);
-	}
-
-	printf("%s", buf2);
-
-    va_end(args);
-}
-
-/* Like printf, but green. Limited to 1000 characters. */
-void green_printf(const char *format, ...)
-{
-	#define RED_LIM 1000
-	va_list args;
-	int i;
-
-	char buf1[RED_LIM], buf2[RED_LIM];
-	memset(buf1, 0, RED_LIM);
-	memset(buf2, 0, RED_LIM);
-
-    va_start(args, format);
-
-	/* Marshal the stuff to print in a buffer */
-	vsnprintf(buf1, RED_LIM, format, args);
-
-	/* Probably a bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf1[i] == 0);
-	}
-
-	/* Add markers for green color and reset color */
-	snprintf(buf2, 1000, "\033[1m\033[32m%s\033[0m", buf1);
-
-	/* Probably another bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf2[i] == 0);
-	}
-
-	printf("%s", buf2);
-
-    va_end(args);
-}
-
-/* Like printf, but magenta. Limited to 1000 characters. */
-void cyan_printf(const char *format, ...)
-{
-	#define RED_LIM 1000
-	va_list args;
-	int i;
-
-	char buf1[RED_LIM], buf2[RED_LIM];
-	memset(buf1, 0, RED_LIM);
-	memset(buf2, 0, RED_LIM);
-
-    va_start(args, format);
-
-	/* Marshal the stuff to print in a buffer */
-	vsnprintf(buf1, RED_LIM, format, args);
-
-	/* Probably a bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf1[i] == 0);
-	}
-
-	/* Add markers for magenta color and reset color */
-	snprintf(buf2, 1000, "\033[1m\033[36m%s\033[0m", buf1);
-
-	/* Probably another bad check for buffer overflow */
-	for(i = RED_LIM - 1; i >= RED_LIM - 50; i --) {
-		assert(buf2[i] == 0);
-	}
-
-	printf("%s", buf2);
-
-    va_end(args);
 }
 
 void hrd_nano_sleep(int ns)

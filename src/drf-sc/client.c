@@ -3,7 +3,7 @@
 //
 
 #include "util.h"
-#include "inline_util.h"
+#include "../../include/kite_inline_util/inline_util.h"
 
 // API_OPCODE
 #define RLXD_READ_BLOCKING 1
@@ -54,7 +54,7 @@ static inline uint32_t send_reqs_from_trace(struct trace_command *trace, uint16_
           // get the result
           polled = true;
           if (CLIENT_DEBUG)
-            green_printf("Client %u pulling req from worker %u for session %u, slot %u\n",
+            my_printf(green, "Client %u pulling req from worker %u for session %u, slot %u\n",
                          t_id, wrkr, s_i, pull_ptr);
           atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
           MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
@@ -75,7 +75,7 @@ static inline uint32_t send_reqs_from_trace(struct trace_command *trace, uint16_
         uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
         while (interface[wrkr].req_array[s_i][push_ptr].state == INVALID_REQ) {
           if (CLIENT_DEBUG)
-            yellow_printf("Client %u inserting req to worker %u for session %u, in slot %u from trace slot %u ptr %p\n",
+            my_printf(yellow, "Client %u inserting req to worker %u for session %u, in slot %u from trace slot %u ptr %p\n",
                           t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
           interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
           memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, TRUE_KEY_SIZE);
@@ -207,7 +207,7 @@ static inline uint64_t poll(uint16_t session_id)
   while (pull_clt_op->state == COMPLETED_REQ) {
     // get the result
     if (CLIENT_DEBUG)
-      green_printf("Client  pulling req from worker %u for session %u, slot %u, last_pulled %u \n",
+      my_printf(green, "Client  pulling req from worker %u for session %u, slot %u, last_pulled %u \n",
                     wrkr, s_i, pull_ptr, last_pulled_req[session_id]);
 
     check_return_values(pull_clt_op);
@@ -305,7 +305,7 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   int return_int = check_inputs(session_id, key_id, value_to_read, value_to_write, val_len,  type);
   if (return_int < 0) {
     if (ENABLE_ASSERTIONS) {
-      red_printf("Error %d, when checking req type %u, for key_id %u, session %u \n",
+      my_printf(red, "Error %d, when checking req type %u, for key_id %u, session %u \n",
                  return_int, type, key_id, session_id);
       assert(false);
     }
@@ -341,7 +341,7 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   // Implicit assumption: other client threads are not racing for this slot
   check_state_with_allowed_flags (2, cl_op->state, INVALID_REQ);
 
-  //green_printf("Sess %u Activating poll ptr %u for req %u at state %u \n",
+  //my_printf(green, "Sess %u Activating poll ptr %u for req %u at state %u \n",
   //             s_i, push_ptr, cl_op->opcode, cl_op->state);
   atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
   MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
@@ -541,55 +541,55 @@ static inline void user_interface()
   sleep(3);
   int req_no = 0;
   do {
-    cyan_printf("Pick a request number: read: 1, write 2, acquire 3, release 4, CAS 5, FAA 6 \n");
+    my_printf(cyan, "Pick a request number: read: 1, write 2, acquire 3, release 4, CAS 5, FAA 6 \n");
   } while (scanf("%d", &req_no) != 1);
 
   switch (req_no) {
     case RLXD_READ_BLOCKING: // read
       do {
-        yellow_printf("READ: Please input key_id \n");
+        my_printf(yellow, "READ: Please input key_id \n");
       } while (scanf("%d", &key_id) != 1);
       assert(key_id >= 0);
       printf ("key_id %u \n", key_id);
       int ret = blocking_read((uint32_t) key_id, value, 1, session_id);
-      green_printf("Return code %d, value read %u \n", ret, value[0]);
+      my_printf(green, "Return code %d, value read %u \n", ret, value[0]);
       assert(ret > 0);
       break;
     case RLXD_WRITE_BLOCKING: // write
       do {
-        yellow_printf("WRITE: Please input key_id, value_to_write \n");
+        my_printf(yellow, "WRITE: Please input key_id, value_to_write \n");
       } while (scanf("%d %d", &key_id, &desired_int) != 2);
       assert(key_id >= 0 && desired_int < 256);
       printf ("key_id %u,  desired %u \n", key_id, desired_int);
       value[0] = (uint8_t) desired_int;
       ret = blocking_write((uint32_t) key_id, value, 1,  session_id);
-      green_printf("Return code %d \n", ret);
+      my_printf(green, "Return code %d \n", ret);
       assert(ret > 0);
       break;
     case ACQUIRE_BLOCKING:
       do {
-        yellow_printf("ACQUIRE: Please input key_id \n");
+        my_printf(yellow, "ACQUIRE: Please input key_id \n");
       } while (scanf("%d", &key_id) != 1);
       assert(key_id >= 0);
       printf ("key_id %u \n", key_id);
       ret = blocking_acquire((uint32_t) key_id, value, 1,  session_id);
-      green_printf("Return code %d, value read  %u \n", ret, value[0]);
+      my_printf(green, "Return code %d, value read  %u \n", ret, value[0]);
       assert(ret > 0);
       break;
     case RELEASE_BLOCKING:
       do {
-        yellow_printf("RELEASE: Please input key_id, value_to_write \n");
+        my_printf(yellow, "RELEASE: Please input key_id, value_to_write \n");
       } while (scanf("%d %d", &key_id, &desired_int) != 2);
       assert(key_id >= 0 && desired_int < 256);
       printf ("key_id %u,  desired %u \n", key_id, desired_int);
       value[0] = (uint8_t) desired_int;
       ret = blocking_release((uint32_t) key_id, value, 1,  session_id);
-      green_printf("Return code %d \n", ret);
+      my_printf(green, "Return code %d \n", ret);
       assert(ret > 0);
       break;
     case CAS_BLOCKING:
       do {
-        yellow_printf("Please input key_id, expected value , desired value \n");
+        my_printf(yellow, "Please input key_id, expected value , desired value \n");
       } while (scanf("%d %d %d:  ", &key_id, &expected_int, &desired_int) != 3);
       assert(expected_int < 256 && desired_int < 256 && key_id >= 0);
       expected_val[0] = (uint8_t) expected_int;
@@ -597,24 +597,24 @@ static inline void user_interface()
       printf ("key_id %u, expected %u, desired %u \n", key_id, expected_val[0], desired_val[0]);
       ret = blocking_cas((uint32_t) key_id, expected_val, desired_val,  1,
                          &cas_result, true, session_id);
-      green_printf("%s, return code %d, expected val %u, desired val %u\n",
+      my_printf(green, "%s, return code %d, expected val %u, desired val %u\n",
                    cas_result ? "Success" : "Failure", ret, expected_val[0], desired_val[0]);
       assert(ret > 0);
       break;
     case FAA_BLOCKING:
       do {
-        yellow_printf("Please input key_id, value to add \n");
+        my_printf(yellow, "Please input key_id, value to add \n");
       } while (scanf("%d %d:  ", &key_id, &desired_int) != 2);
       assert(desired_int < 256 && key_id >= 0);
       desired_val[0] = (uint8_t) desired_int;
       printf ("key_id %u, desired %u \n", key_id, desired_val[0]);
       ret = blocking_faa((uint32_t) key_id, value, desired_val, 1, session_id);
-      green_printf("Return code %d, value read: %u\n",
+      my_printf(green, "Return code %d, value read: %u\n",
                    ret, value[0], desired_val[0]);
       assert(ret > 0);
       break;
     default:
-      red_printf("No request corresponds to input number %d \n", req_no);
+      my_printf(red, "No request corresponds to input number %d \n", req_no);
       assert(false);
 
   }
@@ -646,7 +646,7 @@ static inline void rel_acq_circular_blocking() {
     for (i = 0; i < relaxed_writes; i++) {
       desired_val[0] = (uint8_t) (10 * machine_id + i);
       blocking_write(key_offset + i, desired_val, val_len, session_id);
-      yellow_printf("Writing key %u, iteration %u, value %u \n", key_offset + i, i, desired_val[0]);
+      my_printf(yellow, "Writing key %u, iteration %u, value %u \n", key_offset + i, i, desired_val[0]);
     }
     desired_val[0] = 1;
     blocking_release(key_flags[machine_id], desired_val, val_len, session_id);
@@ -655,19 +655,19 @@ static inline void rel_acq_circular_blocking() {
   uint8_t prev_machine_id = (uint8_t) ((MACHINE_NUM + machine_id - 1) % MACHINE_NUM);
   while (true) {
     // First acquire the previous machine flag
-    yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
+    my_printf(yellow, "Machine %d Acquiring key_flag %u  from machine %u\n",
                   machine_id, key_flags[prev_machine_id], prev_machine_id);
     do {
       int ret = blocking_acquire(key_flags[prev_machine_id], value, val_len, session_id);
       assert(ret > 0);
     } while (value[0] != 1);
 
-    yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
+    my_printf(yellow, "Machine %d Acquired key_flag %u  from machine %u\n",
                   machine_id, key_flags[prev_machine_id], prev_machine_id);
     // Then read all values to make sure they are what they are supposed to be
     for (i = 0; i < relaxed_writes; i++) {
       blocking_read(key_offset + i, value, val_len, session_id);
-      cyan_printf("Reading key %u, iteration %u, value %u \n", key_offset + i, i, value[0]);
+      my_printf(cyan, "Reading key %u, iteration %u, value %u \n", key_offset + i, i, value[0]);
       assert(value[0] == 10 * prev_machine_id + i);
     }
 
@@ -683,7 +683,7 @@ static inline void rel_acq_circular_blocking() {
 
     // release your flag
     desired_val[0] = 1;
-    yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
+    my_printf(yellow, "Releasing key_flag %u \n", key_flags[machine_id]);
     blocking_release(key_flags[machine_id], desired_val, val_len, session_id);
   }
 }
@@ -718,21 +718,21 @@ static inline void rel_acq_circular_async() {
     for (i = 0; i < relaxed_writes; i++) {
       desired_val[0] = (uint8_t) (10 * machine_id + i);
       async_write_strong(write_key_offset + i, desired_val, val_len, session_id);
-      //yellow_printf("Writing key %u, iteration %u, value %u \n", write_key_offset + i, i, desired_val[0]);
+      //my_printf(yellow, "Writing key %u, iteration %u, value %u \n", write_key_offset + i, i, desired_val[0]);
     }
     desired_val[0] = 1;
     async_release_strong(key_flags[machine_id], desired_val, val_len, session_id);
   }
   while (true) {
     // First acquire the previous machine flag
-    //yellow_printf("Machine %d Acquiring key_flag %u  from machine %u\n",
+    //my_printf(yellow, "Machine %d Acquiring key_flag %u  from machine %u\n",
     //              machine_id, key_flags[prev_machine_id], prev_machine_id);
     do {
       ret = blocking_acquire(key_flags[prev_machine_id], value[0], val_len, session_id);
       assert(ret >= 0);
     } while (value[0][0] != 1);
 
-    //yellow_printf("Machine %d Acquired key_flag %u  from machine %u\n",
+    //my_printf(yellow, "Machine %d Acquired key_flag %u  from machine %u\n",
     //              machine_id, key_flags[prev_machine_id], prev_machine_id);
 
 
@@ -756,14 +756,14 @@ static inline void rel_acq_circular_async() {
 
     // release your flag
     desired_val[0] = 1;
-    //yellow_printf("Releasing key_flag %u \n", key_flags[machine_id]);
+    //my_printf(yellow, "Releasing key_flag %u \n", key_flags[machine_id]);
     ret = async_release_strong(key_flags[machine_id], desired_val, val_len, session_id);
     assert(ret > 0);
 
     // Do the actual reads
     poll_a_req_blocking(session_id, last_issued_req);
     for (i = 0; i < relaxed_writes; i++) {
-      //cyan_printf("Reading key %u, iteration %u, value %u \n", read_key_offset + i, i, value[i][0]);
+      //my_printf(cyan, "Reading key %u, iteration %u, value %u \n", read_key_offset + i, i, value[i][0]);
       assert(value[i][0] == 10 * prev_machine_id + i);
     }
 
@@ -837,14 +837,14 @@ static inline bool check_top(struct top *top, char *message,
 
     if (top->push_counter == top->pop_counter) {
       if (top->key_id != 0) { // Stack must be empty
-        if (!silent) red_printf("%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
+        if (!silent) my_printf(red, "%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
                    message, stack_id, top->push_counter, top->pop_counter, top->key_id);
         return false;
         assert(false);
       }
     } else if (top->push_counter > top->pop_counter) {
       if (top->key_id < NUM_OF_RMW_KEYS) { // Stack cannot be empty
-        if (!silent)  red_printf("%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
+        if (!silent)  my_printf(red, "%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
                    message, stack_id, top->push_counter, top->pop_counter, top->key_id);
         return false;
         assert(false);
@@ -890,7 +890,7 @@ static inline void check_node(uint8_t *val, char *message,
     if (node->next_key_id >= NUM_OF_RMW_KEYS && node->next_key_id <= MAX_TR_NODE_KEY)
       return;
 
-    red_printf("%s node key id %u, bkt %u\n",
+    my_printf(red, "%s node key id %u, bkt %u\n",
                message, node->next_key_id, key_bkt);
     assert(false);
   }
@@ -900,7 +900,7 @@ static inline void check_node(uint8_t *val, char *message,
 static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id, int key_id_to_push)
 {
   if (key_id_to_push < 0) {
-    red_printf("Tried to push a negative key id %d \n", key_id_to_push);
+    my_printf(red, "Tried to push a negative key id %d \n", key_id_to_push);
     return;
   }
   uint32_t new_node_key = (uint32_t) key_id_to_push;
@@ -916,7 +916,7 @@ static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id,
   struct node new_node;
   bool success = false;
   blocking_read(top_key_id, (uint8_t *)&top, sizeof(struct top), session_id);
-  //green_printf("Read top_key_id %u, points to key %u top counter %u\n",
+  //my_printf(green, "Read top_key_id %u, points to key %u top counter %u\n",
   //              stack_id, top.key_id, top.counter);
 
   do {
@@ -932,7 +932,7 @@ static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id,
 //    }
   } while(!success);
 
-//  green_printf("Session %u successfully pushed key %u to stack %u, previous top key %u top counter %u\n",
+//  my_printf(green, "Session %u successfully pushed key %u to stack %u, previous top key %u top counter %u\n",
 //               session_id, new_node_key, stack_id, top.key_id, top.counter);
 }
 
@@ -948,7 +948,7 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
   struct node first_node;
   bool success = false;
   blocking_read(top_key_id, (uint8_t *)&top, sizeof(struct top), session_id);
-  //green_printf("Read top_key_id %u, points to key %u top counter %u\n",
+  //my_printf(green, "Read top_key_id %u, points to key %u top counter %u\n",
   //              stack_id, top.key_id, top.counter);
 
   do {
@@ -966,7 +966,7 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
   } while(!success);
 
 
-//  green_printf("Session %u successfully popped key %u from stack %u, top counter %u\n",
+//  my_printf(green, "Session %u successfully popped key %u from stack %u, top counter %u\n",
 //               session_id, top.key_id, stack_id, top.counter);
   return top.key_id;
 }
@@ -1105,7 +1105,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
   uint8_t state[SESSIONS_PER_CLIENT] = {0};
   uint32_t stack_id[SESSIONS_PER_CLIENT] = {0};
   uint32_t stack_id_cntr = (uint32_t) machine_id * 100;
-  //green_printf("Read top_key_id %u, points to key %u top counter %u\n",
+  //my_printf(green, "Read top_key_id %u, points to key %u top counter %u\n",
   //              stack_id, top.key_id, top.counter);
   //uint32_t success_cntr = 0;
   for (s_i = 0; s_i < SESSIONS_PER_CLIENT; s_i++) {
@@ -1183,7 +1183,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
   uint32_t key_to_write;
   //printf("Session %u %p %p \n", s_i, info, top);
 
-  //green_printf("Session %u state %u, top key_id %u\n", s_i, info->state, top->key_id);
+  //my_printf(green, "Session %u state %u, top key_id %u\n", s_i, info->state, top->key_id);
   switch (info->state) {
     case TR_INIT:
       assert(!info->success);
@@ -1218,7 +1218,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
         while  (first_node[0].stack_id != (uint16_t) info->stack_id) {
 //          if (dbg_count == 0) {
 //            struct key key = create_key(info->stack_id);
-//            yellow_printf("Sess %u/%u,  Popping stack %u -- Read node %u stack id %u, pushed %u, owner %u,"
+//            my_printf(yellow, "Sess %u/%u,  Popping stack %u -- Read node %u stack id %u, pushed %u, owner %u,"
 //                            "bkt %u  key id %u push/pop %u/%u \n",
 //                          info->glob_sess_i, t_id, info->stack_id, top->key_id,
 //                          first_node[0].stack_id, first_node[0].pushed, first_node[0].owner, key.bkt,
@@ -1228,7 +1228,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
                             sizeof(struct node), real_sess_i);
           MOD_ADD(dbg_count, M_4);
 //          if (first_node[0].stack_id == (uint16_t) info->stack_id)
-//            green_printf("Repeat: Sess %u Popping stack %u -- Read node %u stack id %u \n",
+//            my_printf(green, "Repeat: Sess %u Popping stack %u -- Read node %u stack id %u \n",
 //                        info->glob_sess_i,
 //                        info->stack_id, top->key_id, first_node[0].stack_id);
           //assert(false);
@@ -1252,7 +1252,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
             blocking_read(top->key_id, (uint8_t *) &first_node[0],
                           sizeof(struct node), real_sess_i);
 //            if (top->sec_key_id == first_node[0].next_key_id)
-//              green_printf("sess %u/%u, Read key becomes correct %u/%u/%u/%u \n",
+//              my_printf(green, "sess %u/%u, Read key becomes correct %u/%u/%u/%u \n",
 //                           info->glob_sess_i, t_id, first_node[0].next_key_id,
 //                           first_node[0].pushed, first_node[0].stack_id, first_node[0].push_counter);
             MOD_ADD(dbg_count, M_4);
@@ -1269,7 +1269,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
 
 
         check_top(new_top, "Pop-new_top on success ", info->stack_id);
-//        cyan_printf("Session %u Popped key %u from stack %u pushed/pulled %u/%u \n",
+//        my_printf(cyan, "Session %u Popped key %u from stack %u pushed/pulled %u/%u \n",
 //                    info->real_sess_i, top->key_id, info->stack_id, new_top->push_counter, new_top->pop_counter);
         update_file(t_id, top->key_id, info, false, top, new_top);
         info->success = false;
@@ -1299,7 +1299,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
       check_top(top, "Pop-already checked ", info->stack_id);
        // Below usage of check_top is okay to fire -- it means we read a stale first node
       if (!check_top(new_top, "Pop-new_top before CAS ", info->stack_id)) {
-        //cyan_printf("Before popping stack %u, new_top key/top key %u/%u, new pushed/pulled %u/%u\n",
+        //my_printf(cyan, "Before popping stack %u, new_top key/top key %u/%u, new pushed/pulled %u/%u\n",
         //            info->stack_id, new_top->key_id, top->key_id, new_top->push_counter, new_top->pop_counter);
         if (info->pop_dbg <= DEBUG_MAX) info->pop_dbg++;
         if (info->pop_dbg == DEBUG_MAX) {
@@ -1313,7 +1313,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
         // TOP MUST HAVE BEEN UPDATED FOR THAT KEY TO BE ZERO
       }
       if (info->pop_dbg >= DEBUG_MAX) {
-        green_printf("Sess %u Unstack when popping for stack %u, push/pop %u/%u next key id %u, current key_id %u \n",
+        my_printf(green, "Sess %u Unstack when popping for stack %u, push/pop %u/%u next key id %u, current key_id %u \n",
                      info->real_sess_i, info->stack_id, new_top->push_counter,
                      new_top->pop_counter, new_top->key_id, top->key_id);
       }
@@ -1341,7 +1341,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
   //uint32_t key_to_write;
   //printf("Session %u %p %p \n", s_i, info, top);
 
-  //green_printf("Session %u state %u, top key_id %u\n", s_i, info->state, top->key_id);
+  //my_printf(green, "Session %u state %u, top key_id %u\n", s_i, info->state, top->key_id);
   switch (info->state) {
     case TR_INIT: // INITIAL phase of a push: come here in the first push ever, and after every successful push
       //MOD_ADD(*stack_id_cntr, NUMBER_OF_STACKS);
@@ -1354,7 +1354,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
 
       if (ENABLE_ASSERTIONS) t_stats[info->wrkr].writes_asked_by_clients+= (TREIBER_WRITES_NUM - 1);
 //      if (info->wrkr == 13)
-//        yellow_printf("Clt %u have Asked worker %u for %lu writes \n",
+//        my_printf(yellow, "Clt %u have Asked worker %u for %lu writes \n",
 //                      t_id, info->wrkr, t_stats[info->wrkr].writes_asked_by_clients);
       for (uint16_t i = 1; i < TREIBER_WRITES_NUM; i++) {
         //assert(false);
@@ -1387,7 +1387,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
           while ( new_top->push_counter - 1 == top->push_counter &&
             new_top->pop_counter == top->pop_counter) {
             if (dbg_count == 0) {
-              red_printf("Sess %u/%u Stack_id %u, CAS failed, top %u/%u/%u, prev top %u/%u/%u \n",
+              my_printf(red, "Sess %u/%u Stack_id %u, CAS failed, top %u/%u/%u, prev top %u/%u/%u \n",
             info->glob_sess_i, t_id, info->stack_id, top->key_id, top->push_counter, top->pop_counter,
                        new_node[0].next_key_id, new_top->push_counter - 1, new_top->pop_counter);
             }
@@ -1396,7 +1396,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
                           sizeof(struct top), real_sess_i);
 
             if (dbg_count == 0) {
-              red_printf("Sess %u/%u Stack_id %u, CAS failed-blocking read, top %u/%u/%u, prev top %u/%u/%u \n",
+              my_printf(red, "Sess %u/%u Stack_id %u, CAS failed-blocking read, top %u/%u/%u, prev top %u/%u/%u \n",
                          info->glob_sess_i, t_id, info->stack_id, top->key_id, top->push_counter, top->pop_counter,
                          new_node[0].next_key_id, new_top->push_counter - 1, new_top->pop_counter);
             }
@@ -1449,7 +1449,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
         info->done_cas = true;
       }
       else if (info->success) { // If push succeeded, do a pull
-//        yellow_printf("Session %u Pushed key %u to stack %u : %u/%u \n",
+//        my_printf(yellow, "Session %u Pushed key %u to stack %u : %u/%u \n",
 //                      info->real_sess_i, new_top->key_id, info->stack_id,
 //                      new_top->push_counter, new_top->pop_counter);
         info->valid_key_to_write = false;
@@ -1577,7 +1577,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
       }
       else if (info->success) {
         info->owned_key = top->key_id;
-//        cyan_printf("Session %u Popped key %u from stack %u pushed/pulled %u/%u \n",
+//        my_printf(cyan, "Session %u Popped key %u from stack %u pushed/pulled %u/%u \n",
 //                    info->real_sess_i, top->key_id, info->stack_id, new_top->push_counter, new_top->pop_counter);
         info->success = false;
         if (!TREIBER_NO_CONFLICTS) {
@@ -1604,13 +1604,13 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
         if (CLIENT_ASSERTIONS) {
           info->pop_dbg++;
           if (info->pop_dbg == DEBUG_MAX)
-            red_printf("A session is stuck %u \n", real_sess_i);
+            my_printf(red, "A session is stuck %u \n", real_sess_i);
         }
         info->state = TR_INIT; break;
       }
       if (CLIENT_ASSERTIONS) {
         if (info->pop_dbg >= DEBUG_MAX)
-          green_printf("Session %u unstuck \n", real_sess_i);
+          my_printf(green, "Session %u unstuck \n", real_sess_i);
         info->pop_dbg=0;
       }
 
@@ -1676,7 +1676,7 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
                                                         sizeof(struct top), &info->success, true, real_sess_i);
       }
       else if (info->success) { // If push succeeded, do a pull
-        //yellow_printf("Session %u Pushed key %u to stack %u : %u/%u \n",
+        //my_printf(yellow, "Session %u Pushed key %u to stack %u : %u/%u \n",
         //              info->real_sess_i, new_top->key_id, info->stack_id,
         //              new_top->push_counter, new_top->pop_counter);
         check_top(new_top, "Push-new_top after success ", info->stack_id);
@@ -1969,7 +1969,7 @@ static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, ch
 {
   if (CLIENT_ASSERTIONS) {
     if (!ms_is_valid_node_key(key_id)) {
-      red_printf("Client: %u Session %u: %s: in queue: %u, owned key %u, state %u, "
+      my_printf(red, "Client: %u Session %u: %s: in queue: %u, owned key %u, state %u, "
                    "checking key ptr %u from node %u: %s \n",
                  t_id, info->real_sess_i,
                  info->enq_or_deq_state == MS_ENQUEUING ? "E" : "D", info->queue_id, info->owned_key,
@@ -1982,7 +1982,7 @@ static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, ch
         struct ms_ptr *last_node_ptr = &info->last_or_first_node_ms_ptr;
         struct ms_ptr *new_last_node_ptr = &info->new_last_or_first_node_ms_ptr;
 
-        yellow_printf("|%u: E %u Last %lu/%u --> %lu/%u | %u/%u e/d: %u/%u\n\n",
+        my_printf(yellow, "|%u: E %u Last %lu/%u --> %lu/%u | %u/%u e/d: %u/%u\n\n",
                 info->queue_id, tail->next_key_id,
                 last_node_ptr->counter, last_node_ptr->next_key_id,
                 new_last_node_ptr->counter, new_last_node_ptr->next_key_id,
@@ -1992,7 +1992,7 @@ static inline void err_message_if_invalid_node_key(struct ms_sess_info *info, ch
       else {
         struct ms_ptr *new_head = &info->new_head;
         struct ms_ptr *head = &info->head;
-        yellow_printf("|%u: D %u Head: %lu/%u --> %lu %u | %u/%u e/d: %u/%u\n",
+        my_printf(yellow, "|%u: D %u Head: %lu/%u --> %lu %u | %u/%u e/d: %u/%u\n",
                 info->queue_id, new_head->next_key_id,
                 head->counter, head->next_key_id,
                 new_head->counter, new_head->next_key_id,
@@ -2179,7 +2179,7 @@ static inline void ms_enqueue_state_machine(struct ms_sess_info *info, uint16_t 
         (uint32_t) async_cas_strong(tail_key_id, (uint8_t *) tail, (uint8_t *) new_tail,
                                     sizeof(struct ms_ptr), &info->advance_tail_result, true, real_sess_i);
 
-        //green_printf("Session %u/%u enqueues key %u to stack %u \n",
+        //my_printf(green, "Session %u/%u enqueues key %u to stack %u \n",
         //             info->glob_sess_i, t_id, info->owned_key, info->queue_id);
         update_ms_file(t_id, 0, info, true);
         info->success = false;
@@ -2252,7 +2252,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
       if (CLIENT_ASSERTIONS) assert(are_ms_ptrs_equal(head, sec_head));
       if (head->next_key_id == tail->next_key_id) {
         if (CLIENT_ASSERTIONS && first_node_ptr->next_key_id == 0) { // If the queue is empty
-          red_printf("Session %u/%u tries to dequeue from %u/%u, first node_ptr %u/%u points to 0 \n",
+          my_printf(red, "Session %u/%u tries to dequeue from %u/%u, first node_ptr %u/%u points to 0 \n",
                      info->glob_sess_i, t_id, info->queue_id, head->counter, head->next_key_id,
                      ms_get_node_ptr_key_id(head->next_key_id));
           exit(0);
@@ -2542,7 +2542,7 @@ static inline void reset_info_state_after_searching(struct hm_sess_info *info, u
   if (info->ins_or_del_state == HM_SEARCHING_INS) {
     info->ins_or_del_state = HM_INSERTING;
     info->state = HM_TRY_INSERT;
-//    green_printf("Search-in: Cl: %u/%u, next_key_id %u, "
+//    my_printf(green, "Search-in: Cl: %u/%u, next_key_id %u, "
 //                   "curr_key_id %u, list %u/%u, pushed/marked %d/%d \n",
 //                  t_id, info->glob_sess_i, curr_ptr->next_key_id, curr_ptr->my_key_id,
 //                  info->list_id, curr_ptr->list_id, curr_ptr->pushed, curr_ptr->marked);
@@ -2746,7 +2746,7 @@ static inline void hm_search_state_machine(struct hm_sess_info *info, uint16_t t
       else { // curr and new curr are equal
         if (CLIENT_ASSERTIONS) {
           if (next_ptr->list_id != info->list_id) {
-            red_printf("Cl : %u/%u, prev_ptr/curr_ptr/curr_ptr->next/next_ptr %u/%u/%u/%u list: %u/%u/%u \n",
+            my_printf(red, "Cl : %u/%u, prev_ptr/curr_ptr/curr_ptr->next/next_ptr %u/%u/%u/%u list: %u/%u/%u \n",
                        t_id, info->glob_sess_i, info->prev_ptr, curr_ptr->my_key_id, curr_ptr->next_key_id,
                        next_ptr->my_key_id, info->list_id, curr_ptr->list_id, next_ptr->list_id);
           }
@@ -2853,7 +2853,7 @@ static inline void hm_insert_state_machine(struct hm_sess_info *info, uint16_t t
         info->state = HM_INIT;
         info->ins_or_del_state = HM_DELETING;
         c_stats[t_id].microbench_pushes++;
-        //green_printf("Cl %u/%u I %u/%u\n", t_id,
+        //my_printf(green, "Cl %u/%u I %u/%u\n", t_id,
         //              info->glob_sess_i, info->owned_key_ptr, info->list_id);
 //        printf("Client %u, sess %u inserted %lu \n",
 //               t_id, info->glob_sess_i, c_stats[t_id].microbench_pushes);
@@ -2967,7 +2967,7 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
         info->state = HM_INIT;
         c_stats[t_id].microbench_pops++;
         info->delete_num++;
-        //yellow_printf("Cl %u/%u D %u/%u\n", t_id,
+        //my_printf(yellow, "Cl %u/%u D %u/%u\n", t_id,
         //              info->glob_sess_i, info->owned_key_ptr, info->list_id);
         if (!HM_NO_CONFLICT) {
           info->list_id = *queue_id_cntr;
@@ -3282,7 +3282,7 @@ static inline void pc_multi_session(uint16_t t_id)
     info[s_i].flag_to_release = PC_FLAG_KEY_ID_OFFSET + info[s_i].glob_sess_i;
     info[s_i].r_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].session_to_acquire_from * PC_WRITES_NUM));
     info[s_i].w_key = (uint32_t) (PC_NODE_OFFSET + (info[s_i].glob_sess_i * PC_WRITES_NUM));
-    //green_printf("%u/%u acquires from %u, flag/key %u/%u\n",
+    //my_printf(green, "%u/%u acquires from %u, flag/key %u/%u\n",
     //             t_id, info[s_i].glob_sess_i,  info[s_i].session_to_acquire_from, info[s_i].flag_to_acquire, info[s_i].r_key);
 
     if (CLIENT_ASSERTIONS) assert(info[s_i].real_sess_i < SESSIONS_PER_MACHINE);
@@ -3306,7 +3306,7 @@ void *client(void *arg) {
   struct thread_params params = *(struct thread_params *) arg;
   uint16_t t_id = (uint16_t) params.id;
   struct trace_command *trace;
-  green_printf("Client %u reached loop \n", t_id);
+  my_printf(green, "Client %u reached loop \n", t_id);
   while (true) {
     switch (CLIENT_MODE) {
       case CLIENT_USE_TRACE:

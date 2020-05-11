@@ -160,9 +160,13 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 #define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
 
+//
+#define ACCEPT_FLIPS_BIT_OP 128
 
 
-
+// LOGGING for PAXOS
+#define LOG_COMS 0
+#define LOG_WS 1
 
 
 #endif //KITE_OPCODES_H

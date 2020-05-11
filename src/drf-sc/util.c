@@ -117,41 +117,41 @@ void static_assert_compile_parameters()
 
 void print_parameters_in_the_start()
 {
-  green_printf("READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu/%d,"
+  my_printf(green, "READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu/%d,"
                  "read info %llu\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
                sizeof (struct read_info));
-  green_printf("W_COALESCE %d, R_COALESCE %d, ACC_COALESCE %u, "
+  my_printf(green, "W_COALESCE %d, R_COALESCE %d, ACC_COALESCE %u, "
                  "PROPOSE COALESCE %d, COM_COALESCE %d, MAX_WRITE_COALESCE %d,"
                  "MAX_READ_COALESCE %d \n",
                W_COALESCE, R_COALESCE, ACC_COALESCE, PROP_COALESCE, COM_COALESCE,
                MAX_WRITE_COALESCE, MAX_READ_COALESCE);
 
 
-  cyan_printf("ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
+  my_printf(cyan, "ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
               sizeof(struct ack_message), ACK_SIZE,
               sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);
-  yellow_printf("READ: read %lu/%d, read message %lu/%d, read message ud req %lu/%d\n",
+  my_printf(yellow, "READ: read %lu/%d, read message %lu/%d, read message ud req %lu/%d\n",
                 sizeof(struct read), R_SIZE,
                 sizeof(struct r_message), R_SEND_SIZE,
                 sizeof(struct r_message_ud_req), R_RECV_SIZE);
-  cyan_printf("Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
+  my_printf(cyan, "Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
               sizeof(struct write), W_SIZE,
               sizeof(struct w_message), W_SEND_SIZE,
               sizeof(struct w_message_ud_req), W_RECV_SIZE);
 
-  green_printf("W INLINING %d, PENDING WRITES %d \n",
+  my_printf(green, "W INLINING %d, PENDING WRITES %d \n",
                W_ENABLE_INLINING, PENDING_WRITES);
-  green_printf("R INLINING %d, PENDING_READS %d \n",
+  my_printf(green, "R INLINING %d, PENDING_READS %d \n",
                R_ENABLE_INLINING, PENDING_READS);
-  green_printf("R_REP INLINING %d \n",
+  my_printf(green, "R_REP INLINING %d \n",
                R_REP_ENABLE_INLINING);
-  cyan_printf("W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
+  my_printf(cyan, "W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
               W_CREDITS, W_BUF_SLOTS, W_BUF_SIZE);
 
-  yellow_printf("Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
-  green_printf("SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
+  my_printf(yellow, "Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
+  my_printf(green, "SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
 }
 
@@ -280,7 +280,7 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
 {
   param_arr[t_id].id = t_id < WORKERS_PER_MACHINE ? t_id : t_id - WORKERS_PER_MACHINE;
   int core = pin_thread(t_id); // + 8 + t_id * 20;
-  yellow_printf("Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
+  my_printf(yellow, "Creating %s thread %d at core %d \n", node_purpose, param_arr[t_id].id, core);
   CPU_ZERO(pinned_hw_threads);
   CPU_SET(core, pinned_hw_threads);
   pthread_attr_setaffinity_np(attr, sizeof(cpu_set_t), pinned_hw_threads);
@@ -422,7 +422,7 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
 
     }
     if (t_id  == 0){
-        cyan_printf("Skewed TRACE: Exponent %d, Hottest key accessed: %.2f%%  \n", SKEW_EXPONENT_A,
+        my_printf(cyan, "Skewed TRACE: Exponent %d, Hottest key accessed: %.2f%%  \n", SKEW_EXPONENT_A,
                     (100 * hottest_key_counter / (double) cmd_count));
         printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
                  "Trace w_size %d \n",
@@ -496,7 +496,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
   }
 
   if (t_id == 0) {
-    cyan_printf("UNIFORM TRACE \n");
+    my_printf(cyan, "UNIFORM TRACE \n");
     printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%, "
              "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d, Write ratio %d \n",
            (double) (opc_info->writes * 100) / TRACE_SIZE,
@@ -591,7 +591,7 @@ int spawn_stats_thread() {
         core = 2 * (num_threads) + 2;
         CPU_SET(core, &cpus_stats);
     }
-    yellow_printf("Creating stats thread at core %d\n", core);
+    my_printf(yellow, "Creating stats thread at core %d\n", core);
     pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus_stats);
     return pthread_create(&thread_arr[0], &attr, print_stats, NULL);
 }
@@ -1353,7 +1353,7 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id,
     // Spawn a thread that prints the stats
     if (CLIENT_MODE != CLIENT_UI) {
       if (spawn_stats_thread() != 0)
-        red_printf("Stats thread was not successfully spawned \n");
+        my_printf(red, "Stats thread was not successfully spawned \n");
     }
     atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
   }

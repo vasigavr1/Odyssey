@@ -114,22 +114,100 @@ void str_to_binary(uint8_t* value, char* str, int size);
 void print_cache_stats(struct timespec start, int id);
 
 
-/* The leader and follower send their local requests to this, reads get served
- * But writes do not get served, writes are only propagated here to see whether their keys exist */
-void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op *op,
-                          struct cache_resp *resp, struct pending_ops *);
-/* The leader sends the writes to be committed with this function*/
-void cache_batch_op_updates(uint16_t , uint16_t , struct write**, struct pending_ops*, uint32_t,  uint32_t, bool);
-// The worker send here the incoming reads, the reads check the incoming ts if it is  bigger/equal to the local
-// the just ack it, otherwise they send the value back
-void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
-                          uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
+/* ---------------------------------------------------------------------------
+//------------------------------ KVS UTILITY GENERIC -----------------------------
+//---------------------------------------------------------------------------*/
 
-void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read_info **writes,
-                                     struct pending_ops *p_ops,
-                                     uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops);
 
-// Send an isolated write to the kvs-no batching
-void cache_isolated_op(int t_id, struct write *write);
+// Locate the buckets for the requested keys
+static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key op_key,
+																				 struct mica_bkt **bkt_ptr, uint *tag,
+																				 mica_op_t **kv_ptr, uint8_t *key_in_store,
+																				 mica_kv_t *KVS)
+{
+	bkt[op_i] = op_key.bkt & KVS->bkt_mask;
+	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
+//  printf("bkt %u \n", bkt[op_i]);
+	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
+	tag[op_i] = op_key.tag;
+	key_in_store[op_i] = 0;
+	kv_ptr[op_i] = NULL;
+}
+
+// Locate the buckets for the requested keys
+static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, struct key *op_key,
+																									struct mica_bkt **bkt_ptr, uint *tag,
+																									mica_op_t **kv_ptr,
+																									uint8_t *key_in_store, mica_kv_t *KVS)
+{
+	bkt[op_i] = op_key->bkt & KVS->bkt_mask;
+	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
+	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
+	tag[op_i] = op_key->tag;
+	key_in_store[op_i] = 0;
+	kv_ptr[op_i] = NULL;
+}
+
+// After locating the buckets locate all kv pairs
+static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mica_bkt **bkt_ptr,
+																					 mica_op_t **kv_ptr, mica_kv_t *KVS)
+{
+	for(uint16_t op_i = 0; op_i < op_num; op_i++) {
+		for (uint8_t j = 0; j < 8; j++) {
+			if (bkt_ptr[op_i]->slots[j].in_use == 1 &&
+					bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
+				uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
+															KVS->log_mask;
+				/*
+                 * We can interpret the log entry as mica_op, even though it
+                 * may not contain the full MICA_MAX_VALUE value.
+                 */
+//        printf("kv_ptr[%u]: offset %lu : %p \n",
+//               op_i, log_offset, (void *)&KVS->ht_log[log_offset]);
+				kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
+
+				/* Small values (1--64 bytes) can span 2 kvs lines */
+				__builtin_prefetch(kv_ptr[op_i], 0, 0);
+				__builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
+
+				/* Detect if the head has wrapped around for this index entry */
+				if (KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
+					kv_ptr[op_i] = NULL;  /* If so, we mark it "not found" */
+				}
+				break;
+			}
+		}
+	}
+}
+
+// Locate a kv_pair inside a bucket: used in a loop for all kv-pairs
+static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt **bkt_ptr,
+																					mica_op_t **kv_ptr, mica_kv_t *KVS)
+{
+	for(uint8_t j = 0; j < 8; j++) {
+		if(bkt_ptr[op_i]->slots[j].in_use == 1 &&
+			 bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
+			uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
+														KVS->log_mask;
+			/*
+               * We can interpret the log entry as mica_op, even though it
+               * may not contain the full MICA_MAX_VALUE value.
+               */
+			kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
+
+			/* Small values (1--64 bytes) can span 2 kvs lines */
+			__builtin_prefetch(kv_ptr[op_i], 0, 0);
+			__builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
+
+			/* Detect if the head has wrapped around for this index entry */
+			if(KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
+				kv_ptr[op_i] = NULL;	/* If so, we mark it "not found" */
+			}
+
+			break;
+		}
+	}
+}
+
 
 #endif

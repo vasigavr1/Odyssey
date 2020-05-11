@@ -326,7 +326,7 @@
 #define DEBUG_SESS_COUNTER M_16
 #define DEBUG_LOG 0
 #define ENABLE_INFO_DUMP_ON_STALL 0
-#define DEBUG_SEQLOCKS 1
+
 
 #define POLL_CQ_R 0
 #define POLL_CQ_W 1
@@ -395,7 +395,7 @@ struct write {
   uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__));
 
-#define ACCEPT_FLIPS_BIT_OP 128
+
 struct accept {
 	struct network_ts_tuple ts;
   struct key key ;

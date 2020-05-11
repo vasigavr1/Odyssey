@@ -14,7 +14,7 @@ hrd_ctrl_blk_init(int local_hid, int port_index,
 {
 
 
-	// red_printf("HRD: creating control block %d: port %d, socket %d, "
+	// my_printf(red, "HRD: creating control block %d: port %d, socket %d, "
 	// 	"conn qps %d, UC %d, conn buf %d bytes (key %d), "
 	// 	"dgram qps %d, dgram buf %d bytes (key %d)\n",
 	// 	local_hid, port_index, numa_node_id,
@@ -40,7 +40,7 @@ hrd_ctrl_blk_init(int local_hid, int port_index,
 	assert(dgram_buf_size >= 0 && dgram_buf_size <= M_1024);
 
 	if(num_conn_qps == 0 && num_dgram_qps == 0) {
-    red_printf("HRD: Control block initialization without QPs. Are you"
+    my_printf(red, "HRD: Control block initialization without QPs. Are you"
                    " sure you want to do this?\n");
 		assert(false);
 	}
@@ -136,7 +136,7 @@ hrd_ctrl_blk_init(int local_hid, int port_index,
 int hrd_ctrl_blk_destroy(struct hrd_ctrl_blk *cb)
 {
 	int i;
-  red_printf("HRD: Destroying control block %d\n", cb->local_hid);
+  my_printf(red, "HRD: Destroying control block %d\n", cb->local_hid);
 
 	/* Destroy QPs and CQs. QPs must be destroyed before CQs. */
 	for(i = 0; i < cb->num_dgram_qps; i++) {
@@ -222,7 +222,7 @@ int hrd_ctrl_blk_destroy(struct hrd_ctrl_blk *cb)
 		return -1;
 	}
 
-  red_printf("HRD: Control block %d destroyed.\n", cb->local_hid);
+  my_printf(red, "HRD: Control block %d destroyed.\n", cb->local_hid);
 	return 0;
 }
 

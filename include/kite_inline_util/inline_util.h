@@ -1,9 +1,16 @@
 #ifndef INLINE_UTILS_H
 #define INLINE_UTILS_H
 
-#include "kvs.h"
+//#include "kvs.h"
 #include "hrd.h"
-#include "common_func.h"
+
+
+#include "generic_util.h"
+#include "rdma_util.h"
+#include "kvs_util.h"
+#include "debug_util.h"
+#include "config_util.h"
+#include "client_if_util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -11,403 +18,23 @@
 #include <assert.h>
 
 
+//forward declarations
+static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
+                                              uint16_t t_id);
+
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
 ---------------------------------------------------------------------------*/
-static inline bool is_odd(uint64_t var) {
-  return ((var % 2) == 1);
-}
-
-static inline bool is_even(uint64_t var) {
-  return ((var % 2) == 0);
-}
-
-static inline void optik_lock(seqlock_t *seqlock)
-{
-  if (WORKERS_PER_MACHINE == 1) return;
-  uint64_t tmp_lock, new_lock;
-  tmp_lock = (uint64_t) atomic_load_explicit(seqlock, memory_order_acquire);
-  do {
-    // First spin in your L1, reading until the lock is
-    while (is_odd(tmp_lock)) {
-      tmp_lock = (uint64_t) atomic_load_explicit(seqlock, memory_order_acquire);
-    }
-
-    new_lock = tmp_lock + 1;
-    if (DEBUG_SEQLOCKS) assert(is_odd(new_lock));
-  } while(!(atomic_compare_exchange_strong_explicit(seqlock, &tmp_lock,
-                                                         new_lock,
-                                                         memory_order_acquire,
-                                                         memory_order_acquire)));
-  if (DEBUG_SEQLOCKS) assert(is_odd ((uint64_t) atomic_load_explicit (seqlock, memory_order_acquire)));
-
-
-}
-
-static inline void optik_unlock(seqlock_t* seqlock)
-{
-  if (WORKERS_PER_MACHINE == 1) return;
-  uint64_t tmp = *seqlock;
-  if (DEBUG_SEQLOCKS) {
-    assert(is_odd(tmp));
-  }
-  atomic_store_explicit(seqlock, tmp + 1, memory_order_release);
-}
-
-// LOCK-free read
-static inline uint64_t read_seqlock_lock_free(seqlock_t *seqlock)
-{
-  if (!ENABLE_LOCK_FREE_READING) {
-    optik_lock(seqlock);
-    return 0;
-  }
-  uint64_t tmp_lock;
-  do {
-    tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
-  } while (is_odd(tmp_lock));
-
-  return tmp_lock;
-}
-
-// return true if the check was successful (loop while it returns false!)
-static inline bool check_seqlock_lock_free(seqlock_t *seqlock,
-                                           uint64_t *read_lock)
-{
-  if (!ENABLE_LOCK_FREE_READING) {
-    optik_unlock(seqlock);
-    return true;
-  }
-  COMPILER_BARRIER();
-  uint64_t tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
-  if (*read_lock == tmp_lock) return true;
-  else {
-    *read_lock = tmp_lock;
-    return false;
-  }
-}
-
-
-static inline void my_assert(bool cond, const char *message)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (!cond) {
-      red_printf("%s\n", message);
-      assert(false);
-    }
-  }
-}
-
-static inline void print_version(const uint32_t version)
-{
-  yellow_printf("Version: %u\n", version);
-}
-
-
-// swap 2 pointerss
-static inline void swap_pointers(void** ptr_1, void** ptr_2)
-{
-	void* tmp = *ptr_1;
-	*ptr_1 = *ptr_2;
-	*ptr_2 = tmp;
-}
-
-// Swap 3 pointers in a cirular fashion
-static inline void circulate_pointers(void** ptr_1, void** ptr_2, void** ptr_3)
-{
-	void* tmp = *ptr_1;
-	*ptr_1 = *ptr_2;
-	*ptr_2 = *ptr_3;
-	*ptr_3 = tmp;
-}
-
-
-// Check whether 2 key hashes are equal
-static inline bool true_keys_are_equal(struct key* key1, struct key* key2) {
-  return memcmp(key1, key2, TRUE_KEY_SIZE) == 0;
-}
-
-// Compares two network timestamps, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_netw_ts(struct network_ts_tuple *ts1, struct network_ts_tuple *ts2)
-{
-  if ((ts1->version == ts2->version) &&
-      (ts1->m_id == ts2->m_id))
-    return EQUAL;
-  else if ((ts1->version < ts2->version) ||
-          ((ts1->version == ts2->version) &&
-           (ts1->m_id < ts2->m_id)))
-    return SMALLER;
-  else if  ((ts1->version > ts2->version) ||
-           ((ts1->version == ts2->version)) &&
-            (ts1->m_id > ts2->m_id))
-    return GREATER;
-
-  return ERROR;
-}
-
-// Compares two timestamps, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_ts(struct ts_tuple *ts1, struct ts_tuple *ts2)
-{
-  if ((ts1->version == ts2->version) &&
-      (ts1->m_id == ts2->m_id))
-    return EQUAL;
-  else if ((ts1->version < ts2->version) ||
-           ((ts1->version == ts2->version) &&
-            (ts1->m_id < ts2->m_id)))
-    return SMALLER;
-  else if  ((ts1->version > ts2->version) ||
-            ((ts1->version == ts2->version)) &&
-            (ts1->m_id > ts2->m_id))
-    return GREATER;
-  return ERROR;
-}
-
-// Compares a network ts with a regular ts, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_netw_ts_with_ts(struct network_ts_tuple *ts1, struct ts_tuple *ts2)
-{
-  if ((ts1->version == ts2->version) &&
-      (ts1->m_id == ts2->m_id))
-    return EQUAL;
-  else if ((ts1->version < ts2->version) ||
-           ((ts1->version == ts2->version) &&
-            (ts1->m_id < ts2->m_id)))
-    return SMALLER;
-  else if  ((ts1->version > ts2->version) ||
-            ((ts1->version == ts2->version)) &&
-            (ts1->m_id > ts2->m_id))
-    return GREATER;
-
-  return ERROR;
-}
-
-static inline enum ts_compare compare_ts_with_flat(struct ts_tuple *ts1, uint32_t version2, uint8_t m_id2) {
-  if ((ts1->version == version2) &&
-      (ts1->m_id == m_id2))
-    return EQUAL;
-  else if ((ts1->version < version2) ||
-           ((ts1->version == version2) &&
-            (ts1->m_id < m_id2)))
-    return SMALLER;
-  else if ((ts1->version > version2) ||
-           ((ts1->version == version2)) &&
-           (ts1->m_id > m_id2))
-    return GREATER;
-
-  return ERROR;
-}
-
-static inline enum ts_compare compare_ts_with_netw_ts(struct ts_tuple *ts1, struct network_ts_tuple *ts2) {
-  if ((ts1->version == ts2->version) &&
-      (ts1->m_id == ts2->m_id))
-    return EQUAL;
-  else if ((ts1->version < ts2->version) ||
-           ((ts1->version == ts2->version) &&
-            (ts1->m_id < ts2->m_id)))
-    return SMALLER;
-  else if ((ts1->version > ts2->version) ||
-           ((ts1->version == ts2->version)) &&
-           (ts1->m_id > ts2->m_id))
-    return GREATER;
-
-  return ERROR;
-}
-
-
-
-static inline enum ts_compare compare_ts_generic(struct ts_tuple *ts1, uint8_t flag1, struct ts_tuple *ts2, uint8_t flag2)
-{
-  uint32_t version1 = ts1->version;
-  uint32_t version2 = ts1->version;
-  uint8_t m_id1 = ts1->m_id;
-  uint8_t m_id2 = ts1->m_id;
-  switch (flag1) {
-    case NETW_TS:
-      version1 =((struct network_ts_tuple*) ts1)->version;
-      m_id1 = ((struct network_ts_tuple*) ts1)->m_id;
-      break;
-    case META_TS:
-      version1 =((struct network_ts_tuple*) ts1)->version;
-      m_id1 = ((struct network_ts_tuple*) ts1)->m_id;
-      break;
-    case REGULAR_TS: break;
-    default: if (ENABLE_ASSERTIONS) assert(false);
-  }
-  switch (flag2) {
-    case NETW_TS:
-      version2 =((struct network_ts_tuple*) ts2)->version;
-      m_id2 = ((struct network_ts_tuple*) ts2)->m_id;
-      break;
-    case META_TS:
-      version2 =((struct network_ts_tuple*) ts2)->version;
-      m_id2 = ((struct network_ts_tuple*) ts2)->m_id;
-      break;
-    case REGULAR_TS: break;
-    default: if (ENABLE_ASSERTIONS) assert(false);
-  }
-
-  if ((version1 == version2) &&
-      (m_id1 == m_id2))
-    return EQUAL;
-  else if ((version1 < version2) ||
-           ((version1 == version2) &&
-            (m_id1 < m_id2)))
-    return SMALLER;
-  else if ((version1 > version2) ||
-           ((version1 == version2)) &&
-           (m_id1 > m_id2))
-    return GREATER;
-
-  return ERROR;
-
-}
-
-
-// First argument is the network ts
-static inline void assign_ts_to_netw_ts(struct network_ts_tuple *ts1, struct ts_tuple *ts2)
-{
-  ts1->m_id = ts2->m_id;
-  ts1->version = ts2->version;
-}
-
-// First argument is the ts
-static inline void assign_netw_ts_to_ts(struct ts_tuple *ts1, struct network_ts_tuple *ts2)
-{
-  ts1->m_id = ts2->m_id;
-  ts1->version = ts2->version;
-}
-
 
 // A condition to be used to trigger periodic (but rare) measurements
 static inline bool trigger_measurement(uint16_t local_client_id)
 {
-	return t_stats[local_client_id].cache_hits_per_thread % K_32 > 0 &&
-		   t_stats[local_client_id].cache_hits_per_thread % K_32 <= 500 &&
-		   local_client_id == 0 && machine_id == MACHINE_NUM -1;
-}
-
-// Calculate the thread global id
-static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
-{
-  return (uint16_t) (m_id * WORKERS_PER_MACHINE + t_id);
-}
-
-// Calculate the machineid out of the thread global id
-static inline uint8_t gid_to_mid(uint16_t g_id)
-{
-  return (uint8_t) (g_id / WORKERS_PER_MACHINE);
-}
-
-// Convert a machine id to a "remote machine id"
-static inline uint8_t  mid_to_rmid(uint8_t m_id)
-{
-  return m_id < machine_id ? m_id : (uint8_t)(m_id - 1);
-}
-
-// Convert a "remote machine id" to a machine id
-static inline uint8_t rmid_to_mid(uint8_t rm_id)
-{
-  return rm_id < machine_id ? rm_id : (uint8_t)(rm_id + 1);
-}
-
-// Calculate the global session id
-static inline uint16_t get_glob_sess_id(uint8_t m_id, uint16_t t_id, uint16_t sess_id)
-{
-  return (uint16_t) ((m_id * SESSIONS_PER_MACHINE) +
-                     (t_id * SESSIONS_PER_THREAD)  +
-                      sess_id);
-}
-
-// Get the machine id out of a global session id
-static inline uint8_t glob_ses_id_to_m_id(uint16_t glob_sess_id)
-{
-  return (uint8_t) (glob_sess_id / SESSIONS_PER_MACHINE);
-}
-
-// Get the machine id out of a global session id
-static inline uint16_t glob_ses_id_to_t_id(uint16_t glob_sess_id)
-{
-  return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) / SESSIONS_PER_THREAD);
-}
-
-// Get the sess id out of a global session id
-static inline uint16_t glob_ses_id_to_sess_id(uint16_t glob_sess_id)
-{
-  return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) % SESSIONS_PER_THREAD);
-}
-
-static inline bool is_global_ses_id_local(uint16_t glob_sess_id, uint16_t t_id)
-{
-  return glob_ses_id_to_t_id(glob_sess_id) == t_id &&
-         glob_ses_id_to_m_id(glob_sess_id) == machine_id;
-}
-// Generic CAS
-static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, uint8_t new_state, uint16_t t_id)
-{
-  return atomic_compare_exchange_strong(state, (atomic_uint_fast8_t *) &old_state,
-                                        (atomic_uint_fast8_t) new_state);
-}
-
-static inline bool rmw_ids_are_equal(struct rmw_id *id1, struct rmw_id *id2)
-{
-  return id1->glob_sess_id == id2->glob_sess_id && id1->id == id2->id;
-}
-
-static inline bool rmw_id_is_equal_with_id_and_glob_sess_id(struct rmw_id *id1, uint64_t id, uint16_t glob_sess_id)
-{
-  return id1->glob_sess_id == glob_sess_id && id1->id == id;
-}
-
-static inline void assign_second_rmw_id_to_first(struct rmw_id* rmw_id1, struct rmw_id* rmw_id2)
-{
-  rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
-}
-
-// assign second argument to the first
-static inline void assign_rmw_id_to_net_rmw_id(struct net_rmw_id* rmw_id1, struct rmw_id* rmw_id2)
-{
-  rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
-}
-
-// assign second argument to the first
-static inline void assign_net_rmw_id_to_rmw_id(struct rmw_id* rmw_id1, struct net_rmw_id* rmw_id2)
-{
-  rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
-}
-
-static inline void swap_rmw_ids(struct rmw_id* rmw_id1, struct rmw_id* rmw_id2)
-{
-  struct rmw_id  tmp = *rmw_id1;
-  assign_second_rmw_id_to_first(rmw_id1, rmw_id2);
-  assign_second_rmw_id_to_first(rmw_id2, &tmp);
-}
-
-static inline uint8_t sum_of_reps(struct rmw_rep_info* rmw_reps)
-{
-  return rmw_reps->acks + rmw_reps->rmw_id_commited +
-         rmw_reps->log_too_small + rmw_reps->already_accepted +
-         rmw_reps->ts_stale + rmw_reps->seen_higher_prop_acc +
-         rmw_reps->log_too_high;
+  return t_stats[local_client_id].cache_hits_per_thread % K_32 > 0 &&
+         t_stats[local_client_id].cache_hits_per_thread % K_32 <= 500 &&
+         local_client_id == 0 && machine_id == MACHINE_NUM -1;
 }
 
 
-
-
-static inline bool opcode_is_rmw(uint8_t opcode)
-{
-  return opcode == FETCH_AND_ADD || opcode == COMPARE_AND_SWAP_WEAK ||
-         opcode == COMPARE_AND_SWAP_STRONG || opcode == RMW_PLAIN_WRITE;
-}
-
-static inline bool opcode_is_compare_rmw(uint8_t opcode)
-{
-  return opcode == COMPARE_AND_SWAP_WEAK || opcode == COMPARE_AND_SWAP_STRONG;
-}
-
-
-static inline void act_on_quorum_of_prop_acks(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
-                                              uint16_t t_id);
 
 static inline struct key create_key(uint32_t key_id)
 {
@@ -418,153 +45,6 @@ static inline struct key create_key(uint32_t key_id)
 }
 
 
-/* ---------------------------------------------------------------------------
-//------------------------------ RDMA GENERIC -----------------------------
-//---------------------------------------------------------------------------*/
-// Post Receives
-static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t recv_num)
-{
-  if (recv_num == 0) return;
-  uint16_t j;
-  struct ibv_recv_wr *bad_recv_wr;
-  for (j = 0; j < recv_num; j++) {
-    recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
-    //printf("Posting a receive at push ptr %u at address %lu \n", recv->w_push_ptr, recv->recv_sgl[j].addr);
-    MOD_ADD(recv->push_ptr, recv->buf_slots);
-    recv->recv_wr[j].next = (j == recv_num - 1) ?
-                            NULL : &recv->recv_wr[j + 1];
-  }
-  int ret = ibv_post_recv(recv->recv_qp, &recv->recv_wr[0], &bad_recv_wr);
-  if (ENABLE_ASSERTIONS) CPE(ret, "ibv_post_recv error", ret);
-}
-
-/* Fill @wc with @num_comps comps from this @cq. Exit on error. */
-static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, uint8_t caller_flag)
-{
-  int comps = 0;
-  uint32_t debug_cnt = 0;
-  while(comps < num_comps) {
-    if (ENABLE_ASSERTIONS && debug_cnt > M_256) {
-      printf("Someone is stuck waiting for a completion %d / %d , type %u  \n", comps, num_comps, caller_flag );
-      debug_cnt = 0;
-    }
-    int new_comps = ibv_poll_cq(cq, num_comps - comps, &wc[comps]);
-    if(new_comps != 0) {
-//			 printf("I see completions %d\n", new_comps);
-      /* Ideally, we should check from comps -> new_comps - 1 */
-      if(ENABLE_ASSERTIONS && wc[comps].status != 0) {
-        fprintf(stderr, "Bad wc status %d\n", wc[comps].status);
-        exit(0);
-      }
-      comps += new_comps;
-    }
-    if (ENABLE_ASSERTIONS) debug_cnt++;
-  }
-  return debug_cnt;
-}
-
-static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *send_wr, uint16_t wr_num)
-{
-  int flag = mes_size < MAXIMUM_INLINE_SIZE ? IBV_SEND_INLINE : 0;
-  for (uint16_t i = 0; i < wr_num; i++)
-    send_wr[i].send_flags = flag;
-}
-
-
-/* ---------------------------------------------------------------------------
-//------------------------------ KVS UTILITY GENERIC -----------------------------
-//---------------------------------------------------------------------------*/
-
-
-// Locate the buckets for the requested keys
-static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key op_key,
-                                         struct mica_bkt **bkt_ptr, uint *tag,
-                                         mica_op_t **kv_ptr, uint8_t *key_in_store,
-                                         mica_kv_t *KVS)
-{
-  bkt[op_i] = op_key.bkt & KVS->bkt_mask;
-  bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
-//  printf("bkt %u \n", bkt[op_i]);
-  __builtin_prefetch(bkt_ptr[op_i], 0, 0);
-  tag[op_i] = op_key.tag;
-  key_in_store[op_i] = 0;
-  kv_ptr[op_i] = NULL;
-}
-
-// Locate the buckets for the requested keys
-static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, struct key *op_key,
-                                                  struct mica_bkt **bkt_ptr, uint *tag,
-                                                  mica_op_t **kv_ptr,
-                                                  uint8_t *key_in_store, mica_kv_t *KVS)
-{
-  bkt[op_i] = op_key->bkt & KVS->bkt_mask;
-  bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
-  __builtin_prefetch(bkt_ptr[op_i], 0, 0);
-  tag[op_i] = op_key->tag;
-  key_in_store[op_i] = 0;
-  kv_ptr[op_i] = NULL;
-}
-
-// After locating the buckets locate all kv pairs
-static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mica_bkt **bkt_ptr,
-                                           mica_op_t **kv_ptr, mica_kv_t *KVS)
-{
-  for(uint16_t op_i = 0; op_i < op_num; op_i++) {
-    for (uint8_t j = 0; j < 8; j++) {
-      if (bkt_ptr[op_i]->slots[j].in_use == 1 &&
-          bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
-        uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
-                              KVS->log_mask;
-        /*
-                 * We can interpret the log entry as mica_op, even though it
-                 * may not contain the full MICA_MAX_VALUE value.
-                 */
-//        printf("kv_ptr[%u]: offset %lu : %p \n",
-//               op_i, log_offset, (void *)&KVS->ht_log[log_offset]);
-        kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
-
-        /* Small values (1--64 bytes) can span 2 kvs lines */
-        __builtin_prefetch(kv_ptr[op_i], 0, 0);
-        __builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
-
-        /* Detect if the head has wrapped around for this index entry */
-        if (KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
-          kv_ptr[op_i] = NULL;  /* If so, we mark it "not found" */
-        }
-        break;
-      }
-    }
-  }
-}
-
-// Locate a kv_pair inside a bucket: used in a loop for all kv-pairs
-static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt **bkt_ptr,
-                                          mica_op_t **kv_ptr, mica_kv_t *KVS)
-{
-  for(uint8_t j = 0; j < 8; j++) {
-    if(bkt_ptr[op_i]->slots[j].in_use == 1 &&
-       bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
-      uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
-                            KVS->log_mask;
-      /*
-               * We can interpret the log entry as mica_op, even though it
-               * may not contain the full MICA_MAX_VALUE value.
-               */
-      kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
-
-      /* Small values (1--64 bytes) can span 2 kvs lines */
-      __builtin_prefetch(kv_ptr[op_i], 0, 0);
-      __builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
-
-      /* Detect if the head has wrapped around for this index entry */
-      if(KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
-        kv_ptr[op_i] = NULL;	/* If so, we mark it "not found" */
-      }
-
-      break;
-    }
-  }
-}
 
 /* ---------------------------------------------------------------------------
 //------------------------------ LATENCY MEASUREMENTS-------------------------
@@ -578,7 +58,7 @@ static inline void bookkeep_latency(int useconds, req_type rt){
       latency_counter = &latency_count.acquires;
       if (useconds > latency_count.max_acq_lat) {
         latency_count.max_acq_lat = (uint32_t) useconds;
-        //green_printf("Found max acq latency: %u/%d \n",
+        //my_printf(green, "Found max acq latency: %u/%d \n",
         //             latency_count.max_acq_lat, useconds);
       }
       break;
@@ -586,7 +66,7 @@ static inline void bookkeep_latency(int useconds, req_type rt){
       latency_counter = &latency_count.releases;
       if (useconds > latency_count.max_rel_lat) {
         latency_count.max_rel_lat = (uint32_t) useconds;
-        //yellow_printf("Found max rel latency: %u/%d \n", latency_count.max_rel_lat, useconds);
+        //my_printf(yellow, "Found max rel latency: %u/%d \n", latency_count.max_rel_lat, useconds);
       }
       break;
     case READ_REQ:
@@ -642,7 +122,7 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
         latency_info->measured_req_flag = RELEASE;
       else if (opcode == OP_ACQUIRE) latency_info->measured_req_flag = ACQUIRE;
       else if (ENABLE_ASSERTIONS) assert(false);
-      //green_printf("Measuring a req %llu, opcode %d, flag %d op_i %d \n",
+      //my_printf(green, "Measuring a req %llu, opcode %d, flag %d op_i %d \n",
       //					 t_stats[t_id].cache_hits_per_thread, opcode, latency_info->measured_req_flag, latency_info->measured_sess_id);
       latency_info->measured_sess_id = sess_id;
       clock_gettime(CLOCK_MONOTONIC, &latency_info->start);
@@ -651,1599 +131,10 @@ static inline void start_measurement(struct latency_flags* latency_info, uint32_
   }
 }
 
-// When an out-of-epoch request completes rectify the keys epoch
-static inline void rectify_key_epoch_id(uint64_t epoch_id, mica_op_t *kv_ptr, uint16_t t_id) {
-  if (!MEASURE_SLOW_PATH) {
-    if (epoch_id > kv_ptr->epoch_id)
-      kv_ptr->epoch_id = epoch_id;
-  }
-}
-
-/* ---------------------------------------------------------------------------
-//------------------------------DEBUGGING-------------------------------------
-//---------------------------------------------------------------------------*/
-#define LOG_COMS 0
-#define LOG_WS 1
-static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_no, uint8_t *old_value,
-                                      uint8_t *value, const char* message, uint8_t flag)
-{
-  if (COMMIT_LOGS) {
-    if (flag == LOG_COMS) {
-      struct top *top = (struct top *) old_value;
-      struct top *new_top = (struct top *) value;
-      bool pushing = new_top->push_counter == top->push_counter + 1;
-      bool popping = new_top->pop_counter == top->pop_counter + 1;
-      fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: %s: push/pop poitner %u/%u, "
-                "key_ptr %u/%u/%u/%u %s - t = %lu\n",
-              bkt, log_no, pushing ? "Pushing" : "Pulling",
-              new_top->push_counter, new_top->pop_counter, new_top->key_id,
-              new_top->sec_key_id, new_top->third_key_id, new_top->fourth_key_id, message,
-              time_approx);
-    }
-    else if (flag == LOG_WS){
-      struct node *node = (struct node *) old_value;
-      struct node *new_node = (struct node *) value;
-      fprintf(rmw_verify_fp[t_id], "Key: %u, %u/%u/%u/%u, "
-                "old: %u/%u/%u/%u version %u -- %s - t = %lu\n",
-              bkt, new_node->key_id,
-              new_node->stack_id, new_node->push_counter, new_node->next_key_id,
-              node->key_id,
-              node->stack_id, node->push_counter, node->next_key_id, log_no, message,
-              time_approx);
-    }
-  }
-}
-
-// first argument here should be the state and then a bunch of allowed flags
-static inline void check_state_with_allowed_flags(int num_of_flags, ...)
-{
-  if (ENABLE_ASSERTIONS) {
-    va_list valist;
-    va_start(valist, num_of_flags);
-    bool found = false;
-    int state = va_arg(valist, int);
-    const uint16_t max_num_flags = 20;
-    assert(num_of_flags < max_num_flags);
-    int flags[max_num_flags];
-    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-      flags[i] = va_arg(valist, int);
-      if (state == flags[i]) found = true;
-    }
-    if (!found) {
-      red_printf("Checking state failed state: %u, Allowed flags: \n", state);
-      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-        red_printf("%u ", flags[i]);
-      }
-      red_printf("\n");
-      assert(false);
-    }
-
-    va_end(valist);
-  }
-}
-
-// first argument here should be the state and then a bunch of disallowed flags
-static inline void check_state_with_disallowed_flags(int num_of_flags, ...)
-{
-  if (ENABLE_ASSERTIONS) {
-    va_list valist;
-    va_start(valist, num_of_flags);
-    bool found = false;
-    int state = va_arg(valist, int);
-    assert(num_of_flags < 10);
-    int flags[10];
-    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-      flags[i] = va_arg(valist, int);
-      if (state == flags[i]) found = true;
-    }
-    if (found) {
-      red_printf("Checking state failed state: %u, Disallowed flags: \n", state);
-      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-        red_printf("%u ", flags[i]);
-      }
-      red_printf("\n");
-      assert(false);
-    }
-
-    va_end(valist);
-  }
-}
-
-static inline void check_version(uint32_t version, const char *message) {
-  if (ENABLE_ASSERTIONS) {
-
-
-//    if (version == 0 || version % 2 != 0) {
-//      red_printf("Version %u %s\n", version, message);
-//    }
-    assert(version > 0);
-//    assert(version % 2 == 0);
-  }
-}
-
-static inline void print_wrkr_stats (uint16_t t_id)
-{
-  green_printf("WORKER %u SENT MESSAGES \n", t_id);
-  yellow_printf("Writes sent %ld/%ld \n", t_stats[t_id].writes_sent_mes_num, t_stats[t_id].writes_sent);
-  yellow_printf("Acks sent %ld/%ld \n", t_stats[t_id].acks_sent_mes_num, t_stats[t_id].acks_sent);
-  yellow_printf("Reads sent %ld/%ld \n", t_stats[t_id].reads_sent_mes_num, t_stats[t_id].reads_sent);
-  yellow_printf("R_reps sent %ld/%ld \n", t_stats[t_id].r_reps_sent_mes_num, t_stats[t_id].r_reps_sent);
-  green_printf("WORKER %u RECEIVED MESSAGES \n", t_id);
-  //yellow_printf("Writes sent %ld/%ld \n", t_stats[g_id].writes_sent_mes_num, t_stats[g_id].writes_sent);
-  //yellow_printf("Acks sent %ld/%ld \n", t_stats[g_id].acks_sent_mes_num, t_stats[g_id].acks_sent);
-  yellow_printf("Reads received %ld/%ld \n", t_stats[t_id].received_reads_mes_num, t_stats[t_id].received_reads);
-  yellow_printf("R_reps received %ld/%ld \n", t_stats[t_id].received_r_reps_mes_num, t_stats[t_id].received_r_reps);
-
-  for (uint8_t i = 0; i < MACHINE_NUM; i++) {
-    if (i == machine_id) continue;
-    cyan_printf("FROM/ TO MACHINE %u \n", i);
-    yellow_printf("Acks Received %lu/%lu from machine id %u \n", t_stats[t_id].per_worker_acks_mes_received[i],
-                  t_stats[t_id].per_worker_acks_received[i], i);
-    yellow_printf("Writes Received %lu from machine id %u\n", t_stats[t_id].per_worker_writes_received[i], i);
-    yellow_printf("Acks Sent %lu/%lu to machine id %u \n", t_stats[t_id].per_worker_acks_mes_sent[i],
-                  t_stats[t_id].per_worker_acks_sent[i], i);
-
-  }
-//  yellow_printf("Reads sent %ld/%ld \n", t_stats[g_id].r_reps_sent_mes_num, t_stats[g_id].r_reps_sent );
-}
-
-// Print the rep info received for a propose or an accept
-static inline void print_rmw_rep_info(struct rmw_local_entry *loc_entry, uint16_t t_id) {
-  struct rmw_rep_info *rmw_rep = &loc_entry->rmw_reps;
-  yellow_printf("Wrkr %u Printing rmw_rep for sess %u state %u helping flag %u \n"
-                  "Tot_replies %u \n acks: %u \n rmw_id_committed: %u \n log_too_small %u\n"
-                  "already_accepted : %u\n t ts_stale : %u \n seen_higher_prop : %u\n "
-                  "log_too_high: %u \n",
-                t_id, loc_entry->sess_id, loc_entry->state, loc_entry->helping_flag,
-                rmw_rep->tot_replies,
-                rmw_rep->acks, rmw_rep->rmw_id_commited, rmw_rep->log_too_small,
-                rmw_rep->already_accepted, rmw_rep->ts_stale,
-                rmw_rep->seen_higher_prop_acc, rmw_rep->log_too_high);
-}
-
-// Leader checks its debug counters
-static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_dbg_counter,
-                                     struct pending_ops *p_ops, void *buf,
-                                     uint32_t r_pull_ptr, uint32_t w_pull_ptr,
-                                     uint32_t ack_pull_ptr, uint32_t r_rep_pull_ptr,
-                                     uint16_t t_id)
-{
-
-//  volatile struct  w_message_ud_req *w_buffer =
-//    (volatile struct w_message_ud_req *)(buf + ACK_BUF_SIZE);
-//  volatile struct  r_message_ud_req *r_buffer =
-//    (volatile struct r_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
-
-  // ACKS
-  if (unlikely(wait_dbg_counter[ACK_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for acks \n", t_id);
-    if (VERBOSE_DBG_COUNTER) {
-      struct ack_message_ud_req *ack_buf = (struct ack_message_ud_req *) (buf);
-      struct ack_message *ack = &ack_buf[ack_pull_ptr].ack;
-      uint64_t l_id = ack->local_id;
-      uint8_t message_opc = ack->opcode;
-      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
-                  t_id, ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
-      MOD_ADD(ack_pull_ptr, ACK_BUF_SLOTS);
-      ack = &ack_buf[ack_pull_ptr].ack;
-      l_id = ack->local_id;
-      message_opc = ack->opcode;
-      cyan_printf("Next index %u,polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
-                  ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
-      for (int i = 0; i < ACK_BUF_SLOTS; ++i) {
-        if (ack_buf[i].ack.opcode == CACHE_OP_ACK) {
-          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, ack_buf[i].ack.local_id);
-        } else
-          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, ack_buf[i].ack.local_id,
-                     ack_buf[i].ack.m_id);
-
-      }
-    }
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[ACK_QP_ID] = 0;
-    //exit(0);
-  }
-  // R_REPS
-  if (unlikely(wait_dbg_counter[R_REP_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for r_reps \n", t_id);
-    if (VERBOSE_DBG_COUNTER) {
-      struct r_rep_message_ud_req *r_rep_buf =
-        (struct r_rep_message_ud_req *) (buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
-      struct r_rep_message *r_rep_mes = (struct r_rep_message *)&r_rep_buf[r_rep_pull_ptr].r_rep_mes;
-      uint64_t l_id = r_rep_mes->l_id;
-      uint8_t message_opc = r_rep_mes->opcode;
-      cyan_printf("Wrkr %d, polling on index %u, polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
-                  t_id, r_rep_pull_ptr, message_opc, r_rep_mes->opcode, l_id, p_ops->local_r_id);
-      MOD_ADD(r_rep_pull_ptr, R_REP_BUF_SLOTS);
-      r_rep_mes = (struct r_rep_message *)&r_rep_buf[r_rep_pull_ptr].r_rep_mes;
-      l_id = r_rep_mes->l_id;
-      message_opc = r_rep_mes->opcode;
-      cyan_printf("Next index %u,polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
-                  r_rep_pull_ptr, message_opc, r_rep_mes->opcode, l_id, p_ops->local_r_id);
-      for (int i = 0; i < R_REP_BUF_SLOTS; ++i) {
-        if (r_rep_mes->opcode == READ_REPLY) {
-          green_printf("GOOD OPCODE in index %d, l_id %u \n", i, r_rep_mes->l_id);
-        } else
-          red_printf("BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i,
-                     r_rep_mes->l_id,
-                     r_rep_mes->m_id);
-
-      }
-    }
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[R_REP_QP_ID] = 0;
-    //exit(0);
-  }
-  if (unlikely(wait_dbg_counter[R_QP_ID] > M_512)) {
-    red_printf("Worker %d waits for reads \n", t_id);
-    print_wrkr_stats(t_id);
-    wait_dbg_counter[R_QP_ID] = 0;
-  }
-  if (unlikely(credit_debug_cnt[W_VC] > M_512)) {
-    red_printf("Worker %d lacks write credits \n", t_id);
-    print_wrkr_stats(t_id);
-    credit_debug_cnt[W_VC] = 0;
-  }
-  if (unlikely(credit_debug_cnt[R_VC] > M_512)) {
-    red_printf("Worker %d lacks read credits \n", t_id);
-    print_wrkr_stats(t_id);
-    credit_debug_cnt[R_VC] = 0;
-  }
-}
-
-// When pulling a n ew req from the trace, check the req and the working session
-static inline void check_trace_req(struct pending_ops *p_ops, struct trace_command *trace,
-                                   int working_session, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(trace->opcode != NOP);
-    check_state_with_allowed_flags(8, trace->opcode, OP_RELEASE, KVS_OP_PUT,
-                                   OP_ACQUIRE, KVS_OP_GET, FETCH_AND_ADD, COMPARE_AND_SWAP_WEAK,
-                                   COMPARE_AND_SWAP_STRONG);
-    assert(!p_ops->sess_info[working_session].stalled);
-    if (ENABLE_RMWS && p_ops->prop_info->entry[working_session].state != INVALID_RMW) {
-      cyan_printf("wrk %u  Session %u has loc_entry state %u , helping flag %u\n", t_id,
-                  working_session, p_ops->prop_info->entry[working_session].state,
-                  p_ops->prop_info->entry[working_session].helping_flag);
-      assert(false);
-    }
-  }
-}
-
-
-static inline void debug_and_count_stats_when_broadcasting_writes
-  (struct pending_ops *p_ops, uint32_t bcast_pull_ptr,
-   uint8_t coalesce_num, uint16_t t_id, uint64_t* expected_l_id_to_send,
-   uint16_t br_i, uint32_t *outstanding_writes)
-{
-  //bool is_accept = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == ACCEPT_OP;
-  if (ENABLE_ASSERTIONS) {
-//    if (!is_accept) {
-//      uint64_t lid_to_send = p_ops->w_fifo->w_message[bcast_pull_ptr].l_id;
-//      if (lid_to_send != (*expected_l_id_to_send)) {
-//        red_printf("Wrkr %u, expected l_id %lu lid_to send %u, opcode %u \n",
-//                   t_id, (*expected_l_id_to_send), lid_to_send,
-//                   p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode );
-//        assert(false);
-//      }
-//      (*expected_l_id_to_send) = lid_to_send + coalesce_num;
-//    }
-    struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[bcast_pull_ptr];
-    if (coalesce_num == 0) {
-      red_printf("Wrkr %u coalesce_num is %u, bcast_size %u, w_size %u, push_ptr %u, pull_ptr %u"
-                   " mes fifo push_ptr %u, mes fifo pull ptr %u l_id %lu"
-                   " bcast_pull_ptr %u, br_i %u\n",
-                 t_id, coalesce_num, p_ops->w_fifo->bcast_size,
-                 p_ops->w_size,
-                 p_ops->w_push_ptr, p_ops->w_pull_ptr,
-                 p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr,
-                 w_mes->l_id,
-                 bcast_pull_ptr, br_i);
-    }
-    assert(coalesce_num > 0);
-    assert(p_ops->w_fifo->bcast_size >= coalesce_num);
-    (*outstanding_writes) += coalesce_num;
-  }
-  if (ENABLE_STAT_COUNTING) {
-    //bool is_commit = p_ops->w_fifo->w_message[bcast_pull_ptr].write[0].opcode == COMMIT_OP;
-//    if (is_accept) t_stats[t_id].accepts_sent++;
-//    else if (is_commit) t_stats[t_id].commits_sent++;
-//    else {
-//      t_stats[t_id].writes_sent += coalesce_num;
-//      t_stats[t_id].writes_sent_mes_num++;
-//    }
-  }
-}
-
-
-// Perform some basic checks when inserting a write to a fresh message
-static inline void debug_checks_when_inserting_a_write
-  (const uint8_t source, struct write *write, const uint32_t w_mes_ptr,
-   const uint64_t message_l_id, struct pending_ops *p_ops,
-   const uint32_t w_ptr, const uint16_t t_id)
-{
-
-  if (ENABLE_ASSERTIONS) {
-    struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
-    if (message_l_id > MAX_MES_IN_WRITE && info->valid_header_l_id) {
-      uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
-
-
-      struct w_message *prev_w_mes = (struct w_message *) &p_ops->w_fifo->w_message[prev_w_mes_ptr];
-      struct w_mes_info *prev_info = &p_ops->w_fifo->info[prev_w_mes_ptr];
-
-      bool prev_mes_valid_l_id = prev_info->valid_header_l_id;
-      uint64_t prev_l_id = prev_w_mes->l_id;
-      uint8_t prev_write_num = prev_info->writes_num;
-
-      if ((prev_mes_valid_l_id) && (message_l_id != prev_l_id + prev_write_num)) {
-        red_printf("Worker %u: Current message l_id %u ptr %u, previous message l_id %u , prev_write_num %u ptr %u\n",
-                   t_id, message_l_id, w_mes_ptr, prev_l_id, prev_write_num, prev_w_mes_ptr);
-      }
-    }
-    // Check the versions
-    assert (write->version < B_4_EXACT);
-//    if (write->version % 2 != 0) {
-//      red_printf("Worker %u: Version to insert %u, comes from read %u \n", t_id,
-//                 write->version, source);
-//      assert (false);
-//    }
-    // Check that the buffer is not occupied
-    if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE  || p_ops->w_size >= MAX_ALLOWED_W_SIZE)
-      red_printf("Worker %u w_state %d at w_ptr %u, kvs hits %lu, w_size/virt_w_size %u/%u, source %u\n",
-                 t_id, p_ops->w_meta[w_ptr].w_state, w_ptr,
-                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size, p_ops->virt_w_size, source);
-    if (unlikely(p_ops->w_meta[w_ptr].w_state != INVALID))
-      red_printf("Worker %u w_state %d at w_ptr %u, kvs hits %lu, w_size %u \n",
-                 t_id, p_ops->w_meta[w_ptr].w_state, w_ptr,
-                 t_stats[t_id].cache_hits_per_thread, p_ops->w_size);
-    //					printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
-    assert(p_ops->w_meta[w_ptr].w_state == INVALID);
-  }
-
-}
-
-// When forging a write (which the accept hijack)
-static inline void checks_when_forging_an_accept(struct accept* acc, struct ibv_sge *send_sgl,
-                                                 uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(coalesce_num > 0);
-      if (DEBUG_RMW)
-        printf("Worker: %u, Accept in position %d, val-len %u, message w_size %d\n", t_id, w_i, acc->val_len,
-               send_sgl[br_i].length);
-    check_state_with_allowed_flags(3, acc->opcode, ACCEPT_OP, ACCEPT_OP_BIT_VECTOR);
-    //assert(acc->val_len == VALUE_SIZE >> SHIFT_BITS);
-
-  }
-}
-
-// When forging a write (which the accept hijack)
-static inline void checks_when_forging_a_commit(struct commit *com, struct ibv_sge *send_sgl,
-                                                 uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(coalesce_num > 0);
-    if (DEBUG_RMW)
-      printf("Worker: %u, Commit %d, val-len %u, message w_size %d\n", t_id, w_i, com->val_len,
-             send_sgl[br_i].length);
-    //assert(com->val_len == VALUE_SIZE >> SHIFT_BITS);
-    assert(com->opcode == COMMIT_OP || com->opcode == RMW_ACQ_COMMIT_OP);
-  }
-}
-
-
-static inline void checks_when_forging_a_write(struct write* write, struct ibv_sge *send_sgl,
-                                               uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id) {
-
-  if (DEBUG_WRITES)
-    printf("Worker: %u, Write %d, val-len %u, message w_size %d\n", t_id, w_i, write->val_len,
-           send_sgl[br_i].length);
-  if (ENABLE_ASSERTIONS) {
-    assert(write->val_len == VALUE_SIZE >> SHIFT_BITS);
-    check_state_with_allowed_flags(6, write->opcode, KVS_OP_PUT, OP_RELEASE,
-                                   OP_ACQUIRE, OP_RELEASE_SECOND_ROUND, OP_RELEASE_BIT_VECTOR);
-    if (write->opcode == OP_RELEASE_SECOND_ROUND)
-      if (DEBUG_QUORUM) green_printf("Thread %u Changing the op of the second round of a release \n", t_id);
-  }
-
-}
-
-
-static inline void print_thread_stats(uint16_t t_id) {
-
-    yellow_printf("Cache hits: %u \nReads: %lu \nWrites: %lu \nReleases: %lu \nAcquires: %lu \nQ Reads: %lu "
-                    "\nRectified keys %lu\n",
-                  t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
-                  t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
-                  t_stats[t_id].acquires_per_thread, t_stats[t_id].quorum_reads,
-                  t_stats[t_id].rectified_keys);
-}
-
-
-static inline void print_verbouse_debug_info(struct pending_ops *p_ops, uint16_t t_id, uint16_t credits[][MACHINE_NUM])
-{
-  uint16_t i;
-  green_printf("---DEBUG INFO---------\n");
-  yellow_printf("1. ---SESSIONS--- \n");
-  if (p_ops->all_sessions_stalled) yellow_printf("All sessions are stalled \n");
-  else yellow_printf("There are available sessions \n");
-  for (i = 0; i < SESSIONS_PER_THREAD; i++)
-    printf("S%u: %d ", i, p_ops->sess_info[i].stalled);
-  printf("\n");
-  cyan_printf("2. ---CREDITS--- \n");
-  for (i = 0; i < MACHINE_NUM; i++)
-    cyan_printf("Credits for machine %u: %u R and %u W \n", i, credits[R_VC][i], credits[W_VC][i]);
-  printf("\n");
-  green_printf("3. ---FIFOS--- \n");
-  green_printf("W_size: %u \nw_push_ptr %u \nw_pull_ptr %u\n", p_ops->w_size, p_ops->w_push_ptr, p_ops->w_pull_ptr);
-  green_printf("R_size: %u \nr_push_ptr %u \nr_pull_ptr %u\n", p_ops->r_size, p_ops->r_push_ptr, p_ops->r_pull_ptr);
-
-  yellow_printf("Cache hits: %u \nReads: %u \nWrites: %u \nReleases: %u \nAcquires: %u \n",
-                t_stats[t_id].cache_hits_per_thread, t_stats[t_id].reads_per_thread,
-                t_stats[t_id].writes_per_thread, t_stats[t_id].releases_per_thread,
-                t_stats[t_id].acquires_per_thread);
-  print_for_debug = false;
-}
-
-
-static inline void print_true_key(struct key *key)
-{
-  printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
-}
-
-
-//The purpose of this is to save some space in function that polls read replies
-static inline void print_and_check_mes_when_polling_r_reps(struct r_rep_message *r_rep_mes,
-                                                           uint32_t index, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    check_state_with_allowed_flags(7, r_rep_mes->opcode, READ_REPLY, PROP_REPLY, ACCEPT_REPLY,
-                                   READ_PROP_REPLY, ACCEPT_REPLY_NO_CREDITS);
-    my_assert(r_rep_mes->m_id < MACHINE_NUM, "Received r_rep with m_id >= Machine_NUM");
-    my_assert(r_rep_mes->coalesce_num > 0, "Received r_rep with coalesce num = 0");
-  }
-
-  if ((DEBUG_READ_REPS && (r_rep_mes->opcode == READ_REPLY)) ||
-      (DEBUG_RMW   && (r_rep_mes->opcode == PROP_REPLY || r_rep_mes->opcode == ACCEPT_REPLY ||
-        r_rep_mes->opcode == ACCEPT_REPLY_NO_CREDITS))) {
-    yellow_printf("Worker %u sees a READ REPLY: %d at offset %d, l_id %lu, from machine "
-                    "%u with %u replies first opc %u\n",
-                  t_id, r_rep_mes->opcode, index,
-                  r_rep_mes->l_id,
-                  r_rep_mes->m_id, r_rep_mes->coalesce_num, r_rep_mes->r_rep[0].opcode);
-  }
-}
-
-static inline void increase_credits_when_polling_r_reps(uint16_t credits[][MACHINE_NUM],
-                                                        bool increase_w_credits,
-                                                        uint8_t rem_m_id, uint16_t t_id)
-{
-  if (!increase_w_credits) credits[R_VC][rem_m_id]++;
-  else credits[W_VC][rem_m_id]++;
-  if (ENABLE_ASSERTIONS) {
-    assert(credits[R_VC][rem_m_id] <= R_CREDITS);
-    assert(credits[W_VC][rem_m_id] <= W_CREDITS);
-  }
-}
-
-// Debug session
-static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
-                                  uint32_t sess_id, uint16_t t_id)
-{
-  if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
-    //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
-    ses_dbg->dbg_cnt[sess_id]++;
-    if (ses_dbg->dbg_cnt[sess_id] == DEBUG_SESS_COUNTER) {
-//      if (sess_id == 0)
-      red_printf("Wrkr %u Session %u seems to be stuck \n", t_id, sess_id);
-      ses_dbg->dbg_cnt[sess_id] = 0;
-    }
-  }
-}
-
-// Debug all the session
-static inline void debug_all_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
-                                      uint16_t t_id)
-{
-  if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
-    for (uint16_t sess_id = 0; sess_id < SESSIONS_PER_THREAD; sess_id++) {
-      assert(p_ops->sess_info[sess_id].stalled);
-      ses_dbg->dbg_cnt[sess_id]++;
-      //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
-      if (ses_dbg->dbg_cnt[sess_id] == DEBUG_SESS_COUNTER) {
-        if (sess_id == 0) {
-          struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
-          red_printf("Wrkr %u Session %u seems to be stuck-- all stuck \n", t_id, sess_id);
-          yellow_printf("Wrkr %u w_size %u, w_state %u, acks seen/expected %u/%u \n",
-                        t_id, p_ops->w_size, w_meta->w_state, w_meta->acks_seen, w_meta->acks_expected);
-//          for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++)
-//            printf("%u - %u- %u - %u, ", ses_dbg->dbg_cnt[i],
-//                   p_ops->prop_info->entry[i].state, p_ops->prop_info->entry[i].back_off_cntr,
-//                   p_ops->prop_info->entry[i].index_to_rmw);
-//          printf ("\n");
-        }
-        ses_dbg->dbg_cnt[sess_id] = 0;
-      }
-    }
-  }
-}
-
-
-// Prints out information about the participants
-static inline void print_q_info(struct quorum_info *q_info)
-{
-  yellow_printf("-----QUORUM INFO----- \n");
-  green_printf("Active m_ids: \n");
-  for (uint8_t i = 0; i < q_info->active_num; i++) {
-    green_printf("%u) %u \n", i, q_info->active_ids[i]);
-  }
-  red_printf("Missing m_ids: \n");
-  for (uint8_t i = 0; i < q_info->missing_num; i++) {
-    red_printf("%u) %u \n", i, q_info->missing_ids[i]);
-  }
-  yellow_printf("Send vector : ");
-  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
-    yellow_printf("%d ", q_info->send_vector[i]);
-  }
-  yellow_printf("\n First rm_id: %u, Last rm_id: %u \n",
-                q_info->first_active_rm_id, q_info->last_active_rm_id);
-}
-
-// From commit reads
-static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint32_t pull_ptr,
-                                                 bool acq_second_round_to_flip_bit, bool insert_write_flag,
-                                                 bool write_local_kvs, bool insert_commit_flag,
-                                                 bool signal_completion, bool signal_completion_after_kvs_write,
-                                                 uint16_t t_id)
-{
-  struct read_info *read_info = &p_ops->read_info[pull_ptr];
-  if (ENABLE_ASSERTIONS) {
-    if (acq_second_round_to_flip_bit) assert(p_ops->virt_r_size < MAX_ALLOWED_R_SIZE);
-    check_state_with_allowed_flags(6, read_info->opcode, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
-                                   KVS_OP_GET, OP_RELEASE, KVS_OP_PUT);
-    assert(!(signal_completion && signal_completion_after_kvs_write));
-    if (read_info->is_rmw) {
-      assert(read_info->opcode == OP_ACQUIRE);
-      assert(!insert_write_flag);
-      assert(ENABLE_RMW_ACQUIRES);
-    }
-    if (read_info->opcode == OP_ACQUIRE_FLIP_BIT) {
-      //printf("%d, %d, %d, %d, %d, %d \n", acq_second_round_to_flip_bit, insert_write_flag, write_local_kvs, insert_commit_flag,
-       //                               signal_completion, signal_completion_after_kvs_write);
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag &&
-             !signal_completion && !signal_completion_after_kvs_write);
-    }
-    if (read_info->opcode == KVS_OP_GET) {
-      assert(epoch_id > 0);
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !insert_commit_flag &&
-             !signal_completion && signal_completion_after_kvs_write && write_local_kvs);
-    }
-    if (read_info->opcode == OP_RELEASE)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs && !insert_commit_flag &&
-             !signal_completion && !signal_completion_after_kvs_write);
-    if (read_info->opcode == KVS_OP_PUT)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs && !insert_commit_flag &&
-             !signal_completion && signal_completion_after_kvs_write);
-    if (read_info->opcode == OP_ACQUIRE) {
-      if (insert_write_flag || insert_commit_flag) assert(!signal_completion && !signal_completion_after_kvs_write);
-      else if (write_local_kvs) assert(signal_completion_after_kvs_write);
-      else assert(signal_completion);
-      if (insert_commit_flag) assert(read_info->is_rmw);
-    }
-  }
-  if (DEBUG_READS || DEBUG_TS)
-    green_printf("Committing read at index %u, it has seen %u times the same timestamp\n",
-                 pull_ptr, read_info->times_seen_ts);
-
-}
-
-//
-static inline void check_read_fifo_metadata(struct pending_ops *p_ops, struct r_message *r_mes,
-                                            uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(p_ops->virt_r_size <= MAX_ALLOWED_R_SIZE); // this may need to be MAX_ALLOWED_R_SIZE + 1
-    assert(p_ops->r_size <= p_ops->virt_r_size);
-    assert(r_mes->coalesce_num <= MAX_READ_COALESCE);
-    assert(p_ops->r_session_id[p_ops->r_push_ptr] <= SESSIONS_PER_THREAD);
-  }
-}
-
-static inline void check_global_sess_id(uint8_t machine_id, uint16_t t_id,
-                                        uint16_t session_id, uint16_t glob_sess_id)
-{
-  assert(glob_ses_id_to_m_id(glob_sess_id) == machine_id);
-  assert(glob_ses_id_to_t_id(glob_sess_id) == t_id);
-  assert(glob_ses_id_to_sess_id(glob_sess_id) == session_id);
-}
-
-
-// Do some preliminary checks for the write message,
-// the while loop is there to wait for the entire message to be written (currently not useful)
-static inline void check_the_polled_write_message(struct w_message *w_mes,
-                                                  uint32_t index, uint32_t polled_writes, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(w_mes->m_id < MACHINE_NUM);
-    assert(w_mes->coalesce_num <= MAX_MES_IN_WRITE);
-    uint32_t debug_cntr = 0;
-    if (w_mes->coalesce_num == 0) {
-      red_printf("Wrkr %u received a write with coalesce_num %u, op %u from machine %u with lid %lu \n",
-                 t_id, w_mes->coalesce_num, w_mes->write[0].opcode, w_mes->m_id, w_mes->l_id);
-      assert(false);
-    }
-    if (polled_writes + w_mes->coalesce_num > MAX_INCOMING_W) {
-      assert(false);
-    }
-    return;
-  }
-}
-
-// When polling for writes
-static inline void check_a_polled_write(struct write* write, uint16_t w_i,
-                                        uint16_t w_num, uint8_t mes_opcode, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(write->m_id < MACHINE_NUM);
-    if (mes_opcode == ONLY_WRITES)
-      assert(write->opcode != ACCEPT_OP && write->opcode != ACCEPT_OP_BIT_VECTOR);
-    else if (mes_opcode == ONLY_ACCEPTS)
-      assert(write->opcode == ACCEPT_OP || write->opcode == ACCEPT_OP_BIT_VECTOR);
-    if (write->opcode != KVS_OP_PUT && write->opcode != OP_RELEASE &&
-        write->opcode != OP_ACQUIRE && write->opcode != ACCEPT_OP &&
-        write->opcode != OP_RELEASE_BIT_VECTOR && write->opcode != COMMIT_OP &&
-        write->opcode != NO_OP_RELEASE && write->opcode != ACCEPT_OP_BIT_VECTOR)
-      red_printf("Wrkr %u Receiving write : Opcode %u, i %u/%u \n", t_id, write->opcode, w_i, w_num);
-//    if (write->version % 2 != 0) {
-//      red_printf("Wrkr %u :Odd version %u, m_id %u \n", t_id, write->version, write->m_id);
-//    }
-  }
-}
-
-
-// When polling for writes
-static inline void print_polled_write_message_info(struct w_message *w_mes, uint32_t index, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct write * write = &w_mes->write[0];
-    if (DEBUG_WRITES && write->opcode != ACCEPT_OP)
-      printf("Worker %u sees a write Opcode %d at offset %d, l_id %lu  \n",
-             t_id, write->opcode, index, w_mes->l_id);
-    else if (DEBUG_RMW &&
-      (write->opcode == ACCEPT_OP || write->opcode == ACCEPT_OP_BIT_VECTOR)) {
-      struct accept *acc = (struct accept*) write;
-      printf("Worker %u sees an Accept: opcode %d at offset %d, rmw_id %lu, "
-               "glob_sess_id %u, log_no %u, coalesce_num %u \n",
-             t_id, acc->opcode, index, acc->t_rmw_id,
-             acc->glob_sess_id, acc->log_no,
-             w_mes->coalesce_num);
-    }
-    else if (DEBUG_RMW && write->opcode == COMMIT_OP) {
-      struct commit *com = (struct commit *) write;
-      printf("Worker %u sees a Commit: opcode %d at offset %d, l_id %lu, "
-               "glob_sess_id %u, log_no %u, coalesce_num %u \n",
-             t_id, com->opcode, index, com->t_rmw_id,
-             com->glob_sess_id, com->log_no,
-             w_mes->coalesce_num);
-    }
-  }
-}
-
-
-static inline void count_stats_on_receiving_w_mes_reset_w_num(struct w_message *w_mes,
-                                                              uint8_t w_num, uint16_t t_id)
-{
-  if (ENABLE_STAT_COUNTING) {
-    if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_writes_received[w_mes->m_id] += w_num;
-    t_stats[t_id].received_writes += w_num;
-    t_stats[t_id].received_writes_mes_num++;
-  }
-  if (ENABLE_ASSERTIONS) w_mes->coalesce_num = 0;
-}
-
-static inline void check_accept_mes(struct w_message *acc_mes)
-{
-  if (ENABLE_ASSERTIONS) {
-    check_state_with_allowed_flags(3, acc_mes->opcode, WRITES_AND_ACCEPTS,
-                                   ONLY_ACCEPTS);
-    assert(acc_mes->coalesce_num == 0); // the coalesce_num gets reset after polling a write
-    assert(acc_mes->m_id < MACHINE_NUM);
-  }
-}
-
-// Called when forging a read reply work request
-static inline void checks_and_prints_when_forging_r_rep_wr(uint8_t coalesce_num, uint16_t mes_i,
-                                                           struct ibv_sge *send_sgl, uint32_t r_rep_i,
-                                                           struct r_rep_message *r_rep_mes,
-                                                           struct r_rep_fifo *r_rep_fifo,
-                                                           uint16_t t_id)
-{
-  if (DEBUG_READ_REPS) {
-    for (uint16_t i = 0; i < coalesce_num; i++)
-      yellow_printf("Wrkr: %u, Read Reply no %d, opcode :%u message mes_size %d \n",
-                    t_id, i, r_rep_mes->opcode, send_sgl[mes_i].length);
-    green_printf("Wrkr %d : I send a READ REPLY message of %u r reps with mes_size %u, with lid: %u to machine %u \n",
-                 t_id, coalesce_num, send_sgl[mes_i].length,
-                 r_rep_mes->l_id, r_rep_fifo->rem_m_id[r_rep_i]);
-  }
-  if (ENABLE_ASSERTIONS) {
-    assert(send_sgl[mes_i].length < MTU);
-    assert(send_sgl[mes_i].length <= R_REP_SEND_SIZE);
-    assert(r_rep_fifo->rem_m_id[r_rep_i] < MACHINE_NUM);
-    assert(coalesce_num > 0);
-  }
-}
-
-
-
-// check the local id of a read reply
-static inline void check_r_rep_l_id(uint64_t l_id, uint8_t r_rep_num, uint64_t pull_lid,
-                                    uint32_t r_size, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(l_id + r_rep_num <= pull_lid + r_size);
-    if ((l_id + r_rep_num < pull_lid) && (!USE_QUORUM)) {
-      red_printf("Wrkr :%u Error on the l_id of a received read reply: "
-                   "l_id %u, r_rep_num %u, pull_lid %u, r_size %u \n", t_id, l_id, r_rep_num, pull_lid, r_size);
-      assert(false);
-    }
-  }
-}
-
-
-static inline void check_a_polled_r_rep(struct r_rep_big *r_rep,
-                                        struct r_rep_message *r_rep_mes,
-                                        uint16_t r_rep_i, uint8_t r_rep_num,
-                                        uint16_t t_id) {
-  if (ENABLE_ASSERTIONS) {
-    uint8_t opcode = r_rep->opcode;
-    if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
-    //check_state_with_allowed_flags(8, opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
-    //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
-
-    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > ACQ_LOG_EQUAL) &&
-        (r_rep->opcode < TS_SMALLER + FALSE_POSITIVE_OFFSET ||
-         r_rep->opcode > ACQ_LOG_EQUAL + FALSE_POSITIVE_OFFSET)) {
-      red_printf("Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, r_rep_i, r_rep_num);
-      assert(false);
-    }
-  }
-}
-
-
-
-// Check when inserting a read
-static inline void check_previous_read_lid(uint8_t source, uint8_t opcode, uint64_t message_l_id,
-                                           struct r_message *r_mes, uint32_t r_mes_ptr, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (source == FROM_TRACE) assert(opcode != PROPOSE_OP);
-    if (message_l_id > MAX_READ_COALESCE) {
-      uint32_t prev_r_mes_ptr = (r_mes_ptr + R_FIFO_SIZE - 1) % R_FIFO_SIZE;
-      if (r_mes[prev_r_mes_ptr].read[0].opcode != PROPOSE_OP) {
-        uint64_t prev_l_id = r_mes[prev_r_mes_ptr].l_id;
-        uint8_t prev_coalesce = r_mes[prev_r_mes_ptr].coalesce_num;
-        if (message_l_id != prev_l_id + prev_coalesce) {
-          red_printf("Wrkr: %u Read: Current message l_id %u, previous message l_id %u , "
-                       "prev push ptr %u, current push ptr %u ,previous coalesce %u, previous opcode %u \n",
-                     t_id, message_l_id, prev_l_id, prev_r_mes_ptr, r_mes_ptr,
-                     prev_coalesce, r_mes[prev_r_mes_ptr].read[0].opcode);
-        }
-      }
-    }
-  }
-}
-
-// Check when inserting a read
-static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t r_ptr, uint8_t source, struct r_message *r_mes,
-                                            struct read_info *r_info, uint32_t r_mes_ptr, struct read *read, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (p_ops->r_state[r_ptr] != INVALID)
-      red_printf("Worker %u r_state %d at r_ptr %u, kvs hits %lu, r_size %u \n",
-                 t_id, p_ops->r_state[r_ptr], r_ptr,
-                 t_stats[t_id].cache_hits_per_thread, p_ops->r_size);
-    //printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
-    assert(p_ops->r_state[r_ptr] == INVALID);
-    //struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
-//    if (read->opcode == 0) red_printf("R_mes_ptr %u, inside_r_ptr %u, first read opcode %u source %u \n",
-//      r_mes_ptr, inside_r_ptr, r_mes[r_mes_ptr].read[0].opcode);
-    check_state_with_allowed_flags(5, read->opcode, KVS_OP_GET, CACHE_OP_GET_TS,
-                                   OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
-    if (source == FROM_TRACE) {
-      assert(true_keys_are_equal(&read->key, &r_info->key));
-      if (!r_info->is_rmw) assert(compare_netw_ts_with_ts(&read->ts, &r_info->ts_to_read) == EQUAL);
-    }
-  }
-}
-
-
-// Returns true if the incoming key and the entry key are equal
-static inline bool check_entry_validity_with_key(struct key *incoming_key, mica_op_t * kv_ptr)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct key *entry_key = &kv_ptr->key;
-    return true_keys_are_equal(incoming_key, entry_key);
-  }
-  return true;
-}
-
-// When polling an ack message
-static inline void check_ack_message_count_stats(struct pending_ops* p_ops, struct ack_message* ack,
-                                                 uint32_t index, uint16_t ack_num, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(ack_num > 0);
-    assert(ack->opcode == CACHE_OP_ACK);
-    //      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
-    assert(ack->m_id < MACHINE_NUM);
-    uint64_t l_id = ack->local_id;
-    uint64_t pull_lid = p_ops->local_w_id;
-    assert(l_id + ack_num <= pull_lid + p_ops->w_size);
-    if ((l_id + ack_num < pull_lid) && (!USE_QUORUM)) {
-      red_printf("l_id %u, ack_num %u, pull_lid %u \n", l_id, ack_num, pull_lid);
-      assert(false);
-    }
-    if (DEBUG_ACKS)
-      yellow_printf(
-        "Wrkr %d  polled ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from machine %u \n",
-        t_id, ack->opcode, ack_num, l_id, pull_lid, index, ack->m_id);
-  }
-  if (ENABLE_STAT_COUNTING) {
-    if (ENABLE_ASSERTIONS) {
-      t_stats[t_id].per_worker_acks_received[ack->m_id] += ack_num;
-      t_stats[t_id].per_worker_acks_mes_received[ack->m_id]++;
-    }
-    t_stats[t_id].received_acks += ack_num;
-    t_stats[t_id].received_acks_mes_num++;
-  }
-}
-
-
-// When polling acks: more precisely when inspecting each l_id acked
-static inline void  check_ack_and_print(struct pending_ops* p_ops, uint16_t ack_i, uint32_t ack_ptr,
-                                        uint16_t  ack_num, uint64_t l_id, uint64_t pull_lid, uint16_t t_id) {
-  if (ENABLE_ASSERTIONS) {
-    if (DEBUG_WRITES && (ack_ptr == p_ops->w_push_ptr)) {
-      uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
-      red_printf("Worker %u: Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
-                 t_id, origin_ack_ptr, (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,
-                 ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
-
-    }
-    if (p_ops->w_meta[ack_ptr].acks_seen >= REM_MACH_NUM) {
-      uint32_t origin_ack_ptr = (ack_ptr - ack_i + PENDING_WRITES) % PENDING_WRITES;
-      red_printf("Worker %u: acks seen %u/%d, w_state %u, max_pending _writes %d,"
-                   "Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, w_size %u \n",
-                 t_id, p_ops->w_meta[ack_ptr].acks_seen, REM_MACH_NUM,
-                 p_ops->w_meta[ack_ptr].w_state,
-                 PENDING_WRITES,
-                 origin_ack_ptr, (p_ops->w_pull_ptr + (l_id - pull_lid)) % PENDING_WRITES,
-                 ack_i, ack_num, p_ops->w_pull_ptr, p_ops->w_push_ptr, p_ops->w_size);
-    }
-    assert(p_ops->w_meta[ack_ptr].acks_seen < REM_MACH_NUM);
-  }
-}
-
-// Check the key of the trace_op and the KVS
-static inline void check_keys_with_two_cache_ops(struct trace_op* op, mica_op_t* kv_ptr)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct key *op_key = &op->key;
-    struct key *kv_key = &kv_ptr->key;
-    if (!true_keys_are_equal(kv_key, op_key)) {
-      print_true_key(kv_key);
-      print_true_key(op_key);
-      assert(false);
-    }
-  }
-}
-
-// Check the key of the cache_op and  the KV
-static inline void check_keys_with_one_trace_op(struct key *com_key, mica_op_t *kv_ptr)
-{
-  if (ENABLE_ASSERTIONS) {
-    struct key *kv_key = &kv_ptr->key;
-    if (!true_keys_are_equal(kv_key, com_key)) {
-      print_true_key(kv_key);
-      print_true_key(com_key);
-      assert(false);
-    }
-  }
-}
-
-// Before batching to kvs we give all ops an odd version, check if it were changed
-static inline void check_version_after_batching_trace_to_cache(struct trace_op* op,
-                                                               struct cache_resp* resp, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS && resp->type != RMW_FAILURE) {
-    if (op->ts.version % 2 != 0) {
-      red_printf("Wrkr %u, Trace to kvs: Version not even: %u, opcode %u, resp %u \n",
-      t_id, op->ts.version, op->opcode, resp->type);
-    }
-    my_assert(op->ts.version % 2 == 0, "Trace to kvs: Version must be even after kvs");
-  }
-}
-
-// When removing writes
-static inline void check_after_removing_writes(struct pending_ops* p_ops, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (p_ops->w_meta[p_ops->w_pull_ptr].w_state >= READY_RELEASE) {
-      red_printf("W state = %u at ptr  %u, size: %u \n",
-                 p_ops->w_meta[p_ops->w_pull_ptr].w_state, p_ops->w_pull_ptr, p_ops->w_size);
-      assert(false);
-    }
-//    if (p_ops->w_meta[(p_ops->w_pull_ptr + 1) % PENDING_WRITES].w_state >= READY_RELEASE) {
-//      red_printf("W state = %u at ptr %u, push ptr %u , size: %u \n",
-//                 p_ops->w_meta[(p_ops->w_pull_ptr + 1) % PENDING_WRITES].w_state,
-//                 (p_ops->w_pull_ptr + 1) % PENDING_WRITES,
-//                 p_ops->w_push_ptr, p_ops->w_size);
-//      red_printf("W state = %u at ptr %u, size: %u \n",
-//                 p_ops->w_meta[p_ops->w_pull_ptr].w_state, p_ops->w_pull_ptr, p_ops->w_size);
-//    }
-  }
-}
-
-// Check that the counter for propose replies add up(SAME FOR ACCEPTS AND PROPS)
-static inline void check_sum_of_reps(struct rmw_local_entry *loc_entry)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(loc_entry->rmw_reps.tot_replies == sum_of_reps(&loc_entry->rmw_reps));
-    assert(loc_entry->rmw_reps.tot_replies <= REM_MACH_NUM);
-  }
-}
-
-// when a ptr is passed as an rmw rep, makes sure it's valid
-static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw_rep)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(rmw_rep->opcode == RMW_ID_COMMITTED || rmw_rep->opcode == LOG_TOO_SMALL);
-//    if ((rmw_rep->ts.version % 2  != 0) )
-//      red_printf("Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
-//    assert(rmw_rep->ts.version % 2  == 0 );
-    if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // it can be 0 if LOG_TOO_SMALL and the other side has not yet committed log 0
-    assert(rmw_rep->glob_sess_id < GLOBAL_SESSION_NUM);
-  }
-}
-
-static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc_entry,
-                                                     const char *message, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) { // make sure the loc_entry is correctly set-up
-    if (loc_entry->help_loc_entry == NULL) {
-      //red_printf("The help_loc_ptr is NULL. The reason is typically that help_loc_entry was passed to the function "
-        //           "instead of loc entry to check \n");
-      assert(loc_entry->state == INVALID_RMW);
-    }
-    else {
-      if (loc_entry->help_loc_entry->state != INVALID_RMW) {
-        red_printf("Wrkr %u: %s \n", t_id, message);
-        assert(false);
-      }
-      assert(loc_entry->rmw_reps.tot_replies == 0);
-      assert(loc_entry->back_off_cntr == 0);
-    }
-  }
-}
-
-
-// When going to ack an accept/propose because the log it refers to is higher than what we are working on
-static inline void check_that_log_is_high_enough(mica_op_t *kv_ptr, uint32_t log_no)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(log_no > kv_ptr->last_committed_log_no);
-    if (log_no == kv_ptr->last_committed_log_no + 1) {
-      if (kv_ptr->state != INVALID_RMW) {
-        red_printf("Checking_that_log_is to high: log_no %u/%u, kv_ptr committed last_log %u, state %u \n",
-                   log_no, kv_ptr->log_no, kv_ptr->last_committed_log_no, kv_ptr->state);
-        assert(false);
-      }
-    } else if (kv_ptr->state != INVALID_RMW)
-      assert(kv_ptr->last_committed_log_no + 1);
-  }
-}
-
-//
-static inline void check_log_nos_of_kv_ptr(mica_op_t *kv_ptr, const char *message, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->state != INVALID_RMW) {
-      if (rmw_ids_are_equal(&kv_ptr->last_committed_rmw_id, &kv_ptr->rmw_id)) {
-        red_printf("Wrkr %u Last committed rmw id is equal to current, kv_ptr state %u, com log/log %u/%u "
-                     "rmw id %u/%u, glob_sess id %u/%u : %s \n",
-                   t_id, kv_ptr->state, kv_ptr->last_committed_log_no, kv_ptr->log_no,
-                   kv_ptr->last_committed_rmw_id.id, kv_ptr->rmw_id.id,
-                   kv_ptr->last_committed_rmw_id.glob_sess_id,
-                   kv_ptr->rmw_id.glob_sess_id, message);
-        assert(false);
-      }
-
-      if (kv_ptr->last_committed_log_no >= kv_ptr->log_no) {
-        red_printf("Wrkr %u t_id, kv_ptr state %u, com log/log %u/%u : %s \n",
-                   t_id, kv_ptr->state, kv_ptr->last_committed_log_no, kv_ptr->log_no, message);
-        assert(false);
-      }
-    }
-  }
-}
-
-//
-static inline void check_for_same_ts_as_already_proposed(mica_op_t *kv_ptr, struct propose *prop, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->state == PROPOSED) {
-      if (compare_netw_ts_with_ts(&prop->ts, &kv_ptr->prop_ts) == EQUAL) {
-        red_printf("Wrkr %u Received a proposal with same TS as an already acked proposal, "
-                     " prop log/glob log %u/%u, glob sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
-                   t_id, prop->log_no, kv_ptr->log_no, prop->glob_sess_id,
-                   kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id,
-                   prop->ts.version, kv_ptr->prop_ts.version, prop->ts.m_id, kv_ptr->prop_ts.m_id);
-        assert(false);
-      }
-    }
-  }
-}
-
-static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id)
-{
-  if (VERIFY_PAXOS && is_global_ses_id_local(loc_entry->rmw_id.glob_sess_id, t_id)) {
-    //if (committed_log_no != *(uint32_t *)loc_entry->value_to_write)
-    //  red_printf ("vale_to write/log no %u/%u",
-     //             *(uint32_t *)loc_entry->value_to_write, committed_log_no );
-    uint64_t val = *(uint64_t *)loc_entry->value_to_read;
-    //assert(val == loc_entry->accepted_log_no - 1);
-    fprintf(rmw_verify_fp[t_id], "%u %lu %u \n", loc_entry->key.bkt, val, loc_entry->accepted_log_no);
-  }
-}
-
-
-static inline void check_last_registered_rmw_id(struct rmw_local_entry *loc_entry,
-                                                mica_op_t *kv_ptr, uint8_t helping_flag, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->last_registered_log_no != loc_entry->log_no - 1) {
-      red_printf("Last registered/last-committed/working  %u/%u/%u, key %u, helping flag %u \n",
-                 kv_ptr->last_registered_log_no, kv_ptr->last_committed_log_no,
-                 loc_entry->log_no, loc_entry->key.bkt, helping_flag);
-      sleep(2);
-      assert(false);
-    }
-    if (loc_entry->log_no == kv_ptr->last_committed_log_no + 1) {
-      if (!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id)) {
-        red_printf(
-          "Wrkr %u, filling help loc entry last registerd rmw id, help log no/ kv_ptr last committed log no %u/%u,"
-            "glob rmw ids: last committed/last registered %lu/%lu \n", t_id,
-          loc_entry->log_no, kv_ptr->last_committed_log_no,
-          kv_ptr->last_registered_rmw_id.id, kv_ptr->last_committed_rmw_id.id);
-      }
-      assert(rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
-    }
-      // If I am helping log_no X, without having committed log_no X-1, the i better have the correct last registered RMW-id
-    else if (loc_entry->log_no > kv_ptr->last_committed_log_no + 1) {
-      assert(!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
-    } else
-      assert(false);
-  }
-}
-
-
-static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_id,
-                                                uint16_t glob_sess_id, uint32_t log_no, uint32_t version,
-                                                uint8_t m_id, const char *message, uint16_t t_id)
-{
-  if (!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->last_committed_rmw_id, rmw_id, glob_sess_id)) {
-    red_printf("~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, %s ~~~~~~~~ \n", t_id, kv_ptr->key.bkt, message);
-    /*if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-      green_printf("GLOBAL ENTRY COMMITTED log %u: rmw_id %lu glob_sess-id- %u, FLAG %u\n",
-                   kv_ptr->last_committed_log_no, kv_ptr->last_committed_rmw_id.id,
-                   kv_ptr->last_committed_rmw_id.glob_sess_id, kv_ptr->dbg->last_committed_flag);
-      yellow_printf("COMMIT log %u: rmw_id %lu glob_sess-id-%u version %u m_id %u \n",
-                    log_no, rmw_id, glob_sess_id, version, m_id);
-      if (kv_ptr->dbg->last_committed_flag <= 1) {
-        cyan_printf("PROPOSED log %u: rmw_id %lu glob_sess-id-%u version %u m_id %u \n",
-                    kv_ptr->dbg->proposed_log_no, kv_ptr->dbg->proposed_rmw_id.id,
-                    kv_ptr->dbg->proposed_rmw_id.glob_sess_id,
-                    kv_ptr->dbg->proposed_ts.version, kv_ptr->dbg->proposed_ts.m_id);
-
-
-        cyan_printf("LAST COMMIT log %u: rmw_id %lu glob_sess-id-%u version %u m_id %u \n",
-                    kv_ptr->dbg->last_committed_log_no, kv_ptr->dbg->last_committed_rmw_id.id,
-                    kv_ptr->dbg->last_committed_rmw_id.glob_sess_id,
-                    kv_ptr->dbg->last_committed_ts.version, kv_ptr->dbg->last_committed_ts.m_id);
-
-      }
-    }*/
-    exit(0);
-  }
-}
-
-
-// After registering, make sure the registered is bigger/equal to what is saved as registered
-static inline void check_registered_against_glob_last_registered(mica_op_t *kv_ptr,
-                                                                 uint64_t committed_id,
-                                                                 uint16_t committed_glob_ses_id,
-                                                                 const char *message, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    uint16_t glob_sess_id = kv_ptr->last_registered_rmw_id.glob_sess_id;
-    uint64_t id = kv_ptr->last_registered_rmw_id.id;
-    assert(glob_sess_id < GLOBAL_SESSION_NUM);
-    if (committed_glob_sess_rmw_id[glob_sess_id] < id) {
-      yellow_printf("Committing %s rmw_id: %u glob_sess_id: %u \n", message, committed_id, committed_glob_ses_id);
-      red_printf("Wrkr %u: %s rmw_id: kv_ptr last committed/kv_ptr last registered %lu/%lu, "
-                   "glob_sess_id :kv_ptr last committed/kv_ptr last registered %u/%u,"
-                   "committed_glob_sess_rmw_id %lu,   \n", t_id, message,
-                 kv_ptr->last_committed_rmw_id.id, kv_ptr->last_registered_rmw_id.id,
-                 kv_ptr->last_committed_rmw_id.glob_sess_id, kv_ptr->last_registered_rmw_id.glob_sess_id,
-                 committed_glob_sess_rmw_id[glob_sess_id]);
-      //assert(false);
-    }
-  }
-}
-
-// Perofrm checks after receiving a rep to commit an RMW
-static inline void check_local_commit_from_rep(mica_op_t *kv_ptr, struct rmw_local_entry *loc_entry,
-                                               struct rmw_rep_last_committed *rmw_rep, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->state != INVALID_RMW) {
-      struct rmw_local_entry *working_entry = loc_entry->helping_flag == HELPING ?
-                                              loc_entry->help_loc_entry : loc_entry;
-      if (rmw_ids_are_equal(&kv_ptr->rmw_id, &working_entry->rmw_id) && kv_ptr->log_no == working_entry->log_no) {
-        red_printf("Wrkr: %u Received a rep opcode %u for rmw id %lu glob_sess_id %u, log no %u "
-                     "received highest committed log %u with rmw_id id %u, glob_sess id %u,"
-                     "but kv_ptr is in state %u, for rmw_id %u, glob_sess id %u on log no %u\n",
-                   t_id, rmw_rep->opcode, working_entry->rmw_id.id, working_entry->rmw_id.glob_sess_id,
-                   working_entry->log_no,
-                   rmw_rep->log_no, rmw_rep->rmw_id, rmw_rep->glob_sess_id,
-                   kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id,
-                   kv_ptr->log_no);
-        assert(rmw_rep->opcode == RMW_ID_COMMITTED);
-      }
-      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, rmw_rep->rmw_id, rmw_rep->glob_sess_id));
-    }
-  }
-}
-
-static inline void check_when_polling_for_reads(struct r_message *r_mes, uint32_t index,
-                                                uint32_t polled_reads, uint16_t t_id)
-{
-  uint8_t r_num = r_mes->coalesce_num;
-  if (ENABLE_ASSERTIONS) {
-    //struct prop_message *p_mes = (struct prop_message *)r_mes;
-    struct read *read = &r_mes->read[0];
-    struct propose *prop =(struct propose *)&r_mes->read[0];
-    assert(r_mes->coalesce_num > 0);
-    if (DEBUG_READ_REPS)
-      printf("Worker %u sees a read Opcode %d at offset %d, l_id %lu  \n", t_id,
-             read->opcode, index, r_mes->l_id);
-    else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
-      //struct prop_message *prop_mes = (struct prop_message *) r_mes;
-      cyan_printf("Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
-                    "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
-                  t_id, r_mes->m_id, prop->opcode, index, prop->t_rmw_id,
-                  prop->glob_sess_id, prop->log_no,
-                  r_mes->coalesce_num, prop->ts.version);
-    }
-    if (polled_reads + r_num > MAX_INCOMING_R) assert(false);
-  }
-  if (ENABLE_STAT_COUNTING) {
-    if (ENABLE_ASSERTIONS) t_stats[t_id].per_worker_reads_received[r_mes->m_id] += r_num;
-    t_stats[t_id].received_reads += r_num;
-    t_stats[t_id].received_reads_mes_num++;
-  }
-}
-
-static inline void check_read_opcode_when_polling_for_reads(struct read *read, uint16_t read_i,
-                                                            uint16_t r_num, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    //assert(MAX_PROP_COALESCE == 1); // this function won't work otherwise
-    check_state_with_allowed_flags(5, read->opcode,
-                                   CACHE_OP_GET_TS, OP_ACQUIRE,
-                                   KVS_OP_GET, OP_ACQUIRE_FLIP_BIT);
-    if (read->opcode != KVS_OP_GET && read->opcode != OP_ACQUIRE &&
-        read->opcode != CACHE_OP_GET_TS &&
-        read->opcode != OP_ACQUIRE_FLIP_BIT)
-      red_printf("Receiving read: Opcode %u, i %u/%u \n", read->opcode, read_i, r_num);
-  }
-}
-
-// called when failing see an even version -- I.E. called by reads
-static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *message, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    (*debug_cntr)++;
-    if ((*debug_cntr) == M_4) {
-      printf("Worker %u stuck on %s \n", t_id, message);
-      (*debug_cntr) = 0;
-    }
-  }
-}
-
-
-static inline void debug_fail_help(struct rmw_local_entry *loc_entry, const char *message, uint16_t t_id)
-{
-  if (DEBUG_RMW) {
-    if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
-      cyan_printf("Sess %u %s \n", loc_entry->sess_id, message);
-  }
-}
-
-// When stealing kv_ptr from a stuck proposal, check that the proposal was referring to a valid log no
-static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local_entry *loc_entry,
-                                             uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->log_no > kv_ptr->last_committed_log_no + 1) {
-      red_printf("Key %u Last committed/last registered/accepted/active %u/%u/%u/%u \n", loc_entry->key.bkt,
-                 kv_ptr->last_committed_log_no,
-                 kv_ptr->last_registered_log_no,
-                 kv_ptr->accepted_log_no,
-                 kv_ptr->log_no);
-      assert(false);
-    }
-  }
-}
-
-// Potentially useful (for performance only) when a propose receives already_committed
-// responses and still is holding the kv_ptr
-static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
-                                             uint8_t state, uint16_t t_id)
-{
-  mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
-  if (kv_ptr->state == state &&
-      kv_ptr->log_no == loc_entry->log_no &&
-      rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id) &&
-      compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL) {
-//    cyan_printf("Wrkr %u, kv_ptr NEEDS TO BE FREED: session %u RMW id %u/%u glob_sess_id %u/%u with version %u/%u,"
-//                  " m_id %u/%u,"
-//                  " kv_ptr log/help log %u/%u kv_ptr committed log %u , biggest committed rmw_id %u for glob sess %u"
-//                  " \n",
-//                t_id, loc_entry->sess_id, loc_entry->rmw_id.id, kv_ptr->rmw_id.id,
-//                loc_entry->rmw_id.glob_sess_id, kv_ptr->rmw_id.glob_sess_id,
-//                loc_entry->new_ts.version, kv_ptr->new_ts.version,
-//                loc_entry->new_ts.m_id, kv_ptr->new_ts.m_id,
-//                kv_ptr->log_no, loc_entry->log_no, kv_ptr->last_committed_log_no,
-//                committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id], kv_ptr->rmw_id.glob_sess_id);
-
-    optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
-    if (kv_ptr->state == state &&
-        kv_ptr->log_no == loc_entry->log_no &&
-        rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id)) {
-      if (state == PROPOSED && compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL) {
-        printf("clearing\n");
-        print_rmw_rep_info(loc_entry, t_id);
-        //assert(false);
-        kv_ptr->state = INVALID_RMW;
-      }
-      else if (state == ACCEPTED && compare_ts(&kv_ptr->accepted_ts, &loc_entry->new_ts) == EQUAL)
-        assert(false);
-    }
-    check_log_nos_of_kv_ptr(kv_ptr, "free_kv_ptr_if_prop_failed", t_id);
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
-  }
-}
-
-static inline void debug_set_version_of_op_to_one(struct trace_op *op, uint8_t opcode,
-                                                  uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    bool is_update = (opcode == (uint8_t) KVS_OP_PUT ||
-                      opcode == (uint8_t) OP_RELEASE);
-    assert(WRITE_RATIO > 0 || is_update == 0);
-    if (is_update) assert(op->val_len > 0);
-    op->ts.version = 1;
-  }
-}
-
-static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16_t req_array_i, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(sess_id < SESSIONS_PER_THREAD);
-    assert(req_array_i < PER_SESSION_REQ_NUM);
-    assert(t_id < WORKERS_PER_MACHINE);
-
-  }
-}
-
-
-static inline void check_all_w_meta(struct pending_ops* p_ops, uint16_t t_id, const char* message)
-{
-  if (ENABLE_ASSERTIONS) ;
-    for (uint16_t i = 0; i < PENDING_WRITES; i++) {
-      struct per_write_meta *w_meta = &p_ops->w_meta[i];
-      uint8_t w_state = w_meta->w_state;
-      check_state_with_allowed_flags(5, w_state, INVALID, VALID, SENT_COMMIT, READY_COMMIT);
-      uint8_t id_to_check = (uint8_t) (machine_id == 0 ? 0 : 1);
-      if (w_state == SENT_COMMIT) {
-        if (w_meta->acks_expected == (MACHINE_NUM - 2) && (w_meta->expected_ids[id_to_check] == MACHINE_THAT_SLEEPS))
-          red_printf("Wrkr %d, ptr %u, expected %u, expected_id[%d]= %d | %s \n", t_id, i,
-                     w_meta->acks_expected, id_to_check, w_meta->expected_ids[id_to_check],
-                     message);
-      }
-    }
-}
-
-
-
-/* ---------------------------------------------------------------------------
-//------------------------------ CONF BITS HANDLERS---------------------------
-//---------------------------------------------------------------------------*/
-/* 1. On detecting a failure bring the corresponding machine's bit_vec to DOWN STABLE
- * 2. On receiving a Release with a bit vector bring all the bits set in the vector to DOWN STABLE
- * 3. On inserting an Acquire from the trace you find out that a remote Release has raised
- *    the conf bit for the local machine; it is necessary to increase the epoch id because the local machine
- *    may be the common machine of the release quorum and acquire quorum and thus the failure may not be visible
- *    to the acquire by the rest of the nodes it will reach. At that point the acquire must raise its conf bit
- *    to UP_STABLE, such that it can catch further failures
- * 4. On receiving the first round of an Acquire, bring the bit to DOWN_TRANSIENT_OWNED
- *    if it's DOWN _STABLE and give the acquire ownership of the bit.
- *    Subsequent Acquires will all get ownership of the bit: each bit has
- *    SESSIONS_PER_THREAD * WORKERS_PER_MACHINE owner-slots, such that it can accommodate all
- *    possible acquires from each machine
- * 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
- *    bring that bit to UP_STABLE*/
-
-// Make sure we avoid aliasing between local_r_ids of regular reads and rmw-ids, when trying to own configuration bits
-static inline void tag_rmw_id_when_owning_a_conf_bit(uint8_t *rmw_id)
-{
-  if (ENABLE_ASSERTIONS) assert(rmw_id[7] == 0);
-  rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
-}
-
-// Call this after an acquire/propose have detected a failure
-static inline void increment_epoch_id (uint64_t req_epoch_id,  uint16_t t_id)
-{
-  if (epoch_id <= req_epoch_id)
-    epoch_id++;
-}
-
-// Covers 1 & 2. Set a bit to new_state. 1 is not covered directly by this function.
-// function "set_send_and_conf_bit_after_detecting_failure" calls this one though to
-// be more efficient with debugging information
-static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t m_id, uint8_t new_state)
-{
-  if (conf_bit_vec[m_id].bit != new_state) {
-    while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[m_id].lock, memory_order_acquire));
-    conf_bit_vec[m_id].bit = new_state;
-    atomic_flag_clear_explicit(&conf_bit_vec[m_id].lock, memory_order_release);
-  }
-}
-
-
-// 3. Query the conf bit vector for the local bit when starting an acquire
-//    if some remote release has raised the bit, then increase epoch id and flip the bit
-static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id, uint64_t req_epoch_id)
-{
-  if (unlikely(conf_bit_vec[machine_id].bit == DOWN_STABLE)) {
-    increment_epoch_id(req_epoch_id, t_id);
-    set_conf_bit_to_new_state(t_id, (uint16_t) machine_id, UP_STABLE);
-    if (DEBUG_BIT_VECS)
-      yellow_printf("Thread %u, acquire increases the epoch id "
-                      "as a remote release has notified the machine "
-                      "it has lost messages, new epoch id %u\n", t_id, epoch_id);
-  }
-}
-
-// 4. On receiving the first round of an Acquire bring the bit to DOWN_TRANSIENT_OWNED
-// and register the acquire's local_r_id as one of the bit's owners
-// Returns true if ownership of the conf bit has been successful
-static inline bool take_ownership_of_a_conf_bit(const uint64_t local_r_id, const uint16_t acq_m_id,
-                                                bool is_rmw, const uint16_t t_id)
-{
-  if (conf_bit_vec[acq_m_id].bit == UP_STABLE) return false;
-  if (DEBUG_BIT_VECS)
-    yellow_printf("Wrkr %u An acquire from machine %u  is looking to take ownership "
-                    "of a bit: local_r_id %u \n", t_id, acq_m_id, local_r_id);
-  bool owned_a_failure = false;
-  // if it's down, own it, even if it is already owned
-  if (is_rmw) {
-    tag_rmw_id_when_owning_a_conf_bit((uint8_t *) &local_r_id);
-    if (ENABLE_ASSERTIONS) assert(local_r_id > B_512);
-  }
-
-  while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
-  if (conf_bit_vec[acq_m_id].bit != UP_STABLE) {
-    uint32_t ses_i = conf_bit_vec[acq_m_id].sess_num[t_id];
-    conf_bit_vec[acq_m_id].owners[t_id][ses_i] = local_r_id;
-    MOD_ADD(conf_bit_vec[acq_m_id].sess_num[t_id], SESSIONS_PER_THREAD);
-    owned_a_failure = true;
-    conf_bit_vec[acq_m_id].bit = DOWN_TRANSIENT_OWNED;
-  }
-  atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
-
-  if (DEBUG_BIT_VECS) {
-    if (t_id == 0 && owned_a_failure) {
-      uint32_t ses_i = (conf_bit_vec[acq_m_id].sess_num[t_id] + SESSIONS_PER_THREAD - 1) % SESSIONS_PER_THREAD;
-      green_printf("Wrkr %u acquire from machine %u got ownership of its failure, "
-                     "bit %u  owned t_id %u, owned local_r_id %u/%u \n",
-                   t_id, acq_m_id, conf_bit_vec[acq_m_id].bit,
-                   t_id, local_r_id, conf_bit_vec[acq_m_id].owners[t_id][ses_i]);
-    }
-  }
-  return owned_a_failure;
-}
-
-// 5. On receiving the second round of an Acquire that owns a bit (DOWN_TRANSIENT_OWNED)
-//    bring that bit to UP_STABLE
-static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const uint16_t acq_m_id,
-                                            bool is_rmw, const uint16_t t_id)
-{
-  if (DEBUG_BIT_VECS)
-    yellow_printf("Wrkr %u An acquire from machine %u  is looking if it owns a failure local_r_id %u \n",
-                  t_id, acq_m_id, local_r_id);
-  // First change the state  of the owned bits
-  bool bit_gets_flipped = false;
-  if (conf_bit_vec[acq_m_id].bit != DOWN_TRANSIENT_OWNED) {
-    return;
-  }
-
-  // add an offset to the id, to make sure rmw-ids cannot conflict with local_r_ids
-  if (is_rmw) {
-    tag_rmw_id_when_owning_a_conf_bit((uint8_t *) &local_r_id);
-    if (ENABLE_ASSERTIONS) assert(local_r_id > B_512);
-  }
-
-
-  // Grab the lock
-  while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_acquire));
-  if (conf_bit_vec[acq_m_id].bit == DOWN_TRANSIENT_OWNED) {
-    uint32_t max_sess = conf_bit_vec[acq_m_id].sess_num[t_id];
-    for (uint32_t ses_i = 0; ses_i <= max_sess; ses_i++) {
-      if (conf_bit_vec[acq_m_id].owners[t_id][ses_i] == local_r_id) {
-        conf_bit_vec[acq_m_id].bit = UP_STABLE;
-        bit_gets_flipped = true;
-        break;
-      }
-    }
-    if (bit_gets_flipped)  // "invalidate" all owners
-      memset(conf_bit_vec[acq_m_id].sess_num, 0, WORKERS_PER_MACHINE * sizeof(*conf_bit_vec[acq_m_id].sess_num));
-  }
-  atomic_flag_clear_explicit(&conf_bit_vec[acq_m_id].lock, memory_order_release);
-
-
-  if (DEBUG_BIT_VECS ) {
-    if (bit_gets_flipped) {
-      if (t_id == 0 && conf_bit_vec[acq_m_id].bit == UP_STABLE);
-      green_printf("Wrkr %u Acquire  from machine %u had ownership of its failure bit %u/%d, "
-                     "owned t_id %u, owned local_w_id %u\n",
-                   t_id, acq_m_id, conf_bit_vec[acq_m_id].bit, UP_STABLE,
-                   t_id, local_r_id);
-    }
-  }
-
-}
-
-// Detect a failure: Bring a given bit of config_bit_vector to state DOWN_STABLE
-static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, const uint16_t t_id)
-{
-  if (DEBUG_BIT_VECS)
-    yellow_printf("Wrkr %u handles Send and conf bit vec after failure to machine %u,"
-                    " send bit %u, state %u, conf_bit %u \n",
-                  t_id, m_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
-                  conf_bit_vec[m_id].bit);
-
-  set_conf_bit_to_new_state(t_id, m_id, DOWN_STABLE);
-  if (DEBUG_BIT_VECS)
-    green_printf("Wrkr %u After: send bit %u, state %u, conf_bit %u \n",
-                 t_id, send_bit_vector.bit_vec[m_id].bit, send_bit_vector.state,
-                 conf_bit_vec[m_id].bit);
-}
-
 
 /* ---------------------------------------------------------------------------
 //------------------------------ DRF-SPECIFIC UTILITY-------------------------
 //---------------------------------------------------------------------------*/
-
-/*-------------------------------- CLIENT REQUEST ARRAY ----------------------------------------*/
-// signal completion of a request to the client
-static inline void signal_completion_to_client(uint32_t sess_id,
-                                               uint32_t req_array_i, uint16_t t_id)
-{
-  if (ENABLE_CLIENTS) {
-    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
-    check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-
-//    yellow_printf("Wrkr %u/%u completing poll ptr %u for req %u at state %u \n", t_id,
-//           sess_id, req_array_i, req_array->opcode, req_array->state);
-
-    if (ENABLE_ASSERTIONS) {
-      if (req_array->state != IN_PROGRESS_REQ)
-        printf("op %u, state %u slot %u/%u \n", req_array->opcode, req_array->state, sess_id, req_array_i);
-    }
-    check_state_with_allowed_flags(2, req_array->state, IN_PROGRESS_REQ);
-
-    atomic_store_explicit(&req_array->state, (uint8_t) COMPLETED_REQ, memory_order_release);
-    if (CLIENT_DEBUG)
-      green_printf("Releasing sess %u, ptr_to_req %u ptr %p \n", sess_id,
-                   req_array_i, &req_array->state);
-  }
-}
-
-// signal that the request is being processed to tne client
-static inline void signal_in_progress_to_client(uint32_t sess_id,
-                                                uint32_t req_array_i, uint16_t t_id)
-{
-  if (ENABLE_CLIENTS) {
-
-    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
-    //cyan_printf("Wrkr %u/%u signals in progress for  poll ptr %u for req %u at state %u \n", t_id,
-    //       sess_id, req_array_i,req_array->opcode, req_array->state);
-    check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-    if (ENABLE_ASSERTIONS) memset(&req_array->key, 0, TRUE_KEY_SIZE);
-    check_state_with_allowed_flags(2, req_array->state, ACTIVE_REQ);
-    atomic_store_explicit(&req_array->state, (uint8_t) IN_PROGRESS_REQ, memory_order_release);
-  }
-}
-
-// Returns whether a certain request is active, i.e. if the client has issued a request in a slot
-static inline bool is_client_req_active(uint32_t sess_id,
-                                        uint32_t req_array_i, uint16_t t_id)
-{
-  struct client_op * req_array = &interface[t_id].req_array[sess_id][req_array_i];
-  check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-  return req_array->state == ACTIVE_REQ;
-}
-
-// is any request of the client request array active
-static inline bool any_request_active(uint16_t sess_id, uint32_t req_array_i, uint16_t t_id)
-{
-  for (uint32_t i = 0; i < PER_SESSION_REQ_NUM; i++) {
-    if (is_client_req_active(sess_id, i, t_id)) {
-      red_printf("session %u slot %u, state %u pull ptr %u\n",
-                 sess_id, i, interface[t_id].req_array[sess_id][req_array_i].state, req_array_i);
-      if (i == req_array_i) return false;
-      return true;
-    }
-  }
-  return false;
-}
-
-//
-static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_entry, uint16_t t_id)
-{
-  if (ENABLE_CLIENTS) {
-    struct client_op *cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
-    if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_val_len == cl_op->val_len);
-    switch (loc_entry->opcode) {
-      case RMW_PLAIN_WRITE:
-        // This is really a write so no need to read anything
-        //cl_op->rmw_is_successful = true;
-        break;
-      case FETCH_AND_ADD:
-        memcpy(cl_op->value_to_read, loc_entry->value_to_read, cl_op->val_len);
-        //*cl_op->rmw_is_successful = true; // that will segfault, no bool pointer is passed in the FAA
-        //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
-        break;
-      case COMPARE_AND_SWAP_WEAK:
-      case COMPARE_AND_SWAP_STRONG:
-        *(cl_op->rmw_is_successful) = loc_entry->rmw_is_successful;
-        if (!loc_entry->rmw_is_successful)
-          memcpy(cl_op->value_to_read, loc_entry->value_to_read, cl_op->val_len);
-        break;
-      default:
-        if (ENABLE_ASSERTIONS) assert(false);
-    }
-  }
-}
-
-static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* value_to_read,
-                                                    uint32_t req_array_i, uint16_t t_id)
-{
-  if (ENABLE_CLIENTS) {
-    if (ENABLE_ASSERTIONS) {
-      assert(value_to_read != NULL);
-      check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-    }
-    struct client_op *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
-    *(cl_op->rmw_is_successful) = false;
-    memcpy(cl_op->value_to_read, value_to_read, cl_op->val_len);
-  }
-}
-
 
 
 // Returns true if it's valid to pull a request for that session
@@ -2281,7 +172,7 @@ static inline void clean_up_on_KVS_miss(struct trace_op *op, struct pending_ops 
 {
   if (op->opcode == OP_RELEASE || op->opcode == OP_ACQUIRE) {
     uint16_t session_id = op->session_id;
-    yellow_printf("Cache_miss, session %u \n", session_id);
+    my_printf(yellow, "Cache_miss, session %u \n", session_id);
     if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
     p_ops->sess_info[session_id].stalled = false;
     p_ops->all_sessions_stalled = false;
@@ -2304,7 +195,7 @@ static inline void register_committed_global_sess_id (uint16_t glob_sess_id, uin
     if (ENABLE_ASSERTIONS) {
       debug_cntr++;
       if (debug_cntr > 100) {
-        red_printf("stuck on registering glob sess id %u \n", debug_cntr);
+        my_printf(red, "stuck on registering glob sess id %u \n", debug_cntr);
         debug_cntr = 0;
       }
     }
@@ -2419,7 +310,7 @@ static inline void update_sess_info_with_fully_acked_write(struct pending_ops *p
   sess_info->live_writes--;
 //  printf("Removing a fully acked %u \n", sess_info->live_writes);
 
-  //green_printf("increasing live writes %u \n", sess_info->live_writes);
+  //my_printf(green, "increasing live writes %u \n", sess_info->live_writes);
   if (sess_info->live_writes == 0) {
     sess_info->ready_to_release = true;
   }
@@ -2459,7 +350,7 @@ static inline void update_sess_info_partially_acked_write(struct pending_ops *p_
     for (uint8_t j = expected_id_pos; j < w_meta->acks_expected; j++) {
       if (!w_meta->seen_expected[j]) {
         missing_id = w_meta->expected_ids[j];
-        //yellow_printf("Write missed an ack from %u \n", missing_id);
+        //my_printf(yellow, "Write missed an ack from %u \n", missing_id);
         expected_id_pos = (uint8_t) (j + 1);
         break;
       }
@@ -2580,7 +471,7 @@ static inline bool add_failure_to_release_from_sess_id
              SEND_CONF_VEC_SIZE);
       memcpy(write->value, bit_vector_to_send, SEND_CONF_VEC_SIZE);
       if (DEBUG_QUORUM)
-        green_printf("Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
+        my_printf(green, "Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
                      *(uint16_t *) bit_vector_to_send);
       write->opcode = OP_RELEASE_BIT_VECTOR;
       p_ops->ptrs_to_local_w[backward_ptr] = write;
@@ -2612,7 +503,7 @@ static inline bool add_failure_to_release_from_sess_id
     }
     else if (ENABLE_ASSERTIONS) assert(false);
     //if (DEBUG_SESSIONS)
-    //  cyan_printf("Wrkr %u release is from session %u, session has pending op: %u\n",
+    //  my_printf(cyan, "Wrkr %u release is from session %u, session has pending op: %u\n",
     //             t_id, p_ops->w_session_id[backward_ptr],
     //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
     return true;
@@ -2701,7 +592,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
         if (failure) {
           write->opcode = NO_OP_RELEASE;
           //struct write *first_rel = (((write *)w_mes) + info->first_release_byte_ptr);
-          //yellow_printf("Wrkr %u Adding a no_op_release in position %u/%u, first opcode %u \n",
+          //my_printf(yellow, "Wrkr %u Adding a no_op_release in position %u/%u, first opcode %u \n",
           //              t_id, i, coalesce_num, first_rel->opcode);
           *w_state = SENT_NO_OP_RELEASE;
           p_ops->ptrs_to_local_w[backward_ptr] = write;
@@ -2726,7 +617,7 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     }
     if (ENABLE_ASSERTIONS) (w_meta->acks_expected >= REMOTE_QUORUM);
 //    if (write->opcode != ACCEPT_OP && t_id == 1)
-//      yellow_printf("Wrkr %u Setting state %u ptr %u/%d opcode %u message %u/%u \n",
+//      my_printf(yellow, "Wrkr %u Setting state %u ptr %u/%d opcode %u message %u/%u \n",
 //                  t_id, *w_state, backward_ptr, PENDING_WRITES, write->opcode,
 //                  i, coalesce_num);
     if (write->opcode != ACCEPT_OP && write->opcode != ACCEPT_OP_BIT_VECTOR) {
@@ -2820,7 +711,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     memcpy(&write->m_id, (void *) &op->ts.m_id, W_SIZE);
     write->opcode = OP_RELEASE_SECOND_ROUND;
     //if (DEBUG_SESSIONS)
-    // cyan_printf("Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
+    // my_printf(cyan, "Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
     //             t_id, op->opcode, write->opcode, inside_w_ptr, w_mes_ptr);
     if (ENABLE_ASSERTIONS) assert (write->m_id == (uint8_t) machine_id);
     if (DEBUG_QUORUM) {
@@ -2859,16 +750,16 @@ static inline void increas_virt_w_size(struct pending_ops *p_ops, struct write *
   if (write->opcode == OP_RELEASE) {
     if (ENABLE_ASSERTIONS) assert(source == FROM_READ);
     p_ops->virt_w_size += 2;
-    //yellow_printf("+2 %u at %u \n",  p_ops->virt_w_size, p_ops->w_push_ptr);
+    //my_printf(yellow, "+2 %u at %u \n",  p_ops->virt_w_size, p_ops->w_push_ptr);
   } else {
-    //yellow_printf("Increasing virt_w_size %u at %u, source %u \n",
+    //my_printf(yellow, "Increasing virt_w_size %u at %u, source %u \n",
     //              p_ops->virt_w_size, p_ops->w_push_ptr, source);
     p_ops->virt_w_size++;
   }
 
   if (ENABLE_ASSERTIONS) {
     if (p_ops->virt_w_size > MAX_ALLOWED_W_SIZE + 1)
-      red_printf("Wrkr %u Virt_w_size %u/%d, source %u, write->opcode %u \n",
+      my_printf(red, "Wrkr %u Virt_w_size %u/%d, source %u, write->opcode %u \n",
                  t_id, p_ops->virt_w_size, MAX_ALLOWED_W_SIZE, source, write->opcode);
     assert(p_ops->w_size <= MAX_ALLOWED_W_SIZE);
     assert(p_ops->w_size <= p_ops->virt_w_size);
@@ -2917,7 +808,7 @@ static inline void rectify_version_of_w_mes(struct pending_ops *p_ops, struct re
                                              uint32_t tmp_version, uint16_t t_id)
 {
 //  if (ENABLE_ASSERTIONS) {
-//    red_printf("Worker: %u, KVS has bigger version %u than read-info %u -> w_message must "
+//    my_printf(red, "Worker: %u, KVS has bigger version %u than read-info %u -> w_message must "
 //               "be rectified in position w_mes: %u, inside_ptr: %u\n",
 //               t_id, r_info->ts_to_read.version, tmp_version,
 //               r_info->w_mes_ptr, r_info->inside_w_ptr);
@@ -2927,17 +818,19 @@ static inline void rectify_version_of_w_mes(struct pending_ops *p_ops, struct re
 }
 
 // returns true if the key was found
-static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops, struct key *read_key, uint16_t t_id, void **val_ptr)
+static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops,
+                                              struct key *read_key,
+                                              uint16_t t_id, void **val_ptr)
 {
   struct pending_out_of_epoch_writes *writes = p_ops->p_ooe_writes;
   uint32_t w_i = writes->pull_ptr;
   for (uint32_t i = 0; i < writes->size; i++) {
-    if (true_keys_are_equal(&p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
+    if (keys_are_equal(&p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
       *val_ptr = (void*) p_ops->read_info[writes->r_info_ptrs[w_i]].value;
-      //red_printf("Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
+      //my_printf(red, "Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
       //print_true_key(read_key);
-      //red_printf("write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
-      //red_printf("size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
+      //my_printf(red, "write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
+      //my_printf(red, "size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
       //          writes->size, writes->push_ptr, writes->pull_ptr, writes->r_info_ptrs[w_i]);
       return true;
     }
@@ -2958,7 +851,7 @@ static inline void fill_reply_entry_with_committed_RMW (mica_op_t *kv_ptr,
   rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
   rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
   //if (rep->ts.version == 0)
-  //  yellow_printf("Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
+  //  my_printf(yellow, "Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
   //         t_id, rep->opcode, rep->log_no, rep->rmw_id, rep->glob_sess_id);
 }
 
@@ -2973,7 +866,7 @@ static inline void register_last_committed_rmw_id_by_remote_accept(mica_op_t *kv
   else if (ENABLE_ASSERTIONS && (kv_ptr->last_committed_log_no == acc->log_no - 1)) {
     if(!(kv_ptr->last_committed_rmw_id.id == acc->last_registered_rmw_id.id &&
            kv_ptr->last_committed_rmw_id.glob_sess_id == acc->last_registered_rmw_id.glob_sess_id)) {
-      red_printf("Wrkr %u: rmw_id: kv_ptr last committed/kv_ptr last registered/acc last registered %lu/%lu/%lu, "
+      my_printf(red, "Wrkr %u: rmw_id: kv_ptr last committed/kv_ptr last registered/acc last registered %lu/%lu/%lu, "
                    "glob_sess_id :kv_ptr last committed/kv_ptr last registered/acc last registered %u/%u/%u,"
                    "log no: kv_ptr last committed/acc log_no %u/%u   \n", t_id,
                  kv_ptr->last_committed_rmw_id.id, kv_ptr->last_registered_rmw_id.id,
@@ -2984,7 +877,7 @@ static inline void register_last_committed_rmw_id_by_remote_accept(mica_op_t *kv
     }
     assert(committed_glob_sess_rmw_id[acc->last_registered_rmw_id.glob_sess_id] >= acc->last_registered_rmw_id.id);
     if(committed_glob_sess_rmw_id[acc->last_registered_rmw_id.glob_sess_id] < acc->last_registered_rmw_id.id) {
-      red_printf("Wrkr %u: rmw_id: kv_ptr last committed/kv_ptr last registered/acc last registered %lu/%lu/%lu, "
+      my_printf(red, "Wrkr %u: rmw_id: kv_ptr last committed/kv_ptr last registered/acc last registered %lu/%lu/%lu, "
                    "glob_sess_id :kv_ptr last committed/kv_ptr last registered/acc last registered %u/%u/%u,"
                    "log no: kv_ptr last committed/acc log_no %u/%u, committed_glob_sess_rmw_id %u   \n", t_id,
                  kv_ptr->last_committed_rmw_id.id, kv_ptr->last_registered_rmw_id.id,
@@ -3004,7 +897,7 @@ static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_i
   if (ENABLE_ASSERTIONS) assert(glob_sess_id < GLOBAL_SESSION_NUM);
   if (committed_glob_sess_rmw_id[glob_sess_id] >= rmw_l_id) {
     if (DEBUG_RMW)
-      green_printf("Worker %u: A Remote machine  is trying a propose with global sess_id %u, "
+      my_printf(green, "Worker %u: A Remote machine  is trying a propose with global sess_id %u, "
                      "rmw_id %lu, that has been already committed \n",
                    t_id, glob_sess_id, rmw_l_id);
     rep->opcode = RMW_ID_COMMITTED;
@@ -3012,6 +905,9 @@ static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_i
   }
   else return false;
 }
+
+
+
 
 // Returns true if the received log-no is smaller than the committed.
 static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_t *kv_ptr,
@@ -3028,7 +924,7 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
     else if (kv_ptr->last_committed_log_no >= log_no ||
              kv_ptr->log_no > log_no) {
       if (DEBUG_RMW)
-        yellow_printf("Wkrk %u Log number is too small %u/%u entry state %u, propose/accept with rmw_lid %u,"
+        my_printf(yellow, "Wkrk %u Log number is too small %u/%u entry state %u, propose/accept with rmw_lid %u,"
                         " global_sess_id %u\n", t_id, log_no, kv_ptr->last_committed_log_no,
                       kv_ptr->state, rmw_l_id, glob_sess_id);
       rep->opcode = LOG_TOO_SMALL;
@@ -3036,7 +932,7 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
     }
     else if (DEBUG_RMW) { // remote log is higher than the locally stored!
       if (kv_ptr->log_no < log_no )
-        yellow_printf("Wkrk %u Log number is higher than expected %u/%u, entry state %u, "
+        my_printf(yellow, "Wkrk %u Log number is higher than expected %u/%u, entry state %u, "
                         "propose/accept with rmw_lid %u, global_sess_id %u \n",
                       t_id, log_no, kv_ptr->log_no,
                       kv_ptr->state, rmw_l_id, glob_sess_id);
@@ -3065,7 +961,7 @@ static inline bool is_log_too_high(uint32_t log_no, mica_op_t *kv_ptr,
     if (log_no > kv_ptr->log_no &&
       log_no > kv_ptr->last_committed_log_no + 1) {
       if (DEBUG_RMW)
-        yellow_printf("Wkrk %u Log number is too high %u/%u entry state %u \n",
+        my_printf(yellow, "Wkrk %u Log number is too high %u/%u entry state %u \n",
                       t_id, log_no, kv_ptr->last_committed_log_no,
                       kv_ptr->state);
       rep->opcode = LOG_TOO_HIGH;
@@ -3096,7 +992,7 @@ static inline bool ts_is_not_greater_than_kvs_ts(mica_op_t *kv_ptr, struct netwo
   tmp_ts.m_id = kv_ptr->ts.m_id;
   if (compare_netw_ts_with_ts(ts, &tmp_ts) != GREATER) {
     if (DEBUG_RMW)
-      yellow_printf("Wrkr %u: TS is NOT greater in a received propose/accept: version %u/%u, m_id %u/%u"
+      my_printf(yellow, "Wrkr %u: TS is NOT greater in a received propose/accept: version %u/%u, m_id %u/%u"
                       " from machine %u  \n", t_id, ts->version,
                     tmp_ts.version, ts->m_id, tmp_ts.m_id, m_id);
     rep->opcode = RMW_TS_STALE;
@@ -3119,7 +1015,7 @@ static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, 
     recv_info->posted_recvs += recvs_to_post_num;
   }
   if (DEBUG_SS_BATCH)
-    green_printf("Sending %u bcasts, total %lu \n", br_i, br_tx);
+    my_printf(green, "Sending %u bcasts, total %lu \n", br_i, br_tx);
 
   send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next = NULL;
   int ret = ibv_post_send(send_qp, &send_wr[q_info->first_active_rm_id], &bad_send_wr);
@@ -3233,7 +1129,7 @@ static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p
   loc_entry->help_loc_entry->l_id = p_ops->prop_info->l_id;
   loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, prop->session_id);
   loc_entry->accepted_log_no = 0;
-  //yellow_printf("Init  RMW-id %u glob_sess_id %u \n", loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
+  //my_printf(yellow, "Init  RMW-id %u glob_sess_id %u \n", loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
   //loc_entry->help_loc_entry->log_no = 0;
   loc_entry->help_loc_entry->state = INVALID_RMW;
 }
@@ -3279,7 +1175,7 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(struct rmw_local_en
 {
   if (ENABLE_ASSERTIONS) { // make sure the loc_entry is correctly set-up
     if (loc_entry->help_loc_entry == NULL) {
-      red_printf("When Zeroing: The help_loc_ptr is NULL. The reason is typically that "
+      my_printf(red, "When Zeroing: The help_loc_ptr is NULL. The reason is typically that "
                    "help_loc_entry was passed to the function "
                    "instead of loc entry to check \n");
       assert(false);
@@ -3329,7 +1225,7 @@ static inline bool if_already_committed_free_session_invalidate_entry(struct pen
     assert(loc_entry == &p_ops->prop_info->entry[loc_entry->sess_id]);
   }
   if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
-    //red_printf("Wrkr %u Freeing session %u \n", t_id, loc_entry->sess_id);
+    //my_printf(red, "Wrkr %u Freeing session %u \n", t_id, loc_entry->sess_id);
     loc_entry->state = INVALID_RMW;
     free_session(p_ops, loc_entry->sess_id, true, t_id);
     return true;
@@ -3395,7 +1291,7 @@ static inline void reinstate_loc_entry_after_helping(struct rmw_local_entry *loc
   zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
 
   if (DEBUG_RMW)
-    yellow_printf("Wrkr %u, sess %u reinstates its RMW id %u glob_sess-id %u after helping \n",
+    my_printf(yellow, "Wrkr %u, sess %u reinstates its RMW id %u glob_sess-id %u after helping \n",
                   t_id, loc_entry->sess_id, loc_entry->rmw_id.id,
                   loc_entry->rmw_id.glob_sess_id);
   if (ENABLE_ASSERTIONS)
@@ -3420,7 +1316,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, mica_
   kv_ptr->prop_ts.m_id = new_ts_m_id;
   //if (ENABLE_ASSERTIONS) assert(new_version >= kv_ptr->prop_ts.version);
   kv_ptr->prop_ts.version = new_version;
-  //cyan_printf("Kv_ptr version %u, m_id %u \n", kv_ptr->prop_ts.version, kv_ptr->new_ts.m_id);
+  //my_printf(cyan, "Kv_ptr version %u, m_id %u \n", kv_ptr->prop_ts.version, kv_ptr->new_ts.m_id);
   kv_ptr->rmw_id.glob_sess_id = glob_sess_id;
   kv_ptr->rmw_id.id = l_id;
   kv_ptr->state = state;
@@ -3438,7 +1334,7 @@ static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, mica_
   if (ENABLE_ASSERTIONS) {
     assert(kv_ptr->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
     if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
-      //red_printf("Wrkr %u, attempts to activate with already committed RMW id %u/%u glob_sess id %u, state %u: %s \n",
+      //my_printf(red, "Wrkr %u, attempts to activate with already committed RMW id %u/%u glob_sess id %u, state %u: %s \n",
       //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
       //           kv_ptr->rmw_id.glob_sess_id, state, message);
     }
@@ -3550,10 +1446,10 @@ static inline void set_up_r_rep_message_size(struct pending_ops *p_ops,
   enum ts_compare ts_comp = compare_netw_ts(&r_rep->ts, remote_ts);
   if (machine_id == 0 && R_TO_W_DEBUG) {
     if (ts_comp == EQUAL)
-      green_printf("L/R:  m_id: %u/%u version %u/%u \n", r_rep->ts.m_id, remote_ts->m_id,
+      my_printf(green, "L/R:  m_id: %u/%u version %u/%u \n", r_rep->ts.m_id, remote_ts->m_id,
                    r_rep->ts.version, remote_ts->version);
     else
-      red_printf("L/R:  m_id: %u/%u version %u/%u \n", r_rep->ts.m_id, remote_ts->m_id,
+      my_printf(red, "L/R:  m_id: %u/%u version %u/%u \n", r_rep->ts.m_id, remote_ts->m_id,
                  r_rep->ts.version, remote_ts->version);
   }
   switch (ts_comp) {
@@ -3589,7 +1485,7 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(struct pending_
 {
   struct rmw_local_entry *help_loc_entry = loc_entry->help_loc_entry;
   if (DEBUG_RMW)
-    cyan_printf("Wrkr %u, session %u helps RMW id %u glob_sess_id %u with version %u, m_id %u,"
+    my_printf(cyan, "Wrkr %u, session %u helps RMW id %u glob_sess_id %u with version %u, m_id %u,"
                   " kv_ptr log/help log %u/%u kv_ptr committed log %u , biggest committed rmw_id %u for kv_ptr sess %u"
                   " stashed rmw_id: %u, global_sess id %u, state %u \n",
                 t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id,
@@ -3602,7 +1498,7 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(struct pending_
   help_loc_entry->state = ACCEPTED;
   if (ENABLE_ASSERTIONS) assert(p_ops->sess_info[loc_entry->sess_id].stalled);
   loc_entry->helping_flag = PROPOSE_NOT_LOCALLY_ACKED;
-  //  cyan_printf("Wrkr %u Sess %u initiates prop help, key %u, log no %u \n", t_id,
+  //  my_printf(cyan, "Wrkr %u Sess %u initiates prop help, key %u, log no %u \n", t_id,
   //             loc_entry->sess_id, loc_entry->key.bkt, loc_entry->log_no);
   help_loc_entry->sess_id = loc_entry->sess_id;
   help_loc_entry->log_no = loc_entry->log_no;
@@ -3628,7 +1524,7 @@ static inline void handle_already_committed_rmw(struct pending_ops *p_ops,
       loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
     else {
       if (ENABLE_ASSERTIONS) {
-        yellow_printf("%s: committed rmw received had too "
+        my_printf(yellow, "%s: committed rmw received had too "
                         "low a log, bcasting from loc_entry \n",
                       loc_entry->state == PROPOSED ? "Propose" : "Accept");
       }
@@ -3652,7 +1548,7 @@ static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
 {
   if (ENABLE_ASSERTIONS && ack->opcode != CACHE_OP_ACK) {
     if(unlikely(ack->local_id) + ack->ack_num != l_id) {
-      red_printf("Wrkr %u: Adding to existing ack for machine %u  with l_id %lu, "
+      my_printf(red, "Wrkr %u: Adding to existing ack for machine %u  with l_id %lu, "
                    "ack_num %u with new l_id %lu, coalesce_num %u, opcode %u\n", t_id, m_id,
                  ack->local_id, ack->ack_num, l_id, w_num, ack->opcode);
       //assert(false);
@@ -3665,7 +1561,7 @@ static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
     ack->credits = 1;
     ack->ack_num = w_num;
     ack->opcode = ACK_NOT_YET_SENT;
-    if (DEBUG_ACKS) yellow_printf("Create an ack with l_id  %lu \n", ack->local_id);
+    if (DEBUG_ACKS) my_printf(yellow, "Create an ack with l_id  %lu \n", ack->local_id);
   }
   else {
     if (ENABLE_ASSERTIONS) {
@@ -3698,7 +1594,7 @@ static inline void handle_configuration_on_receiving_rel(struct write *write, ui
       acc = (struct accept *) write;
       uint16_t *part_of_acc = (uint16_t *) (((void*) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
       recv_conf_bit_vec = *part_of_acc;
-      //yellow_printf("received %u bit vec \n", recv_conf_bit_vec);
+      //my_printf(yellow, "received %u bit vec \n", recv_conf_bit_vec);
       *part_of_acc = 0;
       write->opcode = ACCEPT_OP;
       if (ENABLE_ASSERTIONS) {
@@ -3714,7 +1610,7 @@ static inline void handle_configuration_on_receiving_rel(struct write *write, ui
     if (recv_conf_bit_vec & machine_bit_id[m_i]) {
       set_conf_bit_to_new_state(t_id, m_i, DOWN_STABLE);
       if (DEBUG_BIT_VECS)
-        green_printf("Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
+        my_printf(green, "Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
                      t_id, recv_conf_bit_vec, m_i);
     }
   }
@@ -3731,7 +1627,7 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
   if (unlikely(r_rep->opcode > ACQ_LOG_EQUAL)) {
     read_info->fp_detected = true;
     if (DEBUG_QUORUM)
-      yellow_printf("Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
+      my_printf(yellow, "Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
     r_rep->opcode -= FALSE_POSITIVE_OFFSET;
     check_state_with_allowed_flags(8, r_rep->opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
                                    ACQ_LOG_TOO_HIGH, ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
@@ -3877,7 +1773,7 @@ static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_
   }
   struct read_info *read_info = &p_ops->read_info[r_ptr];
   if (DEBUG_READ_REPS)
-    yellow_printf("Read reply %u, Received replies %u/%d at r_ptr %u \n",
+    my_printf(yellow, "Read reply %u, Received replies %u/%d at r_ptr %u \n",
                   r_rep_i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
   if (read_info->is_rmw) {
     rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id);
@@ -3886,7 +1782,7 @@ static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_
     read_info_bookkeeping(r_rep, read_info, t_id);
   }
   if (read_info->rep_num >= REMOTE_QUORUM) {
-    //yellow_printf("%u r_ptr becomes ready, l_id %u,   \n", r_ptr, l_id);
+    //my_printf(yellow, "%u r_ptr becomes ready, l_id %u,   \n", r_ptr, l_id);
     p_ops->r_state[r_ptr] = READY;
     if (ENABLE_ASSERTIONS) {
       (*outstanding_reads)--;
@@ -3952,6 +1848,24 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
 
 }
 
+// returns true if the RMW can be failed before allocating a local entry
+static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
+                                       struct cache_resp *resp, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
+  if (op->opcode == COMPARE_AND_SWAP_WEAK &&
+      rmw_compare_fails(op->opcode, op->value_to_read,
+                        kv_ptr->value, op->real_val_len, t_id)) {
+    //my_printf(red, "CAS fails returns val %u/%u \n", kv_ptr->value[RMW_BYTE_OFFSET], op->value_to_read[0]);
+
+    fill_req_array_on_rmw_early_fail(op->session_id, kv_ptr->value,
+                                     op->index_to_req_array, t_id);
+    resp->type = RMW_FAILURE;
+    return true;
+  }
+  else return  false;
+}
+
 //
 static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, mica_op_t *kv_pair,
                                             bool *rmw_fails, uint16_t t_id)
@@ -3973,24 +1887,6 @@ static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, m
     }
   }
   return false;
-}
-
-// returns true if the RMW can be failed before allocating a local entry
-static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct cache_resp *resp, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
-  if (op->opcode == COMPARE_AND_SWAP_WEAK &&
-     rmw_compare_fails(op->opcode, op->value_to_read,
-                       kv_ptr->value, op->real_val_len, t_id)) {
-    //red_printf("CAS fails returns val %u/%u \n", kv_ptr->value[RMW_BYTE_OFFSET], op->value_to_read[0]);
-
-    fill_req_array_on_rmw_early_fail(op->session_id, kv_ptr->value,
-                                     op->index_to_req_array, t_id);
-    resp->type = RMW_FAILURE;
-    return true;
-  }
-  else return  false;
 }
 
 
@@ -4121,7 +2017,7 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_ptr];
   if (DEBUG_RMW)
-    green_printf("Worker: %u, inserting an rmw in r_mes_ptr %u and inside ptr %u \n",
+    my_printf(green, "Worker: %u, inserting an rmw in r_mes_ptr %u and inside ptr %u \n",
                  t_id, r_mes_ptr, r_mes->coalesce_num);
 //  struct propose *prop = &p_mes->prop[inside_r_ptr];
   assign_ts_to_netw_ts(&prop->ts, &loc_entry->new_ts);
@@ -4166,7 +2062,7 @@ static inline void insert_read(struct pending_ops *p_ops, struct trace_op *op,
     read->opcode = OP_ACQUIRE_FLIP_BIT;
     if (ENABLE_ASSERTIONS) assert(r_info->opcode == OP_ACQUIRE_FLIP_BIT);
     if (DEBUG_BIT_VECS)
-      cyan_printf("Wrkr: %u Acquire generates a read with op %u and key %u \n",
+      my_printf(cyan, "Wrkr: %u Acquire generates a read with op %u and key %u \n",
                   t_id, read->opcode, *(uint64_t *)&read->key);
   }
   else { // FROM TRACE: out of epoch reads/writes, acquires and releases
@@ -4183,11 +2079,11 @@ static inline void insert_read(struct pending_ops *p_ops, struct trace_op *op,
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_ptr];
 
   if (DEBUG_READS)
-    green_printf("Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u opcode %u \n",
+    my_printf(green, "Worker: %u, inserting a read in r_mes_ptr %u and inside ptr %u opcode %u \n",
                  t_id, r_mes_ptr, r_mes->coalesce_num, read->opcode);
   check_read_state_and_key(p_ops, r_ptr, source, r_mes, r_info, r_mes_ptr, read, t_id);
 
-  //green_printf("%u r_ptr becomes valid, size %u/%u \n", r_ptr, p_ops->r_size, p_ops->virt_r_size);
+  //my_printf(green, "%u r_ptr becomes valid, size %u/%u \n", r_ptr, p_ops->r_size, p_ops->virt_r_size);
   p_ops->r_state[r_ptr] = VALID;
   if (source == FROM_TRACE) {
       struct trace_op *tr_op = op;
@@ -4226,7 +2122,7 @@ static inline void reset_write_message(struct pending_ops *p_ops)
   struct w_message *w_mes = (struct w_message *)
     &p_ops->w_fifo->w_message[w_mes_ptr];
   struct w_mes_info * info = &p_ops->w_fifo->info[w_mes_ptr];
-  //cyan_printf("resetting message %u \n", p_ops->w_fifo->push_ptr);
+  //my_printf(cyan, "resetting message %u \n", p_ops->w_fifo->push_ptr);
   w_mes->l_id = 0;
   w_mes->coalesce_num = 0;
   info->message_size = (uint16_t) W_MES_HEADER;
@@ -4252,7 +2148,7 @@ static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w
       return false;
     }
   }
-  //green_printf("Wrkr %u release is of session %u, and can be coalesced at %u \n",
+  //my_printf(green, "Wrkr %u release is of session %u, and can be coalesced at %u \n",
   //       t_id, session_id, w_mes->coalesce_num);
   return true;
 
@@ -4312,7 +2208,7 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
       info->valid_header_l_id = true;
       info->backward_ptr = p_ops->w_push_ptr;
       w_mes->l_id = (uint64_t) (p_ops->local_w_id + p_ops->w_size);
-      //yellow_printf("Setting l_id of ms %u to %lu \n", w_mes_ptr, w_mes->l_id);
+      //my_printf(yellow, "Setting l_id of ms %u to %lu \n", w_mes_ptr, w_mes->l_id);
     }
     info->writes_num++;
     if (w_mes->opcode == ONLY_ACCEPTS) w_mes->opcode = WRITES_AND_ACCEPTS;
@@ -4324,7 +2220,7 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
   uint32_t inside_w_ptr = info->message_size;
   info->message_size += new_size;
   if (DEBUG_WRITES)
-     green_printf("Wrkr %u, sess %u inserts write %u, new_message %d, coalesce num %u, "
+     my_printf(green, "Wrkr %u, sess %u inserts write %u, new_message %d, coalesce num %u, "
                  "w_num %u, w_mes_ptr %u, mes_l_id %lu valid l_id %d,  message size %u \n",
                t_id, session_id, opcode, new_message, w_mes->coalesce_num,
                info->writes_num, w_mes_ptr, w_mes->l_id, info->valid_header_l_id, info->message_size);
@@ -4345,7 +2241,7 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
   check_loc_entry_metadata_is_reset(loc_entry, "insert_accept_in_writes_message_fifo", t_id);
   if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED);
   if (DEBUG_RMW) {
-    yellow_printf("Wrkr %u Inserting an accept, bcast size %u, "
+    my_printf(yellow, "Wrkr %u Inserting an accept, bcast size %u, "
                     "rmw_id %lu, global_sess_id %u, fifo push_ptr %u, fifo pull ptr %u\n",
                   t_id, p_ops->w_fifo->bcast_size, loc_entry->rmw_id.id,
                   loc_entry->rmw_id.glob_sess_id,
@@ -4422,7 +2318,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct trace_op *op, 
 
   //printf("Insert a write %u \n", *(uint32_t *)write);
   if (DEBUG_READS && source == FROM_READ) {
-    yellow_printf("Wrkr %u Inserting a write as a second round of read/write w_size %u/%d, bcast size %u, "
+    my_printf(yellow, "Wrkr %u Inserting a write as a second round of read/write w_size %u/%d, bcast size %u, "
                     " push_ptr %u, pull_ptr %u "
                     "l_id %lu, fifo push_ptr %u, fifo pull ptr %u\n", t_id,
                   p_ops->w_size, PENDING_WRITES, p_ops->w_fifo->bcast_size,
@@ -4490,7 +2386,7 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
 
   if (!coalesce){
     set_up_r_rep_entry(r_rep_fifo, rem_m_id, l_id, read_opcode, is_rmw);
-    //cyan_printf("Wrkr %u Creating a new read_reply message opcode: %u/%u at push_ptr %u\n",
+    //my_printf(cyan, "Wrkr %u Creating a new read_reply message opcode: %u/%u at push_ptr %u\n",
     //           t_id, r_rep_mes[r_rep_fifo->push_ptr].opcode, read_opcode, r_rep_fifo->push_ptr);
   }
   uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
@@ -4527,7 +2423,7 @@ static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_
 
   if (false_pos) {
     if (DEBUG_QUORUM)
-      yellow_printf("Worker %u Letting machine %u know that I believed it failed \n", t_id, rem_m_id);
+      my_printf(yellow, "Worker %u Letting machine %u know that I believed it failed \n", t_id, rem_m_id);
     rep->opcode += FALSE_POSITIVE_OFFSET;
   }
   p_ops->r_rep_fifo->total_size++;
@@ -4566,7 +2462,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
   struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[session_id];
   if (ENABLE_ASSERTIONS) {
     if (loc_entry->state != INVALID_RMW) {
-      red_printf("Wrkr %u Expected an invalid loc entry for session %u, loc_entry state %u \n",
+      my_printf(red, "Wrkr %u Expected an invalid loc entry for session %u, loc_entry state %u \n",
                  t_id, session_id, loc_entry->state);
       assert(false);
     }
@@ -4575,7 +2471,7 @@ static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
   p_ops->prop_info->l_id++;
   // if the global RMW entry was occupied, put in the next op to try next round
   if (resp->type == RETRY_RMW_KEY_EXISTS) {
-    //if (DEBUG_RMW) green_printf("Worker %u failed to do its RMW and moved "
+    //if (DEBUG_RMW) my_printf(green, "Worker %u failed to do its RMW and moved "
     //      "it from position %u to %u \n", t_id, op_i, *old_op_i);
     loc_entry->state = NEEDS_KV_PTR;
     // Set up the state that the RMW should wait on
@@ -4705,9 +2601,9 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   if (ENABLE_ASSERTIONS && DEBUG_SESSIONS) ses_dbg->dbg_cnt[working_session] = 0;
   if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, op->opcode);
 
-  //if (pull_ptr[[working_session]] == 100000) yellow_printf("Working ses %u \n", working_session);
-  //yellow_printf("BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
-  //yellow_printf("Wrkr %u, session %u, opcode %u \n", t_id, working_session, op->opcode);
+  //if (pull_ptr[[working_session]] == 100000) my_printf(yellow, "Working ses %u \n", working_session);
+  //my_printf(yellow, "BEFORE: OP_i %u -> session %u, opcode: %u \n", op_i, working_session, ops[op_i].opcode);
+  //my_printf(yellow, "Wrkr %u, session %u, opcode %u \n", t_id, working_session, op->opcode);
   *writes_num_ = writes_num, *reads_num_ = reads_num;
   if (ENABLE_CLIENTS) {
     signal_in_progress_to_client(op->session_id, op->index_to_req_array, t_id);
@@ -4751,7 +2647,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 
   bool passed_over_all_sessions = false;
   //if (!passed_over_all_sessions)
-  //  green_printf("Pulling from working session %d \n", working_session);
+  //  my_printf(green, "Pulling from working session %d \n", working_session);
 
 
   while (op_i < MAX_OP_BATCH && !passed_over_all_sessions) {
@@ -4781,14 +2677,14 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 
   t_stats[t_id].cache_hits_per_thread += op_i;
   cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
-  //cyan_printf("thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
+  //my_printf(cyan, "thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
   for (uint16_t i = 0; i < op_i; i++) {
 //    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
     //printf("%u %u \n", i, ops[i].opcode);
 
-    // green_printf("After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
+    // my_printf(green, "After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == KVS_MISS)  {
-      green_printf("Cache_miss %u: bkt %u, server %u, tag %u \n", i,
+      my_printf(green, "Cache_miss %u: bkt %u, server %u, tag %u \n", i,
                    ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
       assert(false);
       clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);
@@ -4852,7 +2748,7 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
     // which can happen, because accepts are fired after a quorum of acks
     if (kv_ptr->rmw_id.glob_sess_id == prop->glob_sess_id &&
         kv_ptr->rmw_id.id == prop->t_rmw_id && acc_ts_comp == EQUAL) {
-      //red_printf("Wrkr %u Received a proposal with same RMW id as an already accepted proposal, "
+      //my_printf(red, "Wrkr %u Received a proposal with same RMW id as an already accepted proposal, "
         //           "kv_ptr sess %u/%u, rmw_id %u/%u,  \n", t_id, prop->glob_sess_id,
           //       kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id);
 
@@ -4867,7 +2763,7 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
       else return_flag = SEEN_HIGHER_ACC; // higher or equal in this case
       // if (ENABLE_ASSERTIONS) {
       //  if (compare_netw_ts_with_ts(&prop->ts, &kv_ptr->new_ts) == EQUAL)
-      //    red_printf("Wrkr %u Received a proposal with same TS as an already accepted proposal, "
+      //    my_printf(red, "Wrkr %u Received a proposal with same TS as an already accepted proposal, "
      //                  "glob sess %u/%u, rmw_id %u/%u,  \n", t_id, prop->glob_sess_id,
       //               kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id);
      // }
@@ -4881,7 +2777,7 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
         break;
       case EQUAL: // this is valid, but should be rare
         //if (ENABLE_ASSERTIONS)
-        // red_printf("Wrkr %u Received a proposal with same TS as an already acked proposal, "
+        // my_printf(red, "Wrkr %u Received a proposal with same TS as an already acked proposal, "
          //            " prop log/kv_ptr log %u/%u, kv_ptr sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
          //          t_id, prop->log_no, kv_ptr->log_no, prop->glob_sess_id,
         //          kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id,
@@ -4923,7 +2819,7 @@ static inline uint8_t accept_snoops_entry(struct accept *acc, mica_op_t *kv_ptr,
       return_flag = RMW_ACK;
       if (ENABLE_ASSERTIONS) {
         if (DEBUG_RMW && ts_comp == EQUAL && kv_ptr->state == ACCEPTED)
-          red_printf("Wrkr %u Received Accept for the same TS as already accepted, "
+          my_printf(red, "Wrkr %u Received Accept for the same TS as already accepted, "
                        "version %u/%u m_id %u/%u, rmw_id %u/%u, global_sess_id %u/%u \n",
                      t_id, acc->ts.version, kv_ptr->prop_ts.version, acc->ts.m_id,
                      kv_ptr->prop_ts.m_id, acc->t_rmw_id, kv_ptr->rmw_id.id,
@@ -4948,7 +2844,7 @@ static inline uint8_t accept_snoops_entry(struct accept *acc, mica_op_t *kv_ptr,
   }
 
   if (DEBUG_RMW)
-      yellow_printf("Wrkr %u: %s Accept with rmw_id %u, glob_sess_id %u, log_no: %u, ts.version: %u, ts_m_id %u,"
+      my_printf(yellow, "Wrkr %u: %s Accept with rmw_id %u, glob_sess_id %u, log_no: %u, ts.version: %u, ts_m_id %u,"
                         "locally stored state: %u, locally stored ts: version %u, m_id %u \n",
                     t_id, return_flag == RMW_ACK ? "Acks" : "Nacks",
                     acc->t_rmw_id,  acc->glob_sess_id, acc->log_no,
@@ -4969,14 +2865,14 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
 {
   uint8_t return_flag;
   mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
-  my_assert(true_keys_are_equal(&loc_entry->key, &kv_ptr->key),
+  my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
             "Attempt local accept: Local entry does not contain the same key as global entry");
 
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return NACK_ALREADY_COMMITTED;
   }
 
@@ -4989,7 +2885,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
     }
     //state would be typically proposed, but may also be accepted if someone has helped
     if (DEBUG_RMW)
-      green_printf("Wrkr %u got rmw id %u, glob sess %u accepted locally \n",
+      my_printf(green, "Wrkr %u got rmw id %u, glob sess %u accepted locally \n",
                    t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
     kv_ptr->state = ACCEPTED;
     // calculate the new value depending on the type of RMW
@@ -5014,7 +2910,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
       //kv_ptr->dbg->proposed_rmw_id = loc_entry->rmw_id;
     }
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and succeed", t_id);
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return_flag = ACCEPT_ACK;
   }
   else { // the entry stores a different rmw_id and thus our proposal has been won by another
@@ -5025,7 +2921,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
       //Otherwise the RMW that won is still in progress
     else return_flag = NACK_ACCEPT_SEEN_HIGHER_TS;
     if (DEBUG_RMW)
-      green_printf("Wrkr %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
+      my_printf(green, "Wrkr %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
                      "global entry rmw id %u, glob sess %u, state %u \n",
                    t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
                    kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
@@ -5043,7 +2939,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
 
 
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and fail", t_id);
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   }
   return return_flag;
 }
@@ -5056,17 +2952,17 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
   mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
   struct rmw_local_entry* help_loc_entry = loc_entry->help_loc_entry;
   help_loc_entry->new_ts = loc_entry->new_ts;
-  my_assert(true_keys_are_equal(&help_loc_entry->key, &kv_ptr->key),
+  my_assert(keys_are_equal(&help_loc_entry->key, &kv_ptr->key),
             "Attempt local accpet to help: Local entry does not contain the same key as global entry");
   my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
             " the help entry and the regular have not the same log nos");
   if (ENABLE_ASSERTIONS) assert(help_loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   if (help_loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[help_loc_entry->rmw_id.glob_sess_id]) {
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     //if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
-     // cyan_printf("Sess %u aborts because the rmw-id is already registered \n", loc_entry->sess_id);
+     // my_printf(cyan, "Sess %u aborts because the rmw-id is already registered \n", loc_entry->sess_id);
     return ABORT_HELP;
   }
 
@@ -5105,13 +3001,13 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
         !helping_stuck_accept && !propose_locally_accepted) {
         assert(rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id));
         if (kv_ptr->state != PROPOSED) {
-          red_printf("Wrkr: %u, state %u \n", t_id, kv_ptr->state);
+          my_printf(red, "Wrkr: %u, state %u \n", t_id, kv_ptr->state);
           assert(false);
         }
       }
     }
     if (DEBUG_RMW)
-      green_printf("Wrkr %u on attempting to locally accept to help "
+      my_printf(green, "Wrkr %u on attempting to locally accept to help "
                    "got rmw id %u, glob sess %u accepted locally \n",
                    t_id, help_loc_entry->rmw_id.id, help_loc_entry->rmw_id.glob_sess_id);
     kv_ptr->state = ACCEPTED;
@@ -5124,7 +3020,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
     memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return_flag = ACCEPT_ACK;
   }
   else {
@@ -5132,14 +3028,14 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
     //if the global entry has accepted a higher TS then again abort help
    return_flag = ABORT_HELP;
     if (DEBUG_RMW)// || (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED))
-      green_printf("Wrkr %u sess %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
+      my_printf(green, "Wrkr %u sess %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
                      "global entry rmw id %u, glob sess %u, state %u \n",
                    t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
                    kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
 
 
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and fail", t_id);
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   }
   return return_flag;
 }
@@ -5156,7 +3052,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t  *kv_ptr,
   if (kv_ptr->last_committed_log_no < loc_entry_to_commit->log_no) {
     take_actions_to_commit_rmw(kv_ptr, loc_entry_to_commit, loc_entry, t_id);
     if (DEBUG_RMW)
-      green_printf("Wrkr %u got rmw id %u, kv_ptr sess %u, log %u committed locally,"
+      my_printf(green, "Wrkr %u got rmw id %u, kv_ptr sess %u, log %u committed locally,"
                      "kv_ptr stats: state %u, rmw_id &u, glob sess_id %u, log no %u  \n",
                    t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry_to_commit->log_no,
                    kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->log_no);
@@ -5167,7 +3063,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t  *kv_ptr,
     //the log numbers should match
     if (ENABLE_ASSERTIONS) {
       if (!rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->rmw_id)) {
-        red_printf("Wrkr %u kv_ptr is on same log as what is about to be committed but on different rmw-id:"
+        my_printf(red, "Wrkr %u kv_ptr is on same log as what is about to be committed but on different rmw-id:"
                      " committed rmw id %u, glob sess %u, "
                      "kv_ptr rmw id %u, glob sess %u, state %u,"
                      " committed version %u/%u m_id %u/%u \n",
@@ -5208,10 +3104,10 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
 
 
   mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
-  my_assert(true_keys_are_equal(&loc_entry->key, &kv_ptr->key),
+  my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
             "Attempt local commit: Local entry does not contain the same key as global entry");
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (loc_entry->state == COMMITTED)
     commit_helped_or_local_from_loc_entry(kv_ptr, loc_entry, loc_entry_to_commit, t_id);
   // Register the RMW-id
@@ -5221,15 +3117,15 @@ static inline void attempt_local_commit(struct pending_ops *p_ops, struct rmw_lo
                                                 loc_entry_to_commit->rmw_id.glob_sess_id,
                                                 "attempt_local_commit", t_id);
 
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (DEBUG_RMW)
-    green_printf("Wrkr %u will broadcast commits for rmw id %u, glob sess %u, "
+    my_printf(green, "Wrkr %u will broadcast commits for rmw id %u, glob sess %u, "
                  "global entry rmw id %u, glob sess %u, state %u \n",
                  t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id,
                  kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
 
   if (DEBUG_LOG)
-    green_printf("Log %u: RMW_id %u glob_sess %u, loc entry state %u, local commit\n",
+    my_printf(green, "Log %u: RMW_id %u glob_sess %u, loc entry state %u, local commit\n",
                  loc_entry_to_commit->log_no, loc_entry_to_commit->rmw_id.id,
                  loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry->state);
 }
@@ -5244,11 +3140,11 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
   uint64_t new_rmw_id = rmw_rep->rmw_id;
   uint16_t new_glob_sess_id = rmw_rep->glob_sess_id;
   if (kv_ptr->last_committed_log_no >= new_log_no) return;
-  my_assert(true_keys_are_equal(&loc_entry->key, &kv_ptr->key),
+  my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
             "Attempt local commit from rep: Local entry does not contain the same key as global entry");
 
   // we need to change the global rmw structure, which means we need to lock the kv-pair.
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   // If the RMW has not been committed yet locally, commit it
   if (kv_ptr->last_committed_log_no < new_log_no) {
     //if (ENABLE_DEBUG_GLOBAL_ENTRY) kv_ptr->dbg->last_committed_flag = REMOTE_RMW_FROM_REP;
@@ -5268,7 +3164,7 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
       kv_pair->ts.version = rmw_rep->ts.version;
     }
     if (DEBUG_RMW)
-      green_printf("Wrkr %u commits locally rmw id %u, glob sess %u after resp with opcode %u \n",
+      my_printf(green, "Wrkr %u commits locally rmw id %u, glob sess %u after resp with opcode %u \n",
                    t_id, new_rmw_id, new_glob_sess_id, rmw_rep->opcode);
     // if the kv_ptr was working on an already committed log, or
     // if it's not active advance its log no and in both cases transition to INVALID RMW
@@ -5288,11 +3184,11 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
   register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
   check_registered_against_glob_last_registered(kv_ptr, new_rmw_id, new_glob_sess_id,
                                                 "attempt_local_commit_from_rep", t_id);
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
 
   if (DEBUG_LOG)
-    green_printf("Log %u: RMW_id %u glob_sess %u, loc entry state %u from reply \n",
+    my_printf(green, "Log %u: RMW_id %u glob_sess %u, loc entry state %u from reply \n",
                  new_log_no, new_rmw_id, new_glob_sess_id, loc_entry->state);
 
 }
@@ -5322,7 +3218,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
       kv_ptr->last_registered_log_no = new_log_no;
     }
     if (DEBUG_LOG)
-      green_printf("Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
+      my_printf(green, "Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
                    new_log_no, new_rmw_id, glob_sess_id);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
@@ -5337,7 +3233,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
   }
   else if (kv_ptr->log_no > new_log_no && kv_ptr->state != INVALID_RMW) {
     if (kv_ptr->rmw_id.id == new_rmw_id && kv_ptr->rmw_id.glob_sess_id == glob_sess_id)
-      red_printf("Wrkr %u, committed rmw_id %u and glob ses id %u on log no %u, but the kv_ptr is working on "
+      my_printf(red, "Wrkr %u, committed rmw_id %u and glob ses id %u on log no %u, but the kv_ptr is working on "
                    "log %u, state %u rmw_id %u glob sess id %u \n", t_id, new_rmw_id, glob_sess_id, new_log_no,
                  kv_ptr->log_no, kv_ptr->state, kv_ptr->rmw_id.id,  kv_ptr->rmw_id.glob_sess_id);
   }
@@ -5359,7 +3255,7 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   uint8_t m_id = !use_commit ? r_info->ts_to_read.m_id : com->ts.m_id;
   uint32_t entry;
 
-  optik_lock(&kv_ptr->seqlock);
+  lock_seqlock(&kv_ptr->seqlock);
   check_keys_with_one_trace_op(key, kv_ptr);
   overwrite_kv = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
@@ -5389,7 +3285,7 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   check_registered_against_glob_last_registered(kv_ptr, rmw_l_id, glob_sess_id,
                                                 "handle remote commit", t_id);
 
-  optik_unlock(&kv_ptr->seqlock);
+  unlock_seqlock(&kv_ptr->seqlock);
   return number_of_reqs;
 
 }
@@ -5533,7 +3429,7 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
     case SEEN_HIGHER_PROP:
       loc_entry->rmw_reps.seen_higher_prop_acc++;
       if (DEBUG_RMW)
-        yellow_printf("Wrkr %u: the prop rep is %u, %u sum of all other reps %u \n", t_id,
+        my_printf(yellow, "Wrkr %u: the prop rep is %u, %u sum of all other reps %u \n", t_id,
                         prop_rep->opcode,
                        loc_entry->rmw_reps.seen_higher_prop_acc,
                        loc_entry->rmw_reps.rmw_id_commited + loc_entry->rmw_reps.log_too_small +
@@ -5541,7 +3437,7 @@ static inline void handle_propose_reply(struct pending_ops *p_ops, struct rmw_re
        if (prop_rep->ts.version > loc_entry->rmw_reps.seen_higher_prop_version) {
         loc_entry->rmw_reps.seen_higher_prop_version = prop_rep->ts.version;
         if (DEBUG_RMW)
-          yellow_printf("Wrkr %u: overwriting the TS version %u \n",
+          my_printf(yellow, "Wrkr %u: overwriting the TS version %u \n",
           t_id, loc_entry->rmw_reps.seen_higher_prop_version);
       }
       break;
@@ -5566,7 +3462,7 @@ static inline void handle_accept_reply(struct pending_ops *p_ops, struct rmw_rep
       loc_entry->rmw_reps.acks++;
       if (ENABLE_ASSERTIONS) assert(acc_rep_mes->m_id < MACHINE_NUM && acc_rep_mes->m_id != machine_id);
       if (DEBUG_RMW)
-        green_printf("Wrkr %u, the received rep is an accept ack, "
+        my_printf(green, "Wrkr %u, the received rep is an accept ack, "
                       "total acks %u \n", t_id, loc_entry->rmw_reps.acks);
       break;
     case RMW_ID_COMMITTED:
@@ -5594,7 +3490,7 @@ static inline void handle_accept_reply(struct pending_ops *p_ops, struct rmw_rep
     case SEEN_HIGHER_PROP:
       loc_entry->rmw_reps.seen_higher_prop_acc++;
       if (DEBUG_RMW)
-        yellow_printf("Wrkr %u: the prop rep is %u, %u sum of all other reps %u \n", t_id,
+        my_printf(yellow, "Wrkr %u: the prop rep is %u, %u sum of all other reps %u \n", t_id,
                       acc_rep->opcode,
                       loc_entry->rmw_reps.seen_higher_prop_acc,
                       loc_entry->rmw_reps.rmw_id_commited + loc_entry->rmw_reps.log_too_small +
@@ -5621,12 +3517,12 @@ static inline void handle_single_rmw_rep(struct pending_ops *p_ops, struct rmw_r
     }
     assert(opcode_is_rmw_rep(rep->opcode));
     if (prop_info->l_id <= rep->l_id)
-      red_printf("Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
+      my_printf(red, "Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
                  t_id, r_rep_i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
 
     assert(prop_info->l_id > rep->l_id);
   }
-  //cyan_printf("RMW rep opcode %u, l_id %u \n", rep->opcode, rep->l_id);
+  //my_printf(cyan, "RMW rep opcode %u, l_id %u \n", rep->opcode, rep->l_id);
   int entry_i = search_prop_entries_with_l_id(prop_info, (uint8_t) (is_accept ? ACCEPTED : PROPOSED),
                                               rep->l_id);
   if (entry_i == -1) return;
@@ -5648,7 +3544,7 @@ static inline void handle_rmw_rep_replies(struct pending_ops *p_ops, struct r_re
   check_state_with_allowed_flags(4, r_rep_mes->opcode, ACCEPT_REPLY,
                                  PROP_REPLY, ACCEPT_REPLY_NO_CREDITS);
   uint8_t rep_num = rep_mes->coalesce_num;
-  //yellow_printf("Received opcode %u, prop_rep num %u \n", r_rep_mes->opcode, rep_num);
+  //my_printf(yellow, "Received opcode %u, prop_rep num %u \n", r_rep_mes->opcode, rep_num);
   uint16_t byte_ptr = R_REP_MES_HEADER; // same for both accepts and replies
   for (uint16_t r_rep_i = 0; r_rep_i < rep_num; r_rep_i++) {
     struct rmw_rep_last_committed *rep = (struct rmw_rep_last_committed *) (((void *) rep_mes) + byte_ptr);
@@ -5698,7 +3594,7 @@ static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_
   mica_op_t *kv_pair = (mica_op_t *) loc_entry->ptr_to_kv_pair;
   mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
 
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   // If the last committed_log_number is still the same then change the KV
   if (kv_ptr->last_committed_log_no == loc_entry->log_no &&
       compare_ts(&kv_pair->ts, &loc_entry->rmw_reps.kvs_higher_ts) == SMALLER) {
@@ -5707,7 +3603,7 @@ static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_
       assert(loc_entry->rmw_reps.kvs_higher_ts.version % 2 == 0);
     }
     if (DEBUG_RMW)
-      yellow_printf("Wrkr %u, on learning that the KVS TS was stale, update the TS version %u/%u m _id %u/%u "
+      my_printf(yellow, "Wrkr %u, on learning that the KVS TS was stale, update the TS version %u/%u m _id %u/%u "
                       "kv_ptr rmw_id %u, glob sess id %u, state %u\n",
                     t_id, kv_pair->ts.version, loc_entry->rmw_reps.kvs_higher_ts.version,
                     kv_pair->ts.m_id, loc_entry->rmw_reps.kvs_higher_ts.m_id,
@@ -5717,7 +3613,7 @@ static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_
     kv_pair->ts.m_id = loc_entry->rmw_reps.kvs_higher_ts.m_id;
   }
   check_log_nos_of_kv_ptr(kv_ptr, "update_KVS_on_receiving_a_TS_stale_rep", t_id);
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
 }
 
 //------------------------------HELP STUCK RMW------------------------------------------
@@ -5732,9 +3628,9 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(struct pending_ops *p_op
   mica_op_t *kv_pair = loc_entry->ptr_to_kv_pair;
   uint32_t version = 0;
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return true;
   }
   if (kv_ptr->state == INVALID_RMW) {
@@ -5742,7 +3638,7 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(struct pending_ops *p_op
       if (ENABLE_ASSERTIONS) assert(kv_ptr->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
       if (ENABLE_ASSERTIONS && kv_ptr->state != INVALID_RMW &&
           committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
-        //red_printf("Wrkr: %u waiting on an rmw id %u/%u glob_sess_id %u that has been committed, so we free it"
+        //my_printf(red, "Wrkr: %u waiting on an rmw id %u/%u glob_sess_id %u that has been committed, so we free it"
         //             "last committed rmw id %u , glob sess id %u, "
         //             "state %u, committed log/log %u/%u, version %u \n",
         //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
@@ -5760,14 +3656,14 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(struct pending_ops *p_op
 
       kv_ptr_was_grabbed = true;
       if (DEBUG_RMW)
-        yellow_printf("Wrkr %u, after waiting for %u cycles, session %u  \n",
+        my_printf(yellow, "Wrkr %u, after waiting for %u cycles, session %u  \n",
                       t_id, loc_entry->back_off_cntr, loc_entry->sess_id);
     }
   }
   else if (kv_ptr_state_has_changed(kv_ptr, loc_entry->help_rmw)) {
     if (ENABLE_ASSERTIONS) {
       if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
-        //red_printf("Wrkr: %u The saved rmw id %u/%u glob_sess_id %u has been committed, "
+        //my_printf(red, "Wrkr: %u The saved rmw id %u/%u glob_sess_id %u has been committed, "
         //             "last committed rmw id %u , glob sess id %u, "
         //             "state %u, committed log/log %u/%u, version %u \n",
         //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
@@ -5779,7 +3675,7 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(struct pending_ops *p_op
       }
     }
     if (DEBUG_RMW)
-      yellow_printf("Wrkr %u, session %u changed who is waiting: waited for %u cycles on "
+      my_printf(yellow, "Wrkr %u, session %u changed who is waiting: waited for %u cycles on "
                       "state %u rmw_id %u glob_sess_id %u, now waiting on rmw_id %u glob_sess_id %u, state %u\n",
                     t_id, loc_entry->sess_id, loc_entry->back_off_cntr,
                     loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
@@ -5791,7 +3687,7 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(struct pending_ops *p_op
     loc_entry->back_off_cntr = 0;
   }
   check_log_nos_of_kv_ptr(kv_ptr, "attempt_to_grab_kv_ptr_after_waiting", t_id);
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (kv_ptr_was_grabbed) {
     fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops, loc_entry, version,
                                           PROPOSED, sess_i, t_id);
@@ -5818,7 +3714,7 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
   bool help = false;
   struct rmw_local_entry *help_loc_entry = loc_entry->help_loc_entry;
   // The stat of the kv_ptr must not be downgraded from ACCEPTED
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   // check again with the lock in hand
   if (kv_ptr->accepted_log_no == kv_ptr->last_committed_log_no + 1) {
     loc_entry->log_no = kv_ptr->accepted_log_no;
@@ -5839,7 +3735,7 @@ static inline void attempt_to_help_a_locally_accepted_value(struct pending_ops *
     help = true;
   }
   check_log_nos_of_kv_ptr(kv_ptr, "attempt_to_help_a_locally_accepted_value", t_id);
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   loc_entry->back_off_cntr = 0;
   if (help) {
@@ -5856,9 +3752,9 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(struct pending_ops *p_ops,
                                                       uint16_t sess_i, uint16_t t_id)
 {
   bool kv_ptr_was_grabbed = false;
-  optik_lock(&loc_entry->ptr_to_kv_pair->seqlock);
+  lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-    optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
     return ;
   }
   uint32_t new_version = 0;
@@ -5876,7 +3772,7 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(struct pending_ops *p_ops,
   }
   else if (kv_ptr_state_has_changed(kv_ptr, loc_entry->help_rmw)) {
     if (DEBUG_RMW)
-      yellow_printf("Wrkr %u, session %u on attempting to steal the propose, changed who is "
+      my_printf(yellow, "Wrkr %u, session %u on attempting to steal the propose, changed who is "
                       "waiting: waited for %u cycles for state %u "
                       "rmw_id %u glob_sess_id %u, state %u,  now waiting on rmw_id % glob_sess_id %u, state %u\n",
                     t_id, loc_entry->sess_id, loc_entry->back_off_cntr,
@@ -5889,11 +3785,11 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(struct pending_ops *p_ops,
   }
   else if (ENABLE_ASSERTIONS) assert(false);
   check_log_nos_of_kv_ptr(kv_ptr, "attempt_to_steal_a_proposed_kv_ptr", t_id);
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
   loc_entry->back_off_cntr = 0;
   if (kv_ptr_was_grabbed) {
     if (DEBUG_RMW)
-      cyan_printf("Wrkr %u: session %u steals kv_ptr to do its propose \n",
+      my_printf(cyan, "Wrkr %u: session %u steals kv_ptr to do its propose \n",
                   t_id, loc_entry->sess_id);
     fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops, loc_entry, new_version,
                                           PROPOSED, sess_i, t_id);
@@ -5910,10 +3806,10 @@ static inline void take_kv_ptr_with_higher_TS(struct pending_ops *p_ops,
     is_still_proposed, is_still_accepted, kv_ptr_can_be_taken_with_higher_TS;
   bool rmw_fails = false;
   mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
-  optik_lock(&kv_ptr->seqlock);
+  lock_seqlock(&kv_ptr->seqlock);
   {
     if (if_already_committed_free_session_invalidate_entry(p_ops, loc_entry, t_id)) {
-      optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+      unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
       return;
     }
     is_still_proposed = rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id) &&
@@ -5963,7 +3859,7 @@ static inline void take_kv_ptr_with_higher_TS(struct pending_ops *p_ops,
       } else kv_ptr->state = INVALID_RMW;
     } else {
       if (DEBUG_RMW)
-        yellow_printf("Wrkr %u, session %u  failed when attempting to get/regain the kv_ptr, "
+        my_printf(yellow, "Wrkr %u, session %u  failed when attempting to get/regain the kv_ptr, "
                         "waiting: waited for %u cycles for "
                         "now waiting on rmw_id % glob_sess_id %u, state %u\n",
                       t_id, loc_entry->sess_id,
@@ -5971,11 +3867,11 @@ static inline void take_kv_ptr_with_higher_TS(struct pending_ops *p_ops,
     }
     check_log_nos_of_kv_ptr(kv_ptr, "take_kv_ptr_with_higher_TS", t_id);
   }
-  optik_unlock(&loc_entry->ptr_to_kv_pair->seqlock);
+  unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
 
   if (kv_ptr_was_grabbed) {
     if (DEBUG_RMW)
-      cyan_printf("Wrkr %u: session %u gets/regains the kv_ptr log %u to do its propose \n",
+      my_printf(cyan, "Wrkr %u: session %u gets/regains the kv_ptr log %u to do its propose \n",
                   t_id, loc_entry->sess_id, kv_ptr->log_no);
     loc_entry->state = PROPOSED;
   }
@@ -6237,7 +4133,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
       //bool is_commit_helping = loc_entry->helping_flag != NOT_HELPING;
       if (p_ops->virt_w_size < MAX_ALLOWED_W_SIZE) {
         if (state == MUST_BCAST_COMMITS_FROM_HELP && loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED) {
-          green_printf("Wrkr %u sess %u will bcast commits for the latest committed RMW,"
+          my_printf(green, "Wrkr %u sess %u will bcast commits for the latest committed RMW,"
                          " after learning its proposed RMW has already been committed \n", t_id, loc_entry->sess_id);
         }
         insert_write(p_ops, (struct trace_op*) entry_to_commit, FROM_COMMIT, state, t_id);
@@ -6256,7 +4152,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
         if (ENABLE_ASSERTIONS) assert(p_ops->sess_info[sess_i].stalled);
         loc_entry->back_off_cntr++;
         if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
-//          yellow_printf("Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
+//          my_printf(yellow, "Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
 //                        t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
 //                        loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
 //                        loc_entry->help_rmw->state);
@@ -6326,11 +4222,11 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
       q_info->send_vector[rm_id] = false;
       //Change the machine-wide configuration bit-vector and the bit vector to be sent
       //set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
-      //if (DEBUG_QUORUM) yellow_printf("Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
+      //if (DEBUG_QUORUM) my_printf(yellow, "Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
       if (!DEBUG_BIT_VECS) {
         if (t_id == 0)
-         cyan_printf("Wrkr %u detects that machine %u has failed \n", t_id, i);
+         my_printf(cyan, "Wrkr %u detects that machine %u has failed \n", t_id, i);
       }
     }
     else {
@@ -6382,7 +4278,7 @@ static inline void revive_machine(struct quorum_info *q_info,
   q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
   if (DEBUG_QUORUM) print_q_info(q_info);
   for (uint16_t i = 0; i < q_info->missing_num; i++)
-    if (DEBUG_QUORUM) green_printf("After: Missing position %u, missing id %u, id to revive\n",
+    if (DEBUG_QUORUM) my_printf(green, "After: Missing position %u, missing id %u, id to revive\n",
                                    i, q_info->missing_ids[i], revived_mach_id);
 }
 
@@ -6391,13 +4287,13 @@ static inline void update_bcast_wr_links(struct quorum_info *q_info, struct ibv_
 {
   if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
   uint8_t prev_i = 0, avail_mach = 0;
-  if (DEBUG_QUORUM) green_printf("Worker %u fixing the links between the wrs \n", t_id);
+  if (DEBUG_QUORUM) my_printf(green, "Worker %u fixing the links between the wrs \n", t_id);
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
     wr[i].next = NULL;
     if (q_info->send_vector[i]) {
       if (avail_mach > 0) {
         for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
-          if (DEBUG_QUORUM) yellow_printf("Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
+          if (DEBUG_QUORUM) my_printf(yellow, "Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
           wr[(REM_MACH_NUM * j) + prev_i].next = &wr[(REM_MACH_NUM * j) + i];
         }
       }
@@ -6440,11 +4336,11 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
     if (credits[vc][q_info->active_ids[i]] < min_credits) {
       time_out_cnt[vc]++;
       //if (DEBUG_BIT_VECS && t_id >= 0 && time_out_cnt[vc] % M_1 == 0)
-        //red_printf("WKR %u: the timeout cnt is %u for vc %u machine %u, credits %u\n",
+        //my_printf(red, "WKR %u: the timeout cnt is %u for vc %u machine %u, credits %u\n",
          //          t_id, time_out_cnt[vc], vc, q_info->active_ids[i], credits[vc][q_info->active_ids[i]]);
       if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM)
-          red_printf("Worker %u timed_out on machine %u  for vc % u, writes  done %lu \n",
+          my_printf(red, "Worker %u timed_out on machine %u  for vc % u, writes  done %lu \n",
                      t_id, q_info->active_ids[i], vc, t_stats[t_id].writes_sent);
         // assert(false);
         update_q_info(q_info, credits, min_credits, vc, t_id);
@@ -6464,7 +4360,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
       if (credits[W_VC][q_info->missing_ids[i]] == W_CREDITS &&
           credits[R_VC][q_info->missing_ids[i]] == R_CREDITS ) {
         if (DEBUG_QUORUM)
-          red_printf("Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
+          my_printf(red, "Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
         printf("Wrkr %u, after reviving, active num %u, active_id %u, %u, %u, %u \n",
         t_id, q_info->active_num, q_info->active_ids[0], q_info->active_ids[1],
@@ -6511,14 +4407,14 @@ static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
                              send_sgl, br_i, p_ops->q_info, t_id);
 
   if (DEBUG_WRITES)
-    green_printf("Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u,"
+    my_printf(green, "Wrkr %d : I BROADCAST a write message %d of %u writes with mes_size %u,"
                    " with credits: %d, lid: %u  \n",
                  t_id, w_mes->write[0].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], w_mes->l_id);
 
   if (DEBUG_RMW) {
     struct accept *acc = (struct accept *) &w_mes->write[0];
-    green_printf("Wrkr %d : I BROADCAST a message %d of %u accepts with mes_size %u, "
+    my_printf(green, "Wrkr %d : I BROADCAST a message %d of %u accepts with mes_size %u, "
                    "with credits: %d, lid: %u , "
                    "rmw_id %u, glob_sess id %u, log_no %u, version %u  \n",
                  t_id, acc->opcode, coalesce_num,
@@ -6666,13 +4562,13 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   }
 
   if (DEBUG_READS && all_reads)
-    green_printf("Wrkr %d : I BROADCAST a read message %d of %u reads with mes_size %u, with credits: %d, lid: %u  \n",
+    my_printf(green, "Wrkr %d : I BROADCAST a read message %d of %u reads with mes_size %u, with credits: %d, lid: %u  \n",
                  t_id, r_mes->read[coalesce_num - 1].opcode, coalesce_num, send_sgl[br_i].length,
                  credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id);
   else if (DEBUG_RMW) {
     //struct prop_message *prop_mes = (struct prop_message *) r_mes;
     struct propose *prop = (struct propose *) &r_mes->read[0];
-  green_printf("Wrkr %d : I BROADCAST a propose message %d of %u props with mes_size %u, with credits: %d, lid: %u, "
+  my_printf(green, "Wrkr %d : I BROADCAST a propose message %d of %u props with mes_size %u, with credits: %d, lid: %u, "
                  "rmw_id %u, glob_sess id %u, log_no %u, version %u \n",
                t_id, prop->opcode, coalesce_num, send_sgl[br_i].length,
                credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id,
@@ -6683,7 +4579,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
     for (i = 0; i < info->reads_num; i++) {
       p_ops->r_state[(info->backward_ptr + i) % PENDING_READS] = SENT;
       if (DEBUG_READS)
-        yellow_printf("Read %d/%u, message mes_size %d, version %u \n", i, coalesce_num,
+        my_printf(yellow, "Read %d/%u, message mes_size %d, version %u \n", i, coalesce_num,
                       send_sgl[br_i].length, r_mes->read[i].ts.version);
       if (ENABLE_ASSERTIONS && all_reads) {
         check_state_with_allowed_flags(5, r_mes->read[i].opcode, KVS_OP_GET, CACHE_OP_GET_TS,
@@ -6777,14 +4673,14 @@ static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_re
   if (DEBUG_RECEIVES) {
     w_recv_info->posted_recvs -= completed_messages;
     if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
-      red_printf("Wrkr %u some remote machine has created credits out of thin air \n", t_id);
+      my_printf(red, "Wrkr %u some remote machine has created credits out of thin air \n", t_id);
   }
   // There is a chance that you wont be able to poll all completed writes,
   // because you wont be able to create acks for them, in which case you
   // pass the number of completed (i.e. from the completion queue) but not polled messages to the next round
   if (unlikely(*completed_but_not_polled_writes > 0)) {
     if (DEBUG_QUORUM)
-      yellow_printf("Wrkr %u adds %u messages to the %u completed messages \n",
+      my_printf(yellow, "Wrkr %u adds %u messages to the %u completed messages \n",
                     t_id, *completed_but_not_polled_writes, completed_messages);
     completed_messages += (*completed_but_not_polled_writes);
     (*completed_but_not_polled_writes) = 0;
@@ -6854,7 +4750,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (!ack_bookkeeping(&acks[w_mes->m_id], writes_to_be_acked, w_mes->l_id, w_mes->m_id, t_id)) {
         (*completed_but_not_polled_writes) = completed_messages - polled_messages;
         //if (DEBUG_QUORUM)
-          yellow_printf("Wrkr %u leaves %u messages for the next polling round \n",
+          my_printf(yellow, "Wrkr %u leaves %u messages for the next polling round \n",
                         t_id, *completed_but_not_polled_writes);
         break;
       }
@@ -6869,10 +4765,10 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   (*pull_ptr) = index;
 
   if (writes_for_kvs > 0) {
-    if (DEBUG_WRITES) yellow_printf("Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);
+    if (DEBUG_WRITES) my_printf(yellow, "Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);
     cache_batch_op_updates((uint16_t) writes_for_kvs, t_id, (struct write **) p_ops->ptrs_to_mes_ops,
                            p_ops, 0, (uint32_t) MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
-    if (DEBUG_WRITES) yellow_printf("Worker %u propagated %u writes to the kvs \n", t_id, writes_for_kvs);
+    if (DEBUG_WRITES) my_printf(yellow, "Worker %u propagated %u writes to the kvs \n", t_id, writes_for_kvs);
   }
 }
 
@@ -7263,7 +5159,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
 
       // The read must have the struct key overloaded with the original acquire l_id
       if (DEBUG_BIT_VECS)
-        cyan_printf("Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent %u, "
+        my_printf(cyan, "Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent %u, "
                     "read_info pull_ptr %u, read_info push_ptr %u read fifo size %u, virtual size: %u  \n",
                     t_id, read_info->opcode, p_ops->local_r_id, pull_ptr,
                     p_ops->r_push_ptr, p_ops->r_size, p_ops->virt_r_size);
@@ -7299,7 +5195,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
       if (ENABLE_ASSERTIONS) assert(!read_info->complete_flag);
         read_info->complete_flag = true;
     }
-    //cyan_printf("%u ptr freed, size %u/%u \n", pull_ptr, p_ops->r_size, p_ops->virt_r_size);
+    //my_printf(cyan, "%u ptr freed, size %u/%u \n", pull_ptr, p_ops->r_size, p_ops->virt_r_size);
     // Clean-up code
     memset(&p_ops->read_info[pull_ptr], 0, 3); // a lin write uses these bytes for the session id but it's still fine to clear them
     p_ops->r_state[pull_ptr] = INVALID;
@@ -7340,7 +5236,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
       t_stats[t_id].acks_sent_mes_num++;
     }
     if (DEBUG_ACKS)
-      yellow_printf("Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
+      my_printf(yellow, "Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
                     t_id, acks[i].local_id, acks[i].credits, acks[i].ack_num, acks[i].m_id);
 
     acks[i].opcode = CACHE_OP_ACK;
@@ -7352,14 +5248,14 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     }
     if ((*sent_ack_tx) % ACK_SS_BATCH == 0) {
       ack_send_wr[i].send_flags |= IBV_SEND_SIGNALED;
-      // if (g_id == 0) green_printf("Sending ack %llu signaled \n", *sent_ack_tx);
+      // if (g_id == 0) my_printf(green, "Sending ack %llu signaled \n", *sent_ack_tx);
     } else ack_send_wr[i].send_flags = IBV_SEND_INLINE;
     if ((*sent_ack_tx) % ACK_SS_BATCH == ACK_SS_BATCH - 1) {
-      // if (g_id == 0) green_printf("Polling for ack  %llu \n", *sent_ack_tx);
+      // if (g_id == 0) my_printf(green, "Polling for ack  %llu \n", *sent_ack_tx);
       poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, POLL_CQ_ACK);
     }
     if (ack_i > 0) {
-      if (DEBUG_ACKS) yellow_printf("Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, i);
+      if (DEBUG_ACKS) my_printf(yellow, "Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, i);
       ack_send_wr[prev_ack_i].next = &ack_send_wr[i];
     }
     else first_wr = i;
@@ -7415,7 +5311,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
   //  memcpy((void *) &op, &p_ops->w_meta[w_pull_ptr].sess_id, SESSION_BYTES);
   memcpy((void *) &op.ts, rel, W_SIZE);
   //if (DEBUG_SESSIONS)
-  //cyan_printf("Wrkr: %u Inserting the write for the second round of the "
+  //my_printf(cyan, "Wrkr: %u Inserting the write for the second round of the "
   //            "release opcode %u that carried a bit vector: session %u\n",
   //            t_id, op.opcode, p_ops->w_session_id[w_pull_ptr]);
   insert_write(p_ops, &op, RELEASE_THIRD, w_pull_ptr, t_id); // the push pointer is not needed because the session id is inside the op
@@ -7439,7 +5335,7 @@ static inline bool complete_requests_that_wait_all_acks(uint8_t *w_state,
       if (ENABLE_ASSERTIONS) {
         if (*w_state >= READY_PUT && *w_state <= READY_NO_OP_RELEASE)
           break;
-        red_printf("Wrkr %u state %u, ptr %u \n", t_id, w_state, w_ptr);
+        my_printf(red, "Wrkr %u state %u, ptr %u \n", t_id, w_state, w_ptr);
         assert(false);
       }
   }
@@ -7499,7 +5395,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
     if (ENABLE_ASSERTIONS && EMULATE_ABD)
       assert(w_state == READY_RELEASE || w_state == READY_ACQUIRE);
     //if (DEBUG_ACKS)
-    //  green_printf("Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
+    //  my_printf(green, "Wkrk %u freeing write at pull_ptr %u, w_size %u, w_state %d, session %u, local_w_id %lu, acks seen %u \n",
     //               g_id, p_ops->w_pull_ptr, p_ops->w_size, p_ops->w_state[p_ops->w_pull_ptr],
     //               p_ops->w_session_id[p_ops->w_pull_ptr], p_ops->local_w_id, p_ops->acks_seen[p_ops->w_pull_ptr]);
     //if (t_id == 1) printf("Wrkr %u Clearing state %u ptr %u \n", t_id, w_state, p_ops->w_pull_ptr);
@@ -7531,7 +5427,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
     }
     else {
       p_ops->virt_w_size--;
-      //yellow_printf("Decreasing virt_w_size %u at %u, state %u \n",
+      //my_printf(yellow, "Decreasing virt_w_size %u at %u, state %u \n",
        //             p_ops->virt_w_size, w_pull_ptr, w_state);
     }
     p_ops->w_size--;
@@ -7563,7 +5459,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
 
 //    if (machine_id == 0 && w_meta->acks_expected == 3) assert(w_meta->expected_ids[0] != 1);
 //    else if (w_meta->acks_expected == 3 && (w_meta->expected_ids[1] == 1))
-//      red_printf("Wrkr %u ack_ptr %u/%u Expected %d/%d, expected_id[1] = %d/%d \n", t_id,
+//      my_printf(red, "Wrkr %u ack_ptr %u/%u Expected %d/%d, expected_id[1] = %d/%d \n", t_id,
 //                 ack_ptr, PENDING_WRITES,
 //                 w_meta->acks_expected, q_info->active_num,
 //                 w_meta->expected_ids[1], q_info->active_ids[1]);
@@ -7578,12 +5474,12 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
     if (w_meta->w_state == SENT_PUT || w_meta->w_state == SENT_COMMIT ||
         w_meta->w_state == SENT_RELEASE) {
       if (!ack_m_id_found) {
-        red_printf("Wrkr %u, ack_ptr %u/%u received ack from m_i %u, state %u, received/expected %u/%u "
+        my_printf(red, "Wrkr %u, ack_ptr %u/%u received ack from m_i %u, state %u, received/expected %u/%u "
                      "active-machines/acks-seen: \n",
                    t_id, ack_ptr, PENDING_WRITES, ack_m_id,
                    w_meta->w_state, w_meta->acks_seen, w_meta->acks_expected);
         for (uint8_t i = 0; i < w_meta->acks_expected; i++) {
-          red_printf("%u/%u \n", w_meta->expected_ids[i], w_meta->seen_expected[i]);
+          my_printf(red, "%u/%u \n", w_meta->expected_ids[i], w_meta->seen_expected[i]);
         }
         assert(ack_m_id_found);
       }
@@ -7627,7 +5523,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
         default:
           if (w_state >= READY_PUT && w_state <= READY_NO_OP_RELEASE)
             break;
-          red_printf("Wrkr %u state %u, ptr %u \n", t_id, w_state, ack_ptr);
+          my_printf(red, "Wrkr %u state %u, ptr %u \n", t_id, w_state, ack_ptr);
           assert(false);
       }
     }
@@ -7705,619 +5601,6 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
   ack_recv_info->posted_recvs -= polled_messages;
 }
 
-/* ---------------------------------------------------------------------------
-//------------------------------ KVS------------------------------------------
-//---------------------------------------------------------------------------*/
-
-/*-----------------------------FROM TRACE---------------------------------------------*/
-
-// Handle a local read/acquire in the KVS
-static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
-                                                     mica_op_t *kv_ptr, struct cache_resp *resp,
-                                                     struct pending_ops *p_ops, uint32_t *r_push_ptr_,
-                                                     uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-  uint64_t kv_epoch = 0;
-  struct ts_tuple kvs_tuple;
-  uint32_t r_push_ptr = *r_push_ptr_;
-  struct read_info *r_info = &p_ops->read_info[r_push_ptr];
-  //Lock free reads through versioning (successful when version is even)
-  uint32_t debug_cntr = 0;
-  bool value_forwarded = false; // has a pending out-of-epoch write forwarded its value to this
-  if (op->opcode == KVS_OP_GET && p_ops->p_ooe_writes->size > 0) {
-    uint8_t *val_ptr;
-    if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
-      memcpy(op->value_to_read, val_ptr, op->real_val_len);
-      //memcpy(p_ops->read_info[r_push_ptr].value, val_ptr, VALUE_SIZE);
-      //red_printf("Wrkr %u Forwarding a value \n", t_id);
-      value_forwarded = true;
-    }
-  }
-  if (!value_forwarded) {
-    uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
-    do {
-      kv_epoch = kv_ptr->epoch_id;
-      kvs_tuple = kv_ptr->ts;
-      debug_stalling_on_lock(&debug_cntr, "trace read/acquire", t_id);
-      //memcpy(p_ops->read_info[r_push_ptr].value, kv_ptr->value, VALUE_SIZE);
-      if (ENABLE_ASSERTIONS) assert(op->value_to_read != NULL);
-      memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
-      //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
-    } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-  }
-  // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
-  if (!value_forwarded &&
-      (kv_epoch < epoch_id || op->opcode == OP_ACQUIRE)) {
-    r_info->opcode = op->opcode;
-    r_info->ts_to_read.m_id = kvs_tuple.m_id;
-    r_info->ts_to_read.version = kvs_tuple.version;
-    r_info->key = op->key;
-    r_info->r_ptr = r_push_ptr;
-    // Copy the value in the read info too.
-    memcpy(r_info->value, op->value_to_read, op->real_val_len);
-    r_info->value_to_read = op->value_to_read;
-    r_info->val_len = op->real_val_len;
-    if (ENABLE_ASSERTIONS) op->ts.version = kvs_tuple.version;
-    resp->type = KVS_GET_SUCCESS;
-    if (ENABLE_STAT_COUNTING && op->opcode == KVS_OP_GET) {
-      t_stats[t_id].quorum_reads++;
-    }
-    MOD_ADD(r_push_ptr, PENDING_READS);
-  }
-  else { //stored value can be read locally or has been forwarded
-    resp->type = KVS_LOCAL_GET_SUCCESS;
-    // this is needed to trick the version check in batch_from_trace_to_cache()
-    if (ENABLE_ASSERTIONS) op->ts.version = 0;
-  }
-  (*r_push_ptr_) =  r_push_ptr;
-}
-
-// Handle a local write in the KVS
-static inline void KVS_from_trace_writes(struct trace_op *op,
-                                         mica_op_t *kv_ptr, struct cache_resp *resp,
-                                         struct pending_ops *p_ops, uint32_t *r_push_ptr_,
-                                         uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-//  if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
-  struct node * new_node = (struct node *) op->value_to_write;
-  optik_lock(&kv_ptr->seqlock);
-  // OUT_OF_EPOCH--first round will be a read TS
-  if (kv_ptr->epoch_id < epoch_id) {
-    uint32_t r_push_ptr = *r_push_ptr_;
-    struct read_info *r_info = &p_ops->read_info[r_push_ptr];
-    r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
-    r_info->ts_to_read.version = kv_ptr->ts.version;
-    optik_unlock(&kv_ptr->seqlock);
-    r_info->opcode = op->opcode;
-    r_info->key = op->key;
-    r_info->r_ptr = r_push_ptr;
-    if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
-    // Store the value to be written in the read_info to be used in the second round
-    memcpy(r_info->value, op->value_to_write, op->real_val_len);
-
-    //yellow_printf("Out of epoch write key %u, node-next key_id %u \n",
-    //             op->key.bkt, new_node->next_key_id);
-    r_info->val_len = op->real_val_len;
-    p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
-    p_ops->p_ooe_writes->size++;
-    MOD_ADD(p_ops->p_ooe_writes->push_ptr, PENDING_READS);
-    MOD_ADD(r_push_ptr, PENDING_READS);
-    resp->type = KVS_GET_TS_SUCCESS;
-    (*r_push_ptr_) =  r_push_ptr;
-  }
-  else { // IN-EPOCH
-    if (ENABLE_ASSERTIONS) {
-      update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
-                         op->value_to_write, "local write", LOG_WS);
-    }
-    memcpy(kv_ptr->value, op->value_to_write, op->real_val_len);
-    //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
-    // This also writes the new version to op
-    kv_ptr->ts.m_id = (uint8_t) machine_id;
-    kv_ptr->ts.version++;
-    op->ts.version = kv_ptr->ts.version;
-    optik_unlock(&kv_ptr->seqlock);
-    resp->type = KVS_PUT_SUCCESS;
-  }
-}
-
-
-// Handle a local release in the KVS
-static inline void KVS_from_trace_releases(struct trace_op *op,
-                                           mica_op_t *kv_ptr, struct cache_resp *resp,
-                                           struct pending_ops *p_ops, uint32_t *r_push_ptr_,
-                                           uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
-  struct ts_tuple kvs_tuple;
-  uint32_t r_push_ptr = *r_push_ptr_;
-  struct read_info *r_info = &p_ops->read_info[r_push_ptr];
-  uint32_t debug_cntr = 0;
-  uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
-  do {
-    kvs_tuple = kv_ptr->ts;
-    debug_stalling_on_lock(&debug_cntr, "trace releases", t_id);
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-
-  if (ENABLE_ASSERTIONS) op->ts.version = kvs_tuple.version;
-  r_info->ts_to_read.m_id = kvs_tuple.m_id;
-  r_info->ts_to_read.version = kvs_tuple.version;
-  r_info->key = op->key;
-  r_info->opcode = op->opcode;
-  r_info->r_ptr = r_push_ptr;
-  // Store the value to be written in the read_info to be used in the second round
-  memcpy(r_info->value, op->value_to_write, op->real_val_len);
-  r_info->val_len = op->real_val_len;
-  MOD_ADD(r_push_ptr, PENDING_READS);
-  resp->type = KVS_GET_TS_SUCCESS;
-  (*r_push_ptr_) =  r_push_ptr;
-}
-
-// Handle a local rmw in the KVS
-static inline void KVS_from_trace_rmw(struct trace_op *op,
-                                      mica_op_t *kv_ptr, struct cache_resp *resp,
-                                      struct pending_ops *p_ops, uint64_t *rmw_l_id_,
-                                      uint16_t op_i, uint16_t t_id)
-{
-  uint64_t rmw_l_id = *rmw_l_id_;
-  if (DEBUG_RMW) green_printf("Worker %u trying a local RMW on op %u\n", t_id, op_i);
-  uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
-                         ALL_ABOARD_TS : PAXOS_TS;
-  optik_lock(&kv_ptr->seqlock);
-  {
-
-    // if it's the first RMW
-//  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-//    if(!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
-//      // sess_id is stored in the first bytes of op
-//      uint32_t new_log_no = 1;
-//      //new_version = 2; //kv_ptr->ts.version + 1;
-//      entry = grab_RMW_entry(PROPOSED, kv_ptr, op->opcode,
-//                             (uint8_t) machine_id, new_version,
-//                             rmw_l_id, new_log_no,
-//                             get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
-//                             t_id);
-//      if (ENABLE_ASSERTIONS) assert(entry == *(uint32_t *) kv_ptr->value);
-//      resp->type = RMW_SUCCESS;
-//      resp->log_no = new_log_no;
-//      kv_ptr->opcode = KEY_HAS_BEEN_RMWED;
-//    }
-//  }
-//  // key has been RMWed before
-//  else if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED) 
-
-    check_keys_with_two_cache_ops(op, kv_ptr);
-    check_log_nos_of_kv_ptr(kv_ptr, "cache_batch_op_trace", t_id);
-    if (kv_ptr->state == INVALID_RMW) {
-      if (!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
-        activate_RMW_entry(PROPOSED, new_version, kv_ptr, op->opcode,
-                           (uint8_t) machine_id, rmw_l_id,
-                           get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
-                           kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
-        resp->type = RMW_SUCCESS;
-        if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
-      }
-    } else {
-      // This is the state the RMW will wait on
-      resp->kv_ptr_ts = kv_ptr->prop_ts;
-      resp->kv_ptr_state = kv_ptr->state;
-      resp->kv_ptr_rmw_id = kv_ptr->rmw_id;
-      resp->type = RETRY_RMW_KEY_EXISTS;
-    }
-    resp->log_no = kv_ptr->log_no;
-    resp->kv_pair_ptr = kv_ptr;
-    // We need to put the new timestamp in the op too, both to send it and to store it for later
-    op->ts.version = new_version;
-  }
-  optik_unlock(&kv_ptr->seqlock);
-  if (resp->type != RMW_FAILURE) (*rmw_l_id_)++;
-}
-
-// Handle a local rmw acquire in the KVS
-static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, mica_op_t *kv_ptr,
-                                              struct cache_resp *resp, struct pending_ops *p_ops,
-                                              uint32_t *r_push_ptr_, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS)
-    assert((ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO) || ENABLE_CLIENTS > 0);
-  //printf("rmw acquire\n");
-  uint32_t r_push_ptr = *r_push_ptr_;
-  struct read_info *r_info = &p_ops->read_info[r_push_ptr];
-  optik_lock(&kv_ptr->seqlock);
-//  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-//    r_info->log_no = 0;
-//  }
-//  else {
-//    if (ENABLE_ASSERTIONS) assert(kv_ptr->opcode == KEY_HAS_BEEN_RMWED);
-    check_keys_with_one_trace_op(&op->key, kv_ptr);
-    r_info->log_no = kv_ptr->last_committed_log_no;
-    r_info->rmw_id = kv_ptr->last_committed_rmw_id;
-//  }
-  r_info->ts_to_read.version = kv_ptr->ts.version;
-  r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
-  memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
-  optik_unlock(&kv_ptr->seqlock);
-
-  // Copy the value to the read_info too
-  memcpy(r_info->value, op->value_to_read, op->real_val_len);
-  r_info->value_to_read = op->value_to_read;
-  r_info->val_len = op->real_val_len;
-  if (ENABLE_ASSERTIONS) op->ts.version = r_info->ts_to_read.version;
-  r_info->key = op->key;
-  r_info->is_rmw = true;
-  r_info->opcode = OP_ACQUIRE;
-  r_info->r_ptr = r_push_ptr;
-  MOD_ADD(r_push_ptr, PENDING_READS);
-  resp->type = KVS_GET_SUCCESS;
-  (*r_push_ptr_) =  r_push_ptr;
-}
-
-// Handle a local relaxed read in the KVS
-static inline void KVS_from_trace_rmw_rlxd_read(struct trace_op *op, mica_op_t *kv_ptr,
-                                                struct cache_resp *resp, struct pending_ops *p_ops,
-                                                uint32_t *r_push_ptr_, uint16_t t_id)
-{
-
-  //printf("rmw acquire\n");
-  uint32_t r_push_ptr = *r_push_ptr_;
-  struct read_info *r_info = &p_ops->read_info[r_push_ptr];
-  optik_lock(&kv_ptr->seqlock);
-  memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
-  optik_unlock(&kv_ptr->seqlock);
-  resp->type = KVS_LOCAL_GET_SUCCESS;
-  // this is needed to trick the version check in batch_from_trace_to_cache()
-  if (ENABLE_ASSERTIONS) op->ts.version = 0;
-
-}
-
-/*-----------------------------UPDATES---------------------------------------------*/
-
-// Handle a remote release/write or acquire-write the KVS
-static inline void KVS_updates_writes_or_releases_or_acquires(struct trace_op *op,
-                                                              mica_op_t *kv_ptr, uint16_t t_id)
-{
-  //red_printf("received op %u with value %u \n", op->opcode, op->value[0]);
-//  if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
-  optik_lock(&kv_ptr->seqlock);
-  if (compare_netw_ts_with_ts(&op->ts, &kv_ptr->ts) == GREATER) {
-    update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
-                       op->value, "rem write", LOG_WS);
-    memcpy(kv_ptr->value, op->value, VALUE_SIZE);
-    //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
-    kv_ptr->ts.m_id = op->ts.m_id;
-    kv_ptr->ts.version = op->ts.version;
-    optik_unlock(&kv_ptr->seqlock);
-
-  } else {
-    optik_unlock(&kv_ptr->seqlock);
-    if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
-  }
-}
-
-
-// Handle a remote RMW accept message in the KVS
-static inline void KVS_updates_accepts(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct pending_ops *p_ops,
-                                       uint16_t op_i, uint16_t t_id)
-{
-  struct accept *acc =(struct accept *) (((void *)op) + 3); // the accept starts at an offset of 3 bytes
-  if (ENABLE_ASSERTIONS) {
-    assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
-           acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
-    assert(acc->ts.version > 0);
-  }
-  // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
-  //struct rmw_help_entry reply_rmw;
-  uint64_t rmw_l_id = acc->t_rmw_id;
-  uint16_t glob_sess_id = acc->glob_sess_id;
-  //cyan_printf("Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
-  uint32_t log_no = acc->log_no;
-  uint64_t l_id = acc->l_id;
-
-  struct w_message *acc_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
-  if (ENABLE_ASSERTIONS) check_accept_mes(acc_mes);
-  uint8_t acc_m_id = acc_mes->m_id;
-  uint8_t opcode_for_r_rep = (uint8_t)
-    (acc_mes->opcode == ONLY_ACCEPTS ? ACCEPT_OP : ACCEPT_OP_NO_CREDITS);
-  struct rmw_rep_last_committed *acc_rep =
-    (struct rmw_rep_last_committed *) get_r_rep_ptr(p_ops, l_id, acc_m_id, opcode_for_r_rep,
-                                                    p_ops->coalesce_r_rep[op_i], t_id);
-  acc_rep->l_id = l_id;
-
-  if (DEBUG_RMW) green_printf("Worker %u is handling a remote RMW accept on op %u from m_id %u "
-                                "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                              t_id, op_i, acc_m_id, l_id, rmw_l_id, glob_sess_id, log_no, acc->ts.version);
-  optik_lock(&kv_ptr->seqlock);
-  // 1. check if it has been committed
-  // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
-  // Either way fill the reply_rmw fully, but have a specialized flag!
-  if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id,
-                                           t_id, acc_rep)) {
-    // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-    //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
-      // 4. If the kv-pair has not been RMWed before grab an entry and ack
-      // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
-      // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
-      acc_rep->opcode = handle_remote_prop_or_acc_in_kvs(kv_ptr, (void*) acc, acc_m_id, t_id, acc_rep, log_no, false);
-      // if the accepted is going to be acked record its information in the kv_ptr
-      if (acc_rep->opcode == RMW_ACK) {
-        activate_RMW_entry(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
-                           acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
-                           ENABLE_ASSERTIONS ? "received accept" : NULL);
-        memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
-        if (log_no - 1 > kv_ptr->last_registered_log_no) {
-          register_last_committed_rmw_id_by_remote_accept(kv_ptr, acc, t_id);
-          assign_net_rmw_id_to_rmw_id(&kv_ptr->last_registered_rmw_id, &acc->last_registered_rmw_id);
-          kv_ptr->last_registered_log_no = log_no -1;
-        }
-      }
-    //}
-  }
-  uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-    // kv_ptr->dbg->prop_acc_num++;
-    // number_of_reqs = kv_ptr->dbg->prop_acc_num;
-  }
-  check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received accept", t_id);
-  optik_unlock(&kv_ptr->seqlock);
-  if (PRINT_LOGS)
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
-              "version %u, m_id: %u, resp: %u \n",
-            kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, acc_rep->opcode);
-  //set_up_rmw_rep_message_size(p_ops, acc_rep->opcode, t_id);
-  p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(acc_rep->opcode);
-  if (ENABLE_ASSERTIONS) assert(p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) acc_rep, false, acc_m_id, t_id);
-
-}
-
-// Handle a remote RMW commit message in the KVS
-static inline void KVS_updates_commits(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct pending_ops *p_ops,
-                                       uint16_t op_i, uint16_t t_id)
-{
-  struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
-  if (ENABLE_ASSERTIONS) assert(com->ts.version > 0);
-  if (DEBUG_RMW)
-    green_printf("Worker %u is handling a remote RMW commit on op %u, "
-                   "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                 t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->ts.version);
-
-  uint64_t number_of_reqs;
-  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
-  if (PRINT_LOGS) {
-    struct w_message *com_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
-    uint8_t acc_m_id = com_mes->m_id;
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Com: m_id:%u, rmw_id %lu, glob_sess id: %u, "
-              "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id, com->glob_sess_id, com->ts.version, com->ts.m_id);
-  }
-}
-
-/*-----------------------------READS---------------------------------------------*/
-
-// Handle remote reads, acquires and acquires-fp
-// (acquires-fp are acquires renamed by the receiver when a false positive is detected)
-static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct trace_op *op, mica_op_t *kv_ptr,
-                                                             struct pending_ops *p_ops, uint16_t op_i,
-                                                             uint16_t t_id)
-{
-  //Lock free reads through versioning (successful when version is even)
-  uint32_t debug_cntr = 0;
-  uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct r_rep_big *r_rep = get_r_rep_ptr(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id,
-                                          rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
-
-  uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
-  do {
-    debug_stalling_on_lock(&debug_cntr, "reads: gets_or_acquires_or_acquires_fp", t_id);
-    r_rep->ts.m_id = kv_ptr->ts.m_id;
-    r_rep->ts.version = kv_ptr->ts.version;
-    if (compare_netw_ts(&r_rep->ts,
-                        (struct network_ts_tuple *) &op->ts.m_id) == GREATER) {
-      memcpy(r_rep->value, kv_ptr->value, VALUE_SIZE);
-    }
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-  set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, false, t_id);
-  finish_r_rep_bookkeeping(p_ops, r_rep, op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
-  //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode leaves \n");
-
-}
-
-// Handle remote requests to get TS that are the first round of a release or of an out-of-epoch write
-static inline void KVS_reads_get_TS(struct trace_op *op, mica_op_t *kv_ptr,
-                                    struct pending_ops *p_ops, uint16_t op_i,
-                                    uint16_t t_id)
-{
-  uint32_t debug_cntr = 0;
-  uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct r_rep_big *r_rep = get_r_rep_ptr(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id,
-                                          rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
-
-  uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
-  do {
-    debug_stalling_on_lock(&debug_cntr, "reads: get-TS-read version", t_id);
-    r_rep->ts.m_id = kv_ptr->ts.m_id;
-    r_rep->ts.version = kv_ptr->ts.version;
-  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-  set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, true, t_id);
-  finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
-}
-
-// Handle remote proposes
-static inline void KVS_reads_proposes(struct trace_op *op, mica_op_t *kv_ptr,
-                                      struct pending_ops *p_ops, uint16_t op_i,
-                                      uint16_t t_id)
-{
-  struct propose *prop = (struct propose *) (((void *)op) + 3); // the propose starts at an offset of 5 bytes
-  if (DEBUG_RMW) green_printf("Worker %u trying a remote RMW propose on op %u\n", t_id, op_i);
-  if (ENABLE_ASSERTIONS) assert(prop->ts.version > 0);
-  uint64_t number_of_reqs = 0;
-  uint64_t rmw_l_id = prop->t_rmw_id;
-  uint64_t l_id = prop->l_id;
-  uint16_t glob_sess_id = prop->glob_sess_id;
-  //cyan_printf("Received propose with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
-  uint32_t log_no = prop->log_no;
-  uint8_t prop_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct rmw_rep_last_committed *prop_rep =
-    (struct rmw_rep_last_committed *) get_r_rep_ptr(p_ops, l_id, prop_m_id, op->opcode,
-                                                    p_ops->coalesce_r_rep[op_i], t_id);
-  prop_rep->l_id = prop->l_id;
-  //green_printf("Sending prop_rep lid %u to m _id %u \n", prop_rep->l_id, prop_m_id);
-
-  optik_lock(&kv_ptr->seqlock);
-  {
-    //check_for_same_ts_as_already_proposed(kv_ptr[I], prop, t_id);
-    // 1. check if it has been committed
-    // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
-    // Either way fill the reply_rmw fully, but have a specialized flag!
-    if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id, t_id, prop_rep)) {
-      if (!is_log_too_high(log_no, kv_ptr, t_id, prop_rep)) {
-        // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-        //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->ts, prop_m_id, t_id, prop_rep)) {
-        // 4. If the kv-pair has not been RMWed before grab an entry and ack
-        // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
-        // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
-        prop_rep->opcode = handle_remote_prop_or_acc_in_kvs(kv_ptr, (void *) prop, prop_m_id, t_id,
-                                                            prop_rep, prop->log_no, true);
-        // if the propose is going to be acked record its information in the kv_ptr
-        if (prop_rep->opcode == RMW_ACK) {
-          assert(prop->log_no >= kv_ptr->log_no);
-          activate_RMW_entry(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
-                             prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
-                             ENABLE_ASSERTIONS ? "received propose" : NULL);
-        }
-        if (ENABLE_ASSERTIONS) {
-          assert(kv_ptr->prop_ts.version >= prop->ts.version);
-          check_keys_with_one_trace_op(&prop->key, kv_ptr);
-        }
-        //}
-      }
-    }    
-    if (ENABLE_DEBUG_GLOBAL_ENTRY) {
-      // kv_ptr->dbg->prop_acc_num++;
-      // number_of_reqs = kv_ptr->dbg->prop_acc_num;
-    }
-    check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received propose", t_id);
-  }
-  optik_unlock(&kv_ptr->seqlock);
-  if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
-              "version %u, m_id: %u, resp: %u \n",  kv_ptr->key.bkt, log_no, number_of_reqs, prop_m_id,
-            rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, prop_rep->opcode);
-  p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(prop_rep->opcode);
-  if (ENABLE_ASSERTIONS) assert(p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
-  bool false_pos = take_ownership_of_a_conf_bit(rmw_l_id, prop_m_id, true, t_id);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) prop_rep, false_pos, prop_m_id, t_id);
-  //struct rmw_rep_message *rmw_mes = (struct rmw_rep_message *) &p_ops->r_rep_fifo->r_rep_message[p_ops->r_rep_fifo->push_ptr];
-
-}
-
-// Handle remote rmw-acquires and rmw-acquires-fp
-// (acquires-fp are acquires renamed by the receiver when a false positive is detected)
-static inline void KVS_reads_rmw_acquires(struct trace_op *op, mica_op_t *kv_ptr,
-                                      struct pending_ops *p_ops, uint16_t op_i,
-                                      uint16_t t_id)
-{
-  uint64_t  l_id = p_ops->ptrs_to_mes_headers[op_i]->l_id;
-  uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct rmw_acq_rep *acq_rep =
-    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
-
-  uint32_t acq_log_no = op->ts.version;
-  optik_lock(&kv_ptr->seqlock);
-  {
-
-    check_keys_with_one_trace_op(&op->key, kv_ptr);
-    if (kv_ptr->last_committed_log_no > acq_log_no) {
-      acq_rep->opcode = ACQ_LOG_TOO_SMALL;
-      acq_rep->rmw_id = kv_ptr->last_registered_rmw_id.id;
-      acq_rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
-      memcpy(acq_rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
-      acq_rep->log_no = kv_ptr->last_committed_log_no;
-      acq_rep->ts.version = kv_ptr->ts.version;
-      acq_rep->ts.m_id = kv_ptr->ts.m_id;
-    }
-    else if (kv_ptr->last_committed_log_no < acq_log_no) {
-      acq_rep->opcode = ACQ_LOG_TOO_HIGH;
-    }
-    else acq_rep->opcode = ACQ_LOG_EQUAL;
-
-  }
-  optik_unlock(&kv_ptr->seqlock);
-  set_up_rmw_acq_rep_message_size(p_ops, acq_rep->opcode, t_id);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep,
-                           op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
-}
-
-
-/*-----------------------------READ-COMMITTING---------------------------------------------*/
-// On a read reply, we may want to write the KVS, if the TS has not been seen
-static inline void KVS_out_of_epoch_writes(struct read_info *op, mica_op_t *kv_ptr,
-                                           struct pending_ops *p_ops, uint16_t t_id)
-{
-//  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
-  uint32_t r_info_version =  op->ts_to_read.version;
-  optik_lock(&kv_ptr->seqlock);
-  rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
-  // find the the max ts and write it in the kvs
-  if (kv_ptr->ts.version > op->ts_to_read.version)
-    op->ts_to_read.version = kv_ptr->ts.version;
-  memcpy(kv_ptr->value, op->value, op->val_len);
-  kv_ptr->ts.m_id = op->ts_to_read.m_id;
-  kv_ptr->ts.version = op->ts_to_read.version;
-  optik_unlock(&kv_ptr->seqlock);
-  if (ENABLE_ASSERTIONS) {
-    assert(op->ts_to_read.m_id == machine_id);
-    assert(r_info_version <= op->ts_to_read.version);
-  }
-  // rectifying is not needed!
-  //if (r_info_version < op->ts_to_read.version)
-  // rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
-  // remove the write from the pending out-of-epoch writes
-  p_ops->p_ooe_writes->size--;
-  MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
-}
-
-// Handle acquires/out-of-epoch-reads that have received a bigger version than locally stored, and need to apply the data
-static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, mica_op_t *kv_ptr,
-                                                       uint16_t t_id)
-{
-//  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
-  optik_lock(&kv_ptr->seqlock);
-
-  if (compare_ts(&kv_ptr->ts, &op->ts_to_read) == SMALLER) {
-    rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
-    memcpy(kv_ptr->value, op->value, op->val_len);
-    kv_ptr->ts.m_id =  op->ts_to_read.m_id;
-    kv_ptr->ts.version = op->ts_to_read.version;
-  }
-  else if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
-  optik_unlock(&kv_ptr->seqlock);
-}
-
-
-// Handle committing an RMW from a response to an rmw acquire
-static inline void KVS_rmw_acquire_commits(struct read_info *op, mica_op_t *kv_ptr,
-                                           uint16_t op_i, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) assert(op->ts_to_read.version > 0);
-  if (DEBUG_RMW)
-    green_printf("Worker %u is handling a remote RMW commit on op %u, "
-                   "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                 t_id, op_i, op->rmw_id.id, op->rmw_id.glob_sess_id,
-                 op->log_no, op->ts_to_read.version);
-  uint64_t number_of_reqs;
-  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
-  if (PRINT_LOGS) {
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, glob_sess id: %u, "
-              "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, op->log_no, number_of_reqs,  op->rmw_id.id, op->rmw_id.glob_sess_id,
-            op->ts_to_read.version, op->ts_to_read.m_id);
-  }
-}
 
 
 #endif /* INLINE_UTILS_H */
