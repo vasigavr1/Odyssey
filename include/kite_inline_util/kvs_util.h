@@ -22,7 +22,7 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
                                               uint8_t rem_m_id, uint8_t read_opcode, bool coalesce,
                                               uint16_t t_id);
 static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct cache_resp *resp, uint16_t t_id);
+                                       struct kvs_resp *resp, uint16_t t_id);
 static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_t *kv_ptr,
                                                        uint64_t rmw_l_id,
                                                        uint16_t glob_sess_id, uint16_t t_id,
@@ -61,7 +61,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 
 // Handle a local read/acquire in the KVS
 static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
-                                                     mica_op_t *kv_ptr, struct cache_resp *resp,
+                                                     mica_op_t *kv_ptr, struct kvs_resp *resp,
                                                      struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                                      uint16_t t_id)
 {
@@ -123,7 +123,7 @@ static inline void KVS_from_trace_reads_and_acquires(struct trace_op *op,
 
 // Handle a local write in the KVS
 static inline void KVS_from_trace_writes(struct trace_op *op,
-                                         mica_op_t *kv_ptr, struct cache_resp *resp,
+                                         mica_op_t *kv_ptr, struct kvs_resp *resp,
                                          struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                          uint16_t t_id)
 {
@@ -174,7 +174,7 @@ static inline void KVS_from_trace_writes(struct trace_op *op,
 
 // Handle a local release in the KVS
 static inline void KVS_from_trace_releases(struct trace_op *op,
-                                           mica_op_t *kv_ptr, struct cache_resp *resp,
+                                           mica_op_t *kv_ptr, struct kvs_resp *resp,
                                            struct pending_ops *p_ops, uint32_t *r_push_ptr_,
                                            uint16_t t_id)
 {
@@ -205,7 +205,7 @@ static inline void KVS_from_trace_releases(struct trace_op *op,
 
 // Handle a local rmw in the KVS
 static inline void KVS_from_trace_rmw(struct trace_op *op,
-                                      mica_op_t *kv_ptr, struct cache_resp *resp,
+                                      mica_op_t *kv_ptr, struct kvs_resp *resp,
                                       struct pending_ops *p_ops, uint64_t *rmw_l_id_,
                                       uint16_t op_i, uint16_t t_id)
 {
@@ -216,7 +216,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
   lock_seqlock(&kv_ptr->seqlock);
   {
     check_trace_op_key_vs_kv_ptr(op, kv_ptr);
-    check_log_nos_of_kv_ptr(kv_ptr, "cache_batch_op_trace", t_id);
+    check_log_nos_of_kv_ptr(kv_ptr, "KVS_batch_op_trace", t_id);
     if (kv_ptr->state == INVALID_RMW) {
       if (!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
         activate_RMW_entry(PROPOSED, new_version, kv_ptr, op->opcode,
@@ -244,7 +244,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
 
 // Handle a local rmw acquire in the KVS
 static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, mica_op_t *kv_ptr,
-                                              struct cache_resp *resp, struct pending_ops *p_ops,
+                                              struct kvs_resp *resp, struct pending_ops *p_ops,
                                               uint32_t *r_push_ptr_, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS)
@@ -283,7 +283,7 @@ static inline void KVS_from_trace_rmw_acquire(struct trace_op *op, mica_op_t *kv
 
 // Handle a local relaxed read in the KVS
 static inline void KVS_from_trace_rmw_rlxd_read(struct trace_op *op, mica_op_t *kv_ptr,
-                                                struct cache_resp *resp, struct pending_ops *p_ops,
+                                                struct kvs_resp *resp, struct pending_ops *p_ops,
                                                 uint32_t *r_push_ptr_, uint16_t t_id)
 {
 
@@ -302,19 +302,19 @@ static inline void KVS_from_trace_rmw_rlxd_read(struct trace_op *op, mica_op_t *
 /*-----------------------------UPDATES---------------------------------------------*/
 
 // Handle a remote release/write or acquire-write the KVS
-static inline void KVS_updates_writes_or_releases_or_acquires(struct trace_op *op,
+static inline void KVS_updates_writes_or_releases_or_acquires(struct write *op,
                                                               mica_op_t *kv_ptr, uint16_t t_id)
 {
   //my_printf(red, "received op %u with value %u \n", op->opcode, op->value[0]);
 //  if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
   lock_seqlock(&kv_ptr->seqlock);
-  if (compare_netw_ts_with_ts(&op->ts, &kv_ptr->ts) == GREATER) {
-    update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
+  if (compare_netw_ts_with_ts((struct network_ts_tuple*) &op, &kv_ptr->ts) == GREATER) {
+    update_commit_logs(t_id, kv_ptr->key.bkt, op->version, kv_ptr->value,
                        op->value, "rem write", LOG_WS);
     memcpy(kv_ptr->value, op->value, VALUE_SIZE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
-    kv_ptr->ts.m_id = op->ts.m_id;
-    kv_ptr->ts.version = op->ts.version;
+    kv_ptr->ts.m_id = op->m_id;
+    kv_ptr->ts.version = op->version;
     unlock_seqlock(&kv_ptr->seqlock);
 
   } else {
@@ -325,11 +325,11 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct trace_op *o
 
 
 // Handle a remote RMW accept message in the KVS
-static inline void KVS_updates_accepts(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                                        struct pending_ops *p_ops,
                                        uint16_t op_i, uint16_t t_id)
 {
-  struct accept *acc =(struct accept *) (((void *)op) + 3); // the accept starts at an offset of 3 bytes
+//  struct accept *acc = (struct accept *) (((void *)op) + 3); // the accept starts at an offset of 3 bytes
   if (ENABLE_ASSERTIONS) {
     assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
            acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
@@ -401,14 +401,13 @@ static inline void KVS_updates_accepts(struct trace_op *op, mica_op_t *kv_ptr,
 }
 
 // Handle a remote RMW commit message in the KVS
-static inline void KVS_updates_commits(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
                                        struct pending_ops *p_ops,
                                        uint16_t op_i, uint16_t t_id)
 {
-  struct commit *com = (struct commit *) (((void *) op) + 3); // the commit starts at an offset of 3 bytes
   if (ENABLE_ASSERTIONS) assert(com->ts.version > 0);
   if (DEBUG_RMW)
-    my_printf(green, "Worker %u is handling a remote RMW commit on op %u, "
+    my_printf(green, "Worker %u is handling a remote RMW commit on com %u, "
                 "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
               t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->ts.version);
 
@@ -427,7 +426,7 @@ static inline void KVS_updates_commits(struct trace_op *op, mica_op_t *kv_ptr,
 
 // Handle remote reads, acquires and acquires-fp
 // (acquires-fp are acquires renamed by the receiver when a false positive is detected)
-static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct read *read, mica_op_t *kv_ptr,
                                                              struct pending_ops *p_ops, uint16_t op_i,
                                                              uint16_t t_id)
 {
@@ -435,33 +434,32 @@ static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct trace_op *op
   uint32_t debug_cntr = 0;
   uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
   struct r_rep_big *r_rep = get_r_rep_ptr(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id,
-                                          rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
+                                          rem_m_id, read->opcode, p_ops->coalesce_r_rep[op_i], t_id);
 
   uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
   do {
     debug_stalling_on_lock(&debug_cntr, "reads: gets_or_acquires_or_acquires_fp", t_id);
     r_rep->ts.m_id = kv_ptr->ts.m_id;
     r_rep->ts.version = kv_ptr->ts.version;
-    if (compare_netw_ts(&r_rep->ts,
-                        (struct network_ts_tuple *) &op->ts.m_id) == GREATER) {
+    if (compare_netw_ts(&r_rep->ts, &read->ts) == GREATER) {
       memcpy(r_rep->value, kv_ptr->value, VALUE_SIZE);
     }
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-  set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, false, t_id);
-  finish_r_rep_bookkeeping(p_ops, r_rep, op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
+  set_up_r_rep_message_size(p_ops, r_rep, &read->ts, false, t_id);
+  finish_r_rep_bookkeeping(p_ops, r_rep, read->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
   //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode leaves \n");
 
 }
 
 // Handle remote requests to get TS that are the first round of a release or of an out-of-epoch write
-static inline void KVS_reads_get_TS(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_reads_get_TS(struct read *read, mica_op_t *kv_ptr,
                                     struct pending_ops *p_ops, uint16_t op_i,
                                     uint16_t t_id)
 {
   uint32_t debug_cntr = 0;
   uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
   struct r_rep_big *r_rep = get_r_rep_ptr(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id,
-                                          rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
+                                          rem_m_id, read->opcode, p_ops->coalesce_r_rep[op_i], t_id);
 
   uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
   do {
@@ -469,16 +467,16 @@ static inline void KVS_reads_get_TS(struct trace_op *op, mica_op_t *kv_ptr,
     r_rep->ts.m_id = kv_ptr->ts.m_id;
     r_rep->ts.version = kv_ptr->ts.version;
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
-  set_up_r_rep_message_size(p_ops, r_rep, (struct network_ts_tuple *) &op->ts, true, t_id);
+  set_up_r_rep_message_size(p_ops, r_rep, &read->ts, true, t_id);
   finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);
 }
 
 // Handle remote proposes
-static inline void KVS_reads_proposes(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
                                       struct pending_ops *p_ops, uint16_t op_i,
                                       uint16_t t_id)
 {
-  struct propose *prop = (struct propose *) (((void *)op) + 3); // the propose starts at an offset of 5 bytes
+  struct propose *prop = (struct propose *) read; //(((void *)read) + 3); // the propose starts at an offset of 5 bytes
   if (DEBUG_RMW) my_printf(green, "Worker %u trying a remote RMW propose on op %u\n", t_id, op_i);
   if (ENABLE_ASSERTIONS) assert(prop->ts.version > 0);
   uint64_t number_of_reqs = 0;
@@ -489,7 +487,7 @@ static inline void KVS_reads_proposes(struct trace_op *op, mica_op_t *kv_ptr,
   uint32_t log_no = prop->log_no;
   uint8_t prop_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
   struct rmw_rep_last_committed *prop_rep =
-    (struct rmw_rep_last_committed *) get_r_rep_ptr(p_ops, l_id, prop_m_id, op->opcode,
+    (struct rmw_rep_last_committed *) get_r_rep_ptr(p_ops, l_id, prop_m_id, read->opcode,
                                                     p_ops->coalesce_r_rep[op_i], t_id);
   prop_rep->l_id = prop->l_id;
   //my_printf(green, "Sending prop_rep lid %u to m _id %u \n", prop_rep->l_id, prop_m_id);
@@ -544,20 +542,20 @@ static inline void KVS_reads_proposes(struct trace_op *op, mica_op_t *kv_ptr,
 
 // Handle remote rmw-acquires and rmw-acquires-fp
 // (acquires-fp are acquires renamed by the receiver when a false positive is detected)
-static inline void KVS_reads_rmw_acquires(struct trace_op *op, mica_op_t *kv_ptr,
+static inline void KVS_reads_rmw_acquires(struct read *read, mica_op_t *kv_ptr,
                                           struct pending_ops *p_ops, uint16_t op_i,
                                           uint16_t t_id)
 {
   uint64_t  l_id = p_ops->ptrs_to_mes_headers[op_i]->l_id;
   uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
   struct rmw_acq_rep *acq_rep =
-    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, op->opcode, p_ops->coalesce_r_rep[op_i], t_id);
+    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, read->opcode, p_ops->coalesce_r_rep[op_i], t_id);
 
-  uint32_t acq_log_no = op->ts.version;
+  uint32_t acq_log_no = read->ts.version;
   lock_seqlock(&kv_ptr->seqlock);
   {
 
-    check_keys_with_one_trace_op(&op->key, kv_ptr);
+    check_keys_with_one_trace_op(&read->key, kv_ptr);
     if (kv_ptr->last_committed_log_no > acq_log_no) {
       acq_rep->opcode = ACQ_LOG_TOO_SMALL;
       acq_rep->rmw_id = kv_ptr->last_registered_rmw_id.id;
@@ -576,7 +574,7 @@ static inline void KVS_reads_rmw_acquires(struct trace_op *op, mica_op_t *kv_ptr
   unlock_seqlock(&kv_ptr->seqlock);
   set_up_rmw_acq_rep_message_size(p_ops, acq_rep->opcode, t_id);
   finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep,
-                           op->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
+                           read->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
 }
 
 
@@ -585,7 +583,6 @@ static inline void KVS_reads_rmw_acquires(struct trace_op *op, mica_op_t *kv_ptr
 static inline void KVS_out_of_epoch_writes(struct read_info *op, mica_op_t *kv_ptr,
                                            struct pending_ops *p_ops, uint16_t t_id)
 {
-//  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
   uint32_t r_info_version =  op->ts_to_read.version;
   lock_seqlock(&kv_ptr->seqlock);
   rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
@@ -612,7 +609,6 @@ static inline void KVS_out_of_epoch_writes(struct read_info *op, mica_op_t *kv_p
 static inline void KVS_acquires_and_out_of_epoch_reads(struct read_info *op, mica_op_t *kv_ptr,
                                                        uint16_t t_id)
 {
-//  cache_meta op_meta = * (cache_meta *) (((void*)op) - 3);
   lock_seqlock(&kv_ptr->seqlock);
 
   if (compare_ts(&kv_ptr->ts, &op->ts_to_read) == SMALLER) {
@@ -654,9 +650,9 @@ static inline void KVS_rmw_acquire_commits(struct read_info *op, mica_op_t *kv_p
 
 /* The worker sends its local requests to this, reads check the ts_tuple and copy it to the op to get broadcast
  * Writes do not get served either, writes are only propagated here to see whether their keys exist */
-static inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op *op,
-                                 struct cache_resp *resp,
-                                 struct pending_ops *p_ops)
+static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, struct trace_op *op,
+                                      struct kvs_resp *resp,
+                                      struct pending_ops *p_ops)
 {
   uint16_t op_i;
   if (ENABLE_ASSERTIONS) assert (op_num <= MAX_OP_BATCH);
@@ -670,7 +666,6 @@ static inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct t
    * for both GETs and PUTs.
    */
   for(op_i = 0; op_i < op_num; op_i++) {
-//    struct cache_op *c_op = (struct cache_op*) &op[op_i];
     KVS_locate_one_bucket(op_i, bkt, op[op_i].key, bkt_ptr, tag, kv_ptr,
                           key_in_store, KVS);
   }
@@ -683,8 +678,8 @@ static inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct t
     if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
       bool key_found = memcmp(&kv_ptr[op_i]->key, &op[op_i].key, TRUE_KEY_SIZE) == 0;
-      if(key_found) { //Cache Hit
-//        my_printf(red, "Cache_hit %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+      if(key_found) { // Hit
+//        my_printf(red, "Hit %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
 //                   op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
 //                   kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
         key_in_store[op_i] = 1;
@@ -715,7 +710,7 @@ static inline void cache_batch_op_trace(uint16_t op_num, uint16_t t_id, struct t
                                          p_ops, &r_push_ptr, t_id);
           }
           else if (ENABLE_ASSERTIONS) {
-            my_printf(red, "Wrkr %u: cache_batch_op_trace wrong opcode in KVS: %d, req %d \n",
+            my_printf(red, "Wrkr %u: KVS_batch_op_trace wrong opcode in KVS: %d, req %d \n",
                       t_id, op[op_i].opcode, op_i);
             assert(0);
           }
@@ -759,7 +754,7 @@ static inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct
      * for both GETs and PUTs.
      */
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct trace_op *op = (struct trace_op*) writes[(pull_ptr + op_i) % max_op_size];
+    struct write *op = writes[(pull_ptr + op_i) % max_op_size];
     KVS_locate_one_bucket(op_i, bkt, op->key, bkt_ptr, tag, kv_ptr,
                           key_in_store, KVS);
   }
@@ -767,30 +762,30 @@ static inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct
 
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct trace_op *op = (struct trace_op *) writes[(pull_ptr + op_i) % max_op_size];
-    if (unlikely (op->opcode == OP_RELEASE_BIT_VECTOR)) continue;
+    struct write *write =  writes[(pull_ptr + op_i) % max_op_size];
+    if (unlikely (write->opcode == OP_RELEASE_BIT_VECTOR)) continue;
     if (kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &write->key, TRUE_KEY_SIZE) == 0;
       if (key_found) { //Cache Hit
         key_in_store[op_i] = 1;
 
-        if (op->opcode == KVS_OP_PUT || op->opcode == OP_RELEASE ||
-            op->opcode == OP_ACQUIRE) {
-          KVS_updates_writes_or_releases_or_acquires(op, kv_ptr[op_i], t_id);
+        if (write->opcode == KVS_OP_PUT || write->opcode == OP_RELEASE ||
+            write->opcode == OP_ACQUIRE) {
+          KVS_updates_writes_or_releases_or_acquires(write, kv_ptr[op_i], t_id);
         }
         else if (ENABLE_RMWS) {
-          if (op->opcode == ACCEPT_OP) {
-            KVS_updates_accepts(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          if (write->opcode == ACCEPT_OP) {
+            KVS_updates_accepts((struct accept*) write, kv_ptr[op_i], p_ops, op_i, t_id);
           }
-          else if (op->opcode == COMMIT_OP) {
-            KVS_updates_commits(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          else if (write->opcode == COMMIT_OP) {
+            KVS_updates_commits((struct commit*) write, kv_ptr[op_i], p_ops, op_i, t_id);
           }
           else if (ENABLE_ASSERTIONS) {
             my_printf(red, "Wrkr %u, kvs batch update: wrong opcode in kvs: %d, req %d, "
                         "m_id %u, val_len %u, version %u , \n",
-                      t_id, op->opcode, op_i, op->ts.m_id,
-                      op->val_len, op->ts.version);
+                      t_id, write->opcode, op_i, write->m_id,
+                      write->val_len, write->version);
             assert(0);
           }
         }
@@ -800,8 +795,8 @@ static inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct
         if (ENABLE_ASSERTIONS) assert(false);
       }
       if (zero_ops) {
-        //printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
-        op->opcode = 5;
+        //printf("Zero out %d at address %lu \n", write->opcode, &write->opcode);
+        write->opcode = 5;
       }
     }
   }
@@ -826,47 +821,47 @@ static inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct p
      * for both GETs and PUTs.
      */
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct trace_op *op = (struct trace_op*) reads[(pull_ptr + op_i) % max_op_size];
-    if (unlikely(op->opcode == OP_ACQUIRE_FLIP_BIT)) continue; // This message is only meant to flip a bit and is thus a NO-OP
-    KVS_locate_one_bucket(op_i, bkt, op->key , bkt_ptr, tag, kv_ptr,
+    struct read *read = reads[(pull_ptr + op_i) % max_op_size];
+    if (unlikely(read->opcode == OP_ACQUIRE_FLIP_BIT)) continue; // This message is only meant to flip a bit and is thus a NO-OP
+    KVS_locate_one_bucket(op_i, bkt, read->key , bkt_ptr, tag, kv_ptr,
                           key_in_store, KVS);
   }
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct trace_op *op = (struct trace_op*) reads[(pull_ptr + op_i) % max_op_size];
-    if (unlikely(op->opcode == OP_ACQUIRE_FLIP_BIT)) continue;
+    struct read *read = reads[(pull_ptr + op_i) % max_op_size];
+    if (unlikely(read->opcode == OP_ACQUIRE_FLIP_BIT)) continue;
     KVS_locate_one_kv_pair(op_i, tag, bkt_ptr, kv_ptr, KVS);
   }
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct trace_op *op = (struct trace_op*) reads[(pull_ptr + op_i) % max_op_size];
-    if (op->opcode == OP_ACQUIRE_FLIP_BIT) {
+    struct read *read = reads[(pull_ptr + op_i) % max_op_size];
+    if (read->opcode == OP_ACQUIRE_FLIP_BIT) {
       insert_r_rep(p_ops, p_ops->ptrs_to_mes_headers[op_i]->l_id, t_id,
                    p_ops->ptrs_to_mes_headers[op_i]->m_id,
-                   p_ops->coalesce_r_rep[op_i], op->opcode);
+                   p_ops->coalesce_r_rep[op_i], read->opcode);
       continue;
     }
     if(kv_ptr[op_i] != NULL) {
       /* We had a tag match earlier. Now compare log entry. */
-      bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &read->key, TRUE_KEY_SIZE) == 0;
       if(key_found) { //Cache Hit
         key_in_store[op_i] = 1;
 
-        check_state_with_allowed_flags(6, op->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
+        check_state_with_allowed_flags(6, read->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
                                        CACHE_OP_GET_TS, PROPOSE_OP);
-        if (op->opcode == KVS_OP_GET || op->opcode == OP_ACQUIRE ||
-            op->opcode == OP_ACQUIRE_FP) {
-          KVS_reads_gets_or_acquires_or_acquires_fp(op, kv_ptr[op_i], p_ops, op_i, t_id);
+        if (read->opcode == KVS_OP_GET || read->opcode == OP_ACQUIRE ||
+          read->opcode == OP_ACQUIRE_FP) {
+          KVS_reads_gets_or_acquires_or_acquires_fp(read, kv_ptr[op_i], p_ops, op_i, t_id);
         }
-        else if (op->opcode == CACHE_OP_GET_TS) {
-          KVS_reads_get_TS(op, kv_ptr[op_i], p_ops, op_i, t_id);
+        else if (read->opcode == CACHE_OP_GET_TS) {
+          KVS_reads_get_TS(read, kv_ptr[op_i], p_ops, op_i, t_id);
         }
         else if (ENABLE_RMWS) {
-          if (op->opcode == PROPOSE_OP) {
-            KVS_reads_proposes(op, kv_ptr[op_i], p_ops, op_i, t_id);
+          if (read->opcode == PROPOSE_OP) {
+            KVS_reads_proposes(read, kv_ptr[op_i], p_ops, op_i, t_id);
           }
-          else if (op->opcode == OP_ACQUIRE || op->opcode == OP_ACQUIRE_FP) {
+          else if (read->opcode == OP_ACQUIRE || read->opcode == OP_ACQUIRE_FP) {
             assert(ENABLE_RMW_ACQUIRES);
-            KVS_reads_rmw_acquires(op, kv_ptr[op_i], p_ops, op_i, t_id);
+            KVS_reads_rmw_acquires(read, kv_ptr[op_i], p_ops, op_i, t_id);
           }
           else if (ENABLE_ASSERTIONS){
             //my_printf(red, "wrong Opcode in KVS: %d, req %d, m_id %u, val_len %u, version %u , \n",
@@ -880,12 +875,13 @@ static inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct p
       }
     }
     if(key_in_store[op_i] == 0) {  //Cache miss --> We get here if either tag or log key match failed
-      my_printf(red, "Opcode %u Cache_miss: bkt %u, server %u, tag %u \n", op->opcode, op->key.bkt, op->key.server, op->key.tag);
+      my_printf(red, "Opcode %u Cache_miss: bkt %u, server %u, tag %u \n",
+                read->opcode, read->key.bkt, read->key.server, read->key.tag);
       assert(false); // cant have a miss since, it hit in the source's kvs
     }
     if (zero_ops) {
 //      printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
-      op->opcode = 5;
+      read->opcode = 5;
     } // TODO is this needed?
   }
 }
@@ -985,13 +981,13 @@ static inline void cache_isolated_op(int t_id, struct write *write)
    * We first lookup the key in the datastore. The first two @I loops work
    * for both GETs and PUTs.
    */
-  struct trace_op *op = (struct trace_op*) (((void *) write) - 3);
+//  struct trace_op *op = (struct trace_op*) (((void *) write) - 3);
   //print_true_key((struct key *) write->key);
   //printf("op bkt %u\n", op->key.bkt);
-  bkt = op->key.bkt & KVS->bkt_mask;
+  bkt = write->key.bkt & KVS->bkt_mask;
   bkt_ptr = &KVS->ht_index[bkt];
   //__builtin_prefetch(bkt_ptr, 0, 0);
-  tag = op->key.tag;
+  tag = write->key.tag;
 
   key_in_store = 0;
   kv_ptr = NULL;
@@ -1018,23 +1014,24 @@ static inline void cache_isolated_op(int t_id, struct write *write)
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   if(kv_ptr != NULL) {
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr->key, &op->key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr->key, &write->key, TRUE_KEY_SIZE) == 0;
     if(key_found) { //Cache Hit
       key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
-        if (op->opcode != OP_RELEASE) {
+        if (write->opcode != OP_RELEASE) {
           my_printf(red, "Wrkr %u: cache_isolated_op: wrong opcode : %d, m_id %u, val_len %u, version %u , \n",
-                    t_id, op->opcode,  op->ts.m_id,
-                    op->val_len, op->ts.version);
+                    t_id, write->opcode,  write->m_id,
+                    write->val_len, write->version);
           assert(false);
         }
       }
       //my_printf(red, "op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
       lock_seqlock(&kv_ptr->seqlock);
-      if (compare_netw_ts_with_ts(&op->ts, &kv_ptr->ts) == GREATER) {
-        memcpy(kv_ptr->value, op->value, VALUE_SIZE);
-        kv_ptr->ts.m_id = op->ts.m_id;
-        kv_ptr->ts.version = op->ts.version;
+      if (compare_netw_ts_with_ts( (struct network_ts_tuple *) &write->m_id,
+                                   &kv_ptr->ts) == GREATER) {
+        memcpy(kv_ptr->value, write->value, VALUE_SIZE);
+        kv_ptr->ts.m_id = write->m_id;
+        kv_ptr->ts.version = write->version;
       }
       unlock_seqlock(&kv_ptr->seqlock);
     }

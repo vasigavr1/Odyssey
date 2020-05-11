@@ -608,7 +608,7 @@ static inline void print_polled_write_message_info(struct w_message *w_mes, uint
     else if (DEBUG_RMW &&
              (write->opcode == ACCEPT_OP || write->opcode == ACCEPT_OP_BIT_VECTOR)) {
       struct accept *acc = (struct accept*) write;
-      printf("Worker %u sees an Accept: opcode %d at offset %d, rmw_id %lu, "
+      my_printf(yellow, "Worker %u sees an Accept: opcode %d at offset %d, rmw_id %lu, "
                "glob_sess_id %u, log_no %u, coalesce_num %u \n",
              t_id, acc->opcode, index, acc->t_rmw_id,
              acc->glob_sess_id, acc->log_no,
@@ -845,19 +845,6 @@ static inline void check_keys_with_one_trace_op(struct key *com_key, mica_op_t *
       print_true_key(com_key);
       assert(false);
     }
-  }
-}
-
-// Before batching to kvs we give all ops an odd version, check if it were changed
-static inline void check_version_after_batching_trace_to_cache(struct trace_op* op,
-                                                               struct cache_resp* resp, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS && resp->type != RMW_FAILURE) {
-    if (op->ts.version % 2 != 0) {
-      my_printf(red, "Wrkr %u, Trace to kvs: Version not even: %u, opcode %u, resp %u \n",
-                t_id, op->ts.version, op->opcode, resp->type);
-    }
-    my_assert(op->ts.version % 2 == 0, "Trace to kvs: Version must be even after kvs");
   }
 }
 

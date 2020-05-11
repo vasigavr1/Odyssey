@@ -631,33 +631,33 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
   }
 }
 
-static inline uint16_t get_w_sess_id(struct pending_ops *p_ops, struct trace_op *write,
+static inline uint16_t get_w_sess_id(struct pending_ops *p_ops, struct trace_op *op,
                                      const uint8_t source,
                                      const uint32_t incoming_pull_ptr,
                                      const uint16_t t_id)
 {
-  struct trace_op *op = (struct trace_op*) write;
-  struct rmw_local_entry *loc_entry = (struct rmw_local_entry *) write;
+  struct rmw_local_entry *loc_entry = (struct rmw_local_entry *) op;
 
   switch (source) {
-    case FROM_TRACE:
-      return op->session_id;
     case FROM_COMMIT:
       return loc_entry->sess_id;
       // source = FROM_READ: 2nd round of Acquires/Releases, 2nd round of out-of-epoch Writes
       // This also includes Commits triggered by RMW-Acquires
     case FROM_READ:
       return (uint16_t) p_ops->r_session_id[incoming_pull_ptr];
+    case FROM_TRACE:
     case RELEASE_THIRD: //source = FROM_WRITE || LIN_WRITE
       if (ENABLE_ASSERTIONS) {
-        assert(write != NULL);
-        uint16_t session_id = 0;
-        memcpy(&session_id, write, SESSION_BYTES);
-        assert(session_id == *(uint16_t *) write);
+        assert(op != NULL);
+        uint16_t session_id = op->session_id;
+        assert(session_id == *(uint16_t *) op);
         assert(session_id < SESSIONS_PER_THREAD);
-        check_state_with_allowed_flags(3, write->opcode, OP_RELEASE_BIT_VECTOR, NO_OP_RELEASE);
+        if (source == RELEASE_THIRD) {
+          struct write *w = (struct write *) &op->ts;
+          check_state_with_allowed_flags(3, w->opcode, OP_RELEASE_BIT_VECTOR, NO_OP_RELEASE);
+        }
       }
-      return *(uint16_t *) write;
+      return op->session_id;
     default: if (ENABLE_ASSERTIONS) assert(false);
   }
 }
@@ -702,13 +702,18 @@ static inline void write_bookkeeping_in_insertion_based_on_source
   my_assert(source <= FROM_COMMIT, "When inserting a write source is too high. Have you enabled lin writes?");
 
   if (source == FROM_TRACE) {
-    memcpy(&write->version, (void *) &op->ts.version, 4 + TRUE_KEY_SIZE + 2);
+    write->version = op->ts.version;
+    write->key = op->key;
+    write->opcode = op->opcode;
+    write->val_len = op->val_len;
+    //memcpy(&write->version, (void *) &op->ts.version, 4 + TRUE_KEY_SIZE + 2);
     if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
     memcpy(write->value, op->value_to_write, op->real_val_len);
     write->m_id = (uint8_t) machine_id;
   }
   else if (source == RELEASE_THIRD) { // Second round of a release
-    memcpy(&write->m_id, (void *) &op->ts.m_id, W_SIZE);
+    struct write *tmp = (struct write *) &op->ts; // we have treated the rest as a struct write
+    memcpy(&write->m_id, tmp, W_SIZE);
     write->opcode = OP_RELEASE_SECOND_ROUND;
     //if (DEBUG_SESSIONS)
     // my_printf(cyan, "Wrkr %u: Changing the opcode from %u to %u of write %u of w_mes %u \n",
@@ -1089,7 +1094,7 @@ static inline bool kv_ptr_state_has_changed(mica_op_t *kv_ptr,
 }
 
 // Initialize a local  RMW entry on the first time it gets allocated
-static inline void init_loc_entry(struct cache_resp* resp, struct pending_ops* p_ops,
+static inline void init_loc_entry(struct kvs_resp* resp, struct pending_ops* p_ops,
                                   struct trace_op *prop,
                                   uint16_t t_id, struct rmw_local_entry* loc_entry)
 {
@@ -1850,7 +1855,7 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
 
 // returns true if the RMW can be failed before allocating a local entry
 static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct cache_resp *resp, uint16_t t_id)
+                                       struct kvs_resp *resp, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
   if (op->opcode == COMPARE_AND_SWAP_WEAK &&
@@ -2086,10 +2091,9 @@ static inline void insert_read(struct pending_ops *p_ops, struct trace_op *op,
   //my_printf(green, "%u r_ptr becomes valid, size %u/%u \n", r_ptr, p_ops->r_size, p_ops->virt_r_size);
   p_ops->r_state[r_ptr] = VALID;
   if (source == FROM_TRACE) {
-      struct trace_op *tr_op = op;
-      p_ops->r_session_id[r_ptr] = tr_op->session_id;
+      p_ops->r_session_id[r_ptr] = op->session_id;
       if (ENABLE_CLIENTS) {
-        p_ops->r_index_to_req_array[r_ptr] = tr_op->index_to_req_array;
+        p_ops->r_index_to_req_array[r_ptr] = op->index_to_req_array;
       }
       // Query the conf to see if the machine has lost messages
       if (r_info->opcode == OP_ACQUIRE)
@@ -2448,7 +2452,7 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 
 // Insert an RMW in the local RMW structs
 static inline void insert_rmw(struct pending_ops *p_ops, struct trace_op *prop,
-                              struct cache_resp *resp, uint16_t t_id)
+                              struct kvs_resp *resp, uint16_t t_id)
 {
   uint16_t session_id = prop->session_id;
   if (resp->type == RMW_FAILURE) {
@@ -2543,7 +2547,7 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
     key = (struct key *) &trace[trace_iter].key_hash;
     value_to_read = op->value;
     value_to_write = op->value;
-    real_val_len = (uint32_t) RMW_VALUE_SIZE;
+    real_val_len = (uint32_t) VALUE_SIZE;
   }
 
   uint16_t writes_num = *writes_num_, reads_num = *reads_num_;
@@ -2618,7 +2622,7 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
 static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
                                              uint32_t trace_iter, struct trace_command *trace,
                                              struct trace_op *ops,
-                                             struct pending_ops *p_ops, struct cache_resp *resp,
+                                             struct pending_ops *p_ops, struct kvs_resp *resp,
                                              struct latency_flags *latency_info,
                                              struct session_dbg *ses_dbg, uint16_t *last_session_,
                                              uint32_t *sizes_dbg_cntr)
@@ -2676,7 +2680,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   *last_session_ = (uint16_t) working_session;
 
   t_stats[t_id].cache_hits_per_thread += op_i;
-  cache_batch_op_trace(op_i, t_id, ops, resp, p_ops);
+  KVS_batch_op_trace(op_i, t_id, ops, resp, p_ops);
   //my_printf(cyan, "thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
   for (uint16_t i = 0; i < op_i; i++) {
 //    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
@@ -4728,7 +4732,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       if (ENABLE_ASSERTIONS) assert(write->opcode != ACCEPT_OP_BIT_VECTOR);
 
       if (write->opcode != NO_OP_RELEASE) {
-        p_ops->ptrs_to_mes_ops[running_writes_for_kvs] = (((void *) write) - 3); // align with cache_op
+        p_ops->ptrs_to_mes_ops[running_writes_for_kvs] = (void *) write; //(((void *) write) - 3); // align with trace_op
         if (write->opcode == ACCEPT_OP) {
           p_ops->ptrs_to_mes_headers[running_writes_for_kvs] = (struct r_message *) w_mes;
           p_ops->coalesce_r_rep[running_writes_for_kvs] = accepts > 0;
@@ -4797,7 +4801,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
       if (is_propose) {
         struct propose *prop = (struct propose *) read;
         check_state_with_allowed_flags(2, prop->opcode, PROPOSE_OP);
-        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) prop) -3); //align with the kvs op
+        p_ops->ptrs_to_mes_ops[polled_reads] = (void *) prop; //(((void *) prop) -3); //align with the kvs op
       }
       else {
         check_read_opcode_when_polling_for_reads(read, i, r_num, t_id);
@@ -4809,7 +4813,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
         if (read->opcode == OP_ACQUIRE_FLIP_BIT)
           raise_conf_bit_iff_owned(*(uint64_t *) &read->key, (uint16_t) r_mes->m_id, false, t_id);
 
-        p_ops->ptrs_to_mes_ops[polled_reads] = (((void *) read) - 3); //align with the kvs op
+        p_ops->ptrs_to_mes_ops[polled_reads] = (void *) read; //(((void *) read) - 3); //align with the kvs op
 
       }
       p_ops->ptrs_to_mes_headers[polled_reads] = r_mes;
@@ -5124,8 +5128,14 @@ static inline void commit_reads(struct pending_ops *p_ops,
         read_info->opcode = UPDATE_EPOCH_OP_GET;
       }
       //check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, UPDATE_EPOCH_OP_GET);
-      if (read_info->seen_larger_ts)
-        memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
+      if (read_info->seen_larger_ts) {
+        if (ENABLE_ASSERTIONS) {
+          //assert(read_info->value_to_read != NULL);
+          //assert(read_info->val_len == VALUE_SIZE);
+        }
+        if (ENABLE_CLIENTS)
+          memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
+      }
       p_ops->ptrs_to_mes_ops[writes_for_cache] = (void *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
       // An out-of-epoch write will get its TS set when inserting a write,
@@ -5308,8 +5318,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
     memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
   struct trace_op op;
   op.session_id = (uint16_t) p_ops->w_meta[w_pull_ptr].sess_id;
-  //  memcpy((void *) &op, &p_ops->w_meta[w_pull_ptr].sess_id, SESSION_BYTES);
-  memcpy((void *) &op.ts, rel, W_SIZE);
+  memcpy((void *) &op.ts, rel, W_SIZE); // We are treating the trace op as a sess_id + struct write
   //if (DEBUG_SESSIONS)
   //my_printf(cyan, "Wrkr: %u Inserting the write for the second round of the "
   //            "release opcode %u that carried a bit vector: session %u\n",

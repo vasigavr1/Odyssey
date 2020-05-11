@@ -10,19 +10,16 @@
 #ifndef _GNU_SOURCE
 # define _GNU_SOURCE
 #endif
-//#include "../optik/optik_mod.h"
-//#include "main.h"
+
 
 #include "main.h"
 
-#define KVS_DEBUG 0
+
 #define KVS_NUM_BKTS (8 * 1024 * 1024)
 #define KVS_LOG_CAP  (1024 * 1024 * 1024)
 
 
-//#define MICA_OP_METADATA (sizeof(struct mica_key) + sizeof(uint8_t) + sizeof(uint8_t))
-//#define MICA_MIN_VALUE (64 - MICA_OP_METADATA)
-//#define MICA_MAX_VALUE (USE_BIG_OBJECTS == 1 ? (MICA_MIN_VALUE + (EXTRA_CACHE_LINES * 64)) : MICA_MIN_VALUE)
+
 
 #define MICA_LOG_BITS 40
 #define MICA_INDEX_SHM_KEY 1185
@@ -70,35 +67,6 @@ extern mica_kv_t *KVS;
 
 
 char* code_to_str(uint8_t code);
-
-
-//typedef volatile struct
-//{
-//  uint8_t epoch_id[2];
-//  uint8_t lock;
-//  uint8_t m_id;
-//  uint32_t version;
-//} cache_meta;
-
-/* Fixed-w_size 16 byte keys */
-//struct cache_key {
-//	cache_meta meta; // This should be 8B (unused --> in mica)
-//	uint32_t bkt;//			:32;
-//  uint16_t server;
-//  uint16_t tag;
-////	unsigned int server			:16;
-////	unsigned int tag			:16;
-//};
-
-
-//struct cache_op {
-//	struct cache_key key;	/* This must be the 1st field and 16B aligned */
-//	uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
-//	uint8_t val_len;
-//	uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
-//};
-
-
 
 
 void custom_mica_init(int kvs_id);

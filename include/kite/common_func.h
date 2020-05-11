@@ -50,7 +50,8 @@
 #define EXTRA_CACHE_LINES 0
 #define BASE_VALUE_SIZE 32
 #define SHIFT_BITS (USE_BIG_OBJECTS == 1 ? 3 : 0) // number of bits to shift left or right to calculate the value length
-#define VALUE_SIZE (USE_BIG_OBJECTS ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
+#define VALUE_SIZE_ (USE_BIG_OBJECTS ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
+#define VALUE_SIZE (VALUE_SIZE_ + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE_, 8)))
 
 
 #define KVS_NUM_KEYS (1000 * 1000)
@@ -80,7 +81,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -90,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -99,10 +100,10 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 0// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 0000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -224,13 +225,16 @@ struct ts_tuple {
 };
 
 typedef atomic_uint_fast64_t seqlock_t;
-#define MICA_OP_SIZE_  (140 + (2 * (VALUE_SIZE)))
+
+#define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
+#define MICA_OP_SIZE_  (140 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
+
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
 typedef struct  {
   // Cache-line -1
-  uint8_t value[VALUE_SIZE];
-  uint8_t last_accepted_value[VALUE_SIZE];
+  uint8_t value[MICA_VALUE_SIZE];
+  uint8_t last_accepted_value[MICA_VALUE_SIZE];
 
   // Cache-line -2
   struct key key;

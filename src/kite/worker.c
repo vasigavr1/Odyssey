@@ -112,7 +112,7 @@ void *worker(void *arg)
 
   struct trace_op *ops = (struct trace_op *) calloc(MAX_OP_BATCH, sizeof(struct trace_op));
   randomize_op_values(ops, t_id);
-  struct cache_resp *resp = (struct cache_resp *) malloc(MAX_OP_BATCH * sizeof(struct cache_resp));
+  struct kvs_resp *resp = (struct kvs_resp *) malloc(MAX_OP_BATCH * sizeof(struct kvs_resp));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl,
                    t_id, cb, w_mr, r_mr);
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl,
@@ -177,14 +177,14 @@ void *worker(void *arg)
         //printf("Wrkr %u is working rectified keys %lu \n",
         //       t_id, t_stats[t_id].rectified_keys);
 
-        if (t_id == 0) {
-          printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
-                   "epoch_id %u, reqs %lld failed writes %lu, writes done %lu/%lu \n", t_id,
-                 conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
-                 t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
-                 t_stats[t_id].cache_hits_per_thread, t_stats[t_id].failed_rem_writes,
-                 t_stats[t_id].writes_sent, t_stats[t_id].writes_asked_by_clients);
-        }
+//        if (t_id == 0) {
+//          printf("Wrkr %u sleeping machine bit %u, q-reads %lu, "
+//                   "epoch_id %u, reqs %lld failed writes %lu, writes done %lu/%lu \n", t_id,
+//                 conf_bit_vec[MACHINE_THAT_SLEEPS].bit,
+//                 t_stats[t_id].quorum_reads, (uint16_t) epoch_id,
+//                 t_stats[t_id].cache_hits_per_thread, t_stats[t_id].failed_rem_writes,
+//                 t_stats[t_id].writes_sent, t_stats[t_id].writes_asked_by_clients);
+//        }
         loop_counter = 0;
       }
     }

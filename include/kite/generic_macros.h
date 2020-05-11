@@ -12,8 +12,9 @@
 #define COMPILER_BARRIER() asm volatile ("" ::: "memory")
 #define GET_GLOBAL_T_ID(m_id, t_id) ((m_id * WORKERS_PER_MACHINE) + t_id)
 #define MY_ASSERT(COND, STR, ARGS...) \
-  if (ENABLE_ASSERTIONS) { if (!(COND)) { red_printf((STR), (ARGS)); assert(false); }}
+  if (ENABLE_ASSERTIONS) { if (!(COND)) { my_printf(red, (STR), (ARGS)); assert(false); }}
 #define FIND_PADDING(size) ((64 - (size % 64)) % 64)
+#define FIND_PADDING_CUST_ALIGN(size, align) ((align - (size % align)) % align)
 #define MAX_OF_3(x1, y1, x2) (MAX(x1, y1) > (x2) ? (MAX(x1, y1)) : (x2))
 #define MAX_OF_4(x1, y1, x2, y2) (MAX(x1, y1) > MAX(x2, y2) ? (MAX(x1, y1)) : (MAX(x2, y2)))
 
@@ -62,7 +63,7 @@
 #define _unused(x) ((void)(x))	/* Make production build happy */
 
 /* Is pointer x aligned to A-byte alignment? */
-#define is_aligned(x, A) (((uint64_t) x) % A == 0)
+#define IS_ALIGNED(x, A) (((uint64_t) x) % A == 0)
 
 #define IS_WRITE(X) (((X) == KVS_OP_PUT || (X) == OP_RELEASE) ? 1 : 0)
 

@@ -27,8 +27,10 @@ static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t re
   }
   int ret = ibv_post_recv(recv->recv_qp, &recv->recv_wr[0], &bad_recv_wr);
   if (ENABLE_ASSERTIONS) {
-    my_printf(red, "ibv_post_recv error %d \n", ret);
-    assert(false);
+    if (ret != 0 ) {
+      my_printf(red, "ibv_post_recv error %d \n", ret);
+      assert(false);
+    }
   }
 }
 

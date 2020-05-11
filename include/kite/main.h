@@ -108,7 +108,7 @@
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
 #define RMW_ID_SIZE 10
-#define RMW_VALUE_SIZE 24 //
+#define RMW_VALUE_SIZE VALUE_SIZE //
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
 // before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
@@ -361,7 +361,7 @@ struct remote_qp {
 };
 
 
-struct cache_resp {
+struct kvs_resp {
   uint8_t type;
   uint8_t kv_ptr_state;
   uint32_t log_no; // the log_number of an RMW
@@ -896,7 +896,7 @@ struct fifo {
 struct trace_op {
   uint16_t session_id;
   bool attempt_all_aboard;
-  struct network_ts_tuple ts;
+  struct ts_tuple ts;
   struct key key;	/* This must be the 1st field and 16B aligned */
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
   uint8_t val_len; // this represents the maximum value len
@@ -905,7 +905,7 @@ struct trace_op {
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
   uint32_t real_val_len; // this is the value length the client is interested in
-}__attribute__((__packed__));
+}; //__attribute__((__packed__));
 
 #define INVALID_REQ 0 // entry not being used
 #define ACTIVE_REQ 1 // client has issued a reqs

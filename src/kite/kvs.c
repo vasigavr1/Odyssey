@@ -209,9 +209,9 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
 
 
   mica_op_t * kv_ptr = (mica_op_t *) log_ptr;
-  assert(is_aligned(&kv_ptr->key, 64));
-  assert(is_aligned(&kv_ptr->rmw_id, 64));
-  assert(is_aligned(&kv_ptr->value, 64));
+  assert(IS_ALIGNED(&kv_ptr->key, 64));
+  assert(IS_ALIGNED(&kv_ptr->rmw_id, 64));
+  assert(IS_ALIGNED(&kv_ptr->value, 64));
 
   //check_mica_op_t_allignement(kv_ptr);
 
