@@ -12,9 +12,9 @@ HOSTS=( "philly" "sanantonio" "austin" "indianapolis")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "atlanta")
 #HOSTS=( "austin" "houston" "sanantonio" "indianapolis")
 LOCAL_HOST=`hostname`
-EXECUTABLES=("drf-sc" "run-drf-sc.sh")
-HOME_FOLDER="/home/s1687259/kite/src/drf-sc"
-MAKE_FOLDER="/home/s1687259/kite/src/drf-sc"
+EXECUTABLES=("kite" "run-kite.sh")
+HOME_FOLDER="/home/s1687259/kite/src/kite"
+MAKE_FOLDER="/home/s1687259/kite/src/kite"
 DEST_FOLDER="/home/s1687259/drf-sc-exec/src/drf-sc"
 
 cd $MAKE_FOLDER

@@ -14,7 +14,7 @@ LOCAL_HOST=`hostname`
 
 
 SRC_FOLDER="/home/s1687259/drf-sc-exec/src/PaxosVerifier"
-DST_FOLDER="/home/s1687259/drf-sc/src/PaxosVerifier/logs"
+DST_FOLDER="/home/s1687259/kite/src/PaxosVerifier/logs"
 LOGS=("thread")
 
 #Delete all previous logs

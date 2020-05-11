@@ -67,7 +67,7 @@ export MLX5_SINGLE_THREADED=1
 export MLX5_SCATTER_TO_CQE=1
 
 
-sudo killall drf-sc
+sudo killall kite
 
 # A function to echo in blue color
 function blue() {
@@ -111,7 +111,7 @@ sleep 1
 #
 blue "Running  worker threads"
  sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
-	./drf-sc \
+	./kite \
 	--all-ips ${remoteIPs[@]} \
 	--machine-id $machine_id \
     --device_name "mlx5_0" \

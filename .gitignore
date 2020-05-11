@@ -1,5 +1,5 @@
-src/drf-sc/drf-sc
-src/drf-sc/core
+src/kite/kite
+src/kite/core
 CMakeLists.txt
 .idea/
 .idea/*
@@ -10,6 +10,9 @@ src/PaxosVerifier/copy_from_remote_machines
 include/optik/
 cmake-build-debug
 *ignore
+bin/clean-pages.sh
+bin/install-dependencies.sh
+
 
 
 

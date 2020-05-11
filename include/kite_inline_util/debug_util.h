@@ -44,61 +44,6 @@ static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_
   }
 }
 
-// first argument here should be the state and then a bunch of allowed flags
-static inline void check_state_with_allowed_flags(int num_of_flags, ...)
-{
-  if (ENABLE_ASSERTIONS) {
-    va_list valist;
-    va_start(valist, num_of_flags);
-    bool found = false;
-    int state = va_arg(valist, int);
-    const uint16_t max_num_flags = 20;
-    assert(num_of_flags < max_num_flags);
-    int flags[max_num_flags];
-    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-      flags[i] = va_arg(valist, int);
-      if (state == flags[i]) found = true;
-    }
-    if (!found) {
-      my_printf(red, "Checking state failed state: %u, Allowed flags: \n", state);
-      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-        my_printf(red, "%u ", flags[i]);
-      }
-      my_printf(red, "\n");
-      assert(false);
-    }
-
-    va_end(valist);
-  }
-}
-
-// first argument here should be the state and then a bunch of disallowed flags
-static inline void check_state_with_disallowed_flags(int num_of_flags, ...)
-{
-  if (ENABLE_ASSERTIONS) {
-    va_list valist;
-    va_start(valist, num_of_flags);
-    bool found = false;
-    int state = va_arg(valist, int);
-    assert(num_of_flags < 10);
-    int flags[10];
-    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-      flags[i] = va_arg(valist, int);
-      if (state == flags[i]) found = true;
-    }
-    if (found) {
-      my_printf(red, "Checking state failed state: %u, Disallowed flags: \n", state);
-      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
-        my_printf(red, "%u ", flags[i]);
-      }
-      my_printf(red, "\n");
-      assert(false);
-    }
-
-    va_end(valist);
-  }
-}
-
 static inline void check_version(uint32_t version, const char *message) {
   if (ENABLE_ASSERTIONS) {
 

@@ -52,6 +52,9 @@
 #define SHIFT_BITS (USE_BIG_OBJECTS == 1 ? 3 : 0) // number of bits to shift left or right to calculate the value length
 #define VALUE_SIZE (USE_BIG_OBJECTS ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
 
+
+#define KVS_NUM_KEYS (1000 * 1000)
+
 /* Request sizes */
 #define KEY_SIZE 16
 #define TRUE_KEY_SIZE 8 // the key that is actually used by MICA
@@ -332,6 +335,62 @@ static void my_printf(Color color, const char *format, ...)
   printf("%s", buf2);
 
   va_end(args);
+}
+
+
+// first argument here should be the state and then a bunch of allowed flags
+static inline void check_state_with_allowed_flags(int num_of_flags, ...)
+{
+  if (ENABLE_ASSERTIONS) {
+    va_list valist;
+    va_start(valist, num_of_flags);
+    bool found = false;
+    int state = va_arg(valist, int);
+    const uint16_t max_num_flags = 20;
+    assert(num_of_flags < max_num_flags);
+    int flags[max_num_flags];
+    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
+      flags[i] = va_arg(valist, int);
+      if (state == flags[i]) found = true;
+    }
+    if (!found) {
+      my_printf(red, "Checking state failed state: %u, Allowed flags: \n", state);
+      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
+        my_printf(red, "%u ", flags[i]);
+      }
+      my_printf(red, "\n");
+      assert(false);
+    }
+
+    va_end(valist);
+  }
+}
+
+// first argument here should be the state and then a bunch of disallowed flags
+static inline void check_state_with_disallowed_flags(int num_of_flags, ...)
+{
+  if (ENABLE_ASSERTIONS) {
+    va_list valist;
+    va_start(valist, num_of_flags);
+    bool found = false;
+    int state = va_arg(valist, int);
+    assert(num_of_flags < 10);
+    int flags[10];
+    for (uint8_t i = 0; i < num_of_flags - 1; i++) {
+      flags[i] = va_arg(valist, int);
+      if (state == flags[i]) found = true;
+    }
+    if (found) {
+      my_printf(red, "Checking state failed state: %u, Disallowed flags: \n", state);
+      for (uint8_t i = 0; i < num_of_flags - 1; i++) {
+        my_printf(red, "%u ", flags[i]);
+      }
+      my_printf(red, "\n");
+      assert(false);
+    }
+
+    va_end(valist);
+  }
 }
 
 

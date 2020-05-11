@@ -17,7 +17,6 @@
 
 #define KVS_DEBUG 0
 #define KVS_NUM_BKTS (8 * 1024 * 1024)
-#define KVS_NUM_KEYS (1000 * 1000)
 #define KVS_LOG_CAP  (1024 * 1024 * 1024)
 
 
