@@ -88,6 +88,8 @@ static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_ent
       case COMPARE_AND_SWAP_WEAK:
       case COMPARE_AND_SWAP_STRONG:
         *(cl_op->rmw_is_successful) = loc_entry->rmw_is_successful;
+        // the value_to_read of loc_entry is valid, because the RMW can only get
+        // committed iff it has been accepted once
         if (!loc_entry->rmw_is_successful)
           memcpy(cl_op->value_to_read, loc_entry->value_to_read, cl_op->val_len);
         break;

@@ -62,7 +62,8 @@ void static_assert_compile_parameters()
   static_assert(sizeof(struct write) == W_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
   static_assert(sizeof(struct propose) == PROP_SIZE, "");
-  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_SIZE, "");
+  static_assert(PROP_REP_ACCEPTED_SIZE == PROP_REP_COMMITTED_SIZE + 1, "");
+  static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_ACCEPTED_SIZE, "");
   static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MES_SIZE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
   static_assert(sizeof(struct rmw_acq_rep) == RMW_ACQ_REP_SIZE, "");
@@ -82,10 +83,10 @@ void static_assert_compile_parameters()
   static_assert(NUM_OF_RMW_KEYS < KVS_NUM_KEYS, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
-  static_assert(ACC_REP_SIZE == PROP_REP_SIZE, "");
+  static_assert(ACC_REP_SIZE == PROP_REP_COMMITTED_SIZE, "");
   static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
   static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
-  static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
+  //static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");
 
 
 
@@ -736,7 +737,9 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
 
 
   // PREP STRUCT
-  (*p_ops)->prop_info = (struct prop_info *) calloc(1, sizeof(struct prop_info));
+  (*p_ops)->prop_info = (struct prop_info *) aligned_alloc(64, sizeof(struct prop_info));
+  memset((*p_ops)->prop_info, 0, sizeof(struct prop_info));
+  assert(IS_ALIGNED((*p_ops)->prop_info, 64));
   (*p_ops)->prop_info->l_id = 1;
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
     (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));

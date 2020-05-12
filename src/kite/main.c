@@ -38,6 +38,8 @@ int main(int argc, char *argv[])
          sizeof(mica_op_t), MICA_OP_SIZE, MICA_OP_PADDING_SIZE);
 
 
+  printf("Rmw-local_entry %ld \n", sizeof(struct rmw_local_entry));
+
 	uint16_t i = 0;
   print_parameters_in_the_start();
   static_assert_compile_parameters();

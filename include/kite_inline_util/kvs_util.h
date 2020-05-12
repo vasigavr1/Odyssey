@@ -4,6 +4,8 @@
 
 #ifndef KITE_KVS_UTILITY_H
 #define KITE_KVS_UTILITY_H
+
+#include <common_func.h>
 #include "kvs.h"
 #include "generic_util.h"
 #include "debug_util.h"
@@ -234,7 +236,7 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
       resp->type = RETRY_RMW_KEY_EXISTS;
     }
     resp->log_no = kv_ptr->log_no;
-    resp->kv_pair_ptr = kv_ptr;
+    resp->kv_ptr = kv_ptr;
     // We need to put the new timestamp in the op too, both to send it and to store it for later
     op->ts.version = new_version;
   }
@@ -374,13 +376,13 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                          acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                          ENABLE_ASSERTIONS ? "received accept" : NULL);
       memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
+      assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
       if (log_no - 1 > kv_ptr->last_registered_log_no) {
         register_last_committed_rmw_id_by_remote_accept(kv_ptr, acc, t_id);
         assign_net_rmw_id_to_rmw_id(&kv_ptr->last_registered_rmw_id, &acc->last_registered_rmw_id);
         kv_ptr->last_registered_log_no = log_no -1;
       }
     }
-    //}
   }
   uint64_t number_of_reqs = 0;
   if (ENABLE_DEBUG_GLOBAL_ENTRY) {
@@ -405,11 +407,10 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
                                        struct pending_ops *p_ops,
                                        uint16_t op_i, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(com->ts.version > 0);
   if (DEBUG_RMW)
     my_printf(green, "Worker %u is handling a remote RMW commit on com %u, "
                 "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-              t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->ts.version);
+              t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->base_ts.version);
 
   uint64_t number_of_reqs;
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
@@ -418,7 +419,7 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
     uint8_t acc_m_id = com_mes->m_id;
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Com: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id, com->glob_sess_id, com->ts.version, com->ts.m_id);
+            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id, com->glob_sess_id, com->base_ts.version, com->base_ts.m_id);
   }
 }
 
@@ -734,12 +735,9 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, struct tra
 }
 
 /* The worker sends the remote writes to be committed with this function*/
-// THE API IS DIFFERENT HERE, THIS TAKES AN ARRAY OF POINTERS RATHER THAN A POINTER TO AN ARRAY
-// YOU have to give a pointer to the beggining of the array of the pointers or else you will not
-// be able to wrap around to your array
-static inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write **writes,
-                                   struct pending_ops *p_ops,
-                                   uint32_t pull_ptr,  uint32_t max_op_size, bool zero_ops)
+static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write **writes,
+                                        struct pending_ops *p_ops,
+                                        uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   uint16_t op_i;	/* I is batch index */
 
@@ -804,8 +802,8 @@ static inline void cache_batch_op_updates(uint16_t op_num, uint16_t t_id, struct
 
 // The worker send here the incoming reads, the reads check the incoming ts if it is  bigger/equal to the local
 // the just ack it, otherwise they send the value back
-static inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
-                                 uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
+static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, struct pending_ops *p_ops,
+                                      uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   uint16_t op_i;	/* I is batch index */
   struct read **reads = (struct read **) p_ops->ptrs_to_mes_ops;
@@ -889,9 +887,9 @@ static inline void cache_batch_op_reads(uint32_t op_num, uint16_t t_id, struct p
 // The  worker sends (out-of-epoch) reads that received a higher timestamp and thus have to be applied as writes
 // Could also be that the first round of an out-of-epoch write received a high TS
 // All out of epoch reads/writes must come in to update the epoch
-static inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read_info **writes,
-                                            struct pending_ops *p_ops,
-                                            uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
+static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, struct read_info **writes,
+                                                 struct pending_ops *p_ops,
+                                                 uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
 {
   uint16_t op_i;
   if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
@@ -967,7 +965,7 @@ static inline void cache_batch_op_first_read_round(uint16_t op_num, uint16_t t_i
 
 
 // Send an isolated write to the kvs-no batching
-static inline void cache_isolated_op(int t_id, struct write *write)
+static inline void KVS_isolated_op(int t_id, struct write *write)
 {
   uint32_t op_num = 1;
   int j;	/* I is batch index */
@@ -1019,7 +1017,7 @@ static inline void cache_isolated_op(int t_id, struct write *write)
       key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
         if (write->opcode != OP_RELEASE) {
-          my_printf(red, "Wrkr %u: cache_isolated_op: wrong opcode : %d, m_id %u, val_len %u, version %u , \n",
+          my_printf(red, "Wrkr %u: KVS_isolated_op: wrong opcode : %d, m_id %u, val_len %u, version %u , \n",
                     t_id, write->opcode,  write->m_id,
                     write->val_len, write->version);
           assert(false);

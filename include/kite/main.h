@@ -134,13 +134,13 @@
 #define W_MES_SIZE (W_MES_HEADER + (W_SIZE * W_COALESCE))
 
 // ACCEPTS -- ACCEPT coalescing is derived from max write size. ACC reps are derived from accept coalescing
-#define ACCEPT_HEADER 47 //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
+#define ACCEPT_HEADER (47 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
 #define ACCEPT_SIZE (ACCEPT_HEADER + RMW_VALUE_SIZE)
 #define ACC_COALESCE (EFFECTIVE_MAX_W_SIZE / ACCEPT_SIZE)
 #define ACC_MES_SIZE (W_MES_HEADER + (ACCEPT_SIZE * ACC_COALESCE))
 
 // COMMITS
-#define COMMIT_HEADER 29 //
+#define COMMIT_HEADER (29)
 #define COMMIT_SIZE (COMMIT_HEADER + RMW_VALUE_SIZE)
 #define COM_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_SIZE)
 #define COM_MES_SIZE (W_MES_HEADER + (COMMIT_SIZE * COM_COALESCE))
@@ -199,16 +199,16 @@
 #define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
 #define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
 // PROPOSE REPLIES
-#define PROP_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define PROP_REP_COMMITTED_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
 #define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
-#define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_SIZE)) //Message size of replies to proposes
+#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
+#define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_ACCEPTED_SIZE)) //Message size of replies to proposes
 // ACCEPT REPLIES
 #define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define ACC_REP_SMALL_SIZE 9 // lid and opcode
 #define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
+//#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
 #define ACC_REP_MES_SIZE (R_REP_MES_HEADER + (ACC_COALESCE * ACC_REP_SIZE)) //Message size of replies to accepts
 
 
@@ -365,7 +365,7 @@ struct kvs_resp {
   uint8_t type;
   uint8_t kv_ptr_state;
   uint32_t log_no; // the log_number of an RMW
-  mica_op_t *kv_pair_ptr;
+  mica_op_t *kv_ptr;
   struct ts_tuple kv_ptr_ts;
   struct rmw_id kv_ptr_rmw_id;
 };
@@ -407,12 +407,13 @@ struct accept {
   uint32_t log_no ;
   struct net_rmw_id last_registered_rmw_id; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
   uint64_t l_id;
+  struct network_ts_tuple base_ts;
 } __attribute__((__packed__));
 
 
 
 struct commit {
-  struct network_ts_tuple ts;
+  struct network_ts_tuple base_ts;
   struct key key;
   uint8_t opcode;
   uint8_t val_len;
@@ -420,6 +421,8 @@ struct commit {
   uint64_t t_rmw_id; //rmw lid to be committed
   uint16_t glob_sess_id;
   uint32_t log_no;
+  //struct network_ts_tuple base_ts;
+
 } __attribute__((__packed__));
 
 //
@@ -554,11 +557,12 @@ struct r_rep_message_ud_req {
 struct rmw_rep_last_committed {
   uint8_t opcode;
   uint64_t l_id; // the l_id of the rmw local_entry
-  struct network_ts_tuple ts;
+  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
   uint16_t glob_sess_id; //accepted  OR last committed
-  uint32_t log_no; // last committed only
+  uint32_t log_no_or_base_version; // last committed only
+  uint8_t base_m_id; //
 } __attribute__((__packed__));
 
 //
@@ -732,9 +736,10 @@ struct rmw_local_entry {
   bool killable; // can the RMW (if CAS) be killed early
   bool must_release;
   bool rmw_is_successful; // was the RMW (if CAS) successful
-	bool all_aboard;
+  bool all_aboard;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
+  struct ts_tuple base_ts;
   uint8_t *compare_val; //for CAS- add value for FAA
   uint32_t rmw_val_len;
   struct rmw_id rmw_id; // this is implicitly the l_id
@@ -749,7 +754,7 @@ struct rmw_local_entry {
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
   uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases
-  mica_op_t *ptr_to_kv_pair;
+  mica_op_t *kv_ptr;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
 };
@@ -849,15 +854,6 @@ struct session_dbg {
 };
 
 
-
-
-
-// Global struct that holds the RMW information
-// Cannot be a FIFO because the incoming commit messages must be processed, such that
-// acks to the commits mean that the RMW has happened
-//struct rmw_info {
-//  struct rmw_entry entry[RMW_ENTRIES_NUM];
-//};
 
 //typedef _Atomic struct rmw_info atomic_rmw_info;
 //extern struct rmw_info rmw;

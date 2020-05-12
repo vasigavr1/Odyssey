@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -103,21 +103,21 @@
 #define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 0000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 0
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 1
+#define ENABLE_ALL_ABOARD 0
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define ENABLE_LOCK_FREE_READING 1
 
@@ -224,10 +224,21 @@ struct ts_tuple {
   uint32_t version;
 };
 
+typedef struct mica_ts {
+  uint8_t base_m_id;
+  uint8_t prop_m_id;
+  uint8_t acc_m_id;
+  uint8_t base_acc_m_id;
+  uint32_t base_version;
+  uint32_t prop_version;
+  uint32_t acc_version;
+  uint32_t base_acc_version;
+} mica_ts_t;
+
 typedef atomic_uint_fast64_t seqlock_t;
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
-#define MICA_OP_SIZE_  (140 + (2 * (MICA_VALUE_SIZE)))
+#define MICA_OP_SIZE_  (144 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
@@ -238,31 +249,34 @@ typedef struct  {
 
   // Cache-line -2
   struct key key;
+  seqlock_t seqlock;
+
   uint8_t opcode; // what kind of RMW
   uint8_t state;
   uint8_t unused[2];
 
-  // BYTES: 12 - 28
+  // BYTES: 20 - 36
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_registered_log_no;
   uint32_t accepted_log_no; // not really needed, but good for debug
   uint32_t last_committed_log_no;
 
-  // BYTES: 28 - 52 -- each takes 8
+  // BYTES: 36 - 60 -- each takes 8
   struct ts_tuple ts;
   struct ts_tuple prop_ts;
   struct ts_tuple accepted_ts;
+  //struct ts_tuple base_acc_ts;
 
   uint8_t unused2[4];
 
-  // byte 56
-  seqlock_t seqlock;
+
 
   // Cache-line 3 -- each rmw_id takes up 16 bytes
   struct rmw_id rmw_id;
   struct rmw_id last_registered_rmw_id;
   struct rmw_id last_committed_rmw_id;
-  struct rmw_id accepted_rmw_id; // not really needed, but good for debug
+
+  struct ts_tuple base_acc_ts;
 
   // Cache-line 3
 //  uint8_t value[VALUE_SIZE];
@@ -270,6 +284,8 @@ typedef struct  {
 
   // // Cache-line -4
   uint64_t epoch_id;
+  struct rmw_id accepted_rmw_id; // not really needed, but good for debug
+
   uint8_t padding[MICA_OP_PADDING_SIZE];
 
 } mica_op_t;

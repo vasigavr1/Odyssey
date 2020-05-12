@@ -1079,7 +1079,7 @@ static inline void check_local_commit_from_rep(mica_op_t *kv_ptr, struct rmw_loc
                     "but kv_ptr is in state %u, for rmw_id %u, glob_sess id %u on log no %u\n",
                   t_id, rmw_rep->opcode, working_entry->rmw_id.id, working_entry->rmw_id.glob_sess_id,
                   working_entry->log_no,
-                  rmw_rep->log_no, rmw_rep->rmw_id, rmw_rep->glob_sess_id,
+                  rmw_rep->log_no_or_base_version, rmw_rep->rmw_id, rmw_rep->glob_sess_id,
                   kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id,
                   kv_ptr->log_no);
         assert(rmw_rep->opcode == RMW_ID_COMMITTED);
@@ -1175,7 +1175,7 @@ static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local
 static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
                                              uint8_t state, uint16_t t_id)
 {
-  mica_op_t *kv_ptr = loc_entry->ptr_to_kv_pair;
+  mica_op_t *kv_ptr = loc_entry->kv_ptr;
   if (kv_ptr->state == state &&
       kv_ptr->log_no == loc_entry->log_no &&
       rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id) &&
@@ -1191,7 +1191,7 @@ static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
 //                kv_ptr->log_no, loc_entry->log_no, kv_ptr->last_committed_log_no,
 //                committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id], kv_ptr->rmw_id.glob_sess_id);
 
-    lock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    lock_seqlock(&loc_entry->kv_ptr->seqlock);
     if (kv_ptr->state == state &&
         kv_ptr->log_no == loc_entry->log_no &&
         rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id)) {
@@ -1205,7 +1205,7 @@ static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
         assert(false);
     }
     check_log_nos_of_kv_ptr(kv_ptr, "free_kv_ptr_if_prop_failed", t_id);
-    unlock_seqlock(&loc_entry->ptr_to_kv_pair->seqlock);
+    unlock_seqlock(&loc_entry->kv_ptr->seqlock);
   }
 }
 
