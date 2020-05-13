@@ -243,12 +243,7 @@
 
 
 
-// Broadcast Commits from helps in 2 occassions:
-// 1. You are helping someone
-// 2. You have received an already committed message
-#define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
-#define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
-#define TS_STALE_ON_REMOTE_KVS 8
+
 
 
 #define VC_NUM 2

@@ -885,7 +885,7 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
 //    if ((rmw_rep->ts.version % 2  != 0) )
 //      my_printf(red, "Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
 //    assert(rmw_rep->ts.version % 2  == 0 );
-    if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // it can be 0 if LOG_TOO_SMALL and the other side has not yet committed log 0
+    // if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // this is the base ts and can be 0
     assert(rmw_rep->glob_sess_id < GLOBAL_SESSION_NUM);
   }
 }

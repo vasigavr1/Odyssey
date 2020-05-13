@@ -104,7 +104,12 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define NEEDS_KV_PTR 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
-
+// Broadcast Commits from helps in 2 occassions:
+// 1. You are helping someone
+// 2. You have received an already committed message
+#define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
+#define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
+#define TS_STALE_ON_REMOTE_KVS 8
 
 /*
  *  SENT means the message has been sent
