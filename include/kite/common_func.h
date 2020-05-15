@@ -81,7 +81,7 @@
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
@@ -100,7 +100,7 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
@@ -259,7 +259,7 @@ typedef struct  {
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
   uint32_t last_registered_log_no;
   uint32_t accepted_log_no; // not really needed, but good for debug
-  uint32_t last_committed_log_no;
+  uint32_t last_committed_log_no; // not really needed, used to filter whether a log-_no has been registered, so we dont keep registering when receiving accepts
 
   // BYTES: 36 - 60 -- each takes 8
   struct ts_tuple ts;
@@ -273,14 +273,12 @@ typedef struct  {
 
   // Cache-line 3 -- each rmw_id takes up 16 bytes
   struct rmw_id rmw_id;
-  struct rmw_id last_registered_rmw_id;
+  struct rmw_id last_registered_rmw_id; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
   struct rmw_id last_committed_rmw_id;
 
   struct ts_tuple base_acc_ts;
 
-  // Cache-line 3
-//  uint8_t value[VALUE_SIZE];
-//  uint8_t last_accepted_value[VALUE_SIZE];
+
 
   // // Cache-line -4
   uint64_t epoch_id;

@@ -955,30 +955,27 @@ static inline bool is_log_too_high(uint32_t log_no, mica_op_t *kv_ptr,
                                    uint16_t t_id,
                                    struct rmw_rep_last_committed *rep)
 {
- // if (kv_ptr->opcode == KEY_HAS_BEEN_RMWED)
-  {
-    check_log_nos_of_kv_ptr(kv_ptr, "is_log_too_high", t_id);
-    // If the request is for the working log_no, it does not have to equal committed + 1
-    // because we may have received an accept for log 10, w/o having committed log 9,
-    // then it's okay to process the propose for log 10
-    if (log_no > kv_ptr->log_no &&
-      log_no > kv_ptr->last_committed_log_no + 1) {
-      if (DEBUG_RMW)
-        my_printf(yellow, "Wkrk %u Log number is too high %u/%u entry state %u \n",
-                      t_id, log_no, kv_ptr->last_committed_log_no,
-                      kv_ptr->state);
-      rep->opcode = LOG_TOO_HIGH;
-      return true;
-    }
-    else if (log_no > kv_ptr->last_committed_log_no + 1) {
-      if (ENABLE_ASSERTIONS) {
-        assert(log_no == kv_ptr->log_no);
-        if (log_no != kv_ptr->accepted_log_no)
-          printf("log_no %u, kv_ptr accepted_log_no %u, kv_ptr log no %u, kv_ptr->state %u \n",
-                 log_no, kv_ptr->accepted_log_no, kv_ptr->log_no, kv_ptr->state);
-        //assert(log_no == kv_ptr->accepted_log_no);
-        //assert(kv_ptr->state == ACCEPTED);
-      }
+  check_log_nos_of_kv_ptr(kv_ptr, "is_log_too_high", t_id);
+  // If the request is for the working log_no, it does not have to equal committed + 1
+  // because we may have received an accept for log 10, w/o having committed log 9,
+  // then it's okay to process the propose for log 10
+  if (log_no > kv_ptr->log_no &&
+    log_no > kv_ptr->last_committed_log_no + 1) {
+    if (DEBUG_RMW)
+      my_printf(yellow, "Wkrk %u Log number is too high %u/%u entry state %u \n",
+                    t_id, log_no, kv_ptr->last_committed_log_no,
+                    kv_ptr->state);
+    rep->opcode = LOG_TOO_HIGH;
+    return true;
+  }
+  else if (log_no > kv_ptr->last_committed_log_no + 1) {
+    if (ENABLE_ASSERTIONS) {
+      assert(log_no == kv_ptr->log_no);
+      if (log_no != kv_ptr->accepted_log_no)
+        printf("log_no %u, kv_ptr accepted_log_no %u, kv_ptr log no %u, kv_ptr->state %u \n",
+               log_no, kv_ptr->accepted_log_no, kv_ptr->log_no, kv_ptr->state);
+      //assert(log_no == kv_ptr->accepted_log_no);
+      //assert(kv_ptr->state == ACCEPTED);
     }
   }
   return false;
@@ -1814,6 +1811,7 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
   struct top *comp_top =(struct top*) loc_entry->compare_val;
   struct top *new_top =(struct top*) loc_entry->value_to_write;
   // if (top->push_counter == top->pop_counter) assert(top->key_id == 0);
+  if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
   loc_entry->rmw_is_successful = true;
   loc_entry->base_ts = kv_ptr->ts;
   switch (loc_entry->opcode) {
@@ -2741,7 +2739,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_ptr, uint8_t m_id,
                                            uint16_t t_id, struct rmw_rep_last_committed *rep)
 {
-  uint8_t return_flag = RMW_ACK;
+  uint8_t return_flag;
   if (ENABLE_ASSERTIONS)  {
     assert(prop->opcode == PROPOSE_OP);
     assert(prop->log_no > kv_ptr->last_committed_log_no);
@@ -2751,23 +2749,11 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key(&prop->key, kv_ptr));
   enum ts_compare prop_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->prop_ts);
-  enum ts_compare acc_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->accepted_ts);
-  // If entry is in Accepted state you typically NACK send back value and ts & RMW_id
-  if (kv_ptr->state == ACCEPTED) {
-    if (ENABLE_ASSERTIONS)
-        assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
-    // This is very likely: it typically means i have polled the accept before polling the propose
-    // which can happen, because accepts are fired after a quorum of acks
-    if (kv_ptr->rmw_id.glob_sess_id == prop->glob_sess_id &&
-        kv_ptr->rmw_id.id == prop->t_rmw_id && acc_ts_comp == EQUAL) {
-      //my_printf(red, "Wrkr %u Received a proposal with same RMW id as an already accepted proposal, "
-        //           "kv_ptr sess %u/%u, rmw_id %u/%u,  \n", t_id, prop->glob_sess_id,
-          //       kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id);
 
-      return_flag = NO_OP_PROP_REP;
-    }
-    else { // need to copy the value, ts and RMW-id here
-      if (acc_ts_comp == GREATER) {
+  if (prop_ts_comp == GREATER) {
+    assign_netw_ts_to_ts(&kv_ptr->prop_ts, &prop->ts);
+    enum ts_compare acc_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->accepted_ts);
+    if (kv_ptr->state == ACCEPTED && acc_ts_comp == GREATER) {
         assign_ts_to_netw_ts(&rep->ts, &kv_ptr->accepted_ts);
         return_flag = SEEN_LOWER_ACC;
         rep->rmw_id = kv_ptr->rmw_id.id;
@@ -2775,44 +2761,15 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
         memcpy(rep->value, kv_ptr->last_accepted_value, (size_t) RMW_VALUE_SIZE);
         rep->log_no_or_base_version = kv_ptr->base_acc_ts.version;
         rep->base_m_id = kv_ptr->base_acc_ts.m_id;
-      }
-      else {
-        return_flag = SEEN_HIGHER_ACC;
-        assign_ts_to_netw_ts(&rep->ts, &kv_ptr->prop_ts);
-      } // higher or equal in this case
-      // if (ENABLE_ASSERTIONS) {
-      //  if (compare_netw_ts_with_ts(&prop->ts, &kv_ptr->new_ts) == EQUAL)
-      //    my_printf(red, "Wrkr %u Received a proposal with same TS as an already accepted proposal, "
-     //                  "glob sess %u/%u, rmw_id %u/%u,  \n", t_id, prop->glob_sess_id,
-      //               kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id);
-     // }
     }
-    if (prop_ts_comp == GREATER) assign_netw_ts_to_ts(&kv_ptr->prop_ts, &prop->ts);
+    else return_flag = RMW_ACK;
   }
-  else if (kv_ptr->state == PROPOSED) {
-    switch(prop_ts_comp) {
-      case GREATER: // new prepare has higher TS
-        return_flag = RMW_ACK;
-        break;
-      case EQUAL: // this is valid, but should be rare
-        //if (ENABLE_ASSERTIONS)
-        // my_printf(red, "Wrkr %u Received a proposal with same TS as an already acked proposal, "
-         //            " prop log/kv_ptr log %u/%u, kv_ptr sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
-         //          t_id, prop->log_no, kv_ptr->log_no, prop->glob_sess_id,
-        //          kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id,
-         //          prop->ts.version, kv_ptr->new_ts.version, prop->ts.m_id, kv_ptr->new_ts.m_id);
-        //assert(false);
-        //break;
-      case SMALLER:
-        return_flag = SEEN_HIGHER_PROP;
-        assign_ts_to_netw_ts(&rep->ts, &kv_ptr->prop_ts);
-        break;
-      default : assert(false);
-    }
+  else {
+    return_flag = SEEN_HIGHER_PROP;
+    assign_ts_to_netw_ts(&rep->ts, &kv_ptr->prop_ts);
   }
 
-  assert(return_flag == RMW_ACK || return_flag == NO_OP_PROP_REP ||
-         rep->ts.version > 0);
+  check_state_with_allowed_flags(4, return_flag, RMW_ACK, SEEN_HIGHER_PROP, SEEN_LOWER_ACC);
   return return_flag;
 }
 
@@ -2919,11 +2876,14 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
     //when last_accepted_value is update also update the acc_base_ts
     kv_ptr->base_acc_ts = kv_ptr->ts;
     loc_entry->accepted_log_no = kv_ptr->log_no;
+    //assert(rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
     assign_second_rmw_id_to_first(&loc_entry->last_registered_rmw_id, &kv_ptr->last_registered_rmw_id);
     check_last_registered_rmw_id(loc_entry, kv_ptr, loc_entry->helping_flag, t_id);
     kv_ptr->accepted_ts = loc_entry->new_ts;
     kv_ptr->accepted_log_no = kv_ptr->log_no;
     if (ENABLE_ASSERTIONS) {
+      assert(loc_entry->accepted_log_no == loc_entry->log_no);
+      assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
       assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
       kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
     }
@@ -3035,6 +2995,7 @@ static inline uint8_t attempt_local_accept_to_help(struct pending_ops *p_ops, st
                    t_id, help_loc_entry->rmw_id.id, help_loc_entry->rmw_id.glob_sess_id);
     kv_ptr->state = ACCEPTED;
     assign_second_rmw_id_to_first(&kv_ptr->rmw_id, &help_loc_entry->rmw_id);
+    //assert(rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
     assign_second_rmw_id_to_first(&help_loc_entry->last_registered_rmw_id, &kv_ptr->last_registered_rmw_id);
     check_last_registered_rmw_id(help_loc_entry, kv_ptr, loc_entry->helping_flag, t_id);
     kv_ptr->prop_ts = help_loc_entry->new_ts;
@@ -3618,35 +3579,6 @@ static inline void act_on_receiving_already_accepted_rep_to_prop(struct pending_
   }
 }
 
-// On receiving a TS-stale rep
-static inline void update_KVS_on_receiving_a_TS_stale_rep(struct pending_ops *p_ops,
-                                                          struct rmw_local_entry *loc_entry,
-                                                          uint16_t t_id)
-{
-  mica_op_t *kv_ptr = loc_entry->kv_ptr;
-
-
-  lock_seqlock(&loc_entry->kv_ptr->seqlock);
-  // If the last committed_log_number is still the same then change the KV
-  if (kv_ptr->last_committed_log_no == loc_entry->log_no &&
-      compare_ts(&kv_ptr->ts, &loc_entry->rmw_reps.kvs_higher_ts) == SMALLER) {
-    if (ENABLE_ASSERTIONS) {
-      assert(kv_ptr->ts.version <= loc_entry->rmw_reps.kvs_higher_ts.version);
-      assert(loc_entry->rmw_reps.kvs_higher_ts.version % 2 == 0);
-    }
-    if (DEBUG_RMW)
-      my_printf(yellow, "Wrkr %u, on learning that the KVS TS was stale, update the TS version %u/%u m _id %u/%u "
-                      "kv_ptr rmw_id %u, glob sess id %u, state %u\n",
-                    t_id, kv_ptr->ts.version, loc_entry->rmw_reps.kvs_higher_ts.version,
-                    kv_ptr->ts.m_id, loc_entry->rmw_reps.kvs_higher_ts.m_id,
-                    kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
-
-    kv_ptr->ts.version = loc_entry->rmw_reps.kvs_higher_ts.version + 1;
-    kv_ptr->ts.m_id = loc_entry->rmw_reps.kvs_higher_ts.m_id;
-  }
-  check_log_nos_of_kv_ptr(kv_ptr, "update_KVS_on_receiving_a_TS_stale_rep", t_id);
-  unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-}
 
 //------------------------------HELP STUCK RMW------------------------------------------
 // When inspecting an RMW that failed to grab a kv_ptr in the past
@@ -3948,16 +3880,7 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     //It is impossible for this RMW to still hold the kv_ptr
     loc_entry->state = NEEDS_KV_PTR;
   }
-  // TS_STALE
-  else if (loc_entry->rmw_reps.ts_stale > 0) {
-    assert(false);
-    debug_fail_help(loc_entry, " ts stale", t_id);
-    update_KVS_on_receiving_a_TS_stale_rep(p_ops, loc_entry, t_id);
-    loc_entry->state = RETRY_WITH_BIGGER_TS;
-    new_version = loc_entry->rmw_reps.kvs_higher_ts.version;
-    check_version(new_version, "inspect_proposes: loc_entry->rmw_reps.ts_stale > 0");
-  }
-    // SEEN HIGHER-TS PROPOSE OR ACCEPT
+  // SEEN HIGHER-TS PROPOSE OR ACCEPT
   else if (loc_entry->rmw_reps.seen_higher_prop_acc > 0) {
     debug_fail_help(loc_entry, " seen higher prop", t_id);
     // retry by incrementing the highest ts seen
@@ -3979,7 +3902,6 @@ static inline void inspect_proposes(struct pending_ops *p_ops,
     act_on_receiving_already_accepted_rep_to_prop(p_ops, loc_entry, &new_version, t_id);
     check_state_with_allowed_flags(4, (int) loc_entry->state, INVALID_RMW, ACCEPTED, NEEDS_KV_PTR);
   }
-
   // LOG TOO HIGH
   else if (loc_entry->rmw_reps.log_too_high > 0) {
     new_version = loc_entry->new_ts.version;
@@ -4091,16 +4013,7 @@ static inline void inspect_accepts(struct pending_ops *p_ops,
     loc_entry->state = NEEDS_KV_PTR;
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);
   }
-  // TS_STALE
-//  else if (loc_entry->rmw_reps.ts_stale > 0) {
-//    if (ENABLE_ASSERTIONS) assert(false);
-//    update_KVS_on_receiving_a_TS_stale_rep(p_ops, loc_entry, t_id);
-//    loc_entry->state = RETRY_WITH_BIGGER_TS;
-//    new_version = loc_entry->rmw_reps.kvs_higher_ts.version;
-//    check_version(new_version, "inspect_accepts: loc_entry->rmw_reps.ts_stale > 0");
-//    if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);
-//  }
-    // ACK QUORUM
+  // ACK QUORUM
   else if (loc_entry->rmw_reps.acks >= remote_quorum) {
     if (ENABLE_ASSERTIONS) {
       assert(loc_entry->state != COMMITTED);

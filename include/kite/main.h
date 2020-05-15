@@ -416,8 +416,6 @@ struct commit {
   uint64_t t_rmw_id; //rmw lid to be committed
   uint16_t glob_sess_id;
   uint32_t log_no;
-  //struct network_ts_tuple base_ts;
-
 } __attribute__((__packed__));
 
 //

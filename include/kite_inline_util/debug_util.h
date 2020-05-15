@@ -995,7 +995,7 @@ static inline void check_last_registered_rmw_id(struct rmw_local_entry *loc_entr
     if (loc_entry->log_no == kv_ptr->last_committed_log_no + 1) {
       if (!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id)) {
         my_printf(red,
-                  "Wrkr %u, filling help loc entry last registerd rmw id, help log no/ kv_ptr last committed log no %u/%u,"
+                  "Wrkr %u, filling help loc entry last registered rmw id, help log no/ kv_ptr last committed log no %u/%u,"
                     "glob rmw ids: last committed/last registered %lu/%lu \n", t_id,
                   loc_entry->log_no, kv_ptr->last_committed_log_no,
                   kv_ptr->last_registered_rmw_id.id, kv_ptr->last_committed_rmw_id.id);
