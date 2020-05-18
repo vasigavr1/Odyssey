@@ -164,7 +164,8 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
 #define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
-
+#define HELP_PREV_COMMITTED_LOG_TOO_HIGH 4
+#define HELPING_MYSELF 5
 //
 #define ACCEPT_FLIPS_BIT_OP 128
 

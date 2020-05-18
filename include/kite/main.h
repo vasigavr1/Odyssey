@@ -661,7 +661,7 @@ struct dbg_glob_entry {
 
 // the first time a key gets RMWed, it grabs an RMW entry
 // that lasts for life, the entry is protected by the KVS lock
-struct rmw_entbry {
+struct rmw_entry {
   uint8_t opcode; // what kind of RMW
   struct key key;
   uint8_t state;
@@ -705,7 +705,7 @@ struct rmw_rep_info {
   uint8_t rmw_id_commited;
   uint8_t log_too_small;
   uint8_t already_accepted;
-  uint8_t ts_stale;
+//  uint8_t ts_stale;
   uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
   uint8_t nacks;
@@ -742,6 +742,7 @@ struct rmw_local_entry {
   uint16_t sess_id;
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
+  uint16_t log_too_high_cntr;
   uint32_t all_aboard_time_out;
   // uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;

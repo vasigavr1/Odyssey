@@ -376,8 +376,7 @@ static inline uint8_t sum_of_reps(struct rmw_rep_info* rmw_reps)
 {
   return rmw_reps->acks + rmw_reps->rmw_id_commited +
          rmw_reps->log_too_small + rmw_reps->already_accepted +
-         rmw_reps->ts_stale + rmw_reps->seen_higher_prop_acc +
-         rmw_reps->log_too_high;
+         rmw_reps->seen_higher_prop_acc + rmw_reps->log_too_high;
 }
 
 static inline bool opcode_is_rmw(uint8_t opcode)

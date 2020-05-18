@@ -87,12 +87,12 @@ static inline void print_rmw_rep_info(struct rmw_local_entry *loc_entry, uint16_
   struct rmw_rep_info *rmw_rep = &loc_entry->rmw_reps;
   my_printf(yellow, "Wrkr %u Printing rmw_rep for sess %u state %u helping flag %u \n"
               "Tot_replies %u \n acks: %u \n rmw_id_committed: %u \n log_too_small %u\n"
-              "already_accepted : %u\n t ts_stale : %u \n seen_higher_prop : %u\n "
+              "already_accepted : %u\n seen_higher_prop : %u\n "
               "log_too_high: %u \n",
             t_id, loc_entry->sess_id, loc_entry->state, loc_entry->helping_flag,
             rmw_rep->tot_replies,
             rmw_rep->acks, rmw_rep->rmw_id_commited, rmw_rep->log_too_small,
-            rmw_rep->already_accepted, rmw_rep->ts_stale,
+            rmw_rep->already_accepted,
             rmw_rep->seen_higher_prop_acc, rmw_rep->log_too_high);
 }
 

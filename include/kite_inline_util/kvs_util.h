@@ -331,14 +331,12 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                                        struct pending_ops *p_ops,
                                        uint16_t op_i, uint16_t t_id)
 {
-//  struct accept *acc = (struct accept *) (((void *)op) + 3); // the accept starts at an offset of 3 bytes
   if (ENABLE_ASSERTIONS) {
     assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
            acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
     assert(acc->ts.version > 0);
   }
   // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
-  //struct rmw_help_entry reply_rmw;
   uint64_t rmw_l_id = acc->t_rmw_id;
   uint16_t glob_sess_id = acc->glob_sess_id;
   //my_printf(cyan, "Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
@@ -362,25 +360,26 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
   // 1. check if it has been committed
   // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
   // Either way fill the reply_rmw fully, but have a specialized flag!
-  if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id,
-                                           t_id, acc_rep)) {
-    // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-    //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
-    // 4. If the kv-pair has not been RMWed before grab an entry and ack
-    // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
-    // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
-    acc_rep->opcode = handle_remote_prop_or_acc_in_kvs(kv_ptr, (void*) acc, acc_m_id, t_id, acc_rep, log_no, false);
-    // if the accepted is going to be acked record its information in the kv_ptr
-    if (acc_rep->opcode == RMW_ACK) {
-      activate_RMW_entry(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
-                         acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
-                         ENABLE_ASSERTIONS ? "received accept" : NULL);
-      memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
-      assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
-      if (log_no - 1 > kv_ptr->last_registered_log_no) {
-        register_last_committed_rmw_id_by_remote_accept(kv_ptr, acc, t_id);
-        assign_net_rmw_id_to_rmw_id(&kv_ptr->last_registered_rmw_id, &acc->last_registered_rmw_id);
-        kv_ptr->last_registered_log_no = log_no -1;
+  if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id, t_id, acc_rep)) {
+    if (!is_log_too_high(log_no, kv_ptr, t_id, acc_rep)) {
+      // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
+      //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
+      // 4. If the kv-pair has not been RMWed before grab an entry and ack
+      // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
+      // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
+      acc_rep->opcode = handle_remote_prop_or_acc_in_kvs(kv_ptr, (void *) acc, acc_m_id, t_id, acc_rep, log_no, false);
+      // if the accepted is going to be acked record its information in the kv_ptr
+      if (acc_rep->opcode == RMW_ACK) {
+        activate_RMW_entry(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
+                           acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                           ENABLE_ASSERTIONS ? "received accept" : NULL);
+        memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
+        assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
+        if (log_no - 1 > kv_ptr->last_registered_log_no) {
+          register_last_committed_rmw_id_by_remote_accept(kv_ptr, acc, t_id);
+          assign_net_rmw_id_to_rmw_id(&kv_ptr->last_registered_rmw_id, &acc->last_registered_rmw_id);
+          kv_ptr->last_registered_log_no = log_no - 1;
+        }
       }
     }
   }
@@ -399,7 +398,6 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
   p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(acc_rep->opcode);
   if (ENABLE_ASSERTIONS) assert(p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
   finish_r_rep_bookkeeping(p_ops, (struct r_rep_big*) acc_rep, false, acc_m_id, t_id);
-
 }
 
 // Handle a remote RMW commit message in the KVS

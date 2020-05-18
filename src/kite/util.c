@@ -742,8 +742,10 @@ void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uin
   assert(IS_ALIGNED((*p_ops)->prop_info, 64));
   (*p_ops)->prop_info->l_id = 1;
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
+    (*p_ops)->prop_info->entry[i].sess_id = (uint16_t) i;
     (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
     (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) calloc(1, sizeof(struct rmw_local_entry));
+    (*p_ops)->prop_info->entry[i].help_loc_entry->sess_id = (uint16_t) i;
   }
   (*p_ops)->sess_info = (struct sess_info *) calloc(SESSIONS_PER_THREAD, sizeof(struct sess_info));
   (*p_ops)->w_meta = (struct per_write_meta *) calloc(pending_writes, sizeof(struct per_write_meta));
