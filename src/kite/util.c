@@ -62,7 +62,7 @@ void static_assert_compile_parameters()
   static_assert(sizeof(struct write) == W_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
   static_assert(sizeof(struct propose) == PROP_SIZE, "");
-  static_assert(PROP_REP_ACCEPTED_SIZE == PROP_REP_COMMITTED_SIZE + 1, "");
+  static_assert(PROP_REP_ACCEPTED_SIZE == PROP_REP_LOG_TOO_LOW_SIZE + 1, "");
   static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_ACCEPTED_SIZE, "");
   static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MES_SIZE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
@@ -83,7 +83,7 @@ void static_assert_compile_parameters()
   static_assert(NUM_OF_RMW_KEYS < KVS_NUM_KEYS, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
-  static_assert(ACC_REP_SIZE == PROP_REP_COMMITTED_SIZE, "");
+  static_assert(ACC_REP_SIZE == PROP_REP_LOG_TOO_LOW_SIZE, "");
   static_assert(ACC_REP_SMALL_SIZE == PROP_REP_SMALL_SIZE, "");
   static_assert(ACC_REP_ONLY_TS_SIZE == PROP_REP_ONLY_TS_SIZE, "");
   //static_assert(ACC_REP_ACCEPTED_SIZE == PROP_REP_ACCEPTED_SIZE, "");

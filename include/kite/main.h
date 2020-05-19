@@ -199,7 +199,7 @@
 #define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
 #define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
 // PROPOSE REPLIES
-#define PROP_REP_COMMITTED_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define PROP_REP_LOG_TOO_LOW_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
 #define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
 #define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
@@ -709,6 +709,7 @@ struct rmw_rep_info {
   uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
   uint8_t nacks;
+  bool no_need_to_bcast;
   // used to know whether to help after a prop-- if you have seen a higher acc,
   // then you should not try to help a lower accept, and thus dont try at all
   bool seen_higher_acc;

@@ -867,6 +867,7 @@ static inline void register_last_committed_rmw_id_by_remote_accept(mica_op_t *kv
 {
   if (ENABLE_ASSERTIONS) assert(acc->last_registered_rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
   if (kv_ptr->last_committed_log_no < (acc->log_no) - 1) {
+    assert(false);
     register_committed_global_sess_id(acc->last_registered_rmw_id.glob_sess_id, acc->last_registered_rmw_id.id, t_id);
   }
   else if (ENABLE_ASSERTIONS && (kv_ptr->last_committed_log_no == acc->log_no - 1)) {
@@ -897,7 +898,8 @@ static inline void register_last_committed_rmw_id_by_remote_accept(mica_op_t *kv
 }
 
 // Check the global RMW-id structure, to see if an RMW has already been committed
-static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_id, uint16_t t_id,
+static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_id,
+                                         bool same_log, uint16_t t_id,
                                          struct rmw_rep_last_committed *rep)
 {
   if (ENABLE_ASSERTIONS) assert(glob_sess_id < GLOBAL_SESSION_NUM);
@@ -906,7 +908,7 @@ static inline bool the_rmw_has_committed(uint16_t glob_sess_id, uint64_t rmw_l_i
       my_printf(green, "Worker %u: A Remote machine  is trying a propose with global sess_id %u, "
                      "rmw_id %lu, that has been already committed \n",
                    t_id, glob_sess_id, rmw_l_id);
-    rep->opcode = RMW_ID_COMMITTED;
+    rep->opcode = (uint8_t) (same_log ? RMW_ID_COMMITTED_SAME_LOG : RMW_ID_COMMITTED);
     return true;
   }
   else return false;
@@ -922,9 +924,10 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
                                                        struct rmw_rep_last_committed *rep)
 {
   check_log_nos_of_kv_ptr(kv_ptr, "is_log_smaller_or_has_rmw_committed", t_id);
-  bool fill_the_rep = false;
-  if (the_rmw_has_committed(glob_sess_id, rmw_l_id, t_id, rep))
-    fill_the_rep = true;
+  // bool fill_the_rep = false;
+  bool same_log = kv_ptr->last_committed_log_no == log_no;
+  if (the_rmw_has_committed(glob_sess_id, rmw_l_id, same_log, t_id, rep))
+    return true;
   else if (kv_ptr->last_committed_log_no >= log_no ||
            kv_ptr->log_no > log_no) {
     if (DEBUG_RMW)
@@ -932,7 +935,9 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
                       " global_sess_id %u\n", t_id, log_no, kv_ptr->last_committed_log_no,
                     kv_ptr->state, rmw_l_id, glob_sess_id);
     rep->opcode = LOG_TOO_SMALL;
-    fill_the_rep = true;
+    fill_reply_entry_with_committed_RMW (kv_ptr, rep, t_id);
+    return true;
+    //fill_the_rep = true;
   }
   else if (DEBUG_RMW) { // remote log is higher than the locally stored!
     if (kv_ptr->log_no < log_no )
@@ -943,10 +948,10 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
   }
   // If either the log is too small or the rmw_id has been committed,
   // store the committed value, TS & log_number to the reply
-  if (fill_the_rep) {
-    fill_reply_entry_with_committed_RMW (kv_ptr, rep, t_id);
-    return true;
-  }
+//  if (fill_the_rep) {
+//    fill_reply_entry_with_committed_RMW (kv_ptr, rep, t_id);
+//    return true;
+//  }
   return false;
 }
 
@@ -1144,7 +1149,8 @@ static inline void store_rmw_rep_to_help_loc_entry(struct rmw_local_entry* loc_e
       help_loc_entry->state = COMMITTED;
       // Here we write the base-ts and the log_no
       help_loc_entry->log_no = prop_rep->log_no_or_base_version;
-      assign_netw_ts_to_ts(&help_loc_entry->base_ts, &prop_rep->ts);
+      //assign_netw_ts_to_ts(&help_loc_entry->base_ts, &prop_rep->ts);
+      //help_loc_entry->rmw_id.glob_sess_id = prop_rep->glob_sess_id;
     }
   }
   if (overwrite_entry) {
@@ -1368,21 +1374,22 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
 {
   if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
 
-  check_state_with_allowed_flags(16, opcode, NO_OP_PROP_REP, RMW_ACK,
+  check_state_with_allowed_flags(17, opcode, NO_OP_PROP_REP, RMW_ACK,
                                  SEEN_HIGHER_PROP, SEEN_LOWER_ACC, RMW_ID_COMMITTED,
                                  LOG_TOO_SMALL, LOG_TOO_HIGH, SEEN_HIGHER_ACC, ACQ_LOG_TOO_HIGH,
                                  ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL, TS_SMALLER, TS_EQUAL,
-                                 TS_GREATER, TS_GREATER_TS_ONLY);
+                                 TS_GREATER, TS_GREATER_TS_ONLY, RMW_ID_COMMITTED_SAME_LOG);
   switch(opcode) {
     // ----RMWS-----
-    case RMW_ID_COMMITTED:
     case LOG_TOO_SMALL:
-      return PROP_REP_COMMITTED_SIZE;
+      return PROP_REP_LOG_TOO_LOW_SIZE;
     case SEEN_LOWER_ACC:
       return PROP_REP_ACCEPTED_SIZE;
     case SEEN_HIGHER_PROP:
     case SEEN_HIGHER_ACC:
       return PROP_REP_ONLY_TS_SIZE;
+    case RMW_ID_COMMITTED:
+    case RMW_ID_COMMITTED_SAME_LOG:
     case RMW_ACK:
     case LOG_TOO_HIGH:
     case NO_OP_PROP_REP:
@@ -1508,19 +1515,17 @@ static inline void handle_already_committed_rmw(struct pending_ops *p_ops,
                                                 struct rmw_local_entry *loc_entry,
                                                 uint16_t t_id)
 {
-  if (loc_entry->rmw_reps.rmw_id_commited < REMOTE_QUORUM) {
-    if (loc_entry->help_loc_entry->log_no >= loc_entry->accepted_log_no)
-      loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
-    else {
-      if (ENABLE_ASSERTIONS) {
-        my_printf(yellow, "%s: committed rmw received had too "
-                        "low a log, bcasting from loc_entry \n",
-                      loc_entry->state == PROPOSED ? "Propose" : "Accept");
-      }
-      // Here we know the correct value/log to broadcast: it's the locally accepted ones
-      loc_entry->log_no = loc_entry->accepted_log_no;
-      loc_entry->state = MUST_BCAST_COMMITS;
+  // Broadcast commits iff you got back you own RMW
+  if (!loc_entry->rmw_reps.no_need_to_bcast &&
+    (loc_entry->rmw_reps.rmw_id_commited < REMOTE_QUORUM)) {
+    if (ENABLE_ASSERTIONS) {
+      my_printf(yellow, "%s: committed rmw received had too "
+                      "low a log, bcasting from loc_entry \n",
+                    loc_entry->state == PROPOSED ? "Propose" : "Accept");
     }
+    // Here we know the correct value/log to broadcast: it's the locally accepted ones
+    loc_entry->log_no = loc_entry->accepted_log_no;
+    loc_entry->state = MUST_BCAST_COMMITS;
     if (MACHINE_NUM <= 3 && ENABLE_ASSERTIONS) assert(false);
   }
   else {
@@ -3405,10 +3410,15 @@ static inline void handle_prop_or_acc_rep(struct pending_ops *p_ops, struct rmw_
       loc_entry->rmw_reps.log_too_high++;
       break;
     case RMW_ID_COMMITTED:
+      loc_entry->rmw_reps.no_need_to_bcast = true;
+    case RMW_ID_COMMITTED_SAME_LOG:
       loc_entry->rmw_reps.rmw_id_commited++;
-      attempt_local_commit_from_rep(p_ops, rep, loc_entry, t_id);
+      if (loc_entry->helping_flag != HELPING)
+        loc_entry->log_no = loc_entry->accepted_log_no;
+      attempt_local_commit(p_ops, loc_entry, t_id);
+      //attempt_local_commit_from_rep(p_ops, rep, loc_entry, t_id);
       // store the reply in the help loc_entry
-      store_rmw_rep_to_help_loc_entry(loc_entry, rep, t_id);
+      //store_rmw_rep_to_help_loc_entry(loc_entry, rep, t_id);
       break;
     case LOG_TOO_SMALL:
       loc_entry->rmw_reps.log_too_small++;

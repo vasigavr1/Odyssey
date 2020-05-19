@@ -66,6 +66,7 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define PROP_REPLY 26 // Contains only prop reps
 #define READ_REPLY 27 // Contains only read reps
 #define READ_PROP_REPLY 127 // Contains read and prop reps
+
 #define TS_SMALLER 28
 #define TS_EQUAL 29
 #define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
@@ -74,22 +75,23 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define SEEN_HIGHER_PROP 33 // send that TS
 #define SEEN_LOWER_ACC 34 // send value, rmw-id, TS
 #define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
-#define RMW_ID_COMMITTED 36 // send the entire committed rmw
-#define LOG_TOO_SMALL 37 // send the entire committed rmw
-#define LOG_TOO_HIGH 38 // single byte-nack only proposes
-#define SEEN_HIGHER_ACC 39 //both accs and props- send only TS different op than SEEN_HIGHER_PROP only for debug
+#define RMW_ID_COMMITTED 36 // this is a 1-byte reply: it also tells me that the RMW has been committed in an older slot, and thus the issuer need not bcast commits
+#define RMW_ID_COMMITTED_SAME_LOG 37 // this means I may need to broadcast commits, because the replier has not committed any RMWs in later log-slots
+#define LOG_TOO_SMALL 38 // send the entire committed rmw
+#define LOG_TOO_HIGH 39 // single byte-nack only proposes
+#define SEEN_HIGHER_ACC 40 //both accs and props- send only TS different op than SEEN_HIGHER_PROP only for debug
 // NO_OP_PROP_REP: Purely for debug: this is sent to proposes when an accept has been received
 // for the same RMW-id and TS, that means the proposer will never see this opcode because
 // it has already gathered prop reps quorum and sent accepts
-#define NO_OP_PROP_REP 40
-#define ACQ_LOG_TOO_SMALL 41
-#define ACQ_LOG_TOO_HIGH 42
-#define ACQ_LOG_EQUAL 43 // for acquires on rmws, the response is with respect to the log numbers
+#define NO_OP_PROP_REP 41
+#define ACQ_LOG_TOO_SMALL 42
+#define ACQ_LOG_TOO_HIGH 43
+#define ACQ_LOG_EQUAL 44 // for acquires on rmws, the response is with respect to the log numbers
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
 // previously considered to have failed
-#define FALSE_POSITIVE_OFFSET 20
+#define FALSE_POSITIVE_OFFSET 30
 
 // WRITE MESSAGE OPCODE
 #define ONLY_WRITES 200 // could be write/accept/commit/release
@@ -104,7 +106,7 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define NEEDS_KV_PTR 3  // there is already an entry for the key
 #define RETRY_WITH_BIGGER_TS 4
 #define MUST_BCAST_COMMITS 5 // locally committed-> must broadcast commits
-// Broadcast Commits from helps in 2 occassions:
+// Broadcast Commits from helps in 2 occasions:
 // 1. You are helping someone
 // 2. You have received an already committed message
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
