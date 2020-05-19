@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -256,35 +256,28 @@ typedef struct  {
   uint8_t state;
   uint8_t unused[2];
 
-  // BYTES: 20 - 36
+  // BYTES: 20 - 32
   uint32_t log_no; // keep track of the biggest log_no that has not been committed
-  uint32_t last_registered_log_no;
   uint32_t accepted_log_no; // not really needed, but good for debug
-  uint32_t last_committed_log_no; // not really needed, used to filter whether a log-_no has been registered, so we dont keep registering when receiving accepts
+  uint32_t last_committed_log_no;
 
-  // BYTES: 36 - 60 -- each takes 8
+  // BYTES: 32 - 64 -- each takes 8
   struct ts_tuple ts;
   struct ts_tuple prop_ts;
   struct ts_tuple accepted_ts;
-  //struct ts_tuple base_acc_ts;
-
-  uint8_t unused2[4];
-
+  struct ts_tuple base_acc_ts;
 
 
   // Cache-line 3 -- each rmw_id takes up 16 bytes
   struct rmw_id rmw_id;
-  struct rmw_id last_registered_rmw_id; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
+  struct rmw_id unused4; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
   struct rmw_id last_committed_rmw_id;
 
-  struct ts_tuple base_acc_ts;
-
-
+  uint64_t epoch_id;
+  uint64_t unused5;
 
   // // Cache-line -4
-  uint64_t epoch_id;
   struct rmw_id accepted_rmw_id; // not really needed, but good for debug
-
   uint8_t padding[MICA_OP_PADDING_SIZE];
 
 } mica_op_t;

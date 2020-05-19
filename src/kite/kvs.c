@@ -55,7 +55,7 @@ inline void check_mica_op_t_allignement(mica_op_t *kv_ptr)
     uint64_t opc_al = ((uint64_t) &kv_ptr->opcode) % MICA_OP_SIZE;
     uint64_t state_al = ((uint64_t) &kv_ptr->state) % MICA_OP_SIZE;
     uint64_t log_no = ((uint64_t) &kv_ptr->log_no) % MICA_OP_SIZE;
-    uint64_t last_registered_log_no = ((uint64_t) &kv_ptr->last_registered_log_no) % MICA_OP_SIZE;
+    //uint64_t last_registered_log_no = ((uint64_t) &kv_ptr->last_registered_log_no) % MICA_OP_SIZE;
     uint64_t accepted_log_no = ((uint64_t) &kv_ptr->accepted_log_no) % MICA_OP_SIZE;
     uint64_t last_committed_log_no = ((uint64_t) &kv_ptr->last_committed_log_no) % MICA_OP_SIZE;
 
@@ -66,18 +66,18 @@ inline void check_mica_op_t_allignement(mica_op_t *kv_ptr)
 
 
     uint64_t rmw_id = ((uint64_t) &kv_ptr->rmw_id) % MICA_OP_SIZE;
-    uint64_t last_registered_rmw_id = ((uint64_t) &kv_ptr->last_registered_rmw_id) % MICA_OP_SIZE;
+   // uint64_t last_registered_rmw_id = ((uint64_t) &kv_ptr->last_registered_rmw_id) % MICA_OP_SIZE;
     uint64_t last_committed_rmw_id = ((uint64_t) &kv_ptr->last_committed_rmw_id) % MICA_OP_SIZE;
     uint64_t accepted_rmw_id = ((uint64_t) &kv_ptr->accepted_rmw_id) % MICA_OP_SIZE;
 
 
     printf(" key: %lu \n opc %lu \n state %lu \n log %lu \n"
-             "last reg log %lu \n accepted log %lu \n last committed log %lu \n"
+             "accepted log %lu \n last committed log %lu \n"
              "seq_lock %lu \n ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
-             "rmw_id %lu \nlast_registered_rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
-           key_al, opc_al, state_al, log_no, last_registered_log_no, accepted_log_no, last_committed_log_no,
+             "rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
+           key_al, opc_al, state_al, log_no, accepted_log_no, last_committed_log_no,
            seq_lock, ts, prop_ts, accepted_ts,
-           rmw_id, last_registered_rmw_id, last_committed_rmw_id, accepted_rmw_id);
+           rmw_id, last_committed_rmw_id, accepted_rmw_id);
 
   }
 }

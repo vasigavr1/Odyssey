@@ -984,30 +984,30 @@ static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id
 static inline void check_last_registered_rmw_id(struct rmw_local_entry *loc_entry,
                                                 mica_op_t *kv_ptr, uint8_t helping_flag, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->last_registered_log_no != loc_entry->log_no - 1) {
-      my_printf(red, "Last registered/last-committed/working  %u/%u/%u, key %u, helping flag %u \n",
-                kv_ptr->last_registered_log_no, kv_ptr->last_committed_log_no,
-                loc_entry->log_no, loc_entry->key.bkt, helping_flag);
-      sleep(2);
-      assert(false);
-    }
-    if (loc_entry->log_no == kv_ptr->last_committed_log_no + 1) {
-      if (!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id)) {
-        my_printf(red,
-                  "Wrkr %u, filling help loc entry last registered rmw id, help log no/ kv_ptr last committed log no %u/%u,"
-                    "glob rmw ids: last committed/last registered %lu/%lu \n", t_id,
-                  loc_entry->log_no, kv_ptr->last_committed_log_no,
-                  kv_ptr->last_registered_rmw_id.id, kv_ptr->last_committed_rmw_id.id);
-      }
-      assert(rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
-    }
-      // If I am helping log_no X, without having committed log_no X-1, the i better have the correct last registered RMW-id
-    else if (loc_entry->log_no > kv_ptr->last_committed_log_no + 1) {
-      assert(!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
-    } else
-      assert(false);
-  }
+//  if (ENABLE_ASSERTIONS) {
+//    if (kv_ptr->last_registered_log_no != loc_entry->log_no - 1) {
+//      my_printf(red, "Last registered/last-committed/working  %u/%u/%u, key %u, helping flag %u \n",
+//                kv_ptr->last_registered_log_no, kv_ptr->last_committed_log_no,
+//                loc_entry->log_no, loc_entry->key.bkt, helping_flag);
+//      sleep(2);
+//      assert(false);
+//    }
+//    if (loc_entry->log_no == kv_ptr->last_committed_log_no + 1) {
+//      if (!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id)) {
+//        my_printf(red,
+//                  "Wrkr %u, filling help loc entry last registered rmw id, help log no/ kv_ptr last committed log no %u/%u,"
+//                    "glob rmw ids: last committed/last registered %lu/%lu \n", t_id,
+//                  loc_entry->log_no, kv_ptr->last_committed_log_no,
+//                  kv_ptr->last_registered_rmw_id.id, kv_ptr->last_committed_rmw_id.id);
+//      }
+//      assert(rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
+//    }
+//      // If I am helping log_no X, without having committed log_no X-1, the i better have the correct last registered RMW-id
+//    else if (loc_entry->log_no > kv_ptr->last_committed_log_no + 1) {
+//      assert(!rmw_ids_are_equal(&kv_ptr->last_registered_rmw_id, &kv_ptr->last_committed_rmw_id));
+//    } else
+//      assert(false);
+//  }
 }
 
 
@@ -1043,22 +1043,22 @@ static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_
 
 
 // After registering, make sure the registered is bigger/equal to what is saved as registered
-static inline void check_registered_against_glob_last_registered(mica_op_t *kv_ptr,
-                                                                 uint64_t committed_id,
-                                                                 uint16_t committed_glob_ses_id,
-                                                                 const char *message, uint16_t t_id)
+static inline void check_registered_against_kv_ptr_last_committed(mica_op_t *kv_ptr,
+                                                                  uint64_t committed_id,
+                                                                  uint16_t committed_glob_ses_id,
+                                                                  const char *message, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    uint16_t glob_sess_id = kv_ptr->last_registered_rmw_id.glob_sess_id;
-    uint64_t id = kv_ptr->last_registered_rmw_id.id;
+    uint16_t glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
+    uint64_t id = kv_ptr->last_committed_rmw_id.id;
     assert(glob_sess_id < GLOBAL_SESSION_NUM);
     if (committed_glob_sess_rmw_id[glob_sess_id] < id) {
       my_printf(yellow, "Committing %s rmw_id: %u glob_sess_id: %u \n", message, committed_id, committed_glob_ses_id);
-      my_printf(red, "Wrkr %u: %s rmw_id: kv_ptr last committed/kv_ptr last registered %lu/%lu, "
-                  "glob_sess_id :kv_ptr last committed/kv_ptr last registered %u/%u,"
+      my_printf(red, "Wrkr %u: %s rmw_id: kv_ptr last committed %lu, "
+                  "glob_sess_id :kv_ptr last committed %u,"
                   "committed_glob_sess_rmw_id %lu,   \n", t_id, message,
-                kv_ptr->last_committed_rmw_id.id, kv_ptr->last_registered_rmw_id.id,
-                kv_ptr->last_committed_rmw_id.glob_sess_id, kv_ptr->last_registered_rmw_id.glob_sess_id,
+                kv_ptr->last_committed_rmw_id.id,
+                kv_ptr->last_committed_rmw_id.glob_sess_id,
                 committed_glob_sess_rmw_id[glob_sess_id]);
       //assert(false);
     }
@@ -1160,9 +1160,8 @@ static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local
 {
   if (ENABLE_ASSERTIONS) {
     if (kv_ptr->log_no > kv_ptr->last_committed_log_no + 1) {
-      my_printf(red, "Key %u Last committed/last registered/accepted/active %u/%u/%u/%u \n", loc_entry->key.bkt,
+      my_printf(red, "Key %u Last committed//accepted/active %u/%u/%u \n", loc_entry->key.bkt,
                 kv_ptr->last_committed_log_no,
-                kv_ptr->last_registered_log_no,
                 kv_ptr->accepted_log_no,
                 kv_ptr->log_no);
       assert(false);

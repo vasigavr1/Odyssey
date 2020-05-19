@@ -134,7 +134,7 @@
 #define W_MES_SIZE (W_MES_HEADER + (W_SIZE * W_COALESCE))
 
 // ACCEPTS -- ACCEPT coalescing is derived from max write size. ACC reps are derived from accept coalescing
-#define ACCEPT_HEADER (47 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
+#define ACCEPT_HEADER (37 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
 #define ACCEPT_SIZE (ACCEPT_HEADER + RMW_VALUE_SIZE)
 #define ACC_COALESCE (EFFECTIVE_MAX_W_SIZE / ACCEPT_SIZE)
 #define ACC_MES_SIZE (W_MES_HEADER + (ACCEPT_SIZE * ACC_COALESCE))
@@ -397,10 +397,9 @@ struct accept {
 	uint8_t opcode;
   uint8_t val_len;
 	uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id ; // upper bits are overloaded to store the bit vector when detecting a failure
+  uint64_t t_rmw_id ; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
   uint16_t glob_sess_id ; // this is useful when helping
   uint32_t log_no ;
-  struct net_rmw_id last_registered_rmw_id; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
   uint64_t l_id;
   struct network_ts_tuple base_ts;
 } __attribute__((__packed__));
@@ -737,7 +736,6 @@ struct rmw_local_entry {
   uint8_t *compare_val; //for CAS- add value for FAA
   uint32_t rmw_val_len;
   struct rmw_id rmw_id; // this is implicitly the l_id
-  struct rmw_id last_registered_rmw_id;
   struct rmw_rep_info rmw_reps;
   uint64_t epoch_id;
   uint16_t sess_id;
@@ -745,7 +743,6 @@ struct rmw_local_entry {
   uint32_t back_off_cntr;
   uint16_t log_too_high_cntr;
   uint32_t all_aboard_time_out;
-  // uint32_t index_to_rmw; // this is an index into the global rmw structure
   uint32_t log_no;
   uint32_t accepted_log_no; // this is the log no that has been accepted locally and thus when committed is guaranteed to be the correct logno
   uint64_t l_id; // the unique l_id of the entry, it typically coincides with the rmw_id except from helping cases

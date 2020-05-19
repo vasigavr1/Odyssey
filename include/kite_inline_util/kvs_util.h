@@ -32,15 +32,10 @@ static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_
 static inline bool is_log_too_high(uint32_t log_no, mica_op_t *kv_ptr,
                                    uint16_t t_id,
                                    struct rmw_rep_last_committed *rep);
-static inline bool ts_is_not_greater_than_kvs_ts(mica_op_t *kv_ptr, struct network_ts_tuple *ts,
-                                                 uint8_t m_id, uint16_t t_id,
-                                                 struct rmw_rep_last_committed *rep);
 static inline uint8_t handle_remote_prop_or_acc_in_kvs(mica_op_t *kv_ptr, void *prop_or_acc,
                                                        uint8_t sender_m_id, uint16_t t_id,
                                                        struct rmw_rep_last_committed *rep, uint32_t log_no,
                                                        bool is_prop);
-static inline void register_last_committed_rmw_id_by_remote_accept(mica_op_t *kv_ptr,
-                                                                   struct accept *acc , uint16_t t_id);
 static inline uint16_t get_size_from_opcode(uint8_t opcode);
 static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_rep_big *rep,
                                             bool false_pos, uint8_t rem_m_id, uint16_t t_id);
@@ -332,8 +327,8 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                                        uint16_t op_i, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
-           acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
+//    assert(acc->last_registered_rmw_id.id != acc->t_rmw_id ||
+//           acc->last_registered_rmw_id.glob_sess_id != acc->glob_sess_id);
     assert(acc->ts.version > 0);
   }
   // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
@@ -375,11 +370,6 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                            ENABLE_ASSERTIONS ? "received accept" : NULL);
         memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
         assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
-        if (log_no - 1 > kv_ptr->last_registered_log_no) {
-          register_last_committed_rmw_id_by_remote_accept(kv_ptr, acc, t_id);
-          assign_net_rmw_id_to_rmw_id(&kv_ptr->last_registered_rmw_id, &acc->last_registered_rmw_id);
-          kv_ptr->last_registered_log_no = log_no - 1;
-        }
       }
     }
   }
@@ -557,7 +547,7 @@ static inline void KVS_reads_rmw_acquires(struct read *read, mica_op_t *kv_ptr,
     check_keys_with_one_trace_op(&read->key, kv_ptr);
     if (kv_ptr->last_committed_log_no > acq_log_no) {
       acq_rep->opcode = ACQ_LOG_TOO_SMALL;
-      acq_rep->rmw_id = kv_ptr->last_registered_rmw_id.id;
+      acq_rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
       acq_rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
       memcpy(acq_rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
       acq_rep->log_no = kv_ptr->last_committed_log_no;
