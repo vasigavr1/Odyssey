@@ -5,6 +5,7 @@
 #ifndef KITE_DEBUG_UTIL_H
 #define KITE_DEBUG_UTIL_H
 
+#include <common_func.h>
 #include "common_func.h"
 #include "main.h"
 #include "generic_util.h"
@@ -873,7 +874,7 @@ static inline void check_sum_of_reps(struct rmw_local_entry *loc_entry)
 {
   if (ENABLE_ASSERTIONS) {
     assert(loc_entry->rmw_reps.tot_replies == sum_of_reps(&loc_entry->rmw_reps));
-    assert(loc_entry->rmw_reps.tot_replies <= REM_MACH_NUM);
+    assert(loc_entry->rmw_reps.tot_replies <= MACHINE_NUM);
   }
 }
 
@@ -904,7 +905,7 @@ static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc
         my_printf(red, "Wrkr %u: %s \n", t_id, message);
         assert(false);
       }
-      assert(loc_entry->rmw_reps.tot_replies == 0);
+      assert(loc_entry->rmw_reps.tot_replies == 1);
       assert(loc_entry->back_off_cntr == 0);
     }
   }
@@ -1169,44 +1170,7 @@ static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local
   }
 }
 
-// Potentially useful (for performance only) when a propose receives already_committed
-// responses and still is holding the kv_ptr
-static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
-                                             uint8_t state, uint16_t t_id)
-{
-  mica_op_t *kv_ptr = loc_entry->kv_ptr;
-  if (kv_ptr->state == state &&
-      kv_ptr->log_no == loc_entry->log_no &&
-      rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id) &&
-      compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL) {
-//    my_printf(cyan, "Wrkr %u, kv_ptr NEEDS TO BE FREED: session %u RMW id %u/%u glob_sess_id %u/%u with version %u/%u,"
-//                  " m_id %u/%u,"
-//                  " kv_ptr log/help log %u/%u kv_ptr committed log %u , biggest committed rmw_id %u for glob sess %u"
-//                  " \n",
-//                t_id, loc_entry->sess_id, loc_entry->rmw_id.id, kv_ptr->rmw_id.id,
-//                loc_entry->rmw_id.glob_sess_id, kv_ptr->rmw_id.glob_sess_id,
-//                loc_entry->new_ts.version, kv_ptr->new_ts.version,
-//                loc_entry->new_ts.m_id, kv_ptr->new_ts.m_id,
-//                kv_ptr->log_no, loc_entry->log_no, kv_ptr->last_committed_log_no,
-//                committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id], kv_ptr->rmw_id.glob_sess_id);
 
-    lock_seqlock(&loc_entry->kv_ptr->seqlock);
-    if (kv_ptr->state == state &&
-        kv_ptr->log_no == loc_entry->log_no &&
-        rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id)) {
-      if (state == PROPOSED && compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL) {
-        printf("clearing\n");
-        print_rmw_rep_info(loc_entry, t_id);
-        //assert(false);
-        kv_ptr->state = INVALID_RMW;
-      }
-      else if (state == ACCEPTED && compare_ts(&kv_ptr->accepted_ts, &loc_entry->new_ts) == EQUAL)
-        assert(false);
-    }
-    check_log_nos_of_kv_ptr(kv_ptr, "free_kv_ptr_if_prop_failed", t_id);
-    unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-  }
-}
 
 static inline void debug_set_version_of_op_to_one(struct trace_op *op, uint8_t opcode,
                                                   uint16_t t_id)
@@ -1246,6 +1210,42 @@ static inline void check_all_w_meta(struct pending_ops* p_ops, uint16_t t_id, co
                   message);
     }
   }
+}
+
+static inline void checks_and_prints_local_accept_help(struct rmw_local_entry *loc_entry,
+                                                       struct rmw_local_entry* help_loc_entry,
+                                                       mica_op_t *kv_ptr, bool kv_ptr_is_the_same,
+                                                       bool kv_ptr_is_invalid_but_not_committed,
+                                                       bool helping_stuck_accept,
+                                                       bool propose_locally_accepted,
+                                                       uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(compare_ts(&kv_ptr->prop_ts, &help_loc_entry->new_ts) != SMALLER);
+    assert(kv_ptr->last_committed_log_no == help_loc_entry->log_no - 1);
+    if (kv_ptr_is_invalid_but_not_committed) {
+      printf("last com/log/help-log/loc-log %u/%u/%u/%u \n",
+             kv_ptr->last_committed_log_no, kv_ptr->log_no,
+             help_loc_entry->log_no, loc_entry->log_no);
+      assert(false);
+    }
+    // if the TS are equal it better be that it is because it remembers the proposed request
+    if (kv_ptr->state != INVALID_RMW &&
+        compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL && !helping_stuck_accept &&
+        !helping_stuck_accept && !propose_locally_accepted) {
+      assert(rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id));
+      if (kv_ptr->state != PROPOSED) {
+        my_printf(red, "Wrkr: %u, state %u \n", t_id, kv_ptr->state);
+        assert(false);
+      }
+    }
+    if (propose_locally_accepted)
+      assert(compare_ts(&help_loc_entry->new_ts, &kv_ptr->accepted_ts) == GREATER);
+  }
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u on attempting to locally accept to help "
+                "got rmw id %u, glob sess %u accepted locally \n",
+              t_id, help_loc_entry->rmw_id.id, help_loc_entry->rmw_id.glob_sess_id);
 }
 
 

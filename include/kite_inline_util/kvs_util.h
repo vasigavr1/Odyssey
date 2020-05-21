@@ -498,7 +498,7 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
                                                             prop_rep, prop->log_no, true);
         // if the propose is going to be acked record its information in the kv_ptr
         if (prop_rep->opcode == RMW_ACK) {
-          assert(prop->log_no >= kv_ptr->log_no);
+          if (ENABLE_ASSERTIONS) assert(prop->log_no >= kv_ptr->log_no);
           activate_RMW_entry(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
                              prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
                              ENABLE_ASSERTIONS ? "received propose" : NULL);

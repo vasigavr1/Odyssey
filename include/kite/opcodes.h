@@ -72,9 +72,9 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
 #define TS_GREATER 31
 #define RMW_ACK 32 // 1 byte reply
-#define SEEN_HIGHER_PROP 33 // send that TS
-#define SEEN_LOWER_ACC 34 // send value, rmw-id, TS
-#define RMW_TS_STALE 35 // Ts was smaller than the KVS stored TS: send that TS
+#define RMW_ACK_ACC_SAME_RMW 33 // only for proposes: Have accepted with lower TS the same RMW-id, it counts as an ack
+#define SEEN_HIGHER_PROP 34 // send that TS
+#define SEEN_LOWER_ACC 35 // send value, rmw-id, TS
 #define RMW_ID_COMMITTED 36 // this is a 1-byte reply: it also tells me that the RMW has been committed in an older slot, and thus the issuer need not bcast commits
 #define RMW_ID_COMMITTED_SAME_LOG 37 // this means I may need to broadcast commits, because the replier has not committed any RMWs in later log-slots
 #define LOG_TOO_SMALL 38 // send the entire committed rmw
@@ -165,7 +165,7 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define NOT_HELPING 0
 #define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
 #define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
-#define PROPOSE_LOCALLY_ACCEPTED 3 // Not needed, but used for readability
+#define PROPOSE_LOCALLY_ACCEPTED 3 // Denotes that we are sending proposes for a locally accepted rmw
 #define HELP_PREV_COMMITTED_LOG_TOO_HIGH 4
 #define HELPING_MYSELF 5
 //

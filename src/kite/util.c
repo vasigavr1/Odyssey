@@ -8,7 +8,7 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 void static_assert_compile_parameters()
 {
-
+  static_assert(RMW_ACK_ACC_SAME_RMW > RMW_ACK, "assumption used to check if replies are acks");
   assert(MICA_OP_SIZE == sizeof(mica_op_t));
   static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
   static_assert(IS_ALIGNED(2 * MICA_VALUE_SIZE, 64), "2 * VALUE_SIZE must be aligned with 64 bytes");
