@@ -1,5 +1,5 @@
-#ifndef ABD_MAIN_H
-#define ABD_MAIN_H
+#ifndef KITE_MAIN_H
+#define KITE_MAIN_H
 
 #include <stdint.h>
 #include <pthread.h>
@@ -49,7 +49,7 @@ void *print_stats(void*);
 /*-------------------------------------------------
 	-----------------MULTICAST-------------------------
 --------------------------------------------------*/
-// Multicast defines are not used in the ABD, but we keep them for possible extension
+// Multicast defines are not used, but are kept them for possible extension
 #define ENABLE_MULTICAST 0
 #define MULTICAST_TESTING_ 0
 #define MULTICAST_TESTING (ENABLE_MULTICAST == 1 ? MULTICAST_TESTING_ : 0)
@@ -139,10 +139,10 @@ void *print_stats(void*);
 #define TRACE_SIZE K_128
 #define NOP 0
 
-struct trace_command {
+typedef struct trace_command {
   uint8_t opcode;
   uint8_t key_hash[8];
-};
+} trace_t;
 
 /* ah pointer and qpn are accessed together in the critical path
    so we are putting them in the same kvs line */
@@ -153,21 +153,21 @@ struct remote_qp {
 };
 
 
-struct kvs_resp {
+typedef struct kv_resp {
   uint8_t type;
   uint8_t kv_ptr_state;
   uint32_t log_no; // the log_number of an RMW
   mica_op_t *kv_ptr;
   struct ts_tuple kv_ptr_ts;
   struct rmw_id kv_ptr_rmw_id;
-};
+} kv_resp_t;
 
-struct r_mes_info {
+typedef  struct r_mes_info {
   uint16_t reads_num; // all non propose messages count as reads
   uint16_t message_size;
   uint16_t max_rep_message_size;
   uint32_t backward_ptr;
-};
+} r_mes_info_t;
 
 
 #define UNUSED_BYTES_IN_REL_BIT_VEC (13 - SEND_CONF_VEC_SIZE)
@@ -177,7 +177,7 @@ struct rel_bit_vec{
   uint8_t opcode;
 }__attribute__((__packed__));
 
-struct w_mes_info {
+typedef struct w_mes_info {
   uint8_t writes_num; // all non-accept messages: releases, writes, or commits
   uint16_t message_size;
   uint16_t max_rep_message_size;
@@ -196,7 +196,7 @@ struct w_mes_info {
   // message contains releases, writes, or commits, and thus has a valid l_id
   bool valid_header_l_id;
   bool sent;
-};
+} w_mes_info_t;
 
 //
 struct read_fifo {
@@ -204,8 +204,7 @@ struct read_fifo {
   uint32_t push_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of reads not messages!
-  struct r_mes_info info[R_FIFO_SIZE];
-  //uint32_t backward_ptrs[R_FIFO_SIZE];
+  r_mes_info_t info[R_FIFO_SIZE];
 };
 
 //
@@ -214,7 +213,7 @@ struct write_fifo {
   uint32_t push_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of writes not messages!
-  struct w_mes_info info[W_FIFO_SIZE];
+  w_mes_info_t info[W_FIFO_SIZE];
 };
 
 //
@@ -230,7 +229,7 @@ struct r_rep_fifo {
 
 
 //
-struct read_info {
+typedef struct read_info{
   uint8_t rep_num; // replies num
   uint8_t times_seen_ts;
   bool seen_larger_ts; // used also for log numbers for rmw_acquires
@@ -255,7 +254,7 @@ struct read_info {
   // remember where it is stored in the w_fifo -- NOT NEEDED
   //  uint32_t w_mes_ptr;
   //  uint8_t inside_w_ptr;
-};
+} r_info_t ;
 
 struct dbg_glob_entry {
   struct ts_tuple last_committed_ts;
@@ -267,9 +266,6 @@ struct dbg_glob_entry {
   uint8_t last_committed_flag;
   uint64_t prop_acc_num;
 };
-
-
-
 
 struct rmw_help_entry{
   struct ts_tuple ts;
@@ -304,7 +300,7 @@ struct rmw_rep_info {
 
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
-struct rmw_local_entry {
+typedef struct rmw_local_entry {
   struct ts_tuple new_ts;
   struct key key;
   uint8_t opcode;
@@ -334,17 +330,17 @@ struct rmw_local_entry {
   mica_op_t *kv_ptr;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
-};
+} loc_entry_t;
 
 
 // Local state of pending RMWs - one entry per session
 // Accessed with session id!
 struct prop_info {
-  struct rmw_local_entry entry[LOCAL_PROP_NUM];
+  loc_entry_t entry[LOCAL_PROP_NUM];
   uint64_t l_id; // highest l_id as of yet -- Starts from 1
 };
 
-struct sess_info {
+typedef struct sess_info {
   bool stalled;
   bool ready_to_release;
   uint8_t missing_num;
@@ -356,9 +352,9 @@ struct sess_info {
 
   uint32_t writes_not_yet_inserted; // for debug only
 
-};
+} sess_info_t;
 
-struct per_write_meta {
+typedef struct per_write_meta {
   uint8_t w_state;
   uint8_t acks_seen;
   uint8_t acks_expected;
@@ -366,7 +362,7 @@ struct per_write_meta {
   bool seen_expected[REM_MACH_NUM];
 
   uint32_t sess_id;
-};
+} per_write_meta_t;
 
 struct pending_out_of_epoch_writes {
   uint32_t size; //number of pending ooe writes
@@ -375,7 +371,7 @@ struct pending_out_of_epoch_writes {
   uint32_t r_info_ptrs[PENDING_READS]; // ptrs to the read_info struct of p_ops
 };
 
-struct pending_ops {
+typedef struct pending_ops {
   struct write_fifo *w_fifo;
   struct read_fifo *r_fifo;
   struct r_rep_fifo *r_rep_fifo;
@@ -387,12 +383,12 @@ struct pending_ops {
   struct r_message **ptrs_to_mes_headers;
   bool *coalesce_r_rep;
 //  struct read_payload *r_payloads;
-  struct read_info *read_info;
+  r_info_t *read_info;
 
   struct prop_info *prop_info;
   //
   struct pending_out_of_epoch_writes *p_ooe_writes;
-  struct sess_info *sess_info;
+  sess_info_t *sess_info;
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
@@ -416,12 +412,12 @@ struct pending_ops {
   uint32_t virt_w_size;  //
   //uint32_t prop_size; // TODO add this if needed
   //uint8_t *acks_seen;
-  struct per_write_meta *w_meta;
+  per_write_meta_t *w_meta;
   uint32_t full_w_q_fifo;
   //bool *session_has_pending_op;
   bool all_sessions_stalled;
   struct quorum_info *q_info;
-};
+} p_ops_t;
 
 // A helper to debug sessions by remembering which write holds a given session
 struct session_dbg {
@@ -444,7 +440,7 @@ struct recv_info {
 	void* buf;
 };
 
-struct trace_op {
+typedef struct trace_op {
   uint16_t session_id;
   bool attempt_all_aboard;
   struct ts_tuple ts;
@@ -456,14 +452,14 @@ struct trace_op {
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
   uint32_t real_val_len; // this is the value length the client is interested in
-};
+} trace_op_t;
 
 
 
 #define RAW_CLIENT_OP_SIZE (8 + TRUE_KEY_SIZE + VALUE_SIZE + 8 + 8)
 #define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
 #define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
-struct client_op {
+typedef struct client_op {
   atomic_uint_fast8_t state;
   uint8_t opcode;
   uint32_t val_len;
@@ -472,7 +468,7 @@ struct client_op {
   uint8_t *value_to_read;//[VALUE_SIZE]; // expected val for CAS
   uint8_t value_to_write[VALUE_SIZE]; // desired Val for CAS
   uint8_t padding[PADDING_BYTES_CLIENT_OP];
-};
+} client_op_t;
 
 #define IF_CLT_PTRS_SIZE (4 * SESSIONS_PER_THREAD) //  4* because client needs 2 ptrs (pull/push) that are 2 bytes each
 #define IF_WRKR_PTRS_SIZE (2 * SESSIONS_PER_THREAD) // 2* because client needs 1 ptr (pull) that is 2 bytes
@@ -483,7 +479,7 @@ struct client_op {
 
 // wrkr-client interface
 struct wrk_clt_if {
-  struct client_op req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+  client_op_t req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
   uint16_t clt_push_ptr[SESSIONS_PER_THREAD];
   uint16_t clt_pull_ptr[SESSIONS_PER_THREAD];
   uint8_t clt_ptr_padding[PADDING_IF_CLT_PTRS];

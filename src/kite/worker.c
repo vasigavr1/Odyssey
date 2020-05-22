@@ -100,9 +100,9 @@ void *worker(void *arg)
     acks[i].m_id = (uint8_t) machine_id;
     acks[i].opcode = CACHE_OP_ACK;
   }
-  struct pending_ops *p_ops;
+  p_ops_t *p_ops;
   struct ibv_mr *r_mr, *w_mr, *r_rep_mr;
-  set_up_pending_ops(&p_ops, PENDING_WRITES, PENDING_READS);
+  p_ops = set_up_pending_ops(PENDING_WRITES, PENDING_READS);
   void *r_fifo_buf = p_ops->r_fifo->r_message;
   void *w_fifo_buf = p_ops->w_fifo->w_message;
   void *r_rep_fifo_buf = (void *)p_ops->r_rep_fifo->r_rep_message;
@@ -110,9 +110,9 @@ void *worker(void *arg)
   set_up_mr(&w_mr, w_fifo_buf, W_ENABLE_INLINING, (uint32_t) W_FIFO_SIZE * ALIGNED_W_SEND_SIDE, cb);
   set_up_mr(&r_rep_mr, r_rep_fifo_buf, R_REP_ENABLE_INLINING, (uint32_t) R_REP_FIFO_SIZE * ALIGNED_R_REP_SEND_SIDE, cb);
 
-  struct trace_op *ops = (struct trace_op *) calloc(MAX_OP_BATCH, sizeof(struct trace_op));
+  trace_op_t *ops = (trace_op_t *) calloc(MAX_OP_BATCH, sizeof(trace_op_t));
   randomize_op_values(ops, t_id);
-  struct kvs_resp *resp = (struct kvs_resp *) malloc(MAX_OP_BATCH * sizeof(struct kvs_resp));
+  kv_resp_t *resp = (kv_resp_t *) malloc(MAX_OP_BATCH * sizeof(kv_resp_t));
   set_up_bcast_WRs(w_send_wr, w_send_sgl, r_send_wr, r_send_sgl,
                    t_id, cb, w_mr, r_mr);
   set_up_ack_n_r_rep_WRs(ack_send_wr, ack_send_sgl, r_rep_send_wr, r_rep_send_sgl,
@@ -120,9 +120,9 @@ void *worker(void *arg)
   set_up_credits(credits);
   assert(credits[R_VC][0] == R_CREDITS && credits[W_VC][0] == W_CREDITS);
 	// TRACE
-	struct trace_command *trace;
+	trace_t *trace;
   if (!ENABLE_CLIENTS)
-	  trace_init((void **)&trace, t_id);
+	  trace = trace_init(t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------

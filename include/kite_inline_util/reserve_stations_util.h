@@ -13,10 +13,10 @@
 //-------------------------------------------------------------------------------------
 // -------------------------------FORWARD DECLARATIONS--------------------------------
 //-------------------------------------------------------------------------------------
-static inline void fill_commit_message_from_l_entry(struct commit *com, struct rmw_local_entry *loc_entry,
+static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entry_t *loc_entry,
                                                     uint8_t broadcast_state, uint16_t t_id);
 static inline void fill_commit_message_from_r_info(struct commit *com,
-                                                   struct read_info* r_info, uint16_t t_id);
+                                                   r_info_t* r_info, uint16_t t_id);
 
 static inline void KVS_isolated_op(int t_id, struct write *write);
 
@@ -28,7 +28,7 @@ static inline void KVS_isolated_op(int t_id, struct write *write);
 
 
 // Returns true if it's valid to pull a request for that session
-static inline bool pull_request_from_this_session(struct pending_ops *p_ops, uint16_t sess_id,
+static inline bool pull_request_from_this_session(p_ops_t *p_ops, uint16_t sess_id,
                                                   uint16_t t_id)
 {
   uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[sess_id];
@@ -45,7 +45,7 @@ static inline bool pull_request_from_this_session(struct pending_ops *p_ops, uin
 }
 
 // In case of a miss in the KVS clean up the op, sessions and what not
-static inline void clean_up_on_KVS_miss(struct trace_op *op, struct pending_ops *p_ops,
+static inline void clean_up_on_KVS_miss(trace_op_t *op, p_ops_t *p_ops,
                                         struct latency_flags *latency_info, uint16_t t_id)
 {
   if (op->opcode == OP_RELEASE || op->opcode == OP_ACQUIRE) {
@@ -68,14 +68,14 @@ static inline void clean_up_on_KVS_miss(struct trace_op *op, struct pending_ops 
  * --------------------SESSION INFO----------------------
  * -----------------------------------------------------*/
 
-static inline void add_request_to_sess_info(struct sess_info *sess_info, uint16_t t_id)
+static inline void add_request_to_sess_info(sess_info_t *sess_info, uint16_t t_id)
 {
   sess_info->live_writes++;
   sess_info->ready_to_release = false;
 }
 
 static inline void check_sess_info_after_completing_release
-  (struct sess_info *sess_info, uint16_t t_id)
+  (sess_info_t *sess_info, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     assert(sess_info->stalled);
@@ -88,11 +88,11 @@ static inline void check_sess_info_after_completing_release
 // If we are not bothering sending a write to a machine, we note this machine
 // so that we know this amchine has not acked the write
 static inline void update_sess_info_missing_ids_when_sending
-  (struct pending_ops *p_ops, struct w_mes_info *info,
+  (p_ops_t *p_ops, w_mes_info_t *info,
    struct quorum_info *q_info, uint8_t w_i, uint16_t t_id)
 {
   if (q_info->missing_num == 0 ) return;
-  struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+  sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
 
   //printf("qinfo missing num %u, sess_info->missing_num %u \n");
   for (uint8_t i = 0; i < q_info->missing_num; i++) {
@@ -109,10 +109,10 @@ static inline void update_sess_info_missing_ids_when_sending
 }
 
 
-static inline void update_sess_info_with_fully_acked_write(struct pending_ops *p_ops,
+static inline void update_sess_info_with_fully_acked_write(p_ops_t *p_ops,
                                                            uint32_t w_ptr, uint16_t t_id)
 {
-  struct sess_info *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
+  sess_info_t *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
   // The write gathered all expected acks so it needs not update the missing num or ids of the sess info
   if (ENABLE_ASSERTIONS) assert(sess_info->live_writes > 0);
   sess_info->live_writes--;
@@ -124,11 +124,11 @@ static inline void update_sess_info_with_fully_acked_write(struct pending_ops *p
   }
 }
 
-static inline void update_sess_info_partially_acked_write(struct pending_ops *p_ops,
+static inline void update_sess_info_partially_acked_write(p_ops_t *p_ops,
                                                           uint32_t w_ptr, uint16_t t_id)
 {
-  struct sess_info *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
-  struct per_write_meta *w_meta = &p_ops->w_meta[w_ptr];
+  sess_info_t *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
+  per_write_meta_t *w_meta = &p_ops->w_meta[w_ptr];
 
   // for each missing id
   if (ENABLE_ASSERTIONS) {
@@ -188,7 +188,7 @@ static inline void update_sess_info_partially_acked_write(struct pending_ops *p_
 }
 
 
-static inline void reset_sess_info_on_release(struct sess_info *sess_info,
+static inline void reset_sess_info_on_release(sess_info_t *sess_info,
                                               struct quorum_info *q_info, uint16_t t_id)
 {
   sess_info->missing_num = q_info->missing_num;
@@ -200,7 +200,7 @@ static inline void reset_sess_info_on_release(struct sess_info *sess_info,
   add_request_to_sess_info(sess_info, t_id);
 }
 
-static inline void reset_sess_info_on_accept(struct sess_info *sess_info,
+static inline void reset_sess_info_on_accept(sess_info_t *sess_info,
                                              uint16_t t_id)
 {
   sess_info->missing_num = 0;
@@ -241,12 +241,12 @@ static inline uint16_t get_read_size_from_opcode(uint8_t opcode) {
 
 
 // Set up a fresh read message to coalesce requests -- Proposes, reads, acquires
-static inline void reset_read_message(struct pending_ops *p_ops)
+static inline void reset_read_message(p_ops_t *p_ops)
 {
   MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_ptr];
-  struct r_mes_info * info = &p_ops->r_fifo->info[r_mes_ptr];
+  r_mes_info_t * info = &p_ops->r_fifo->info[r_mes_ptr];
 
   r_mes->l_id = 0;
   r_mes->coalesce_num = 0;
@@ -257,12 +257,12 @@ static inline void reset_read_message(struct pending_ops *p_ops)
 
 
 // Returns a pointer, where the next request can be created -- Proposes, reads, acquires
-static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
+static inline void* get_r_ptr(p_ops_t *p_ops, uint8_t opcode,
                               bool is_rmw_acquire, uint16_t t_id)
 {
   bool is_propose = opcode == PROPOSE_OP;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
-  struct r_mes_info *info = &p_ops->r_fifo->info[r_mes_ptr];
+  r_mes_info_t *info = &p_ops->r_fifo->info[r_mes_ptr];
   uint16_t new_size = get_read_size_from_opcode(opcode);
   if (is_propose) info->max_rep_message_size += PROP_REP_ACCEPTED_SIZE;
   else if (is_rmw_acquire) info->max_rep_message_size += RMW_ACQ_REP_SIZE;
@@ -304,14 +304,14 @@ static inline void* get_r_ptr(struct pending_ops *p_ops, uint8_t opcode,
 /*-------------WRITES/ACCEPTS/COMMITS------------- */
 
 // Set up a fresh write message to coalesce requests -- Accepts, commits, writes, releases
-static inline void reset_write_message(struct pending_ops *p_ops)
+static inline void reset_write_message(p_ops_t *p_ops)
 {
 
   MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   struct w_message *w_mes = (struct w_message *)
     &p_ops->w_fifo->w_message[w_mes_ptr];
-  struct w_mes_info * info = &p_ops->w_fifo->info[w_mes_ptr];
+  w_mes_info_t * info = &p_ops->w_fifo->info[w_mes_ptr];
   //my_printf(cyan, "resetting message %u \n", p_ops->w_fifo->push_ptr);
   w_mes->l_id = 0;
   w_mes->coalesce_num = 0;
@@ -324,7 +324,7 @@ static inline void reset_write_message(struct pending_ops *p_ops)
 
 
 // Find out if a release can be coalesced
-static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w_mes,
+static inline bool coalesce_release(w_mes_info_t *info, struct w_message *w_mes,
                                     uint16_t session_id, uint16_t t_id)
 {
   /* release cannot be coalesced when
@@ -344,7 +344,7 @@ static inline bool coalesce_release(struct w_mes_info *info, struct w_message *w
 }
 
 // Return a pointer, where the next request can be created -- Accepts, commits, writes, releases
-static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
+static inline void* get_w_ptr(p_ops_t *p_ops, uint8_t opcode,
                               uint16_t session_id, uint16_t t_id)
 {
   check_state_with_allowed_flags(8, opcode, OP_RELEASE, KVS_OP_PUT, ACCEPT_OP,
@@ -357,7 +357,7 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
   bool release_or_acc = is_release || (is_accept && ACCEPT_IS_RELEASE); //is_accept || is_release;
 
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
-  struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
+  w_mes_info_t *info = &p_ops->w_fifo->info[w_mes_ptr];
   struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[w_mes_ptr];
   uint16_t new_size = get_write_size_from_opcode(opcode);
   bool new_message_because_of_release =
@@ -421,9 +421,9 @@ static inline void* get_w_ptr(struct pending_ops *p_ops, uint8_t opcode,
 }
 
 //
-static inline uint8_t get_write_opcode(const uint8_t source, struct trace_op *op,
-                                       struct read_info *r_info,
-                                       struct rmw_local_entry *loc_entry)
+static inline uint8_t get_write_opcode(const uint8_t source, trace_op_t *op,
+                                       r_info_t *r_info,
+                                       loc_entry_t *loc_entry)
 {
   switch(source) {
     case FROM_TRACE:
@@ -442,7 +442,7 @@ static inline uint8_t get_write_opcode(const uint8_t source, struct trace_op *op
 }
 
 //
-static inline void increase_virt_w_size(struct pending_ops *p_ops, struct write *write,
+static inline void increase_virt_w_size(p_ops_t *p_ops, struct write *write,
                                         uint8_t source, uint16_t t_id) {
   if (write->opcode == OP_RELEASE) {
     if (ENABLE_ASSERTIONS) assert(source == FROM_READ);
@@ -464,12 +464,12 @@ static inline void increase_virt_w_size(struct pending_ops *p_ops, struct write 
 }
 
 //
-static inline uint16_t get_w_sess_id(struct pending_ops *p_ops, struct trace_op *op,
+static inline uint16_t get_w_sess_id(p_ops_t *p_ops, trace_op_t *op,
                                      const uint8_t source,
                                      const uint32_t incoming_pull_ptr,
                                      const uint16_t t_id)
 {
-  struct rmw_local_entry *loc_entry = (struct rmw_local_entry *) op;
+  loc_entry_t *loc_entry = (loc_entry_t *) op;
 
   switch (source) {
     case FROM_COMMIT:
@@ -497,7 +497,7 @@ static inline uint16_t get_w_sess_id(struct pending_ops *p_ops, struct trace_op 
 
 // When inserting a write
 static inline void
-set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct trace_op *write,
+set_w_sess_info_and_index_to_req_array(p_ops_t *p_ops, trace_op_t *write,
                                        const uint8_t source, uint32_t w_ptr,
                                        const uint32_t incoming_pull_ptr,
                                        uint8_t opcode, uint16_t sess_id, const uint16_t t_id)
@@ -528,9 +528,9 @@ set_w_sess_info_and_index_to_req_array(struct pending_ops *p_ops, struct trace_o
 
 // Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
 static inline void write_bookkeeping_in_insertion_based_on_source
-  (struct pending_ops *p_ops, struct write *write, struct trace_op *op,
+  (p_ops_t *p_ops, struct write *write, trace_op_t *op,
    const uint8_t source, const uint32_t incoming_pull_ptr,
-   struct read_info *r_info, const uint16_t t_id)
+   r_info_t *r_info, const uint16_t t_id)
 {
   my_assert(source <= FROM_COMMIT, "When inserting a write source is too high. Have you enabled lin writes?");
 
@@ -564,7 +564,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     else {
       uint8_t broadcast_state = (uint8_t)incoming_pull_ptr;
       fill_commit_message_from_l_entry((struct commit *) write,
-                                       (struct rmw_local_entry *) op, broadcast_state,  t_id);
+                                       (loc_entry_t *) op, broadcast_state,  t_id);
     }
   }
   else { //source = FROM_READ: 2nd round of read/write/acquire/release
@@ -611,7 +611,7 @@ static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem
 
 // Get a pointer to the read reply that will be sent, typically before going to the kvs,
 // such that the kvs value, can be copied directly to the reply
-static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_t l_id,
+static inline struct r_rep_big* get_r_rep_ptr(p_ops_t *p_ops, uint64_t l_id,
                                               uint8_t rem_m_id, uint8_t read_opcode, bool coalesce,
                                               uint16_t t_id)
 {
@@ -657,7 +657,7 @@ static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_
 }
 
 //After filling the read reply do the final required bookkeeping
-static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_rep_big *rep,
+static inline void finish_r_rep_bookkeeping(p_ops_t *p_ops, struct r_rep_big *rep,
                                             bool false_pos, uint8_t rem_m_id, uint16_t t_id)
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
@@ -679,7 +679,7 @@ static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_
 
 // This function sets the size and the opcode of a red reply, for reads/acquires and Read TS
 // The locally stored TS is copied in the r_rep
-static inline void set_up_r_rep_message_size(struct pending_ops *p_ops,
+static inline void set_up_r_rep_message_size(p_ops_t *p_ops,
                                              struct r_rep_big *r_rep,
                                              struct network_ts_tuple *remote_ts,
                                              bool read_ts,
@@ -723,7 +723,7 @@ static inline void set_up_r_rep_message_size(struct pending_ops *p_ops,
 }
 
 //
-static inline void set_up_rmw_acq_rep_message_size(struct pending_ops *p_ops,
+static inline void set_up_rmw_acq_rep_message_size(p_ops_t *p_ops,
                                                    uint8_t opcode, uint16_t t_id)
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
@@ -744,7 +744,7 @@ static inline void set_up_rmw_acq_rep_message_size(struct pending_ops *p_ops,
 //---------------------------------------------------------------------------*/
 
 // RMWs hijack the read fifo, to send propose broadcasts to all
-static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
+static inline void insert_prop_to_read_fifo(p_ops_t *p_ops, loc_entry_t *loc_entry,
                                             uint16_t t_id)
 {
   if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED &&
@@ -782,12 +782,12 @@ static inline void insert_prop_to_read_fifo(struct pending_ops *p_ops, struct rm
 
 // Worker inserts a new local read to the read fifo it maintains -- Typically for Acquire
 // but can also be the first round of an out-of-epoch write/release or an out-of-epoch read-- BUT NOT A PROPOSE!
-static inline void insert_read(struct pending_ops *p_ops, struct trace_op *op,
+static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
                                uint8_t source, uint16_t t_id)
 {
   check_state_with_allowed_flags(3, source, FROM_TRACE, FROM_ACQUIRE);
   const uint32_t r_ptr = p_ops->r_push_ptr;
-  struct read_info *r_info = &p_ops->read_info[r_ptr];
+  r_info_t *r_info = &p_ops->read_info[r_ptr];
   bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
 
   struct read *read = (struct read*) get_r_ptr(p_ops, r_info->opcode, is_rmw_acquire, t_id);
@@ -849,8 +849,8 @@ static inline void insert_read(struct pending_ops *p_ops, struct trace_op *op,
 
 
 // Insert accepts to the write message fifo
-static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_ops,
-                                                        struct rmw_local_entry *loc_entry,
+static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
+                                                        loc_entry_t *loc_entry,
                                                         bool helping,
                                                         uint16_t t_id)
 {
@@ -889,11 +889,11 @@ static inline void insert_accept_in_writes_message_fifo(struct pending_ops *p_op
 
 
 // Insert a new local or remote write to the pending writes
-static inline void insert_write(struct pending_ops *p_ops, struct trace_op *op, const uint8_t source,
+static inline void insert_write(p_ops_t *p_ops, trace_op_t *op, const uint8_t source,
                                 const uint32_t incoming_pull_ptr, uint16_t t_id)
 {
-  struct read_info *r_info = NULL;
-  struct rmw_local_entry *loc_entry = (struct rmw_local_entry *) op;
+  r_info_t *r_info = NULL;
+  loc_entry_t *loc_entry = (loc_entry_t *) op;
   if (source == FROM_READ) r_info = &p_ops->read_info[incoming_pull_ptr];
   uint32_t w_ptr = p_ops->w_push_ptr;
   uint8_t opcode = get_write_opcode(source, op, r_info, loc_entry);
@@ -945,7 +945,7 @@ static inline void insert_write(struct pending_ops *p_ops, struct trace_op *op, 
 
 // Insert a new r_rep to the r_rep reply fifo: used only for OP_ACQIUIRE_FLIP_BIT
 // i.e. the message spawned by acquires that detected a false positive, meant to merely flip the owned bit
-static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16_t t_id,
+static inline void insert_r_rep(p_ops_t *p_ops, uint64_t l_id, uint16_t t_id,
                                 uint8_t rem_m_id, bool coalesce,  uint8_t read_opcode)
 {
   check_state_with_allowed_flags(2, read_opcode, OP_ACQUIRE_FLIP_BIT);
@@ -957,8 +957,8 @@ static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16
 
 
 // Fill the trace_op to be passed to the KVS. Returns whether no more requests can be processed
-static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
-                                 uint32_t trace_iter, struct trace_command *trace,
+static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
+                                 uint32_t trace_iter, trace_t *trace,
                                  uint16_t op_i, int working_session, uint16_t *writes_num_, uint16_t *reads_num_,
                                  struct session_dbg *ses_dbg,struct latency_flags *latency_info,
                                  uint32_t *sizes_dbg_cntr,
@@ -970,7 +970,7 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
   uint32_t real_val_len;
   if (ENABLE_CLIENTS) {
     uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[working_session];
-    struct client_op *if_cl_op = &interface[t_id].req_array[working_session][pull_ptr];
+    client_op_t *if_cl_op = &interface[t_id].req_array[working_session][pull_ptr];
     opcode = if_cl_op->opcode;
     key = &if_cl_op->key;
     op->index_to_req_array = pull_ptr;
@@ -1075,7 +1075,7 @@ static inline bool fill_trace_op(struct pending_ops *p_ops, struct trace_op *op,
 
 
 // When forging a write
-static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct w_mes_info *info,
+static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info,
                                               struct w_message *w_mes, uint32_t backward_ptr,
                                               uint8_t coalesce_num, struct ibv_sge *send_sgl,
                                               uint16_t br_i, struct quorum_info *q_info, uint16_t t_id)
@@ -1092,10 +1092,10 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
     //printf("Write %u/%u opcode %u \n", i, coalesce_num, write->opcode);
     byte_ptr += get_write_size_from_opcode(write->opcode);
 
-    struct per_write_meta *w_meta = &p_ops->w_meta[backward_ptr];
+    per_write_meta_t *w_meta = &p_ops->w_meta[backward_ptr];
     uint8_t *w_state = &w_meta->w_state;
 
-    struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
+    sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
     switch (write->opcode) {
       case ACCEPT_OP:
       case ACCEPT_OP_BIT_VECTOR:
@@ -1170,17 +1170,17 @@ static inline void set_w_state_for_each_write(struct pending_ops *p_ops, struct 
 
 
 
-static inline bool release_not_ready(struct pending_ops *p_ops,
-                                     struct w_mes_info *info, struct w_message *w_mes,
+static inline bool release_not_ready(p_ops_t *p_ops,
+                                     w_mes_info_t *info, struct w_message *w_mes,
                                      uint32_t *release_rdy_dbg_cnt, uint16_t t_id) {
   if (!info->is_release)
     return false; // not even a release
 
-  //struct sess_info *sess_info = p_ops->sess_info;
+  //sess_info_t *sess_info = p_ops->sess_info;
   // We know the message contains releases. let's check their sessions!
   for (uint8_t i = 0; i < w_mes->coalesce_num; i++) {
     if (info->per_message_release_flag[i]) {
-      struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
+      sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[i]];
       if (!sess_info->ready_to_release) {
         if (ENABLE_ASSERTIONS) {
           assert(sess_info->live_writes > 0);
@@ -1207,7 +1207,7 @@ static inline bool release_not_ready(struct pending_ops *p_ops,
  * --------------------------------------------------*/
 
 // Release performs two writes when the first round must carry the send vector
-static inline void commit_first_round_of_release_and_spawn_the_second (struct pending_ops *p_ops,
+static inline void commit_first_round_of_release_and_spawn_the_second (p_ops_t *p_ops,
                                                                        uint16_t t_id)
 {
   uint32_t w_pull_ptr = p_ops->w_pull_ptr;
@@ -1221,7 +1221,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (struct pe
   // because we overwrite the value,
   if (!is_no_op)
     memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
-  struct trace_op op;
+  trace_op_t op;
   op.session_id = (uint16_t) p_ops->w_meta[w_pull_ptr].sess_id;
   memcpy((void *) &op.ts, rel, W_SIZE); // We are treating the trace op as a sess_id + struct write
   //if (DEBUG_SESSIONS)
@@ -1260,9 +1260,9 @@ static inline bool complete_requests_that_wait_all_acks(uint8_t *w_state,
 
 
 //
-static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_ops, uint16_t t_id)
+static inline void attempt_to_free_partially_acked_write(p_ops_t *p_ops, uint16_t t_id)
 {
-  struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
+  per_write_meta_t *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
 
   if (w_meta->w_state >= SENT_PUT && w_meta->acks_seen >= REMOTE_QUORUM) {
     p_ops->full_w_q_fifo++;
@@ -1286,12 +1286,12 @@ static inline void attempt_to_free_partially_acked_write(struct pending_ops *p_o
 
 
 //
-static inline void clear_after_release_quorum(struct pending_ops *p_ops,
+static inline void clear_after_release_quorum(p_ops_t *p_ops,
                                               uint32_t w_ptr, uint16_t t_id)
 {
   uint32_t sess_id = p_ops->w_meta[w_ptr].sess_id;
   if (ENABLE_ASSERTIONS) assert( sess_id < SESSIONS_PER_THREAD);
-  struct sess_info *sess_info = &p_ops->sess_info[sess_id];
+  sess_info_t *sess_info = &p_ops->sess_info[sess_id];
   if (ENABLE_ASSERTIONS && !sess_info->stalled)
     printf("state %u ptr %u \n", p_ops->w_meta[w_ptr].w_state, w_ptr);
   // Releases, and Acquires/RMW-Acquires that needed a "write" round complete here
@@ -1303,7 +1303,7 @@ static inline void clear_after_release_quorum(struct pending_ops *p_ops,
 
 
 // When committing reads
-static inline void set_flags_before_committing_a_read(struct read_info *read_info,
+static inline void set_flags_before_committing_a_read(r_info_t *read_info,
                                                       bool *acq_second_round_to_flip_bit, bool *insert_write_flag,
                                                       bool *write_local_kvs, bool *insert_commit_flag,
                                                       bool *signal_completion, bool *signal_completion_after_kvs_write,
@@ -1346,7 +1346,7 @@ static inline void set_flags_before_committing_a_read(struct read_info *read_inf
 
 // Returns true, if you should move to the next message
 static inline bool find_the_r_ptr_rep_refers_to(uint32_t *r_ptr, uint64_t l_id, uint64_t pull_lid,
-                                                struct pending_ops *p_ops,
+                                                p_ops_t *p_ops,
                                                 uint8_t mes_opcode, uint8_t r_rep_num, uint16_t  t_id)
 {
   if (p_ops->r_size == 0 && mes_opcode == READ_REPLY) {
@@ -1365,7 +1365,7 @@ static inline bool find_the_r_ptr_rep_refers_to(uint32_t *r_ptr, uint64_t l_id, 
 }
 
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
-static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_info *read_info,
+static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read_info,
                                          uint16_t t_id)
 {
   // Check for acquires that detected a false positive
@@ -1411,7 +1411,7 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, struct read_in
 }
 
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
-static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, struct read_info *read_info,
+static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_info_t *read_info,
                                                  uint16_t t_id)
 {
   detect_false_positives_on_read_info_bookkeeping((struct r_rep_big *) acq_rep, read_info, t_id);
@@ -1456,7 +1456,7 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, st
 
 //When polling read replies, handle a reply to read, acquire, readts, rmw acquire-- return true to continue to next rep
 static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_, uint64_t l_id, uint64_t pull_lid,
-                                       struct pending_ops *p_ops, int read_i, uint16_t r_rep_i,
+                                       p_ops_t *p_ops, int read_i, uint16_t r_rep_i,
                                        uint32_t *outstanding_reads, uint16_t t_id)
 {
   uint32_t r_ptr = *r_ptr_;
@@ -1465,7 +1465,7 @@ static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_
   if (pull_lid >= l_id) {
     if (l_id + read_i < pull_lid) return true;
   }
-  struct read_info *read_info = &p_ops->read_info[r_ptr];
+  r_info_t *read_info = &p_ops->read_info[r_ptr];
   if (DEBUG_READ_REPS)
     my_printf(yellow, "Read reply %u, Received replies %u/%d at r_ptr %u \n",
               r_rep_i, read_info->rep_num, REMOTE_QUORUM, r_ptr);

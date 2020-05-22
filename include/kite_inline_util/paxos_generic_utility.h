@@ -15,7 +15,7 @@
 /* ---------------------------------------------------------------------------
 //------------------------------ GENERIC UTILITY------------------------------------------
 //---------------------------------------------------------------------------*/
-static inline void zero_out_the_rmw_reply_loc_entry_metadata(struct rmw_local_entry* loc_entry)
+static inline void zero_out_the_rmw_reply_loc_entry_metadata(loc_entry_t* loc_entry)
 {
   if (ENABLE_ASSERTIONS) { // make sure the loc_entry is correctly set-up
     if (loc_entry->help_loc_entry == NULL) {
@@ -33,7 +33,7 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(struct rmw_local_en
 
 
 // After having helped another RMW, bring your own RMW back into the local entry
-static inline void reinstate_loc_entry_after_helping(struct rmw_local_entry *loc_entry, uint16_t t_id)
+static inline void reinstate_loc_entry_after_helping(loc_entry_t *loc_entry, uint16_t t_id)
 {
   //if (loc_entry->helping_flag == HELPING_NEED_STASHING) {
   //  loc_entry->opcode = loc_entry->help_rmw->opcode;
@@ -54,7 +54,7 @@ static inline void reinstate_loc_entry_after_helping(struct rmw_local_entry *loc
 
 
 // Perform the operation of the RMW and store the result in the local entry, call on locally accepting
-static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_entry,
+static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
                                                     mica_op_t *kv_ptr,
                                                     uint16_t t_id)
 {
@@ -91,10 +91,10 @@ static inline void perform_the_rmw_on_the_loc_entry(struct rmw_local_entry *loc_
 
 
 // free a session held by an RMW
-static inline void free_session_from_rmw(struct pending_ops *p_ops, uint16_t sess_id, bool allow_paxos_log,
+static inline void free_session_from_rmw(p_ops_t *p_ops, uint16_t sess_id, bool allow_paxos_log,
                                          uint16_t t_id)
 {
-  struct rmw_local_entry *loc_entry = &p_ops->prop_info->entry[sess_id];
+  loc_entry_t *loc_entry = &p_ops->prop_info->entry[sess_id];
   if (ENABLE_ASSERTIONS) {
     assert(sess_id < SESSIONS_PER_THREAD);
     assert(loc_entry->state == INVALID_RMW);
@@ -111,7 +111,7 @@ static inline void free_session_from_rmw(struct pending_ops *p_ops, uint16_t ses
 }
 
 
-static inline void local_rmw_ack(struct rmw_local_entry *loc_entry)
+static inline void local_rmw_ack(loc_entry_t *loc_entry)
 {
   loc_entry->rmw_reps.tot_replies = 1;
   loc_entry->rmw_reps.acks = 1;
@@ -162,8 +162,8 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
 }
 
 // returns true if the RMW can be failed before allocating a local entry
-static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct kvs_resp *resp, uint16_t t_id)
+static inline bool does_rmw_fail_early(trace_op_t *op, mica_op_t *kv_ptr,
+                                       kv_resp_t *resp, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
   if (op->opcode == COMPARE_AND_SWAP_WEAK &&
@@ -180,7 +180,7 @@ static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
 }
 
 //
-static inline bool rmw_fails_with_loc_entry(struct rmw_local_entry *loc_entry, mica_op_t *kv_ptr,
+static inline bool rmw_fails_with_loc_entry(loc_entry_t *loc_entry, mica_op_t *kv_ptr,
                                             bool *rmw_fails, uint16_t t_id)
 {
   if (ENABLE_CAS_CANCELLING) {
@@ -231,7 +231,7 @@ static inline bool kv_ptr_state_has_changed(mica_op_t *kv_ptr,
 
 // When a propose/accept has inspected the responses (after they have reached at least a quorum),
 // advance the entry's l_id such that previous responses are disregarded
-static inline void advance_loc_entry_l_id(struct pending_ops *p_ops, struct rmw_local_entry *loc_entry,
+static inline void advance_loc_entry_l_id(p_ops_t *p_ops, loc_entry_t *loc_entry,
                                           uint16_t t_id)
 {
   loc_entry->l_id = p_ops->prop_info->l_id;
@@ -240,8 +240,8 @@ static inline void advance_loc_entry_l_id(struct pending_ops *p_ops, struct rmw_
 }
 
 //
-static inline bool if_already_committed_bcast_commits(struct pending_ops *p_ops,
-                                                      struct rmw_local_entry *loc_entry,
+static inline bool if_already_committed_bcast_commits(p_ops_t *p_ops,
+                                                      loc_entry_t *loc_entry,
                                                       uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -261,7 +261,7 @@ static inline bool if_already_committed_bcast_commits(struct pending_ops *p_ops,
 
 // Potentially useful (for performance only) when a propose receives already_committed
 // responses and still is holding the kv_ptr
-static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
+static inline void free_kv_ptr_if_rmw_failed(loc_entry_t *loc_entry,
                                              uint8_t state, uint16_t t_id)
 {
   mica_op_t *kv_ptr = loc_entry->kv_ptr;
@@ -304,7 +304,7 @@ static inline void free_kv_ptr_if_rmw_failed(struct rmw_local_entry *loc_entry,
  * --------------------------------------------------------------------------*/
 
 // Fill a write message with a commit
-static inline void fill_commit_message_from_l_entry(struct commit *com, struct rmw_local_entry *loc_entry,
+static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entry_t *loc_entry,
                                                     uint8_t broadcast_state, uint16_t t_id)
 {
   com->base_ts.m_id = loc_entry->base_ts.m_id;
@@ -330,7 +330,7 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, struct r
 
 // Fill a write message with a commit from read info, after an rmw acquire
 static inline void fill_commit_message_from_r_info(struct commit *com,
-                                                   struct read_info* r_info, uint16_t t_id)
+                                                   r_info_t* r_info, uint16_t t_id)
 {
   com->base_ts.m_id = r_info->ts_to_read.m_id;
   com->base_ts.version = r_info->ts_to_read.version;

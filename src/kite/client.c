@@ -16,7 +16,7 @@
  * --------------------------------------------------------------------------------------*/
 
 // Use a trace - can be either manufactured or from text
-static inline uint32_t send_reqs_from_trace(struct trace_command *trace, uint16_t t_id)
+static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
 {
   const uint16_t worker_num = (uint16_t)(WORKERS_PER_MACHINE / CLIENTS_PER_MACHINE_);
   uint16_t first_worker = worker_num * t_id;
@@ -2759,12 +2759,12 @@ static inline void pc_multi_session(uint16_t t_id)
 void *client(void *arg) {
   struct thread_params params = *(struct thread_params *) arg;
   uint16_t t_id = (uint16_t) params.id;
-  struct trace_command *trace;
+  trace_t *trace;
   my_printf(green, "Client %u reached loop \n", t_id);
   while (true) {
     switch (CLIENT_MODE) {
       case CLIENT_USE_TRACE:
-        trace_init((void **)&trace, t_id);
+        trace = trace_init(t_id);
         send_reqs_from_trace(trace, t_id);
         break;
       case CLIENT_UI:

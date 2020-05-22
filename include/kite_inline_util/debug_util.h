@@ -84,7 +84,7 @@ static inline void print_wrkr_stats (uint16_t t_id)
 }
 
 // Print the rep info received for a propose or an accept
-static inline void print_rmw_rep_info(struct rmw_local_entry *loc_entry, uint16_t t_id) {
+static inline void print_rmw_rep_info(loc_entry_t *loc_entry, uint16_t t_id) {
   struct rmw_rep_info *rmw_rep = &loc_entry->rmw_reps;
   my_printf(yellow, "Wrkr %u Printing rmw_rep for sess %u state %u helping flag %u \n"
               "Tot_replies %u \n acks: %u \n rmw_id_committed: %u \n log_too_small %u\n"
@@ -99,7 +99,7 @@ static inline void print_rmw_rep_info(struct rmw_local_entry *loc_entry, uint16_
 
 // Leader checks its debug counters
 static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_dbg_counter,
-                                     struct pending_ops *p_ops, void *buf,
+                                     p_ops_t *p_ops, void *buf,
                                      uint32_t r_pull_ptr, uint32_t w_pull_ptr,
                                      uint32_t ack_pull_ptr, uint32_t r_rep_pull_ptr,
                                      uint16_t t_id)
@@ -188,7 +188,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
 }
 
 // When pulling a n ew req from the trace, check the req and the working session
-static inline void check_trace_req(struct pending_ops *p_ops, struct trace_command *trace,
+static inline void check_trace_req(p_ops_t *p_ops, trace_t *trace,
                                    int working_session, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -208,7 +208,7 @@ static inline void check_trace_req(struct pending_ops *p_ops, struct trace_comma
 
 
 static inline void debug_and_count_stats_when_broadcasting_writes
-  (struct pending_ops *p_ops, uint32_t bcast_pull_ptr,
+  (p_ops_t *p_ops, uint32_t bcast_pull_ptr,
    uint8_t coalesce_num, uint16_t t_id, uint64_t* expected_l_id_to_send,
    uint16_t br_i, uint32_t *outstanding_writes)
 {
@@ -255,18 +255,18 @@ static inline void debug_and_count_stats_when_broadcasting_writes
 // Perform some basic checks when inserting a write to a fresh message
 static inline void debug_checks_when_inserting_a_write
   (const uint8_t source, struct write *write, const uint32_t w_mes_ptr,
-   const uint64_t message_l_id, struct pending_ops *p_ops,
+   const uint64_t message_l_id, p_ops_t *p_ops,
    const uint32_t w_ptr, const uint16_t t_id)
 {
 
   if (ENABLE_ASSERTIONS) {
-    struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_ptr];
+    w_mes_info_t *info = &p_ops->w_fifo->info[w_mes_ptr];
     if (message_l_id > MAX_MES_IN_WRITE && info->valid_header_l_id) {
       uint32_t prev_w_mes_ptr = (w_mes_ptr + W_FIFO_SIZE - 1) % W_FIFO_SIZE;
 
 
       struct w_message *prev_w_mes = (struct w_message *) &p_ops->w_fifo->w_message[prev_w_mes_ptr];
-      struct w_mes_info *prev_info = &p_ops->w_fifo->info[prev_w_mes_ptr];
+      w_mes_info_t *prev_info = &p_ops->w_fifo->info[prev_w_mes_ptr];
 
       bool prev_mes_valid_l_id = prev_info->valid_header_l_id;
       uint64_t prev_l_id = prev_w_mes->l_id;
@@ -357,7 +357,7 @@ static inline void print_thread_stats(uint16_t t_id) {
 }
 
 
-static inline void print_verbouse_debug_info(struct pending_ops *p_ops, uint16_t t_id, uint16_t credits[][MACHINE_NUM])
+static inline void print_verbouse_debug_info(p_ops_t *p_ops, uint16_t t_id, uint16_t credits[][MACHINE_NUM])
 {
   uint16_t i;
   my_printf(green, "---DEBUG INFO---------\n");
@@ -424,7 +424,7 @@ static inline void increase_credits_when_polling_r_reps(uint16_t credits[][MACHI
 }
 
 // Debug session
-static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
+static inline void debug_sessions(struct session_dbg *ses_dbg, p_ops_t *p_ops,
                                   uint32_t sess_id, uint16_t t_id)
 {
   if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
@@ -439,7 +439,7 @@ static inline void debug_sessions(struct session_dbg *ses_dbg, struct pending_op
 }
 
 // Debug all the session
-static inline void debug_all_sessions(struct session_dbg *ses_dbg, struct pending_ops *p_ops,
+static inline void debug_all_sessions(struct session_dbg *ses_dbg, p_ops_t *p_ops,
                                       uint16_t t_id)
 {
   if (DEBUG_SESSIONS && ENABLE_ASSERTIONS) {
@@ -449,7 +449,7 @@ static inline void debug_all_sessions(struct session_dbg *ses_dbg, struct pendin
       //assert(p_ops->prop_info->entry[sess_id].state != INVALID_RMW);
       if (ses_dbg->dbg_cnt[sess_id] == DEBUG_SESS_COUNTER) {
         if (sess_id == 0) {
-          struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
+          per_write_meta_t *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
           my_printf(red, "Wrkr %u Session %u seems to be stuck-- all stuck \n", t_id, sess_id);
           my_printf(yellow, "Wrkr %u w_size %u, w_state %u, acks seen/expected %u/%u \n",
                     t_id, p_ops->w_size, w_meta->w_state, w_meta->acks_seen, w_meta->acks_expected);
@@ -487,13 +487,13 @@ static inline void print_q_info(struct quorum_info *q_info)
 }
 
 // From commit reads
-static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint32_t pull_ptr,
+static inline void checks_when_committing_a_read(p_ops_t *p_ops, uint32_t pull_ptr,
                                                  bool acq_second_round_to_flip_bit, bool insert_write_flag,
                                                  bool write_local_kvs, bool insert_commit_flag,
                                                  bool signal_completion, bool signal_completion_after_kvs_write,
                                                  uint16_t t_id)
 {
-  struct read_info *read_info = &p_ops->read_info[pull_ptr];
+  r_info_t *read_info = &p_ops->read_info[pull_ptr];
   if (ENABLE_ASSERTIONS) {
     if (acq_second_round_to_flip_bit) assert(p_ops->virt_r_size < MAX_ALLOWED_R_SIZE);
     check_state_with_allowed_flags(6, read_info->opcode, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
@@ -535,7 +535,7 @@ static inline void checks_when_committing_a_read(struct pending_ops *p_ops, uint
 }
 
 //
-static inline void check_read_fifo_metadata(struct pending_ops *p_ops, struct r_message *r_mes,
+static inline void check_read_fifo_metadata(p_ops_t *p_ops, struct r_message *r_mes,
                                             uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -732,8 +732,8 @@ static inline void check_previous_read_lid(uint8_t source, uint8_t opcode, uint6
 }
 
 // Check when inserting a read
-static inline void check_read_state_and_key(struct pending_ops *p_ops, uint32_t r_ptr, uint8_t source, struct r_message *r_mes,
-                                            struct read_info *r_info, uint32_t r_mes_ptr, struct read *read, uint16_t t_id)
+static inline void check_read_state_and_key(p_ops_t *p_ops, uint32_t r_ptr, uint8_t source, struct r_message *r_mes,
+                                            r_info_t *r_info, uint32_t r_mes_ptr, struct read *read, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     if (p_ops->r_state[r_ptr] != INVALID)
@@ -766,7 +766,7 @@ static inline bool check_entry_validity_with_key(struct key *incoming_key, mica_
 }
 
 // When polling an ack message
-static inline void check_ack_message_count_stats(struct pending_ops* p_ops, struct ack_message* ack,
+static inline void check_ack_message_count_stats(p_ops_t* p_ops, struct ack_message* ack,
                                                  uint32_t index, uint16_t ack_num, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -798,7 +798,7 @@ static inline void check_ack_message_count_stats(struct pending_ops* p_ops, stru
 
 
 // When polling acks: more precisely when inspecting each l_id acked
-static inline void  check_ack_and_print(struct pending_ops* p_ops, uint16_t ack_i, uint32_t ack_ptr,
+static inline void  check_ack_and_print(p_ops_t* p_ops, uint16_t ack_i, uint32_t ack_ptr,
                                         uint16_t  ack_num, uint64_t l_id, uint64_t pull_lid, uint16_t t_id) {
   if (ENABLE_ASSERTIONS) {
     if (DEBUG_WRITES && (ack_ptr == p_ops->w_push_ptr)) {
@@ -823,7 +823,7 @@ static inline void  check_ack_and_print(struct pending_ops* p_ops, uint16_t ack_
 }
 
 // Check the key of the trace_op and the KVS
-static inline void check_trace_op_key_vs_kv_ptr(struct trace_op* op, mica_op_t* kv_ptr)
+static inline void check_trace_op_key_vs_kv_ptr(trace_op_t* op, mica_op_t* kv_ptr)
 {
   if (ENABLE_ASSERTIONS) {
     struct key *op_key = &op->key;
@@ -850,7 +850,7 @@ static inline void check_keys_with_one_trace_op(struct key *com_key, mica_op_t *
 }
 
 // When removing writes
-static inline void check_after_removing_writes(struct pending_ops* p_ops, uint16_t t_id)
+static inline void check_after_removing_writes(p_ops_t* p_ops, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     if (p_ops->w_meta[p_ops->w_pull_ptr].w_state >= READY_RELEASE) {
@@ -870,7 +870,7 @@ static inline void check_after_removing_writes(struct pending_ops* p_ops, uint16
 }
 
 // Check that the counter for propose replies add up(SAME FOR ACCEPTS AND PROPS)
-static inline void check_sum_of_reps(struct rmw_local_entry *loc_entry)
+static inline void check_sum_of_reps(loc_entry_t *loc_entry)
 {
   if (ENABLE_ASSERTIONS) {
     assert(loc_entry->rmw_reps.tot_replies == sum_of_reps(&loc_entry->rmw_reps));
@@ -891,7 +891,7 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
   }
 }
 
-static inline void check_loc_entry_metadata_is_reset(struct rmw_local_entry* loc_entry,
+static inline void check_loc_entry_metadata_is_reset(loc_entry_t* loc_entry,
                                                      const char *message, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) { // make sure the loc_entry is correctly set-up
@@ -969,7 +969,7 @@ static inline void check_for_same_ts_as_already_proposed(mica_op_t *kv_ptr, stru
   }
 }
 
-static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id)
+static inline void verify_paxos(loc_entry_t *loc_entry, uint16_t t_id)
 {
   if (VERIFY_PAXOS && is_global_ses_id_local(loc_entry->rmw_id.glob_sess_id, t_id)) {
     //if (committed_log_no != *(uint32_t *)loc_entry->value_to_write)
@@ -982,7 +982,7 @@ static inline void verify_paxos(struct rmw_local_entry *loc_entry, uint16_t t_id
 }
 
 
-static inline void check_last_registered_rmw_id(struct rmw_local_entry *loc_entry,
+static inline void check_last_registered_rmw_id(loc_entry_t *loc_entry,
                                                 mica_op_t *kv_ptr, uint8_t helping_flag, uint16_t t_id)
 {
 //  if (ENABLE_ASSERTIONS) {
@@ -1067,12 +1067,12 @@ static inline void check_registered_against_kv_ptr_last_committed(mica_op_t *kv_
 }
 
 // Perofrm checks after receiving a rep to commit an RMW
-static inline void check_local_commit_from_rep(mica_op_t *kv_ptr, struct rmw_local_entry *loc_entry,
+static inline void check_local_commit_from_rep(mica_op_t *kv_ptr, loc_entry_t *loc_entry,
                                                struct rmw_rep_last_committed *rmw_rep, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     if (kv_ptr->state != INVALID_RMW) {
-      struct rmw_local_entry *working_entry = loc_entry->helping_flag == HELPING ?
+      loc_entry_t *working_entry = loc_entry->helping_flag == HELPING ?
                                               loc_entry->help_loc_entry : loc_entry;
       if (rmw_ids_are_equal(&kv_ptr->rmw_id, &working_entry->rmw_id) && kv_ptr->log_no == working_entry->log_no) {
         my_printf(red, "Wrkr: %u Received a rep opcode %u for rmw id %lu glob_sess_id %u, log no %u "
@@ -1147,7 +1147,7 @@ static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *mess
 }
 
 
-static inline void debug_fail_help(struct rmw_local_entry *loc_entry, const char *message, uint16_t t_id)
+static inline void debug_fail_help(loc_entry_t *loc_entry, const char *message, uint16_t t_id)
 {
   if (DEBUG_RMW) {
     if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED && t_id == 0)
@@ -1156,7 +1156,7 @@ static inline void debug_fail_help(struct rmw_local_entry *loc_entry, const char
 }
 
 // When stealing kv_ptr from a stuck proposal, check that the proposal was referring to a valid log no
-static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local_entry *loc_entry,
+static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, loc_entry_t *loc_entry,
                                              uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -1172,7 +1172,7 @@ static inline void check_the_proposed_log_no(mica_op_t *kv_ptr, struct rmw_local
 
 
 
-static inline void debug_set_version_of_op_to_one(struct trace_op *op, uint8_t opcode,
+static inline void debug_set_version_of_op_to_one(trace_op_t *op, uint8_t opcode,
                                                   uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -1195,11 +1195,11 @@ static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16
 }
 
 
-static inline void check_all_w_meta(struct pending_ops* p_ops, uint16_t t_id, const char* message)
+static inline void check_all_w_meta(p_ops_t* p_ops, uint16_t t_id, const char* message)
 {
   if (ENABLE_ASSERTIONS) ;
   for (uint16_t i = 0; i < PENDING_WRITES; i++) {
-    struct per_write_meta *w_meta = &p_ops->w_meta[i];
+    per_write_meta_t *w_meta = &p_ops->w_meta[i];
     uint8_t w_state = w_meta->w_state;
     check_state_with_allowed_flags(5, w_state, INVALID, VALID, SENT_COMMIT, READY_COMMIT);
     uint8_t id_to_check = (uint8_t) (machine_id == 0 ? 0 : 1);
@@ -1212,8 +1212,8 @@ static inline void check_all_w_meta(struct pending_ops* p_ops, uint16_t t_id, co
   }
 }
 
-static inline void checks_and_prints_local_accept_help(struct rmw_local_entry *loc_entry,
-                                                       struct rmw_local_entry* help_loc_entry,
+static inline void checks_and_prints_local_accept_help(loc_entry_t *loc_entry,
+                                                       loc_entry_t* help_loc_entry,
                                                        mica_op_t *kv_ptr, bool kv_ptr_is_the_same,
                                                        bool kv_ptr_is_invalid_but_not_committed,
                                                        bool helping_stuck_accept,

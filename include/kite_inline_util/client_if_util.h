@@ -11,7 +11,7 @@ static inline void signal_completion_to_client(uint32_t sess_id,
                                                uint32_t req_array_i, uint16_t t_id)
 {
   if (ENABLE_CLIENTS) {
-    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
+    client_op_t *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
 
 //    my_printf(yellow, "Wrkr %u/%u completing poll ptr %u for req %u at state %u \n", t_id,
@@ -36,7 +36,7 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
 {
   if (ENABLE_CLIENTS) {
 
-    struct client_op *req_array = &interface[t_id].req_array[sess_id][req_array_i];
+    client_op_t *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     //my_printf(cyan, "Wrkr %u/%u signals in progress for  poll ptr %u for req %u at state %u \n", t_id,
     //       sess_id, req_array_i,req_array->opcode, req_array->state);
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
@@ -50,7 +50,7 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
 static inline bool is_client_req_active(uint32_t sess_id,
                                         uint32_t req_array_i, uint16_t t_id)
 {
-  struct client_op * req_array = &interface[t_id].req_array[sess_id][req_array_i];
+  client_op_t * req_array = &interface[t_id].req_array[sess_id][req_array_i];
   check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
   return req_array->state == ACTIVE_REQ;
 }
@@ -70,10 +70,10 @@ static inline bool any_request_active(uint16_t sess_id, uint32_t req_array_i, ui
 }
 
 //
-static inline void fill_req_array_when_after_rmw(struct rmw_local_entry *loc_entry, uint16_t t_id)
+static inline void fill_req_array_when_after_rmw(loc_entry_t *loc_entry, uint16_t t_id)
 {
   if (ENABLE_CLIENTS) {
-    struct client_op *cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
+    client_op_t *cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
     if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_val_len == cl_op->val_len);
     switch (loc_entry->opcode) {
       case RMW_PLAIN_WRITE:
@@ -107,7 +107,7 @@ static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* v
       assert(value_to_read != NULL);
       check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
     }
-    struct client_op *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
+    client_op_t *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
     *(cl_op->rmw_is_successful) = false;
     memcpy(cl_op->value_to_read, value_to_read, cl_op->val_len);
   }

@@ -30,9 +30,9 @@
 //---------------------------------------------------------------------------*/
 
 static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
-                                             uint32_t trace_iter, struct trace_command *trace,
-                                             struct trace_op *ops,
-                                             struct pending_ops *p_ops, struct kvs_resp *resp,
+                                             uint32_t trace_iter, trace_t *trace,
+                                             trace_op_t *ops,
+                                             p_ops_t *p_ops, kv_resp_t *resp,
                                              struct latency_flags *latency_info,
                                              struct session_dbg *ses_dbg, uint16_t *last_session_,
                                              uint32_t *sizes_dbg_cntr)
@@ -137,10 +137,10 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 //---------------------------------------------------------------------------*/
 
 // Worker inspects its local RMW entries
-static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
+static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
 {
   for (uint16_t sess_i = 0; sess_i < SESSIONS_PER_THREAD; sess_i++) {
-    struct rmw_local_entry* loc_entry = &p_ops->prop_info->entry[sess_i];
+    loc_entry_t* loc_entry = &p_ops->prop_info->entry[sess_i];
     uint8_t state = loc_entry->state;
     if (state == INVALID_RMW) continue;
     if (ENABLE_ASSERTIONS) {
@@ -160,7 +160,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
     }
     /* =============== BROADCAST COMMITS ======================== */
     if (state == MUST_BCAST_COMMITS || state == MUST_BCAST_COMMITS_FROM_HELP) {
-      struct rmw_local_entry *entry_to_commit =
+      loc_entry_t *entry_to_commit =
         state == MUST_BCAST_COMMITS ? loc_entry : loc_entry->help_loc_entry;
       //bool is_commit_helping = loc_entry->helping_flag != NOT_HELPING;
       if (p_ops->virt_w_size < MAX_ALLOWED_W_SIZE) {
@@ -168,7 +168,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
           my_printf(green, "Wrkr %u sess %u will bcast commits for the latest committed RMW,"
                          " after learning its proposed RMW has already been committed \n", t_id, loc_entry->sess_id);
         }
-        insert_write(p_ops, (struct trace_op*) entry_to_commit, FROM_COMMIT, state, t_id);
+        insert_write(p_ops, (trace_op_t*) entry_to_commit, FROM_COMMIT, state, t_id);
         loc_entry->state = COMMITTED;
         continue;
       }
@@ -237,7 +237,7 @@ static inline void inspect_rmws(struct pending_ops *p_ops, uint16_t t_id)
 //------------------------------ BROADCASTS ----------------------------------
 //---------------------------------------------------------------------------*/
 // Broadcast Writes
-static inline void broadcast_writes(struct pending_ops *p_ops,
+static inline void broadcast_writes(p_ops_t *p_ops,
                                     uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
                                     uint32_t *release_rdy_dbg_cnt, uint32_t *time_out_cnt,
                                     struct ibv_sge *w_send_sgl, struct ibv_send_wr *r_send_wr,
@@ -303,7 +303,7 @@ static inline void broadcast_writes(struct pending_ops *p_ops,
 
 
 // Broadcast Reads
-static inline void broadcast_reads(struct pending_ops *p_ops,
+static inline void broadcast_reads(p_ops_t *p_ops,
                                    uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
                                    uint32_t *credit_debug_cnt,
                                    uint32_t *time_out_cnt,
@@ -364,7 +364,7 @@ static inline void broadcast_reads(struct pending_ops *p_ops,
 //---------------------------------------------------------------------------*/
 
 // Send Read Replies
-static inline void send_r_reps(struct pending_ops *p_ops, struct hrd_ctrl_blk *cb,
+static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
                                struct ibv_send_wr *r_rep_send_wr, struct ibv_sge *r_rep_send_sgl,
                                struct recv_info *r_recv_info, struct recv_info *w_recv_info,
                                uint64_t *r_rep_tx,  uint16_t t_id)
@@ -493,7 +493,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
 
 // Poll for the write broadcasts
 static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws,
-                                   uint32_t *pull_ptr, struct pending_ops *p_ops,
+                                   uint32_t *pull_ptr, p_ops_t *p_ops,
                                    struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
                                    struct recv_info *w_recv_info, struct ack_message *acks,
                                    uint32_t *completed_but_not_polled_writes,
@@ -574,7 +574,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
 // Poll for the r_rep broadcasts
 static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
-                                  uint32_t *pull_ptr, struct pending_ops *p_ops,
+                                  uint32_t *pull_ptr, p_ops_t *p_ops,
                                   struct ibv_cq *r_recv_cq, struct ibv_wc *r_recv_wc,
                                   uint16_t t_id, uint32_t *dbg_counter)
 {
@@ -634,7 +634,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
 
 
 // Apply the acks that refer to stored writes
-static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint32_t ack_ptr,
+static inline void apply_acks(p_ops_t *p_ops, uint16_t ack_num, uint32_t ack_ptr,
                               uint8_t ack_m_id, uint32_t *outstanding_writes,
                               uint64_t l_id, uint64_t pull_lid,
                               struct quorum_info *q_info,
@@ -643,7 +643,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
   for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {
     //printf("Checking my acks \n");
     check_ack_and_print(p_ops, ack_i, ack_ptr, ack_num, l_id, pull_lid, t_id);
-    struct per_write_meta *w_meta = &p_ops->w_meta[ack_ptr];
+    per_write_meta_t *w_meta = &p_ops->w_meta[ack_ptr];
     w_meta->acks_seen++;
     bool ack_m_id_found = false;
     if (ENABLE_ASSERTIONS) assert(w_meta->acks_expected >= REMOTE_QUORUM);
@@ -724,7 +724,7 @@ static inline void apply_acks(struct pending_ops *p_ops, uint16_t ack_num, uint3
 
 // Worker polls for acks
 static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t *pull_ptr,
-                             struct pending_ops *p_ops,
+                             p_ops_t *p_ops,
                              uint16_t credits[][MACHINE_NUM],
                              struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
                              struct recv_info *ack_recv_info,
@@ -790,7 +790,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
 
 //Poll for read replies
 static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *incoming_r_reps,
-                                         uint32_t *pull_ptr, struct pending_ops *p_ops,
+                                         uint32_t *pull_ptr, p_ops_t *p_ops,
                                          uint16_t credits[][MACHINE_NUM],
                                          struct ibv_cq *r_rep_recv_cq, struct ibv_wc *r_rep_recv_wc,
                                          struct recv_info *r_rep_recv_info, uint16_t t_id,
@@ -881,7 +881,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
 // Handle acked reads: trigger second round if needed, update the KVS if needed
 // Handle the first round of Lin Writes
 // Increment the epoch_id after an acquire that learnt the node has missed messages
-static inline void commit_reads(struct pending_ops *p_ops,
+static inline void commit_reads(p_ops_t *p_ops,
                                 struct latency_flags * latency_info, uint16_t t_id)
 {
   uint32_t pull_ptr = p_ops->r_pull_ptr;
@@ -918,7 +918,7 @@ static inline void commit_reads(struct pending_ops *p_ops,
    * this many acquires can possibly exist in the fifo*/
   if (ENABLE_ASSERTIONS) assert(p_ops->virt_r_size < PENDING_READS);
   while(p_ops->r_state[pull_ptr] == READY) {
-    struct read_info *read_info = &p_ops->read_info[pull_ptr];
+    r_info_t *read_info = &p_ops->read_info[pull_ptr];
     //set the flags for each read
     set_flags_before_committing_a_read(read_info, &acq_second_round_to_flip_bit, &insert_write_flag,
                                        &write_local_kvs, &insert_commit_flag,
@@ -1035,20 +1035,20 @@ static inline void commit_reads(struct pending_ops *p_ops,
   }
   p_ops->r_pull_ptr = pull_ptr;
   if (writes_for_cache > 0)
-    KVS_batch_op_first_read_round(writes_for_cache, t_id, (struct read_info **) p_ops->ptrs_to_mes_ops,
+    KVS_batch_op_first_read_round(writes_for_cache, t_id, (r_info_t **) p_ops->ptrs_to_mes_ops,
                                   p_ops, 0, MAX_INCOMING_R, false);
 }
 
 
 
 // Remove writes that have seen all acks
-static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags *latency_info,
+static inline void remove_writes(p_ops_t *p_ops, struct latency_flags *latency_info,
                                  uint16_t t_id)
 {
   while(p_ops->w_meta[p_ops->w_pull_ptr].w_state >= READY_PUT) {
     p_ops->full_w_q_fifo = 0;
     uint32_t w_pull_ptr = p_ops->w_pull_ptr;
-    struct per_write_meta *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
+    per_write_meta_t *w_meta = &p_ops->w_meta[p_ops->w_pull_ptr];
     uint8_t w_state = w_meta->w_state;
     if (ENABLE_ASSERTIONS && EMULATE_ABD)
       assert(w_state == READY_RELEASE || w_state == READY_ACQUIRE);
@@ -1059,7 +1059,7 @@ static inline void remove_writes(struct pending_ops *p_ops, struct latency_flags
     //if (t_id == 1) printf("Wrkr %u Clearing state %u ptr %u \n", t_id, w_state, p_ops->w_pull_ptr);
     uint32_t sess_id = w_meta->sess_id;
     if (ENABLE_ASSERTIONS) assert(sess_id < SESSIONS_PER_THREAD);
-    struct sess_info *sess_info = &p_ops->sess_info[sess_id];
+    sess_info_t *sess_info = &p_ops->sess_info[sess_id];
 
     //if (w_state == READY_RELEASE ||
     if(w_state == READY_RMW_ACQ_COMMIT || w_state == READY_ACQUIRE) {

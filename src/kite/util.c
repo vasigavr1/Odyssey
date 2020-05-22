@@ -94,15 +94,15 @@ void static_assert_compile_parameters()
 #if VERIFY_PAXOS == 1
   static_assert(EXIT_ON_PRINT == 1, "");
 #endif
-  //static_assert(sizeof(struct trace_op) == 18 + VALUE_SIZE  + 8 + 4, "");
+  //static_assert(sizeof(trace_op_t) == 18 + VALUE_SIZE  + 8 + 4, "");
   static_assert(TRACE_ONLY_CAS + TRACE_ONLY_FA + TRACE_MIXED_RMWS == 1, "");
 
 
-//  printf("Client op  %u  %u \n", sizeof(struct client_op), PADDING_BYTES_CLIENT_OP);
+//  printf("Client op  %u  %u \n", sizeof(client_op_t), PADDING_BYTES_CLIENT_OP);
 //  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
-  static_assert(sizeof(struct client_op) == CLIENT_OP_SIZE, "");
-  static_assert(sizeof(struct client_op) % 64 == 0, "");
+  static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
+  static_assert(sizeof(client_op_t) % 64 == 0, "");
   static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
   static_assert(sizeof(struct wrk_clt_if) == INTERFACE_SIZE, "");
   for (uint16_t i = 0; i < WORKERS_PER_MACHINE; i++) {
@@ -124,7 +124,7 @@ void print_parameters_in_the_start()
                  "read info %llu\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
                sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
-               sizeof (struct read_info));
+               sizeof (r_info_t));
   my_printf(green, "W_COALESCE %d, R_COALESCE %d, ACC_COALESCE %u, "
                  "PROPOSE COALESCE %d, COM_COALESCE %d, MAX_WRITE_COALESCE %d,"
                  "MAX_READ_COALESCE %d \n",
@@ -356,8 +356,9 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
 }
 
 
-// Parse a trace, use this for skewed workloads as uniform trace can be manufactured easilly
-int parse_trace(char* path, struct trace_command **cmds, int t_id){
+// Parse a trace, use this for skewed workloads as uniform trace can be manufactured easily
+trace_t* parse_trace(char* path, int t_id){
+    trace_t *trace;
     FILE * fp;
     ssize_t read;
     size_t len = 0;
@@ -383,10 +384,10 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
         exit(EXIT_FAILURE);
     }
     // printf("File %s has %d lines \n", path, cmd_count);
-    (*cmds) = (struct trace_command *)malloc((cmd_count + 1) * sizeof(struct trace_command));
+    trace = (trace_t *)malloc((cmd_count + 1) * sizeof(trace_t));
     struct timespec time;
     clock_gettime(CLOCK_MONOTONIC, &time);
-    uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds));
+    uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)trace);
     srand (seed);
     int debug_cnt = 0;
     //parse file line by line and insert trace to cmd.
@@ -395,11 +396,11 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
           my_printf(red, "ERROR: Problem while reading the trace\n");
         word_count = 0;
         word = strtok_r (line, " ", &saveptr);
-        (*cmds)[i].opcode = 0;
+        trace[i].opcode = 0;
 
         //Before reading the request deside if it's gone be r_rep or write
        //bool is_rmw = false, is_update = false, is_sc = false;
-      (*cmds)[i].opcode = compute_opcode(opc_info, &seed);
+      trace[i].opcode = compute_opcode(opc_info, &seed);
 
       while (word != NULL) {
         if (word[strlen(word) - 1] == '\n')
@@ -413,7 +414,7 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
             hottest_key_counter++;
           uint128 key_hash = CityHash128((char *) &(key_id), 4);
           debug_cnt++;
-          memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
+          memcpy(trace[i].key_hash, &(key_hash.second), 8);
         }
         word_count++;
         word = strtok_r(NULL, " ", &saveptr);
@@ -435,25 +436,25 @@ int parse_trace(char* path, struct trace_command **cmds, int t_id){
                (double) (opc_info->sc_reads * 100) / cmd_count,
                (double) (opc_info->rmws * 100) / cmd_count, cmd_count);
     }
-    (*cmds)[cmd_count].opcode = NOP;
+    trace[cmd_count].opcode = NOP;
     // printf("Thread %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
     //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
     assert(cmd_count == debug_cnt);
     fclose(fp);
     if (line)
         free(line);
-    return cmd_count;
+    return trace;
 }
 
 
 // Manufactures a trace with a uniform distrbution without a backing file
-void manufacture_trace(struct trace_command **cmds, int t_id)
+trace_t* manufacture_trace(int t_id)
 {
-  (*cmds) = (struct trace_command *)malloc((TRACE_SIZE + 1) * sizeof(struct trace_command));
+  trace_t *trace = (trace_t *)malloc((TRACE_SIZE + 1) * sizeof(trace_t));
   struct timespec time;
   //struct random_data *buf;
   clock_gettime(CLOCK_MONOTONIC, &time);
-  uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds));
+  uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)trace);
   srand (seed);
   struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
   uint32_t i, keys_that_get_rmwed[NUM_OF_RMW_KEYS];
@@ -463,10 +464,10 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
   }
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
-    (*cmds)[i].opcode = 0;
+    trace[i].opcode = 0;
 
     //Before reading the request decide if it's gone be r_rep or write
-    (*cmds)[i].opcode = compute_opcode(opc_info, &seed);
+    trace[i].opcode = compute_opcode(opc_info, &seed);
 
     //--- KEY ID----------
     uint32 key_id;
@@ -495,7 +496,7 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
       } while (found);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
-    memcpy((*cmds)[i].key_hash, &(key_hash.second), 8);
+    memcpy(trace[i].key_hash, &(key_hash.second), 8);
   }
 
   if (t_id == 0) {
@@ -514,13 +515,14 @@ void manufacture_trace(struct trace_command **cmds, int t_id)
            opc_info->rmw_acquires,
            TRACE_SIZE, WRITE_RATIO);
   }
-  (*cmds)[TRACE_SIZE].opcode = NOP;
+  trace[TRACE_SIZE].opcode = NOP;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
   //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
 }
 
 // Initiialize the trace
-void trace_init(void **cmds, uint16_t t_id) {
+trace_t* trace_init(uint16_t t_id) {
+  trace_t *trace;
     //create the trace path path
     if (FEED_FROM_TRACE == 1) {
       char path[2048];
@@ -535,12 +537,12 @@ void trace_init(void **cmds, uint16_t t_id) {
                GET_GLOBAL_T_ID(machine_id, t_id), "_a_0.", SKEW_EXPONENT_A, ".txt");
 
       //initialize the command array from the trace file
-      parse_trace(path, (struct trace_command **)cmds, t_id);
+      trace = parse_trace(path, t_id);
     }
     else {
-      manufacture_trace((struct trace_command **)cmds, t_id);
+      trace = manufacture_trace(t_id);
     }
-
+  return trace;
 }
 
 void dump_stats_2_file(struct stats* st){
@@ -696,109 +698,109 @@ void set_up_rmw_struct()
 }
 
 // Initialize the pending ops struct
-void set_up_pending_ops(struct pending_ops **p_ops, uint32_t pending_writes, uint32_t pending_reads)
+p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads)
 {
   uint32_t i, j;
-  (*p_ops) = (struct pending_ops *) calloc(1, sizeof(struct pending_ops));
-  set_up_q_info(&(*p_ops)->q_info);
+   p_ops_t *p_ops = (p_ops_t *) calloc(1, sizeof(p_ops_t));
+  set_up_q_info(&p_ops->q_info);
 
 
-  //(*p_ops)->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
-  (*p_ops)->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
-  //(*p_ops)->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
-  (*p_ops)->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
-  (*p_ops)->w_index_to_req_array = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
-  (*p_ops)->r_index_to_req_array = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
-  //(*p_ops)->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
-  //(*p_ops)->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
-  (*p_ops)->read_info = (struct read_info *) calloc(pending_reads, sizeof(struct read_info));
-  (*p_ops)->p_ooe_writes =
+  //p_ops->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
+  p_ops->r_state = (uint8_t *) malloc(pending_reads * sizeof(uint8_t *));
+  //p_ops->w_session_id = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
+  p_ops->r_session_id = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
+  p_ops->w_index_to_req_array = (uint32_t *) calloc(pending_writes, sizeof(uint32_t));
+  p_ops->r_index_to_req_array = (uint32_t *) calloc(pending_reads, sizeof(uint32_t));
+  //p_ops->session_has_pending_op = (bool *) calloc(SESSIONS_PER_THREAD, sizeof(bool));
+  //p_ops->acks_seen = (uint8_t *) calloc(pending_writes, sizeof(uint8_t));
+  p_ops->read_info = (r_info_t *) calloc(pending_reads, sizeof(r_info_t));
+  p_ops->p_ooe_writes =
     (struct pending_out_of_epoch_writes *) calloc(1, sizeof(struct pending_out_of_epoch_writes));
 
 
   // R_REP_FIFO
-  (*p_ops)->r_rep_fifo = (struct r_rep_fifo *) calloc(1, sizeof(struct r_rep_fifo));
-  (*p_ops)->r_rep_fifo->r_rep_message =
+  p_ops->r_rep_fifo = (struct r_rep_fifo *) calloc(1, sizeof(struct r_rep_fifo));
+  p_ops->r_rep_fifo->r_rep_message =
     (struct r_rep_message_template *) calloc((size_t)R_REP_FIFO_SIZE, (size_t)ALIGNED_R_REP_SEND_SIDE);
-  (*p_ops)->r_rep_fifo->rem_m_id = (uint8_t *) malloc(R_REP_FIFO_SIZE * sizeof(uint8_t));
-  (*p_ops)->r_rep_fifo->pull_ptr = 1;
-  for (i= 0; i < R_REP_FIFO_SIZE; i++) (*p_ops)->r_rep_fifo->rem_m_id[i] = MACHINE_NUM;
-  (*p_ops)->r_rep_fifo->message_sizes = (uint16_t *) calloc((size_t) R_REP_FIFO_SIZE, sizeof(uint16_t));
+  p_ops->r_rep_fifo->rem_m_id = (uint8_t *) malloc(R_REP_FIFO_SIZE * sizeof(uint8_t));
+  p_ops->r_rep_fifo->pull_ptr = 1;
+  for (i= 0; i < R_REP_FIFO_SIZE; i++) p_ops->r_rep_fifo->rem_m_id[i] = MACHINE_NUM;
+  p_ops->r_rep_fifo->message_sizes = (uint16_t *) calloc((size_t) R_REP_FIFO_SIZE, sizeof(uint16_t));
 
   // W_FIFO
-  (*p_ops)->w_fifo = (struct write_fifo *) calloc(1, sizeof(struct write_fifo));
-  (*p_ops)->w_fifo->w_message =
+  p_ops->w_fifo = (struct write_fifo *) calloc(1, sizeof(struct write_fifo));
+  p_ops->w_fifo->w_message =
     (struct w_message_template *) calloc((size_t)W_FIFO_SIZE, (size_t) ALIGNED_W_SEND_SIDE);
 
   // R_FIFO
-  (*p_ops)->r_fifo = (struct read_fifo *) calloc(1, sizeof(struct read_fifo));
-  (*p_ops)->r_fifo->r_message =
+  p_ops->r_fifo = (struct read_fifo *) calloc(1, sizeof(struct read_fifo));
+  p_ops->r_fifo->r_message =
     (struct r_message_template *) calloc(R_FIFO_SIZE, (size_t) ALIGNED_R_SEND_SIDE);
 
 
   // PREP STRUCT
-  (*p_ops)->prop_info = (struct prop_info *) aligned_alloc(64, sizeof(struct prop_info));
-  memset((*p_ops)->prop_info, 0, sizeof(struct prop_info));
-  assert(IS_ALIGNED((*p_ops)->prop_info, 64));
-  (*p_ops)->prop_info->l_id = 1;
+  p_ops->prop_info = (struct prop_info *) aligned_alloc(64, sizeof(struct prop_info));
+  memset(p_ops->prop_info, 0, sizeof(struct prop_info));
+  assert(IS_ALIGNED(p_ops->prop_info, 64));
+  p_ops->prop_info->l_id = 1;
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
-    (*p_ops)->prop_info->entry[i].sess_id = (uint16_t) i;
-    (*p_ops)->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
-    (*p_ops)->prop_info->entry[i].help_loc_entry = (struct rmw_local_entry *) calloc(1, sizeof(struct rmw_local_entry));
-    (*p_ops)->prop_info->entry[i].help_loc_entry->sess_id = (uint16_t) i;
+    p_ops->prop_info->entry[i].sess_id = (uint16_t) i;
+    p_ops->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
+    p_ops->prop_info->entry[i].help_loc_entry = (loc_entry_t *) calloc(1, sizeof(loc_entry_t));
+    p_ops->prop_info->entry[i].help_loc_entry->sess_id = (uint16_t) i;
   }
-  (*p_ops)->sess_info = (struct sess_info *) calloc(SESSIONS_PER_THREAD, sizeof(struct sess_info));
-  (*p_ops)->w_meta = (struct per_write_meta *) calloc(pending_writes, sizeof(struct per_write_meta));
+  p_ops->sess_info = (sess_info_t *) calloc(SESSIONS_PER_THREAD, sizeof(sess_info_t));
+  p_ops->w_meta = (per_write_meta_t *) calloc(pending_writes, sizeof(per_write_meta_t));
 
 
 
    uint32_t max_incoming_w_r = (uint32_t) MAX(MAX_INCOMING_R, MAX_INCOMING_W);
-  (*p_ops)->ptrs_to_mes_headers =
+  p_ops->ptrs_to_mes_headers =
     (struct r_message **) malloc(max_incoming_w_r * sizeof(struct r_message *));
-  (*p_ops)->coalesce_r_rep =
+  p_ops->coalesce_r_rep =
     (bool *) malloc(max_incoming_w_r* sizeof(bool));
 
 
   // PTRS to W_OPS
-  //(*p_ops)->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
+  //p_ops->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
   // PTRS to R_OPS
-  (*p_ops)->ptrs_to_mes_ops = (void **) malloc(max_incoming_w_r * sizeof(struct read *));
+  p_ops->ptrs_to_mes_ops = (void **) malloc(max_incoming_w_r * sizeof(struct read *));
   // PTRS to local ops to find the write after sending the first round of a release
-  (*p_ops)->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
-  (*p_ops)->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
+  p_ops->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
+  p_ops->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
 
 
   for (i = 0; i < SESSIONS_PER_THREAD; i++) {
-    (*p_ops)->sess_info[i].ready_to_release = true;
+    p_ops->sess_info[i].ready_to_release = true;
   }
   for (i = 0; i < W_FIFO_SIZE; i++) {
-    struct w_message *w_mes = (struct w_message *) &(*p_ops)->w_fifo->w_message[i];
+    struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[i];
     w_mes->m_id = (uint8_t) machine_id;
 //    for (j = 0; j < MAX_W_COALESCE; j++){
-//      (*p_ops)->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
-//      (*p_ops)->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
+//      p_ops->w_fifo->w_message[i].write[j].m_id = (uint8_t) machine_id;
+//      p_ops->w_fifo->w_message[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
 //    }
   }
-  (*p_ops)->w_fifo->info[0].message_size = W_MES_HEADER;
+  p_ops->w_fifo->info[0].message_size = W_MES_HEADER;
 
   for (i = 0; i < R_FIFO_SIZE; i++) {
-    struct r_message *r_mes = (struct r_message *) &(*p_ops)->r_fifo->r_message[i];
+    struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[i];
     r_mes->m_id= (uint8_t) machine_id;
   }
-  (*p_ops)->r_fifo->info[0].message_size = R_MES_HEADER;
+  p_ops->r_fifo->info[0].message_size = R_MES_HEADER;
 
   for (i = 0; i < R_REP_FIFO_SIZE; i++) {
-    struct rmw_rep_message *rmw_mes = (struct rmw_rep_message *) &(*p_ops)->r_rep_fifo->r_rep_message[i];
-    assert(((void *)rmw_mes - (void *)(*p_ops)->r_rep_fifo->r_rep_message) % ALIGNED_R_REP_SEND_SIDE == 0);
+    struct rmw_rep_message *rmw_mes = (struct rmw_rep_message *) &p_ops->r_rep_fifo->r_rep_message[i];
+    assert(((void *)rmw_mes - (void *)p_ops->r_rep_fifo->r_rep_message) % ALIGNED_R_REP_SEND_SIDE == 0);
     rmw_mes->m_id = (uint8_t) machine_id;
   }
   for (i = 0; i < pending_reads; i++)
-    (*p_ops)->r_state[i] = INVALID;
+    p_ops->r_state[i] = INVALID;
   for (i = 0; i < pending_writes; i++) {
-    (*p_ops)->w_meta[i].w_state = INVALID;
-    (*p_ops)->ptrs_to_local_w[i] = NULL;
+    p_ops->w_meta[i].w_state = INVALID;
+    p_ops->ptrs_to_local_w[i] = NULL;
   }
-
+ return p_ops;
 }
 
 // Initialize the quorum info that contains the system configuration
@@ -949,7 +951,7 @@ void set_up_credits(uint16_t credits[][MACHINE_NUM])
 }
 
 // If reading CAS rmws out of the trace, CASes that compare against 0 succeed the rest fail
-void randomize_op_values(struct trace_op *ops, uint16_t t_id)
+void randomize_op_values(trace_op_t *ops, uint16_t t_id)
 {
   if (!ENABLE_CLIENTS) {
     for (uint16_t i = 0; i < MAX_OP_BATCH; i++) {

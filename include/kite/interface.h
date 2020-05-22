@@ -74,7 +74,7 @@ static inline void check_push_pull_ptrs(uint16_t session_id)
     assert(last_pushed_req[session_id] - last_pulled_req[session_id] == PER_SESSION_REQ_NUM);
 }
 //
-static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint8_t type,
+static inline void fill_client_op(client_op_t *cl_op, uint32_t key_id, uint8_t type,
                                   uint8_t *value_to_read, uint8_t *value_to_write, uint32_t val_len,
                                   bool *cas_result, bool weak)
 
@@ -118,7 +118,7 @@ static inline void fill_client_op(struct client_op *cl_op, uint32_t key_id, uint
 }
 
 // fill the replies // TODO Probably needs to be DEPRICATED
-static inline void check_return_values(struct client_op *cl_op)
+static inline void check_return_values(client_op_t *cl_op)
 {
   switch (cl_op->opcode) {
     case KVS_OP_PUT:
@@ -139,8 +139,8 @@ static inline uint64_t poll(uint16_t session_id)
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
   uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
   uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
-  struct client_op *pull_clt_op = &interface[wrkr].req_array[s_i][pull_ptr];
-  struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][interface[wrkr].clt_push_ptr[s_i]];
+  client_op_t *pull_clt_op = &interface[wrkr].req_array[s_i][pull_ptr];
+  client_op_t *push_clt_op = &interface[wrkr].req_array[s_i][interface[wrkr].clt_push_ptr[s_i]];
   while (pull_clt_op->state == COMPLETED_REQ) {
     // get the result
     if (CLIENT_DEBUG)
@@ -184,7 +184,7 @@ static inline void poll_one_req_blocking(uint16_t session_id)
     uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
     uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
     uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
-    struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
+    client_op_t *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
     check_state_with_allowed_flags(2, push_clt_op->state, INVALID_REQ);
   }
 }
@@ -217,7 +217,7 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
   }
 
   // Issuing the request
-  struct client_op *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
+  client_op_t *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
   fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, val_len, cas_result, rmw_is_weak);
 
   // Implicit assumption: other client threads are not racing for this slot
@@ -252,7 +252,7 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   uint16_t wrkr = (uint16_t) (session_id / SESSIONS_PER_THREAD);
   uint16_t s_i = (uint16_t) (session_id % SESSIONS_PER_THREAD);
   uint16_t push_ptr = interface[wrkr].clt_push_ptr[s_i];
-  struct client_op *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
+  client_op_t *push_clt_op = &interface[wrkr].req_array[s_i][push_ptr];
 
   // let's poll for the slot first
   if (push_clt_op->state != INVALID_REQ) {
@@ -272,7 +272,7 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
     }
   }
   // Issuing the request
-  struct client_op *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
+  client_op_t *cl_op = &interface[wrkr].req_array[s_i][push_ptr];
   fill_client_op(cl_op, key_id, type, value_to_read, value_to_write, val_len, cas_result, rmw_is_weak);
 
   // Implicit assumption: other client threads are not racing for this slot

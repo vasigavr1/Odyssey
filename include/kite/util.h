@@ -168,12 +168,9 @@ struct opcode_info {
 // Used by all kinds of threads to publish their QPs
 //void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
 
-uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed);
-int parse_trace(char* path, struct trace_command **cmds, int t_id);
-// Manufactures a trace without a file
-void manufacture_trace(struct trace_command **cmds, int t_id);
 
-void trace_init(void **cmds, uint16_t t_id);
+
+trace_t* trace_init(uint16_t t_id);
 void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
 // Connect with Workers and Clients
 void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
@@ -186,7 +183,7 @@ void set_up_queue_depths(int**, int**);
 // Initialize the rmw struct
 void set_up_rmw_struct();
 // Initialize the struct that holds all pending ops
-void set_up_pending_ops(struct pending_ops**, uint32_t, uint32_t);
+p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads);
 // Initialize the quorum info that contains the system configuration
 void set_up_q_info(struct quorum_info **q_info);
 // Set up the memory registrations in case inlining is disabled
@@ -217,7 +214,7 @@ void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
 // Set up the credits
 void set_up_credits(uint16_t credits[][MACHINE_NUM]);
 
-void randomize_op_values(struct trace_op *ops, uint16_t t_id);
+void randomize_op_values(trace_op_t *ops, uint16_t t_id);
 
 
 /* ---------------------------------------------------------------------------

@@ -121,7 +121,7 @@ static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_re
 
 
 // Form the  work request for the read reply
-static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, struct pending_ops *p_ops,
+static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops_t *p_ops,
                                   struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                                   struct ibv_send_wr *send_wr, uint64_t *r_rep_tx,
                                   uint16_t t_id) {
@@ -161,7 +161,7 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, struc
 
 
 // Form the Broadcast work request for the red
-static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
+static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
                               struct quorum_info *q_info,
                               struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                               struct ibv_send_wr *send_wr, uint64_t *r_br_tx,
@@ -170,7 +170,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
   uint16_t i;
   struct ibv_wc signal_send_wc;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_i];
-  struct r_mes_info *info = &p_ops->r_fifo->info[r_mes_i];
+  r_mes_info_t *info = &p_ops->r_fifo->info[r_mes_i];
   uint16_t coalesce_num = r_mes->coalesce_num;
   bool has_reads = info->reads_num > 0;
   bool all_reads = info->reads_num == r_mes->coalesce_num;
@@ -227,14 +227,14 @@ static inline void forge_r_wr(uint32_t r_mes_i, struct pending_ops *p_ops,
 
 
 // Form the Broadcast work request for the write
-static inline void forge_w_wr(uint32_t w_mes_i, struct pending_ops *p_ops,
+static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
                               struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                               struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
                               uint8_t vc, uint16_t t_id) {
   struct ibv_wc signal_send_wc;
   struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[w_mes_i];
-  struct w_mes_info *info = &p_ops->w_fifo->info[w_mes_i];
+  w_mes_info_t *info = &p_ops->w_fifo->info[w_mes_i];
   uint8_t coalesce_num = w_mes->coalesce_num;
   bool has_writes = info->writes_num > 0;
   bool all_writes = info->writes_num == w_mes->coalesce_num;

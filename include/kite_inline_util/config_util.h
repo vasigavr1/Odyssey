@@ -182,8 +182,8 @@ static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, con
 }
 
 // returns the number of failures
-static inline uint8_t create_bit_vec_of_failures(struct pending_ops *p_ops, struct w_message *w_mes,
-                                                 struct w_mes_info *info, struct quorum_info *q_info,
+static inline uint8_t create_bit_vec_of_failures(p_ops_t *p_ops, struct w_message *w_mes,
+                                                 w_mes_info_t *info, struct quorum_info *q_info,
                                                  uint8_t *bit_vector_to_send, uint16_t t_id)
 {
   bool bit_vec[MACHINE_NUM] = {0};
@@ -192,7 +192,7 @@ static inline uint8_t create_bit_vec_of_failures(struct pending_ops *p_ops, stru
   for (uint8_t w_i = 0; w_i < w_mes->coalesce_num; w_i++) {
     if (!info->per_message_release_flag[w_i]) continue;
     if (ENABLE_ASSERTIONS) assert(info->per_message_sess_id[w_i] <= SESSIONS_PER_THREAD);
-    struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+    sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
     for (uint8_t j = 0; j < sess_info->missing_num; j++) {
       if (!bit_vec[sess_info->missing_ids[j]]) {
         bit_vec[sess_info->missing_ids[j]] = true;
@@ -220,8 +220,8 @@ static inline uint8_t create_bit_vec_of_failures(struct pending_ops *p_ops, stru
 
 // When forging a write
 static inline bool add_failure_to_release_from_sess_id
-  (struct pending_ops *p_ops, struct w_message *w_mes,
-   struct w_mes_info *info, struct quorum_info *q_info,
+  (p_ops_t *p_ops, struct w_message *w_mes,
+   w_mes_info_t *info, struct quorum_info *q_info,
    uint32_t backward_ptr, uint16_t t_id)
 {
   struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
@@ -273,7 +273,7 @@ static inline bool add_failure_to_release_from_sess_id
       //printf("Wrkr %u sending an accept bit vector %u \n",
       //                     t_id, *part_of_accept);
       acc->opcode = ACCEPT_OP_BIT_VECTOR;
-      //struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+      //sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
       //reset_sess_info_on_accept(sess_info, t_id);
     }
     else if (ENABLE_ASSERTIONS) assert(false);
@@ -290,7 +290,7 @@ static inline bool add_failure_to_release_from_sess_id
 
 // When creating the accept message have it try to flip the remote bits,
 // if a false positive has been previously detected by a propose
-static inline void signal_conf_bit_flip_in_accept(struct rmw_local_entry *loc_entry,
+static inline void signal_conf_bit_flip_in_accept(loc_entry_t *loc_entry,
                                                   struct accept *acc,  uint16_t t_id)
 {
   if (unlikely(loc_entry->fp_detected)) {
@@ -365,7 +365,7 @@ static inline void handle_configuration_on_receiving_rel(struct write *write, ui
 
 // Remove the false positive offset from the opcode
 static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_big *r_rep,
-                                                                   struct read_info *read_info,
+                                                                   r_info_t *read_info,
                                                                    uint16_t t_id)
 {
   // Check for acquires that detected a false positive
