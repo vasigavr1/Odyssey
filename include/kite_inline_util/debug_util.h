@@ -1249,4 +1249,64 @@ static inline void checks_and_prints_local_accept_help(struct rmw_local_entry *l
 }
 
 
+// called when sending read replies
+static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo *r_rep_fifo,
+                                                              uint8_t coalesce_num,
+                                                              uint16_t mes_i, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    uint32_t pull_ptr = r_rep_fifo->pull_ptr;
+    struct r_rep_message *r_rep_mes = (struct r_rep_message *) &r_rep_fifo->r_rep_message[pull_ptr];
+    check_state_with_allowed_flags(6, r_rep_mes->opcode, ACCEPT_REPLY_NO_CREDITS, ACCEPT_REPLY,
+                                   PROP_REPLY, READ_REPLY, READ_PROP_REPLY);
+    uint16_t byte_ptr = R_REP_MES_HEADER;
+    struct r_rep_big *r_rep;
+    struct rmw_rep_last_committed *rmw_rep;
+    assert(r_rep_mes->coalesce_num > 0 && r_rep_mes->coalesce_num <= MAX_R_REP_COALESCE);
+    for (uint8_t i = 0; i < r_rep_mes->coalesce_num; i++) {
+      r_rep = (struct r_rep_big *)(((void *) r_rep_mes) + byte_ptr);
+      uint8_t opcode = r_rep->opcode;
+      //if (byte_ptr > 505)
+      //printf("%u/%u \n", byte_ptr, r_rep_fifo->message_sizes[pull_ptr]);
+      if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+      if (opcode < TS_SMALLER || opcode > ACQ_LOG_EQUAL)
+        printf("R_rep %u/%u, byte ptr %u/%u opcode %u/%u \n",
+               i, r_rep_mes->coalesce_num, byte_ptr, r_rep_fifo->message_sizes[pull_ptr],
+               opcode, r_rep_mes->opcode);
+
+
+      assert(opcode >= TS_SMALLER && opcode <= ACQ_LOG_EQUAL);
+      bool is_rmw = false, is_rmw_acquire = false;
+      if (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP)
+        is_rmw = true;
+      else if (opcode > NO_OP_PROP_REP)
+        is_rmw_acquire = true;
+
+      if (is_rmw) {
+        check_state_with_allowed_flags(6, r_rep_mes->opcode, ACCEPT_REPLY_NO_CREDITS, ACCEPT_REPLY,
+                                       PROP_REPLY, READ_PROP_REPLY);
+        rmw_rep = (struct rmw_rep_last_committed *) r_rep;
+        assert(opcode_is_rmw_rep(rmw_rep->opcode));
+      }
+      byte_ptr += get_size_from_opcode(r_rep->opcode);
+
+    }
+    //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode comes \n");
+    //check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
+    if (DEBUG_READ_REPS)
+      printf("Wrkr %d has %u read replies to send \n", t_id, r_rep_fifo->total_size);
+    if (ENABLE_ASSERTIONS) {
+      assert(r_rep_fifo->total_size >= coalesce_num);
+      assert(mes_i < MAX_R_REP_WRS);
+    }
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].r_reps_sent += coalesce_num;
+    t_stats[t_id].r_reps_sent_mes_num++;
+  }
+}
+
+
+
+
 #endif //KITE_DEBUG_UTIL_H

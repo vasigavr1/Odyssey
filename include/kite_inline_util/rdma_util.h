@@ -66,5 +66,26 @@ static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *sen
     send_wr[i].send_flags = flag;
 }
 
+// Post a quorum broadcast and post the appropriate receives for it
+static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, uint32_t recvs_to_post_num,
+                                                   struct quorum_info *q_info, uint16_t br_i, uint64_t br_tx,
+                                                   struct ibv_send_wr *send_wr, struct ibv_qp *send_qp,
+                                                   int enable_inlining)
+{
+  struct ibv_send_wr *bad_send_wr;
+  if (recvs_to_post_num > 0) {
+    // printf("Wrkr %d posting %d recvs\n", g_id,  recvs_to_post_num);
+    if (recvs_to_post_num) post_recvs_with_recv_info(recv_info, recvs_to_post_num);
+    recv_info->posted_recvs += recvs_to_post_num;
+  }
+  if (DEBUG_SS_BATCH)
+    my_printf(green, "Sending %u bcasts, total %lu \n", br_i, br_tx);
+
+  send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next = NULL;
+  int ret = ibv_post_send(send_qp, &send_wr[q_info->first_active_rm_id], &bad_send_wr);
+  if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
+  if (!ENABLE_ADAPTIVE_INLINING)
+    send_wr[q_info->first_active_rm_id].send_flags = enable_inlining == 1 ? IBV_SEND_INLINE : 0;
+}
 
 #endif //KITE_RDMA_UTIL_H

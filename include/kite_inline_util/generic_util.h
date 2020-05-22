@@ -271,8 +271,6 @@ static inline void assign_netw_ts_to_ts(struct ts_tuple *ts1, struct network_ts_
 }
 
 
-
-
 // Calculate the thread global id
 static inline uint16_t get_gid(uint8_t m_id, uint16_t t_id)
 {
@@ -379,6 +377,31 @@ static inline uint8_t sum_of_reps(struct rmw_rep_info* rmw_reps)
          rmw_reps->seen_higher_prop_acc + rmw_reps->log_too_high;
 }
 
+static inline struct key create_key(uint32_t key_id)
+{
+  uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
+  struct key key;
+  memcpy(&key, &key_hash, TRUE_KEY_SIZE);
+  return key;
+}
+
+// Increment the per-request counters
+static inline void increment_per_req_counters(uint8_t opcode, uint16_t t_id)
+{
+  if (ENABLE_STAT_COUNTING) {
+    if (opcode == KVS_OP_PUT) t_stats[t_id].writes_per_thread++;
+    else if (opcode == KVS_OP_GET) t_stats[t_id].reads_per_thread++;
+    else if (opcode == OP_ACQUIRE) t_stats[t_id].acquires_per_thread++;
+    else if (opcode == OP_RELEASE) t_stats[t_id].releases_per_thread++;
+    else  t_stats[t_id].rmws_completed++;
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------ OPCODE HANDLING----------------------------
+//---------------------------------------------------------------------------*/
+
 static inline bool opcode_is_rmw(uint8_t opcode)
 {
   return opcode == FETCH_AND_ADD || opcode == COMPARE_AND_SWAP_WEAK ||
@@ -390,9 +413,98 @@ static inline bool opcode_is_compare_rmw(uint8_t opcode)
   return opcode == COMPARE_AND_SWAP_WEAK || opcode == COMPARE_AND_SWAP_STRONG;
 }
 
+static inline bool opcode_is_rmw_rep(uint8_t opcode)
+{
+  return (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP) ||
+         (opcode >= RMW_ACK + FALSE_POSITIVE_OFFSET &&
+          opcode <= NO_OP_PROP_REP + FALSE_POSITIVE_OFFSET);
+}
 
+static inline bool r_rep_has_big_size(uint8_t opcode)
+{
+  return opcode == TS_GREATER || (opcode == TS_GREATER + FALSE_POSITIVE_OFFSET);
+}
 
+static inline bool r_rep_has_rmw_acq_size(uint8_t opcode)
+{
+  return opcode == ACQ_LOG_TOO_SMALL || (opcode == ACQ_LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET);
+}
 
+static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
+{
+  if (r_rep_has_rmw_acq_size(opcode))
+    return RMW_ACQ_REP_SIZE;
+  else if (r_rep_has_big_size(opcode))
+    return R_REP_SIZE;
+  else if (opcode == TS_GREATER_TS_ONLY)
+    return R_REP_ONLY_TS_SIZE;
+  else return 1;
+}
+
+// Give an opcode to get the size of the read rep messages
+static inline uint16_t get_size_from_opcode(uint8_t opcode)
+{
+  if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+  switch(opcode) {
+    // ----RMWS-----
+    case LOG_TOO_SMALL:
+      return PROP_REP_LOG_TOO_LOW_SIZE;
+    case SEEN_LOWER_ACC:
+      return PROP_REP_ACCEPTED_SIZE;
+    case SEEN_HIGHER_PROP:
+    case SEEN_HIGHER_ACC:
+      return PROP_REP_ONLY_TS_SIZE;
+    case RMW_ID_COMMITTED:
+    case RMW_ID_COMMITTED_SAME_LOG:
+    case RMW_ACK:
+    case RMW_ACK_ACC_SAME_RMW:
+    case LOG_TOO_HIGH:
+    case NO_OP_PROP_REP:
+      return PROP_REP_SMALL_SIZE;
+      //---- RMW ACQUIRES--------
+    case ACQ_LOG_TOO_HIGH:
+    case ACQ_LOG_EQUAL:
+      return R_REP_SMALL_SIZE;
+    case ACQ_LOG_TOO_SMALL:
+      return RMW_ACQ_REP_SIZE;
+      // -----REGULAR READS/ACQUIRES----
+    case TS_SMALLER:
+    case TS_EQUAL:
+      return R_REP_SMALL_SIZE;
+    case TS_GREATER:
+      return R_REP_SIZE;
+    case TS_GREATER_TS_ONLY:
+      return R_REP_ONLY_TS_SIZE;
+    default: if (ENABLE_ASSERTIONS) {
+        my_printf(red, "Opcode %u \n", opcode);
+        assert(false);
+      }
+  }
+}
+
+// Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
+static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
+  check_state_with_allowed_flags(11, opcode, OP_RELEASE, KVS_OP_PUT, ACCEPT_OP,
+                                 ACCEPT_OP_BIT_VECTOR,
+                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR,
+                                 OP_RELEASE_SECOND_ROUND, OP_ACQUIRE, NO_OP_RELEASE);
+  switch(opcode) {
+    case OP_RELEASE:
+    case OP_ACQUIRE:
+    case KVS_OP_PUT:
+    case OP_RELEASE_BIT_VECTOR:
+    case OP_RELEASE_SECOND_ROUND:
+    case NO_OP_RELEASE:
+      return W_SIZE;
+    case ACCEPT_OP:
+    case ACCEPT_OP_BIT_VECTOR:
+      return ACCEPT_SIZE;
+    case COMMIT_OP:
+    case RMW_ACQ_COMMIT_OP:
+      return COMMIT_SIZE;
+    default: if (ENABLE_ASSERTIONS) assert(false);
+  }
+}
 
 
 #endif //KITE_GENERIC_UTILITY_H

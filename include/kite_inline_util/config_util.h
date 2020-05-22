@@ -181,6 +181,324 @@ static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, con
               conf_bit_vec[m_id].bit);
 }
 
+// returns the number of failures
+static inline uint8_t create_bit_vec_of_failures(struct pending_ops *p_ops, struct w_message *w_mes,
+                                                 struct w_mes_info *info, struct quorum_info *q_info,
+                                                 uint8_t *bit_vector_to_send, uint16_t t_id)
+{
+  bool bit_vec[MACHINE_NUM] = {0};
+  uint8_t failed_machine_num = 0 ;
+  // Then look at each release in the message sess_info
+  for (uint8_t w_i = 0; w_i < w_mes->coalesce_num; w_i++) {
+    if (!info->per_message_release_flag[w_i]) continue;
+    if (ENABLE_ASSERTIONS) assert(info->per_message_sess_id[w_i] <= SESSIONS_PER_THREAD);
+    struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+    for (uint8_t j = 0; j < sess_info->missing_num; j++) {
+      if (!bit_vec[sess_info->missing_ids[j]]) {
+        bit_vec[sess_info->missing_ids[j]] = true;
+        set_conf_bit_after_detecting_failure(sess_info->missing_ids[j], t_id);
+        failed_machine_num++;
+      }
+    }
+  }
+  if (ENABLE_ASSERTIONS) assert(failed_machine_num < MACHINE_NUM);
+  if (failed_machine_num == 0) return failed_machine_num;
+
+  {
+    uint64_t bit_vect = 0;
+    for (uint16_t i = 0; i < MACHINE_NUM; i++) {
+      if (i == machine_id) continue;
+      if (bit_vec[i])
+        bit_vect = bit_vect | machine_bit_id[i];
+    }
+    if (ENABLE_ASSERTIONS) assert(bit_vect > 0);
+    memcpy(bit_vector_to_send, (void *) &bit_vect, SEND_CONF_VEC_SIZE);
+  }
+  return failed_machine_num;
+}
+
+
+// When forging a write
+static inline bool add_failure_to_release_from_sess_id
+  (struct pending_ops *p_ops, struct w_message *w_mes,
+   struct w_mes_info *info, struct quorum_info *q_info,
+   uint32_t backward_ptr, uint16_t t_id)
+{
+  struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
+  bool is_release = write->opcode == OP_RELEASE;
+  bool is_accept = write->opcode == ACCEPT_OP;
+  //printf("opcode %u \n", write->opcode);
+  if (ENABLE_ASSERTIONS) assert(is_release || is_accept);
+
+  uint8_t bit_vector_to_send[SEND_CONF_VEC_SIZE] = {0};
+  // Find all machine ids that need to be included in the message
+  // Do not include the machines the release will not be sent to
+  uint8_t failed_machine_num = create_bit_vec_of_failures(p_ops, w_mes, info, q_info,
+                                                          bit_vector_to_send, t_id);
+  if (failed_machine_num == 0) return false;
+
+  if (*(uint16_t *) bit_vector_to_send > 0) {
+    uint8_t w_i = info->first_release_w_i;
+    if (is_release) {
+      backward_ptr = (backward_ptr + w_i) % PENDING_WRITES;
+      // Save the overloaded bytes in some buffer, such that they can be used in the second round of the release
+      memcpy(&p_ops->overwritten_values[SEND_CONF_VEC_SIZE * backward_ptr], write->value,
+             SEND_CONF_VEC_SIZE);
+      memcpy(write->value, bit_vector_to_send, SEND_CONF_VEC_SIZE);
+      if (DEBUG_QUORUM)
+        my_printf(green, "Wrkr %u Sending a release with a vector bit_vec %u \n", t_id,
+                  *(uint16_t *) bit_vector_to_send);
+      write->opcode = OP_RELEASE_BIT_VECTOR;
+      p_ops->ptrs_to_local_w[backward_ptr] = write;
+    }
+    else if (is_accept) {
+      assert(ACCEPT_IS_RELEASE);
+      struct accept *acc = (struct accept *) write;
+      // Overload the last 2 bytes of the rmw-id
+      uint16_t *part_of_accept = (uint16_t *) (((void *)&acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+
+      if (ENABLE_ASSERTIONS) {
+        uint64_t rmw_id = *(uint64_t *) (((void *) &acc->glob_sess_id) - 8);
+        assert(acc->t_rmw_id == rmw_id);
+        if ((*part_of_accept) != 0) {
+          printf("rmw_id %lu\n", acc->t_rmw_id);
+          assert(false);
+        }
+        assert(info->per_message_release_flag[w_i]);
+      }
+
+      memcpy(part_of_accept, bit_vector_to_send, SEND_CONF_VEC_SIZE);
+      if (ENABLE_ASSERTIONS) assert(*part_of_accept != 0);
+      //if (t_id == 0)
+      //printf("Wrkr %u sending an accept bit vector %u \n",
+      //                     t_id, *part_of_accept);
+      acc->opcode = ACCEPT_OP_BIT_VECTOR;
+      //struct sess_info *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
+      //reset_sess_info_on_accept(sess_info, t_id);
+    }
+    else if (ENABLE_ASSERTIONS) assert(false);
+    //if (DEBUG_SESSIONS)
+    //  my_printf(cyan, "Wrkr %u release is from session %u, session has pending op: %u\n",
+    //             t_id, p_ops->w_session_id[backward_ptr],
+    //             p_ops->session_has_pending_op[p_ops->w_session_id[backward_ptr]]);
+    return true;
+  }
+  if (ENABLE_ASSERTIONS) assert(false);
+  return false;
+}
+
+
+// When creating the accept message have it try to flip the remote bits,
+// if a false positive has been previously detected by a propose
+static inline void signal_conf_bit_flip_in_accept(struct rmw_local_entry *loc_entry,
+                                                  struct accept *acc,  uint16_t t_id)
+{
+  if (unlikely(loc_entry->fp_detected)) {
+    if (loc_entry->helping_flag == NOT_HELPING) {
+      uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->t_rmw_id;
+      if (ENABLE_ASSERTIONS) assert(ptr_to_reged_rmw_id[7] == 0);
+      ptr_to_reged_rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
+      loc_entry->fp_detected = false;
+    }
+  }
+
+}
+
+// When receiving an accept, check if it is trying to raise  its configuration bit
+static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8_t acc_m_id,
+                                                       uint16_t t_id)
+{
+  if (unlikely(acc->t_rmw_id > B_512)) {
+    uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->t_rmw_id;
+    if (ptr_to_reged_rmw_id[7] == ACCEPT_FLIPS_BIT_OP) {
+      raise_conf_bit_iff_owned(acc->t_rmw_id, (uint16_t) acc_m_id, true, t_id);
+      ptr_to_reged_rmw_id[7] = 0;
+    }
+    else if (ENABLE_ASSERTIONS) assert(false);
+
+  }
+  if (ENABLE_ASSERTIONS) assert(acc->t_rmw_id < B_4);
+}
+
+
+//Handle the configuration bit_vec vector on receiving a release
+static inline void handle_configuration_on_receiving_rel(struct write *write, uint16_t t_id)
+{
+
+  // On receiving the 1st round of a Release/ Accept:
+  // apply the change to the stable vector and set the bit_vec that gets changed to Stable state.
+  // Do not change the sent vector
+  uint16_t recv_conf_bit_vec = 0;
+  struct accept *acc;
+  switch (write->opcode) {
+    case OP_RELEASE_BIT_VECTOR :
+      recv_conf_bit_vec = *(uint16_t *) write->value;
+      if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
+      break;
+    case ACCEPT_OP_BIT_VECTOR:
+      acc = (struct accept *) write;
+      uint16_t *part_of_acc = (uint16_t *) (((void*) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+      recv_conf_bit_vec = *part_of_acc;
+      //my_printf(yellow, "received %u bit vec \n", recv_conf_bit_vec);
+      *part_of_acc = 0;
+      write->opcode = ACCEPT_OP;
+      if (ENABLE_ASSERTIONS) {
+        assert(ACCEPT_IS_RELEASE);
+        assert(recv_conf_bit_vec > 0);
+        assert(acc->t_rmw_id < B_4);
+      }
+      break;
+    default: return;
+  }
+  if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
+  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+    if (recv_conf_bit_vec & machine_bit_id[m_i]) {
+      set_conf_bit_to_new_state(t_id, m_i, DOWN_STABLE);
+      if (DEBUG_BIT_VECS)
+        my_printf(green, "Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
+                  t_id, recv_conf_bit_vec, m_i);
+    }
+  }
+  // we do not change the op back to OP_RELEASE, because we want to avoid making the actual write to the KVS
+  // (because it only contains a bit vector)
+}
+
+// Remove the false positive offset from the opcode
+static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_big *r_rep,
+                                                                   struct read_info *read_info,
+                                                                   uint16_t t_id)
+{
+  // Check for acquires that detected a false positive
+  if (unlikely(r_rep->opcode > ACQ_LOG_EQUAL)) {
+    read_info->fp_detected = true;
+    if (DEBUG_QUORUM)
+      my_printf(yellow, "Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
+    r_rep->opcode -= FALSE_POSITIVE_OFFSET;
+    check_state_with_allowed_flags(8, r_rep->opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
+                                   ACQ_LOG_TOO_HIGH, ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
+    if (ENABLE_ASSERTIONS) {
+      assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
+      assert(read_info->opcode == OP_ACQUIRE);
+    }
+  }
+  if (ENABLE_ASSERTIONS) {
+    if (r_rep->opcode > TS_GREATER) {
+      check_state_with_allowed_flags(4, r_rep->opcode, ACQ_LOG_TOO_HIGH, ACQ_LOG_TOO_SMALL, ACQ_LOG_EQUAL);
+      assert(read_info->is_rmw);
+      assert(read_info->opcode == OP_ACQUIRE);
+    }
+    else {
+      check_state_with_allowed_flags(5, r_rep->opcode, TS_SMALLER, TS_EQUAL,
+                                     TS_GREATER_TS_ONLY, TS_GREATER);
+    }
+  }
+
+}
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------CONFIGURATION -----------------------------
+//---------------------------------------------------------------------------*/
+// Update the quorum info, use this one a timeout
+// On a timeout it goes through all machines
+static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[][MACHINE_NUM],
+                                 uint16_t min_credits, uint8_t vc, uint16_t t_id)
+{
+  uint8_t i, rm_id;
+  q_info->missing_num = 0;
+  q_info->active_num = 0;
+  for (i = 0; i < MACHINE_NUM; i++) {
+    if (i == machine_id) continue;
+    rm_id = mid_to_rmid(i);
+    if (credits[vc][i] < min_credits) {
+      q_info->missing_ids[q_info->missing_num] = i;
+      q_info->missing_num++;
+      q_info->send_vector[rm_id] = false;
+      //Change the machine-wide configuration bit-vector and the bit vector to be sent
+      //set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
+      //if (DEBUG_QUORUM) my_printf(yellow, "Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
+      //                               i, send_bit_vector.bit_vec[i].bit);
+      if (!DEBUG_BIT_VECS) {
+        if (t_id == 0)
+          my_printf(cyan, "Wrkr %u detects that machine %u has failed \n", t_id, i);
+      }
+    }
+    else {
+      q_info->active_ids[q_info->active_num] = i;
+      q_info->active_num++;
+      q_info->send_vector[rm_id] = true;
+    }
+  }
+  q_info->first_active_rm_id = mid_to_rmid(q_info->active_ids[0]);
+  if (q_info->active_num > 0)
+    q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
+  if (DEBUG_QUORUM) print_q_info(q_info);
+
+  if (ENABLE_ASSERTIONS) {
+    assert(q_info->missing_num <= REM_MACH_NUM);
+    assert(q_info->active_num <= REM_MACH_NUM);
+  }
+}
+
+// Bring back a machine
+static inline void revive_machine(struct quorum_info *q_info,
+                                  uint8_t revived_mach_id)
+{
+
+  uint8_t rm_id = mid_to_rmid(revived_mach_id);
+  if (ENABLE_ASSERTIONS) {
+    assert(revived_mach_id < MACHINE_NUM);
+    assert(revived_mach_id != machine_id);
+    assert(q_info->missing_num > 0);
+    assert(!q_info->send_vector[rm_id]);
+  }
+  // Fix the send vector and update the rest based on that,
+  // because using the credits may not be reliable here
+  q_info->send_vector[rm_id] = true;
+  q_info->missing_num = 0;
+  q_info->active_num = 0;
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    uint8_t m_id = rmid_to_mid(i);
+    if (!q_info->send_vector[i]) {
+      q_info->missing_ids[q_info->missing_num] = m_id;
+      q_info->missing_num++;
+    }
+    else {
+      q_info->active_ids[q_info->active_num] = m_id;
+      q_info->active_num++;
+    }
+  }
+  q_info->first_active_rm_id = mid_to_rmid(q_info->active_ids[0]);
+  q_info->last_active_rm_id = mid_to_rmid(q_info->active_ids[q_info->active_num - 1]);
+  if (DEBUG_QUORUM) print_q_info(q_info);
+  for (uint16_t i = 0; i < q_info->missing_num; i++)
+    if (DEBUG_QUORUM) my_printf(green, "After: Missing position %u, missing id %u, id to revive\n",
+                                i, q_info->missing_ids[i], revived_mach_id);
+}
+
+// Update the links between the send Work Requests for broadcasts given the quorum information
+static inline void update_bcast_wr_links(struct quorum_info *q_info, struct ibv_send_wr *wr, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
+  uint8_t prev_i = 0, avail_mach = 0;
+  if (DEBUG_QUORUM) my_printf(green, "Worker %u fixing the links between the wrs \n", t_id);
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    wr[i].next = NULL;
+    if (q_info->send_vector[i]) {
+      if (avail_mach > 0) {
+        for (uint16_t j = 0; j < MAX_BCAST_BATCH; j++) {
+          if (DEBUG_QUORUM) my_printf(yellow, "Worker %u, wr %d points to %d\n", t_id, (REM_MACH_NUM * j) + prev_i, (REM_MACH_NUM * j) + i);
+          wr[(REM_MACH_NUM * j) + prev_i].next = &wr[(REM_MACH_NUM * j) + i];
+        }
+      }
+      avail_mach++;
+      prev_i = i;
+    }
+  }
+}
+
+
+
 
 
 #endif //KITE_CONFIG_UTIL_H

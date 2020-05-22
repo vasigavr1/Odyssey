@@ -11,44 +11,35 @@
 #include "debug_util.h"
 #include "config_util.h"
 #include "client_if_util.h"
+#include "paxos_util.h"
 
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------ KVS-specific utility-------------------------
+//---------------------------------------------------------------------------*/
+// returns true if the key was found
 static inline bool search_out_of_epoch_writes(struct pending_ops *p_ops,
                                               struct key *read_key,
-                                              uint16_t t_id, void **val_ptr);
-static inline void update_commit_logs(uint16_t t_id, uint32_t bkt, uint32_t log_no, uint8_t *old_value,
-                                      uint8_t *value, const char* message, uint8_t flag);
-static inline void activate_RMW_entry(uint8_t state, uint32_t new_version, mica_op_t  *kv_ptr,
-                                      uint8_t opcode, uint8_t new_ts_m_id, uint64_t l_id, uint16_t glob_sess_id,
-                                      uint32_t log_no, uint16_t t_id, const char* message);
-static inline struct r_rep_big* get_r_rep_ptr(struct pending_ops *p_ops, uint64_t l_id,
-                                              uint8_t rem_m_id, uint8_t read_opcode, bool coalesce,
-                                              uint16_t t_id);
-static inline bool does_rmw_fail_early(struct trace_op *op, mica_op_t *kv_ptr,
-                                       struct kvs_resp *resp, uint16_t t_id);
-static inline bool is_log_smaller_or_has_rmw_committed(uint32_t log_no, mica_op_t *kv_ptr,
-                                                       uint64_t rmw_l_id,
-                                                       uint16_t glob_sess_id, uint16_t t_id,
-                                                       struct rmw_rep_last_committed *rep);
-static inline bool is_log_too_high(uint32_t log_no, mica_op_t *kv_ptr,
-                                   uint16_t t_id,
-                                   struct rmw_rep_last_committed *rep);
-static inline uint8_t handle_remote_prop_or_acc_in_kvs(mica_op_t *kv_ptr, void *prop_or_acc,
-                                                       uint8_t sender_m_id, uint16_t t_id,
-                                                       struct rmw_rep_last_committed *rep, uint32_t log_no,
-                                                       bool is_prop);
-static inline uint16_t get_size_from_opcode(uint8_t opcode);
-static inline void finish_r_rep_bookkeeping(struct pending_ops *p_ops, struct r_rep_big *rep,
-                                            bool false_pos, uint8_t rem_m_id, uint16_t t_id);
-static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op, bool use_commit, uint16_t t_id);
-static inline void set_up_r_rep_message_size(struct pending_ops *p_ops,
-                                             struct r_rep_big *r_rep,
-                                             struct network_ts_tuple *remote_ts,
-                                             bool read_ts,
-                                             uint16_t t_id);
-static inline void set_up_rmw_acq_rep_message_size(struct pending_ops *p_ops,
-                                                   uint8_t opcode, uint16_t t_id);
-static inline void insert_r_rep(struct pending_ops *p_ops, uint64_t l_id, uint16_t t_id,
-                                uint8_t rem_m_id, bool coalesce,  uint8_t read_opcode);
+                                              uint16_t t_id, void **val_ptr)
+{
+  struct pending_out_of_epoch_writes *writes = p_ops->p_ooe_writes;
+  uint32_t w_i = writes->pull_ptr;
+  for (uint32_t i = 0; i < writes->size; i++) {
+    if (keys_are_equal(&p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
+      *val_ptr = (void*) p_ops->read_info[writes->r_info_ptrs[w_i]].value;
+      //my_printf(red, "Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
+      //print_true_key(read_key);
+      //my_printf(red, "write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
+      //my_printf(red, "size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
+      //          writes->size, writes->push_ptr, writes->pull_ptr, writes->r_info_ptrs[w_i]);
+      return true;
+    }
+    MOD_ADD(w_i, PENDING_READS);
+  }
+  return false;
+}
+
 
 /* ---------------------------------------------------------------------------
 //------------------------------ KVS------------------------------------------
@@ -216,10 +207,10 @@ static inline void KVS_from_trace_rmw(struct trace_op *op,
     check_log_nos_of_kv_ptr(kv_ptr, "KVS_batch_op_trace", t_id);
     if (kv_ptr->state == INVALID_RMW) {
       if (!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
-        activate_RMW_entry(PROPOSED, new_version, kv_ptr, op->opcode,
-                           (uint8_t) machine_id, rmw_l_id,
-                           get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
-                           kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
+        activate_kv_pair(PROPOSED, new_version, kv_ptr, op->opcode,
+                         (uint8_t) machine_id, rmw_l_id,
+                         get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
+                         kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
         resp->type = RMW_SUCCESS;
         if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
       }
@@ -365,9 +356,9 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
       acc_rep->opcode = handle_remote_prop_or_acc_in_kvs(kv_ptr, (void *) acc, acc_m_id, t_id, acc_rep, log_no, false);
       // if the accepted is going to be acked record its information in the kv_ptr
       if (acc_rep->opcode == RMW_ACK) {
-        activate_RMW_entry(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
-                           acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
-                           ENABLE_ASSERTIONS ? "received accept" : NULL);
+        activate_kv_pair(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
+                         acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                         ENABLE_ASSERTIONS ? "received accept" : NULL);
         memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
         assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
       }
@@ -499,9 +490,9 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
         // if the propose is going to be acked record its information in the kv_ptr
         if (prop_rep->opcode == RMW_ACK) {
           if (ENABLE_ASSERTIONS) assert(prop->log_no >= kv_ptr->log_no);
-          activate_RMW_entry(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
-                             prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
-                             ENABLE_ASSERTIONS ? "received propose" : NULL);
+          activate_kv_pair(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
+                           prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                           ENABLE_ASSERTIONS ? "received propose" : NULL);
         }
         if (ENABLE_ASSERTIONS) {
           assert(kv_ptr->prop_ts.version >= prop->ts.version);
