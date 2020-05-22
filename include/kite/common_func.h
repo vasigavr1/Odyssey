@@ -150,9 +150,13 @@
 #define DEBUG_SEQLOCKS 1
 
 
+/*-------------------------------------------------
+	-----------------TRACE-----------------
+--------------------------------------------------*/
+#define SKEW_EXPONENT_A 90 // representation divided by 100 (i.e. 99 means a = 0.99)
 
-
-
+/* SHM key for the 1st request region created by master. ++ for other RRs.*/
+#define MASTER_SHM_KEY 24
 
 //////////////////////////////////////////////////////
 /////////////~~~~GLOBALS~~~~~~/////////////////////////

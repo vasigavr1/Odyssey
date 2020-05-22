@@ -14,7 +14,7 @@
 #include "paxos_util.h"
 #include "reserve_stations_util.h"
 #include "latency_util.h"
-#include "communication-utility.h"
+#include "communication_utility.h"
 
 #include <stdlib.h>
 #include <string.h>

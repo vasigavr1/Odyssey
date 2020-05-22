@@ -6,14 +6,14 @@
 #include <stdint-gcc.h>
 #include "city.h"
 #include "common_func.h"
+#include "messages.h"
+#include "buffer_sizes.h"
+#include "stats.h"
 
-
-
-
-/*-------------------------------------------------
-	-----------------TRACE-----------------
---------------------------------------------------*/
-#define SKEW_EXPONENT_A 90 // representation divided by 100 (i.e. 99 means a = 0.99)
+// Threads
+void *client(void *arg);
+void *worker(void *arg);
+void *print_stats(void*);
 
 /*-------------------------------------------------
 	-----------------CLIENT---------------------------
@@ -60,12 +60,6 @@
 #define COM_MCAST_QP 1 //
 #define MCAST_GROUPS_NUM 2
 
-/*-------------------------------------------------
-	-----------------Paxos-------------------------
---------------------------------------------------*/
-#define ALL_ABOARD_TS 2
-#define PAXOS_TS 3
-//ABD
 
 // ABD EMULATION
 #define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
@@ -92,180 +86,16 @@
 #define RMW_CAS_CANCEL_RATIO 400 // out of 1000
 #define USE_WEAK_CAS 1
 #define MAX_TR_NODE_KEY ((GLOBAL_SESSION_NUM * TREIBER_WRITES_NUM) + NUM_OF_RMW_KEYS)
-// QUEUE PAIRS
-#define QP_NUM 4
-#define R_QP_ID 0
-#define R_REP_QP_ID 1
-#define W_QP_ID 2
-#define ACK_QP_ID 3
 
 // QUORUM
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
 #define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1 ): REM_MACH_NUM)
 
-// IMPORTANT SIZES
-#define EPOCH_BYTES 2
-#define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
-#define LOG_NO_SIZE 4
-#define RMW_ID_SIZE 10
-#define RMW_VALUE_SIZE VALUE_SIZE //
-#define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
-// in the first round of a release the first bytes of the value get overwritten
-// before ovewritting them they get stored in astruct with size SEND_CONF_VEC_SIZE
-#define SEND_CONF_VEC_SIZE 2 //(CEILING(MACHINE_NUM, 8))
-
-
-
-// ------COMMON-------------------
-#define MAX_BCAST_BATCH (1) //how many broadcasts can fit in a batch
-#define MESSAGES_IN_BCAST (REM_MACH_NUM)
-#define MESSAGES_IN_BCAST_BATCH (MAX_BCAST_BATCH * MESSAGES_IN_BCAST) //must be smaller than the q_depth
-// post some extra receives to avoid spurious out_of_buffer errors
-#define RECV_WR_SAFETY_MARGIN 2
-
-// WRITES: Releases, writes, accepts and commits -- all sizes in BYTES
-#define W_MES_HEADER (11) // local id + m_id+ w_num + opcode
-#define EFFECTIVE_MAX_W_SIZE (MAX_WRITE_SIZE - W_MES_HEADER) // all messages have the same header
-
-// Writes-Releases
-#define WRITE_HEADER (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 2) // opcode + val_len
-#define W_SIZE (VALUE_SIZE + WRITE_HEADER)
-#define W_COALESCE (EFFECTIVE_MAX_W_SIZE / W_SIZE)
-#define W_MES_SIZE (W_MES_HEADER + (W_SIZE * W_COALESCE))
-
-// ACCEPTS -- ACCEPT coalescing is derived from max write size. ACC reps are derived from accept coalescing
-#define ACCEPT_HEADER (37 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
-#define ACCEPT_SIZE (ACCEPT_HEADER + RMW_VALUE_SIZE)
-#define ACC_COALESCE (EFFECTIVE_MAX_W_SIZE / ACCEPT_SIZE)
-#define ACC_MES_SIZE (W_MES_HEADER + (ACCEPT_SIZE * ACC_COALESCE))
-
-// COMMITS
-#define COMMIT_HEADER (29)
-#define COMMIT_SIZE (COMMIT_HEADER + RMW_VALUE_SIZE)
-#define COM_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_SIZE)
-#define COM_MES_SIZE (W_MES_HEADER + (COMMIT_SIZE * COM_COALESCE))
-
-// COMBINED FROM Writes, Releases, Accepts, Commits
-#define MAX_WRITE_COALESCE MAX_OF_3(W_COALESCE, COM_COALESCE, ACC_COALESCE)
-#define MAX_W_MES_SIZE MAX_OF_3(W_MES_SIZE, COM_MES_SIZE, ACC_MES_SIZE)
-#define MAX_MES_IN_WRITE (MAX_WRITE_COALESCE)
-
-#define W_SEND_SIZE MAX_W_MES_SIZE
-#define W_SEND_SIDE_PADDING FIND_PADDING(W_SEND_SIZE)
-#define ALIGNED_W_SEND_SIDE (W_SEND_SIZE + W_SEND_SIDE_PADDING)
-
-#define W_RECV_SIZE (GRH_SIZE + ALIGNED_W_SEND_SIDE)
-#define W_ENABLE_INLINING ((MAX_W_MES_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
-#define MAX_RECV_W_WRS ((W_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
-#define MAX_W_WRS (MESSAGES_IN_BCAST_BATCH)
-#define MAX_INCOMING_W (MAX_RECV_W_WRS * MAX_WRITE_COALESCE)
-
-
-// READS : Read,Acquires, RMW-Acquires, Proposes
-#define R_MES_HEADER (10) // local id + coalesce num + m_id
-#define EFFECTIVE_MAX_R_SIZE (MAX_READ_SIZE - R_MES_HEADER)
-
-// reads/acquires/rmw-acquire
-#define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
-#define R_COALESCE (EFFECTIVE_MAX_R_SIZE / R_SIZE)
-#define R_MES_SIZE (R_MES_HEADER + (R_SIZE * R_COALESCE))
-// proposes
-#define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
-#define PROP_COALESCE (EFFECTIVE_MAX_R_SIZE / PROP_SIZE)
-#define PROP_MES_SIZE (R_MES_HEADER + (PROP_SIZE * PROP_COALESCE))
-
-// Combining reads + proposes
-#define R_SEND_SIZE MAX(R_MES_SIZE, PROP_MES_SIZE)
-#define MAX_READ_COALESCE MAX(R_COALESCE, PROP_COALESCE)
-
-#define R_SEND_SIDE_PADDING FIND_PADDING(R_SEND_SIZE)
-#define ALIGNED_R_SEND_SIDE (R_SEND_SIZE + R_SEND_SIDE_PADDING)
-
-#define MAX_RECV_R_WRS ((R_CREDITS * REM_MACH_NUM) + RECV_WR_SAFETY_MARGIN)
-#define MAX_INCOMING_R (MAX_RECV_R_WRS * MAX_READ_COALESCE)
-#define MAX_R_WRS (MESSAGES_IN_BCAST_BATCH)
-#define R_ENABLE_INLINING ((R_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
-#define R_RECV_SIZE (GRH_SIZE + ALIGNED_R_SEND_SIDE)
-
-
-// READ REPLIES -- Replies to reads/acquires/proposes accepts
-#define R_REP_MES_HEADER (11) //l_id 8 , coalesce_num 1, m_id 1, opcode 1 // and credits
-// Reads/acquires
-#define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
-#define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
-#define R_REP_SMALL_SIZE (1)
-#define READ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
-// RMW_ACQUIRE
-#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
-#define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
-// PROPOSE REPLIES
-#define PROP_REP_LOG_TOO_LOW_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-#define PROP_REP_SMALL_SIZE 9 // lid and opcode
-#define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
-#define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_ACCEPTED_SIZE)) //Message size of replies to proposes
-// ACCEPT REPLIES
-#define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
-#define ACC_REP_SMALL_SIZE 9 // lid and opcode
-#define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-//#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
-#define ACC_REP_MES_SIZE (R_REP_MES_HEADER + (ACC_COALESCE * ACC_REP_SIZE)) //Message size of replies to accepts
-
-
-// COMBINE Reads, Acquires, RMW-acquires, Accepts , Propose
-#define MAX_R_REP_MES_SIZE MAX_OF_4(READ_REP_MES_SIZE, RMW_ACQ_REP_MES_SIZE, PROP_REP_MES_SIZE, ACC_REP_MES_SIZE)
-#define R_REP_SEND_SIZE MIN(MAX_R_REP_MES_SIZE, MTU)
-
-#define MAX_R_REP_COALESCE MAX_OF_3(R_COALESCE, PROP_COALESCE, ACC_COALESCE)
-#define MAX_REPS_IN_REP MAX_R_REP_COALESCE
-
-#define R_REP_SEND_SIDE_PADDING FIND_PADDING(R_REP_SEND_SIZE)
-#define ALIGNED_R_REP_SEND_SIDE (R_REP_SEND_SIZE + R_REP_SEND_SIDE_PADDING)
-#define R_REP_RECV_SIZE (GRH_SIZE + ALIGNED_R_REP_SEND_SIDE)
-
-#define R_REP_SLOTS_FOR_ACCEPTS (W_CREDITS * REM_MACH_NUM * SESSIONS_PER_THREAD) // the maximum number of accept-related read replies
-#define MAX_RECV_R_REP_WRS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
-#define R_REP_WRS_WITHOUT_ACCEPTS (R_CREDITS * REM_MACH_NUM)
-#define MAX_R_REP_WRS (R_REP_WRS_WITHOUT_ACCEPTS + R_REP_SLOTS_FOR_ACCEPTS)
-
-#define R_REP_ENABLE_INLINING ((R_REP_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
-#define R_REP_FIFO_SIZE (MAX_INCOMING_R + R_REP_SLOTS_FOR_ACCEPTS)
-
-// Acks
-#define MAX_RECV_ACK_WRS (REM_MACH_NUM * W_CREDITS)
-#define MAX_ACK_WRS (MACHINE_NUM)
-#define ACK_SIZE (14)
-#define ACK_RECV_SIZE (GRH_SIZE + (ACK_SIZE))
-
 // RMWs
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
 #define LOCAL_PROP_NUM (ENABLE_RMWS == 1 ? LOCAL_PROP_NUM_ : 0)
 
-
-
-
-
-
-#define VC_NUM 2
-#define R_VC 0
-#define W_VC 1
-
-// BUFFER SIZES
-#define R_BUF_SLOTS (REM_MACH_NUM * R_CREDITS)
-#define R_BUF_SIZE (R_RECV_SIZE * R_BUF_SLOTS)
-
-#define R_REP_BUF_SLOTS ((REM_MACH_NUM * R_CREDITS) + R_REP_SLOTS_FOR_ACCEPTS)
-#define R_REP_BUF_SIZE (R_REP_RECV_SIZE * R_REP_BUF_SLOTS)
-
-#define W_BUF_SLOTS (REM_MACH_NUM * W_CREDITS)
-#define W_BUF_SIZE (W_RECV_SIZE * W_BUF_SLOTS)
-
-#define ACK_BUF_SLOTS (REM_MACH_NUM * W_CREDITS)
-#define ACK_BUF_SIZE (ACK_RECV_SIZE * ACK_BUF_SLOTS)
-
-#define TOTAL_BUF_SIZE (R_BUF_SIZE + R_REP_BUF_SIZE + W_BUF_SIZE + ACK_BUF_SIZE)
-#define TOTAL_BUF_SLOTS (R_BUF_SLOTS + R_REP_BUF_SLOTS + W_BUF_SLOTS + ACK_BUF_SLOTS)
-// that allows for reads to insert reads
+// this allows for reads to insert reads
 #define PENDING_READS MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define PENDING_WRITES_ MAX((MAX_OP_BATCH + 1), ((2 * SESSIONS_PER_THREAD) + 1))
 #define PENDING_WRITES MAX((PENDING_WRITES_) , ((W_CREDITS * MAX_MES_IN_WRITE) + 1))
@@ -278,25 +108,6 @@
 #define MAX_ALLOWED_W_SIZE (PENDING_WRITES - 1)
 #define R_FIFO_SIZE (PENDING_READS + LOCAL_PROP_NUM) // Proposes use the read fifo
 #define MAX_ALLOWED_R_SIZE (PENDING_READS - 1)
-
-#define W_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 1))
-#define R_BCAST_SS_BATCH MAX((MIN_SS_BATCH / (REM_MACH_NUM)), (MESSAGES_IN_BCAST_BATCH + 2))
-#define R_REP_SS_BATCH MAX(MIN_SS_BATCH, (MAX_R_REP_WRS + 1))
-#define ACK_SS_BATCH MAX(MIN_SS_BATCH, (MAX_ACK_WRS + 2))
-
-
-//  Receive
-#define RECV_ACK_Q_DEPTH (MAX_RECV_ACK_WRS + 3)
-#define RECV_W_Q_DEPTH  (MAX_RECV_W_WRS + 3) //
-#define RECV_R_Q_DEPTH (MAX_RECV_R_WRS + 3) //
-#define RECV_R_REP_Q_DEPTH (MAX_RECV_R_REP_WRS + 3)
-
-// Send
-#define SEND_ACK_Q_DEPTH ((2 * ACK_SS_BATCH) + 3)
-#define SEND_W_Q_DEPTH ((2 * W_BCAST_SS_BATCH * REM_MACH_NUM) + 3) // Do not question or doubt the +3!!
-#define SEND_R_Q_DEPTH ((2 * R_BCAST_SS_BATCH * REM_MACH_NUM) + 3) //
-#define SEND_R_REP_Q_DEPTH ((2 * R_REP_SS_BATCH) + 3)
-
 
 /*-------------------------------------------------
 -----------------DEBUGGING-------------------------
@@ -321,24 +132,10 @@
 #define DEBUG_SESS_COUNTER M_16
 #define DEBUG_LOG 0
 #define ENABLE_INFO_DUMP_ON_STALL 0
-
-
-#define POLL_CQ_R 0
-#define POLL_CQ_W 1
-#define POLL_CQ_R_REP 2
-#define POLL_CQ_ACK 3
-
-//LATENCY Measurements
-#define MAX_LATENCY 400 //in us
-#define LATENCY_BUCKETS 200 //latency accuracy
-
-/* SHM key for the 1st request region created by master. ++ for other RRs.*/
-#define MASTER_SHM_KEY 24
+#define ENABLE_DEBUG_RMW_KV_PTR 0
 
 
 //Defines for parsing the trace
-#define _200_K 200000
-#define MAX_TRACE_SIZE _200_K
 #define TRACE_SIZE K_128
 #define NOP 0
 
@@ -364,110 +161,6 @@ struct kvs_resp {
   struct ts_tuple kv_ptr_ts;
   struct rmw_id kv_ptr_rmw_id;
 };
-
-// The format of an ack message
-struct ack_message {
-	uint64_t local_id ; // the first local id that is being acked
-  uint8_t m_id;
-  uint8_t opcode;
-  uint16_t credits;
-  uint16_t ack_num;
-} __attribute__((__packed__));
-
-
-struct ack_message_ud_req {
-	uint8_t grh[GRH_SIZE];
-  struct ack_message ack;
- };
-
-
-struct write {
-  uint8_t m_id;
-  uint32_t version;
-  struct key key;
-  uint8_t opcode;
-  uint8_t val_len;
-  uint8_t value[VALUE_SIZE];
-} __attribute__((__packed__));
-
-
-struct accept {
-	struct network_ts_tuple ts;
-  struct key key ;
-	uint8_t opcode;
-  uint8_t val_len;
-	uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id ; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
-  uint16_t glob_sess_id ; // this is useful when helping
-  uint32_t log_no ;
-  uint64_t l_id;
-  struct network_ts_tuple base_ts;
-} __attribute__((__packed__));
-
-
-
-struct commit {
-  struct network_ts_tuple base_ts;
-  struct key key;
-  uint8_t opcode;
-  uint8_t val_len;
-  uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id; //rmw lid to be committed
-  uint16_t glob_sess_id;
-  uint32_t log_no;
-} __attribute__((__packed__));
-
-//
-struct read {
-  struct network_ts_tuple ts;
-  struct key key;
-  uint8_t opcode;
-} __attribute__((__packed__));
-
-//
-struct propose {
-  struct network_ts_tuple ts;
-  struct key key;
-  uint8_t opcode;
-  uint64_t t_rmw_id;
-  uint16_t glob_sess_id;
-  uint32_t log_no;
-  uint64_t l_id; // the l_id of the rmw local_entry
-} __attribute__((__packed__));
-
-
-
-/*------- HEADERS---------------------- */
-
-struct w_message {
-	uint8_t m_id;
-	uint8_t coalesce_num;
-	uint8_t opcode;
-	uint64_t l_id ;
-	struct write write[W_COALESCE];
-} __attribute__((__packed__));
-
-//
-struct r_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  uint64_t l_id ;
-  struct read read[R_COALESCE];
-} __attribute__((__packed__));
-
-struct w_message_ud_req {
-  uint8_t unused[GRH_SIZE];
-  uint8_t w_mes[ALIGNED_W_SEND_SIDE];
-};
-
-//
-struct r_message_ud_req {
-  uint8_t unused[GRH_SIZE];
-  uint8_t r_mes[ALIGNED_R_SEND_SIDE];
-};
-
-
-
 
 struct r_mes_info {
   uint16_t reads_num; // all non propose messages count as reads
@@ -505,72 +198,6 @@ struct w_mes_info {
   bool sent;
 };
 
-
-
-// Sent when the timestamps are equal or smaller
-struct r_rep_small {
-  uint8_t opcode;
-};
-
-// Sent when you have a bigger ts_tuple
-struct r_rep_big {
-  uint8_t opcode;
-  struct network_ts_tuple ts;
-  uint8_t value[VALUE_SIZE];
-}__attribute__((__packed__));
-
-struct rmw_acq_rep {
-  uint8_t opcode;
-  struct network_ts_tuple ts;
-  uint8_t value[RMW_VALUE_SIZE];
-  uint32_t log_no; // last committed only
-  uint64_t rmw_id; // last committed
-  uint16_t glob_sess_id; // last committed
-} __attribute__((__packed__));
-
-//
-struct r_rep_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  uint8_t opcode;
-  uint64_t l_id;
-  struct r_rep_big r_rep[MAX_R_REP_COALESCE];
-} __attribute__((__packed__));
-
-
-struct r_rep_message_ud_req {
-  uint8_t unused[GRH_SIZE];
-  uint8_t r_rep_mes[ALIGNED_R_REP_SEND_SIDE];
-};
-
-// Reply for both accepts and proposes
-// Reply with the last committed RMW if the
-// proposal/accept had a low log number or has already been committed
-struct rmw_rep_last_committed {
-  uint8_t opcode;
-  uint64_t l_id; // the l_id of the rmw local_entry
-  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
-  uint8_t value[RMW_VALUE_SIZE];
-  uint64_t rmw_id; //accepted  OR last committed
-  uint16_t glob_sess_id; //accepted  OR last committed
-  uint32_t log_no_or_base_version; // last committed only
-  uint8_t base_m_id; //
-} __attribute__((__packed__));
-
-//
-struct rmw_rep_message {
-  uint8_t coalesce_num;
-  uint8_t m_id;
-  uint8_t opcode;
-  uint64_t l_id ;
-  struct rmw_rep_last_committed rmw_rep[PROP_COALESCE];
-}__attribute__((__packed__));
-
-
-struct r_message_template {
-  uint8_t unused[ALIGNED_R_SEND_SIDE];
-};
-
 //
 struct read_fifo {
   struct r_message_template *r_message;
@@ -581,11 +208,6 @@ struct read_fifo {
   //uint32_t backward_ptrs[R_FIFO_SIZE];
 };
 
-
-struct w_message_template {
-  uint8_t unused[ALIGNED_W_SEND_SIDE];
-};
-
 //
 struct write_fifo {
   struct w_message_template *w_message;
@@ -593,24 +215,15 @@ struct write_fifo {
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of writes not messages!
   struct w_mes_info info[W_FIFO_SIZE];
-  //uint32_t size;
-  //uint32_t backward_ptrs[W_FIFO_SIZE]; // pointers to the slots in p_ops--one pointer per message
 };
 
-
-struct r_rep_message_template {
-  uint8_t unused[ALIGNED_R_REP_SEND_SIDE];
-};
-
-
+//
 struct r_rep_fifo {
   struct r_rep_message_template *r_rep_message;
   uint8_t *rem_m_id;
   uint16_t *message_sizes;
   uint32_t push_ptr;
-  //uint32_t inner_push_ptr; // this points to bytes, rather than "read replies"
   uint32_t pull_ptr;
-  //uint32_t bcast_pull_ptr;
   uint32_t total_size; // number of r_reps not messages!
   uint32_t mes_size; // number of messages
 };
@@ -656,34 +269,6 @@ struct dbg_glob_entry {
 };
 
 
-#define ENABLE_DEBUG_GLOBAL_ENTRY 0
-
-// the first time a key gets RMWed, it grabs an RMW entry
-// that lasts for life, the entry is protected by the KVS lock
-struct rmw_entry {
-  uint8_t opcode; // what kind of RMW
-  struct key key;
-  uint8_t state;
-  struct rmw_id rmw_id;
-  struct rmw_id last_committed_rmw_id;
-  struct rmw_id last_registered_rmw_id;
-  struct rmw_id accepted_rmw_id; // not really needed, but good for debug
-  struct dbg_glob_entry *dbg;
-  //struct ts_tuple old_ts;
-  struct ts_tuple prop_ts;
-  struct ts_tuple accepted_ts; // really needed
-  uint8_t last_accepted_value[RMW_VALUE_SIZE]; // last accepted
-  uint32_t log_no; // keep track of the biggest log_no that has not been committed
-  uint32_t last_committed_log_no;
-  uint32_t last_registered_log_no;
-  uint32_t accepted_log_no; // not really needed, but good for debug
-};
-
-// possible flags explaining how the last committed RMW was committed
-#define LOCAL_RMW 0
-#define LOCAL_RMW_FROM_HELP 1
-#define REMOTE_RMW 2
-#define REMOTE_RMW_FROM_REP 3
 
 
 struct rmw_help_entry{
@@ -845,11 +430,7 @@ struct session_dbg {
 	//uint32_t request_id[SESSIONS_PER_THREAD];
 };
 
-
-
-//typedef _Atomic struct rmw_info atomic_rmw_info;
-//extern struct rmw_info rmw;
-
+// Registering data structure
 extern atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
 struct recv_info {
@@ -863,24 +444,6 @@ struct recv_info {
 	void* buf;
 };
 
-struct send_info {
-  struct ibv_send_wr *send_wr;
-  struct ibv_sge *r_send_sgl;
-  struct ibv_sge *r_recv_sgl;
-  struct ibv_wc *r_recv_wc;
-  struct ibv_recv_wr *r_recv_wr;
-};
-
-
-struct fifo {
-  void *fifo;
-  uint32_t push_ptr;
-  uint32_t pull_ptr;
-  uint32_t size;
-
-};
-
-//#define TRACE_OP_SIZE (18 + VALUE_SIZE  + 8 + 4)
 struct trace_op {
   uint16_t session_id;
   bool attempt_all_aboard;
@@ -893,12 +456,9 @@ struct trace_op {
   uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
   uint32_t index_to_req_array;
   uint32_t real_val_len; // this is the value length the client is interested in
-}; //__attribute__((__packed__));
+};
 
-#define INVALID_REQ 0 // entry not being used
-#define ACTIVE_REQ 1 // client has issued a reqs
-#define IN_PROGRESS_REQ 2 // worker has picked up the req
-#define COMPLETED_REQ 3 // worker has completed the req
+
 
 #define RAW_CLIENT_OP_SIZE (8 + TRUE_KEY_SIZE + VALUE_SIZE + 8 + 8)
 #define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
@@ -936,83 +496,7 @@ extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
-// Store statistics from the workers, for the stats thread to use
-struct thread_stats { // 2 kvs lines
-	long long cache_hits_per_thread;
 
-	uint64_t reads_per_thread;
-	uint64_t writes_per_thread;
-	uint64_t acquires_per_thread;
-	uint64_t releases_per_thread;
-
-
-
-	long long reads_sent;
-	long long acks_sent;
-	long long r_reps_sent;
-	uint64_t writes_sent;
-	uint64_t writes_asked_by_clients;
-
-
-	long long reads_sent_mes_num;
-	long long acks_sent_mes_num;
-	long long r_reps_sent_mes_num;
-	long long writes_sent_mes_num;
-
-
-	long long received_reads;
-	long long received_acks;
-	long long received_r_reps;
-	long long received_writes;
-
-	long long received_r_reps_mes_num;
-	long long received_acks_mes_num;
-	long long received_reads_mes_num;
-	long long received_writes_mes_num;
-
-
-	uint64_t per_worker_acks_sent[MACHINE_NUM];
-	uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
-	uint64_t per_worker_writes_received[MACHINE_NUM];
-	uint64_t per_worker_acks_received[MACHINE_NUM];
-	uint64_t per_worker_acks_mes_received[MACHINE_NUM];
-
-	uint64_t per_worker_reads_received[MACHINE_NUM];
-	uint64_t per_worker_r_reps_received[MACHINE_NUM];
-
-
-	uint64_t read_to_write;
-	uint64_t failed_rem_writes;
-	uint64_t total_writes;
-	uint64_t quorum_reads;
-	uint64_t rectified_keys;
-	uint64_t q_reads_with_low_epoch;
-
-	uint64_t proposes_sent; // number of broadcast
-	uint64_t accepts_sent; // number of broadcast
-	uint64_t commits_sent;
-	uint64_t rmws_completed;
-	uint64_t cancelled_rmws;
-	uint64_t all_aboard_rmws; // completed ones
-
-
-
-	uint64_t stalled_ack;
-	uint64_t stalled_r_rep;
-
-	//long long unused[3]; // padding to avoid false sharing
-};
-
-struct client_stats {
-  uint64_t microbench_pushes;
-  uint64_t microbench_pops;
-  //uint64_t ms_enqueues;
- // uint64_t ms_dequeues;
-};
-#define UP_STABLE 0
-#define DOWN_STABLE 1
-#define DOWN_TRANSIENT_OWNED 2
-#define UNUSED_STATE 3 // used to denote that the field will not be used
 
 // A bit of a bit vector: can be a send bit vector
 // or a configuration bit vector and can be owned
@@ -1073,70 +557,10 @@ struct thread_params {
 	int id;
 };
 
-typedef enum {
-  NO_REQ,
-  RELEASE,
-  ACQUIRE,
-  WRITE_REQ,
-  READ_REQ,
-} req_type;
 
 
-struct latency_flags {
-  req_type measured_req_flag;
-  uint32_t measured_sess_id;
-  struct cache_key* key_to_measure;
-  struct timespec start;
-};
 
 
-struct latency_counters{
-	uint32_t* acquires;
-	uint32_t* releases;
-	uint32_t* hot_reads;
-	uint32_t* hot_writes;
-	long long total_measurements;
-  uint32_t max_acq_lat;
-  uint32_t max_rel_lat;
-	uint32_t max_read_lat;
-	uint32_t max_write_lat;
-};
-
-
-struct local_latency {
-	int measured_local_region;
-	uint8_t local_latency_start_polling;
-	char* flag_to_poll;
-};
-
-
-extern struct latency_counters latency_count;
-
-// TREIBER STRUCTS
-struct top {
-  uint32_t fourth_key_id;
-  uint32_t third_key_id;
-  uint32_t sec_key_id;
-  uint32_t key_id;
-  uint32_t pop_counter;
-  uint32_t push_counter;
-};
-#define NODE_SIZE (VALUE_SIZE - 17)
-#define NODE_SIGNATURE 144
-struct node {
-  uint8_t value[NODE_SIZE];
-  bool pushed;
-  uint16_t stack_id;
-  uint16_t owner;
-  uint32_t push_counter;
-  uint32_t key_id;
-  uint32_t next_key_id;
-};
-
-
-void *client(void *arg);
-void *worker(void *arg);
-void *print_stats(void*);
 
 
 

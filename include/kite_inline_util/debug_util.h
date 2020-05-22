@@ -1018,7 +1018,7 @@ static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_
 {
   if (!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->last_committed_rmw_id, rmw_id, glob_sess_id)) {
     my_printf(red, "~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, %s ~~~~~~~~ \n", t_id, kv_ptr->key.bkt, message);
-    /*if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+    /*if (ENABLE_DEBUG_RMW_KV_PTR) {
       my_printf(green, "GLOBAL ENTRY COMMITTED log %u: rmw_id %lu glob_sess-id- %u, FLAG %u\n",
                    kv_ptr->last_committed_log_no, kv_ptr->last_committed_rmw_id.id,
                    kv_ptr->last_committed_rmw_id.glob_sess_id, kv_ptr->dbg->last_committed_flag);

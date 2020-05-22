@@ -689,7 +689,7 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 void set_up_rmw_struct()
 {
 //  memset(&rmw, 0, sizeof(struct rmw_info));
-//  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+//  if (ENABLE_DEBUG_RMW_KV_PTR) {
 //    for (int i = 0; i < RMW_ENTRIES_NUM; i++)
 //      rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
 //  }
@@ -897,18 +897,6 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack
   }
 }
 
-
-
-// construct a prep_message-- max_size must be in bytes
-void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
-{
-  (*fifo) = (struct fifo *)malloc(fifos_num * sizeof(struct fifo));
-  memset((*fifo), 0, fifos_num *  sizeof(struct fifo));
-  for (int i = 0; i < fifos_num; ++i) {
-    (*fifo)[i].fifo = malloc(max_size);
-    memset((*fifo)[i].fifo, 0, max_size);
-  }
-}
 
 // Set up the receive info
 void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
@@ -1181,9 +1169,9 @@ void multicast_testing(struct mcast_essentials *mcast, int clt_gid, struct hrd_c
     exit(0);
 }
 
-//////////////////////////////////
-////PUBLISHING QPS///////////////
-//////////////////////////////////
+//--------------------------------------------------
+//--------------PUBLISHING QPS---------------------
+//--------------------------------------------------
 
 
 // Worker calls this function to connect with all workers

@@ -412,7 +412,7 @@ static inline uint8_t attempt_local_accept(struct pending_ops *p_ops, struct rmw
       assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
       kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
     }
-    if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+    if (ENABLE_DEBUG_RMW_KV_PTR) {
       //kv_ptr->dbg->proposed_ts = loc_entry->new_ts;
       //kv_ptr->dbg->proposed_log_no = loc_entry->log_no;
       //kv_ptr->dbg->proposed_rmw_id = loc_entry->rmw_id;
@@ -555,7 +555,7 @@ static inline void take_actions_to_commit_rmw(struct rmw_local_entry *loc_entry_
                                               uint16_t t_id)
 {
   /*
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+  if (ENABLE_DEBUG_RMW_KV_PTR) {
       if (loc_entry->helping_flag == NOT_HELPING)
         kv_ptr->dbg->last_committed_flag = LOCAL_RMW;
       else kv_ptr->dbg->last_committed_flag = LOCAL_RMW_FROM_HELP;
@@ -701,7 +701,7 @@ static inline void attempt_local_commit_from_rep(struct pending_ops *p_ops, stru
   lock_seqlock(&kv_ptr->seqlock);
   // If the RMW has not been committed yet locally, commit it
   if (kv_ptr->last_committed_log_no < new_log_no) {
-    //if (ENABLE_DEBUG_GLOBAL_ENTRY) kv_ptr->dbg->last_committed_flag = REMOTE_RMW_FROM_REP;
+    //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW_FROM_REP;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
     kv_ptr->last_committed_rmw_id.glob_sess_id = new_glob_sess_id;
@@ -761,7 +761,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
   // First check if that log no (or a higher) has been committed
   if (kv_ptr->last_committed_log_no < new_log_no) {
     is_log_higher = true;
-    //if (ENABLE_DEBUG_GLOBAL_ENTRY) kv_ptr->dbg->last_committed_flag = REMOTE_RMW;
+    //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
     kv_ptr->last_committed_rmw_id.glob_sess_id = glob_sess_id;
@@ -827,7 +827,7 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
       assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, rmw_l_id, glob_sess_id));
   }
   uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+  if (ENABLE_DEBUG_RMW_KV_PTR) {
     //kv_ptr->dbg->prop_acc_num++;
     //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
   }
@@ -1103,7 +1103,7 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(struct pending_
   help_loc_entry->key = loc_entry->key;
   loc_entry->rmw_reps.tot_replies = 1;
   loc_entry->rmw_reps.already_accepted = 1;
-  if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
+  if (PRINT_LOGS && ENABLE_DEBUG_RMW_KV_PTR)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Prop-not-locally accepted: helping rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, From: rmw_id %lu, glob_sess id: %u with version %u, m_id: %u \n",
             loc_entry->key.bkt, loc_entry->log_no, help_loc_entry->rmw_id.id, help_loc_entry->rmw_id.glob_sess_id,

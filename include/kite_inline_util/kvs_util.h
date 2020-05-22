@@ -365,7 +365,7 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
     }
   }
   uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+  if (ENABLE_DEBUG_RMW_KV_PTR) {
     // kv_ptr->dbg->prop_acc_num++;
     // number_of_reqs = kv_ptr->dbg->prop_acc_num;
   }
@@ -501,14 +501,14 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
         //}
       }
     }
-    if (ENABLE_DEBUG_GLOBAL_ENTRY) {
+    if (ENABLE_DEBUG_RMW_KV_PTR) {
       // kv_ptr->dbg->prop_acc_num++;
       // number_of_reqs = kv_ptr->dbg->prop_acc_num;
     }
     check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received propose", t_id);
   }
   unlock_seqlock(&kv_ptr->seqlock);
-  if (PRINT_LOGS && ENABLE_DEBUG_GLOBAL_ENTRY)
+  if (PRINT_LOGS && ENABLE_DEBUG_RMW_KV_PTR)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",  kv_ptr->key.bkt, log_no, number_of_reqs, prop_m_id,
             rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, prop_rep->opcode);

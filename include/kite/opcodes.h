@@ -172,9 +172,65 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define ACCEPT_FLIPS_BIT_OP 128
 
 
+
+
+
+// CLIENT REQUESTS STATE
+#define INVALID_REQ 0 // entry not being used
+#define ACTIVE_REQ 1 // client has issued a reqs
+#define IN_PROGRESS_REQ 2 // worker has picked up the req
+#define COMPLETED_REQ 3 // worker has completed the req
+
+// CONF BITS STATES
+#define UP_STABLE 0
+#define DOWN_STABLE 1
+#define DOWN_TRANSIENT_OWNED 2
+#define UNUSED_STATE 3 // used to denote that the field will not be used
+
+
+
+// These are for when ENABLE_DEBUG_RMW_KV_PTR is activated
+// possible flags explaining how the last committed RMW was committed
+#define LOCAL_RMW 0
+#define LOCAL_RMW_FROM_HELP 1
+#define REMOTE_RMW 2
+#define REMOTE_RMW_FROM_REP 3
+
+
+// TS,version used
+#define ALL_ABOARD_TS 2
+#define PAXOS_TS 3
+
 // LOGGING for PAXOS
 #define LOG_COMS 0
 #define LOG_WS 1
 
+
+// VIRTUAL CHANNELS
+#define VC_NUM 2
+#define R_VC 0
+#define W_VC 1
+
+
+// QUEUE PAIRS
+#define QP_NUM 4
+#define R_QP_ID 0
+#define R_REP_QP_ID 1
+#define W_QP_ID 2
+#define ACK_QP_ID 3
+
+#define POLL_CQ_R 0
+#define POLL_CQ_W 1
+#define POLL_CQ_R_REP 2
+#define POLL_CQ_ACK 3
+
+
+typedef enum {
+  NO_REQ,
+  RELEASE,
+  ACQUIRE,
+  WRITE_REQ,
+  READ_REQ,
+} req_type;
 
 #endif //KITE_OPCODES_H

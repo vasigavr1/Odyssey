@@ -204,8 +204,6 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*,
                             struct ack_message*, uint16_t);
 
 
-// construct a prep_message-- max_size must be in bytes
-void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t);
 // Set up the receive info
 void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
                     uint32_t push_ptr, uint32_t buf_slots,
