@@ -6,16 +6,17 @@
 #define KITE_OPCODES_H
 
 
-enum {COMPARE_AND_SWAP_STRONG = 97,
-  COMPARE_AND_SWAP_WEAK = 98,
-  FETCH_AND_ADD  = 99,
-  RMW_PLAIN_WRITE  =100 // writes to rmwable keys get translated to this op
+enum {COMPARE_AND_SWAP_STRONG = 96,
+  COMPARE_AND_SWAP_WEAK,
+  FETCH_AND_ADD,
+  RMW_PLAIN_WRITE // writes to rmwable keys get translated to this op
 };
 
 
 // when inserting the commit use this OP and change it to COMMIT_OP
 // before broadcasting. The purpose is for the state of the commit message to be tagged as SENT_RMW_ACQ
 // such that whens acks are gathered, it will be recognized that local entry need not get freed
+#define COMMIT_OP_NO_VAL 100
 #define RMW_ACQ_COMMIT_OP 101
 #define COMMIT_OP 102
 #define ACCEPT_OP 103
@@ -45,7 +46,7 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 
 //Cache Response
 //#define RETRY_RMW_NO_ENTRIES 0
-#define RETRY_RMW_KEY_EXISTS 1
+#define RETRY_RMW 1
 #define RMW_FAILURE 2 // when a CAS has to be cut short
 #define RMW_SUCCESS 118
 
@@ -111,7 +112,7 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 // 2. You have received an already committed message
 #define MUST_BCAST_COMMITS_FROM_HELP 6 // broadcast commits using the help_loc_entry as the source
 #define COMMITTED 7 // Local entry only: bcasts broadcasted, but session not yet freed
-#define TS_STALE_ON_REMOTE_KVS 8
+#define CAS_FAILED 8
 
 /*
  *  SENT means the message has been sent
@@ -162,12 +163,16 @@ enum {COMPARE_AND_SWAP_STRONG = 97,
 #define NACK_ALREADY_COMMITTED 7
 
 // Possible Helping flags
-#define NOT_HELPING 0
-#define PROPOSE_NOT_LOCALLY_ACKED 1 // HELP from waiting too long
-#define HELPING 2 // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
-#define PROPOSE_LOCALLY_ACCEPTED 3 // Denotes that we are sending proposes for a locally accepted rmw
-#define HELP_PREV_COMMITTED_LOG_TOO_HIGH 4
-#define HELPING_MYSELF 5
+enum {
+  NOT_HELPING,
+  PROPOSE_NOT_LOCALLY_ACKED, // HELP from waiting too long
+  HELPING, // HELP to avoid deadlocks: The RMW metadata need not been stashed, because the help_loc_entry is in use
+  PROPOSE_LOCALLY_ACCEPTED, // Denotes that we are sending proposes for a locally accepted rmw
+  HELP_PREV_COMMITTED_LOG_TOO_HIGH,
+  HELPING_MYSELF,
+  IS_HELPER
+};
+
 //
 #define ACCEPT_FLIPS_BIT_OP 128
 

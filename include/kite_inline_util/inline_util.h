@@ -118,7 +118,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     }
     // RMWS
     else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
-      insert_rmw(p_ops, &ops[i], &resp[i], t_id);
+       insert_rmw(p_ops, &ops[i], t_id);
     }
     // CACHE_GET_SUCCESS: Acquires, out-of-epoch reads, CACHE_GET_TS_SUCCESS: Releases, out-of-epoch Writes
     else {
@@ -152,7 +152,7 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
     if (state == ACCEPTED) {
       check_sum_of_reps(loc_entry);
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
-      if (loc_entry->rmw_reps.tot_replies >= QUORUM_NUM) {
+      if (loc_entry->rmw_reps.ready_to_inspect) {
         inspect_accepts(p_ops, loc_entry, t_id);
         check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
                                        MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP, ACCEPTED);
@@ -166,7 +166,8 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
       if (p_ops->virt_w_size < MAX_ALLOWED_W_SIZE) {
         if (state == MUST_BCAST_COMMITS_FROM_HELP && loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED) {
           my_printf(green, "Wrkr %u sess %u will bcast commits for the latest committed RMW,"
-                         " after learning its proposed RMW has already been committed \n", t_id, loc_entry->sess_id);
+                         " after learning its proposed RMW has already been committed \n",
+                    t_id, loc_entry->sess_id);
         }
         insert_write(p_ops, (trace_op_t*) entry_to_commit, FROM_COMMIT, state, t_id);
         loc_entry->state = COMMITTED;
@@ -209,16 +210,19 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
     }
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
-      if (loc_entry->must_release && !p_ops->sess_info[sess_i].ready_to_release) {
-        continue;
+      if (!TURN_OFF_KITE) {
+        if (loc_entry->must_release && !p_ops->sess_info[sess_i].ready_to_release) {
+          continue;
+        }
+        else if (loc_entry->must_release) loc_entry->must_release = false;
       }
-      else if (loc_entry->must_release) loc_entry->must_release = false;
+
 
       uint8_t quorum = QUORUM_NUM;
 //      if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
 //        check_sum_of_reps(loc_entry);
 //      else quorum++;
-      if (loc_entry->rmw_reps.tot_replies >= quorum) {
+      if (loc_entry->rmw_reps.ready_to_inspect) {
         // further responses for that broadcast of Propose must be disregarded
         advance_loc_entry_l_id(p_ops, loc_entry, t_id);
         inspect_proposes(p_ops, loc_entry, t_id);
@@ -523,7 +527,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
       struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
       byte_ptr += get_write_size_from_opcode(write->opcode);
       check_a_polled_write(write, i, w_num, w_mes->opcode, t_id);
-      if (!EMULATE_ABD) handle_configuration_on_receiving_rel(write, t_id);
+      handle_configuration_on_receiving_rel(write, t_id);
       if (ENABLE_ASSERTIONS) assert(write->opcode != ACCEPT_OP_BIT_VECTOR);
 
       if (write->opcode != NO_OP_RELEASE) {
@@ -1061,7 +1065,6 @@ static inline void remove_writes(p_ops_t *p_ops, struct latency_flags *latency_i
     if (ENABLE_ASSERTIONS) assert(sess_id < SESSIONS_PER_THREAD);
     sess_info_t *sess_info = &p_ops->sess_info[sess_id];
 
-    //if (w_state == READY_RELEASE ||
     if(w_state == READY_RMW_ACQ_COMMIT || w_state == READY_ACQUIRE) {
       if (!sess_info->stalled)
         printf("state %u ptr %u \n", w_state, p_ops->w_pull_ptr);

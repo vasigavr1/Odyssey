@@ -324,7 +324,8 @@ static inline void checks_when_forging_a_commit(struct commit *com, struct ibv_s
       printf("Worker: %u, Commit %d, val-len %u, message w_size %d\n", t_id, w_i, com->val_len,
              send_sgl[br_i].length);
     //assert(com->val_len == VALUE_SIZE >> SHIFT_BITS);
-    assert(com->opcode == COMMIT_OP || com->opcode == RMW_ACQ_COMMIT_OP);
+    assert(com->opcode == COMMIT_OP || com->opcode == RMW_ACQ_COMMIT_OP ||
+           com->opcode == COMMIT_OP_NO_VAL);
   }
 }
 
@@ -589,6 +590,7 @@ static inline void check_a_polled_write(struct write* write, uint16_t w_i,
     if (write->opcode != KVS_OP_PUT && write->opcode != OP_RELEASE &&
         write->opcode != OP_ACQUIRE && write->opcode != ACCEPT_OP &&
         write->opcode != OP_RELEASE_BIT_VECTOR && write->opcode != COMMIT_OP &&
+        write->opcode != COMMIT_OP_NO_VAL &&
         write->opcode != NO_OP_RELEASE && write->opcode != ACCEPT_OP_BIT_VECTOR)
       my_printf(red, "Wrkr %u Receiving write : Opcode %u, i %u/%u \n", t_id, write->opcode, w_i, w_num);
 //    if (write->version % 2 != 0) {

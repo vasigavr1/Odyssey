@@ -5,6 +5,7 @@
 #ifndef KITE_PAXOS_UTIL_H
 #define KITE_PAXOS_UTIL_H
 
+#include <common_func.h>
 #include "paxos_generic_utility.h"
 
 
@@ -130,41 +131,42 @@ static inline void fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops_t *p_ops,
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   local_rmw_ack(loc_entry);
   loc_entry->state = state;
-  loc_entry->epoch_id = (uint64_t) epoch_id;
+  if (!TURN_OFF_KITE) loc_entry->epoch_id = (uint64_t) epoch_id;
   loc_entry->new_ts.version = version;
   loc_entry->new_ts.m_id = (uint8_t) machine_id;
 }
 
 // Initialize a local  RMW entry on the first time it gets allocated
-static inline void init_loc_entry(kv_resp_t* resp, p_ops_t* p_ops,
-                                  trace_op_t *prop,
+static inline void init_loc_entry(p_ops_t* p_ops,
+                                  trace_op_t *op,
                                   uint16_t t_id, loc_entry_t* loc_entry)
 {
-  loc_entry->opcode = prop->opcode;
-  if (ENABLE_ASSERTIONS) assert(prop->real_val_len <= RMW_VALUE_SIZE);
-  if (opcode_is_compare_rmw(prop->opcode) || prop->opcode == RMW_PLAIN_WRITE)
-    memcpy(loc_entry->value_to_write, prop->value_to_write, prop->real_val_len);
-  loc_entry->killable = prop->opcode == COMPARE_AND_SWAP_WEAK;
-  if (opcode_is_compare_rmw(prop->opcode))
-    loc_entry->compare_val = prop->value_to_read; //expected value
-  else if (prop->opcode == FETCH_AND_ADD)
-    loc_entry->compare_val = prop->value_to_write; // value to be added
+  loc_entry->opcode = op->opcode;
+  if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
+  if (opcode_is_compare_rmw(op->opcode) || op->opcode == RMW_PLAIN_WRITE)
+    memcpy(loc_entry->value_to_write, op->value_to_write, op->real_val_len);
+  loc_entry->killable = op->opcode == COMPARE_AND_SWAP_WEAK;
+  if (opcode_is_compare_rmw(op->opcode))
+    loc_entry->compare_val = op->value_to_read; //expected value
+  else if (op->opcode == FETCH_AND_ADD)
+    loc_entry->compare_val = op->value_to_write; // value to be added
 
 
   loc_entry->must_release = ACCEPT_IS_RELEASE != 0; // TODO That can be a programmer input
   loc_entry->fp_detected = false;
-  loc_entry->rmw_val_len = prop->real_val_len;
+  loc_entry->rmw_val_len = op->real_val_len;
   loc_entry->rmw_is_successful = false;
-  loc_entry->all_aboard = false;
+  loc_entry->all_aboard = ENABLE_ALL_ABOARD && op->attempt_all_aboard;
+  loc_entry->avoid_val_in_com = false;
   loc_entry->all_aboard_time_out = 0;
-  memcpy(&loc_entry->key, &prop->key, TRUE_KEY_SIZE);
+  memcpy(&loc_entry->key, &op->key, TRUE_KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
-  loc_entry->kv_ptr = resp->kv_ptr;
-  if (ENABLE_ASSERTIONS) {
-    loc_entry->help_loc_entry->kv_ptr = resp->kv_ptr;
-  }
-  // loc_entry->sess_id = prop->session_id;
-  loc_entry->index_to_req_array = prop->index_to_req_array;
+//  loc_entry->kv_ptr = resp->kv_ptr;
+//  if (ENABLE_ASSERTIONS) {
+//    loc_entry->help_loc_entry->kv_ptr = resp->kv_ptr;
+//  }
+  // loc_entry->sess_id = op->session_id;
+  loc_entry->index_to_req_array = op->index_to_req_array;
   //loc_entry->accept_acks = 0;
   //loc_entry->accept_replies = 0;
   loc_entry->back_off_cntr = 0;
@@ -175,7 +177,8 @@ static inline void init_loc_entry(kv_resp_t* resp, p_ops_t* p_ops,
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.id < B_4);
   loc_entry->l_id = p_ops->prop_info->l_id;
   loc_entry->help_loc_entry->l_id = p_ops->prop_info->l_id;
-  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, prop->session_id);
+  p_ops->prop_info->l_id++;
+  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id);
   loc_entry->accepted_log_no = 0;
   //my_printf(yellow, "Init  RMW-id %u glob_sess_id %u \n", loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
   //loc_entry->help_loc_entry->log_no = 0;
@@ -185,7 +188,8 @@ static inline void init_loc_entry(kv_resp_t* resp, p_ops_t* p_ops,
 
 // Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
 static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op_t *kv_ptr,
-                                    uint8_t opcode, uint8_t new_ts_m_id, uint64_t l_id, uint16_t glob_sess_id,
+                                    uint8_t opcode, uint8_t new_ts_m_id, loc_entry_t *loc_entry,
+                                    uint64_t l_id, uint16_t glob_sess_id,
                                     uint32_t log_no, uint16_t t_id, const char *message)
 {
   if (ENABLE_ASSERTIONS) {
@@ -210,10 +214,13 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
     if (ENABLE_ASSERTIONS) {
       assert(kv_ptr->prop_ts.version == new_version);
       assert(kv_ptr->prop_ts.m_id == new_ts_m_id);
+      kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
     }
     kv_ptr->accepted_ts = kv_ptr->prop_ts;
     kv_ptr->accepted_log_no = log_no;
-    if (ENABLE_ASSERTIONS)  kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
+    if (loc_entry != NULL && loc_entry->all_aboard) {
+      perform_the_rmw_on_the_loc_entry(loc_entry, kv_ptr, t_id);
+    }
   }
   if (ENABLE_ASSERTIONS) {
     assert(kv_ptr->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
@@ -394,18 +401,11 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
     kv_ptr->state = ACCEPTED;
     // calculate the new value depending on the type of RMW
     perform_the_rmw_on_the_loc_entry(loc_entry, kv_ptr, t_id);
-    // we need to remember the last accepted value
-    if (loc_entry->rmw_is_successful) {
-      memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-    }
-    else {
-      memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
-    }
     //when last_accepted_value is update also update the acc_base_ts
     kv_ptr->base_acc_ts = kv_ptr->ts;
-    loc_entry->accepted_log_no = kv_ptr->log_no;
     kv_ptr->accepted_ts = loc_entry->new_ts;
     kv_ptr->accepted_log_no = kv_ptr->log_no;
+
     if (ENABLE_ASSERTIONS) {
       assert(loc_entry->accepted_log_no == loc_entry->log_no);
       assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
@@ -517,9 +517,11 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
     assign_second_rmw_id_to_first(&kv_ptr->rmw_id, &help_loc_entry->rmw_id);
     kv_ptr->accepted_ts = help_loc_entry->new_ts;
     kv_ptr->accepted_log_no = kv_ptr->log_no;
+
     if (ENABLE_ASSERTIONS) {
       assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
       kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
+
     }
     memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base ts of the RMW we are helping
@@ -745,6 +747,40 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
 
 }
 
+
+// Check if the commit must be applied to the KVS and
+// transition the kv_ptr to INVALID_RMW if it has been waiting for this commit
+static inline bool attempt_remote_commit_no_value(mica_op_t *kv_ptr, struct commit_no_val *com,
+                                                  uint16_t t_id)
+{
+  uint32_t new_log_no = com->log_no;
+  // the function is called with the lock in hand
+  bool is_log_higher = false;
+  // First check if that log no (or a higher) has been committed
+  if (kv_ptr->last_committed_log_no < new_log_no) {
+    if (ENABLE_ASSERTIONS) {
+      assert(kv_ptr->state == ACCEPTED);
+      assert(kv_ptr->log_no == com->log_no);
+      assert(rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->accepted_rmw_id, com->t_rmw_id, com->glob_sess_id));
+    }
+    is_log_higher = true;
+    kv_ptr->last_committed_log_no = new_log_no;
+    kv_ptr->last_committed_rmw_id.id = com->t_rmw_id;
+    kv_ptr->last_committed_rmw_id.glob_sess_id = com->glob_sess_id;
+    kv_ptr->state = INVALID_RMW;
+    if (DEBUG_LOG)
+      my_printf(green, "Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
+                new_log_no, com->t_rmw_id, com->glob_sess_id);
+  }
+  else if (kv_ptr->last_committed_log_no == new_log_no) {
+    check_that_the_rmw_ids_match(kv_ptr, com->t_rmw_id, com->glob_sess_id, new_log_no,
+                                 kv_ptr->base_acc_ts.version, kv_ptr->base_acc_ts.m_id, "attempt_remote_commit without val", t_id);
+  }
+
+  return is_log_higher;
+}
+
+
 // Check if the commit must be applied to the KVS and
 // transition the kv_ptr to INVALID_RMW if it has been waiting for this commit
 static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
@@ -794,18 +830,29 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   bool is_log_higher;
   r_info_t * r_info = (r_info_t*) op;
   struct commit *com = (struct commit*) op;
-  uint64_t rmw_l_id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
-  uint16_t glob_sess_id = !use_commit ? r_info->rmw_id.glob_sess_id : com->glob_sess_id;
+  struct rmw_id tmp_rmw_id;
+  tmp_rmw_id.id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
+  tmp_rmw_id.glob_sess_id = !use_commit ? r_info->rmw_id.glob_sess_id : com->glob_sess_id;
   uint32_t log_no = !use_commit ? r_info->log_no : com->log_no;
   struct key *key = !use_commit ? &r_info->key : &com->key;
   uint8_t *value = !use_commit ? r_info->value : com->value;
-  uint32_t version = !use_commit ? r_info->ts_to_read.version : com->base_ts.version;
-  uint8_t m_id = !use_commit ? r_info->ts_to_read.m_id : com->base_ts.m_id;
-  uint32_t entry;
+  struct ts_tuple tmp_ts;
+  tmp_ts.version = !use_commit ? r_info->ts_to_read.version : com->base_ts.version;
+  tmp_ts.m_id = !use_commit ? r_info->ts_to_read.m_id : com->base_ts.m_id;
+
+
 
   lock_seqlock(&kv_ptr->seqlock);
   check_keys_with_one_trace_op(key, kv_ptr);
-  is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
+  if (use_commit && com->opcode == COMMIT_OP_NO_VAL) {
+    is_log_higher = attempt_remote_commit_no_value(kv_ptr, (struct commit_no_val*) com, t_id);
+    if (is_log_higher) {
+      value = kv_ptr->last_accepted_value;
+      tmp_ts = kv_ptr->base_acc_ts;
+      log_no = kv_ptr->log_no;
+    }
+  }
+  else is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
 //  else if (ENABLE_ASSERTIONS) assert(false);
   // The commit must be applied to the KVS if
@@ -813,27 +860,28 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   //   2. the commit has the same base with the kv, but higher log
   // But if the kv-ptr has a greater base-ts, then its value should not be overwritten
   if (is_log_higher) {
-    if (compare_ts_with_flat(&kv_ptr->ts, version, m_id) != GREATER) {
-      kv_ptr->ts.m_id = m_id;
-      kv_ptr->ts.version = version;
+    if (compare_ts(&kv_ptr->ts, &tmp_ts) != GREATER) {
+      kv_ptr->ts = tmp_ts;
       memcpy(kv_ptr->value, value, (size_t) RMW_VALUE_SIZE);
     }
     update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
                        value, "From remote commit ", LOG_COMS);
   }
+
   check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received commit", t_id);
+
   if (ENABLE_ASSERTIONS) {
     if (kv_ptr->state != INVALID_RMW)
-      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, rmw_l_id, glob_sess_id));
+      assert(!rmw_ids_are_equal(&kv_ptr->rmw_id, &tmp_rmw_id));
   }
   uint64_t number_of_reqs = 0;
   if (ENABLE_DEBUG_RMW_KV_PTR) {
     //kv_ptr->dbg->prop_acc_num++;
     //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
   }
-  register_committed_global_sess_id (glob_sess_id, rmw_l_id, t_id);
-  check_registered_against_kv_ptr_last_committed(kv_ptr, rmw_l_id, glob_sess_id,
-                                                 "handle remote commit", t_id);
+  register_committed_global_sess_id(tmp_rmw_id.glob_sess_id, tmp_rmw_id.id, t_id);
+  check_registered_against_kv_ptr_last_committed(kv_ptr, tmp_rmw_id.id, tmp_rmw_id.glob_sess_id,
+                                                   "handle remote commit", t_id);
 
   unlock_seqlock(&kv_ptr->seqlock);
   return number_of_reqs;
@@ -937,10 +985,12 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
                                           bool is_accept,
                                           const uint16_t t_id)
 {
+
+  rmw_rep_info_t *rep_info = &loc_entry->rmw_reps;
   if (ENABLE_ASSERTIONS) {
     if (is_accept) assert(loc_entry->state == ACCEPTED);
     else {
-      assert(loc_entry->rmw_reps.tot_replies > 0);
+      assert(rep_info->tot_replies > 0);
       assert(loc_entry->state == PROPOSED);
       // this checks that the performance optimization of NO-op reps is valid
       assert(rep->opcode != NO_OP_PROP_REP);
@@ -948,26 +998,28 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
                                      PROPOSE_NOT_LOCALLY_ACKED, PROPOSE_LOCALLY_ACCEPTED);
     }
   }
-  loc_entry->rmw_reps.tot_replies++;
-  if (rep->opcode > RMW_ACK_ACC_SAME_RMW) loc_entry->rmw_reps.nacks++;
+  rep_info->tot_replies++;
+  if (rep_info->tot_replies > QUORUM_NUM)  rep_info->ready_to_inspect = true;
+  if (rep->opcode > RMW_ACK_ACC_SAME_RMW) rep_info->nacks++;
   switch (rep->opcode) {
     case RMW_ACK:
     case RMW_ACK_ACC_SAME_RMW:
-      loc_entry->rmw_reps.acks++;
+      rep_info->acks++;
       if (ENABLE_ASSERTIONS)
         assert(rep_mes->m_id < MACHINE_NUM && rep_mes->m_id != machine_id);
       if (DEBUG_RMW)
         my_printf(green, "Wrkr %u, the received rep is an %s ack, "
                     "total acks %u \n", t_id, is_accept ? "acc" : "prop",
-                  loc_entry->rmw_reps.acks);
+                  rep_info->acks);
       break;
     case LOG_TOO_HIGH:
-      loc_entry->rmw_reps.log_too_high++;
+      rep_info->log_too_high++;
       break;
     case RMW_ID_COMMITTED:
-      loc_entry->rmw_reps.no_need_to_bcast = true;
+      rep_info->no_need_to_bcast = true;
     case RMW_ID_COMMITTED_SAME_LOG:
-      loc_entry->rmw_reps.rmw_id_commited++;
+      rep_info->ready_to_inspect = true;
+      rep_info->rmw_id_commited++;
       if (loc_entry->helping_flag != HELPING)
         loc_entry->log_no = loc_entry->accepted_log_no;
       attempt_local_commit(p_ops, loc_entry, t_id);
@@ -976,39 +1028,40 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
       //store_rmw_rep_to_help_loc_entry(loc_entry, rep, t_id);
       break;
     case LOG_TOO_SMALL:
-      loc_entry->rmw_reps.log_too_small++;
+      rep_info->ready_to_inspect = true;
+      rep_info->log_too_small++;
       attempt_local_commit_from_rep(p_ops, rep, loc_entry, t_id);
       break;
     case SEEN_LOWER_ACC:
-      loc_entry->rmw_reps.already_accepted++;
+      rep_info->already_accepted++;
       if (ENABLE_ASSERTIONS) {
         assert(compare_netw_ts_with_ts(&rep->ts, &loc_entry->new_ts) == SMALLER);
         assert(rep->rmw_id < B_4);
         assert(!is_accept);
       }
       // Store the accepted rmw only if no higher priority reps have been seen
-      if (!loc_entry->rmw_reps.seen_higher_prop_acc +
-          (loc_entry->rmw_reps.rmw_id_commited + loc_entry->rmw_reps.log_too_small == 0)) {
+      if (!rep_info->seen_higher_prop_acc +
+          (rep_info->rmw_id_commited + rep_info->log_too_small == 0)) {
         store_rmw_rep_to_help_loc_entry(loc_entry, rep, t_id);
       }
       break;
     case SEEN_HIGHER_ACC:
     case SEEN_HIGHER_PROP:
       // make sure no lower accepts will be helped, useful only for proposes
-      //loc_entry->rmw_reps.seen_higher_acc = true;
-
-      loc_entry->rmw_reps.seen_higher_prop_acc++;
+      //rep_info->seen_higher_acc = true;
+      if (!is_accept) rep_info->ready_to_inspect = true;
+      rep_info->seen_higher_prop_acc++;
       if (DEBUG_RMW)
         my_printf(yellow, "Wrkr %u: the %s rep is %u, %u sum of all other reps %u \n", t_id,
                   is_accept ? "acc" : "prop",rep->opcode,
-                  loc_entry->rmw_reps.seen_higher_prop_acc,
-                  loc_entry->rmw_reps.rmw_id_commited + loc_entry->rmw_reps.log_too_small +
-                  loc_entry->rmw_reps.already_accepted);
-      if (rep->ts.version > loc_entry->rmw_reps.seen_higher_prop_version) {
-        loc_entry->rmw_reps.seen_higher_prop_version = rep->ts.version;
+                  rep_info->seen_higher_prop_acc,
+                  rep_info->rmw_id_commited + rep_info->log_too_small +
+                  rep_info->already_accepted);
+      if (rep->ts.version > rep_info->seen_higher_prop_version) {
+        rep_info->seen_higher_prop_version = rep->ts.version;
         if (DEBUG_RMW)
           my_printf(yellow, "Wrkr %u: overwriting the TS version %u \n",
-                    t_id, loc_entry->rmw_reps.seen_higher_prop_version);
+                    t_id, rep_info->seen_higher_prop_version);
       }
       break;
     default:
@@ -1144,7 +1197,7 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(p_ops_t *p_ops,
       }
       loc_entry->log_no = kv_ptr->last_committed_log_no + 1;
       activate_kv_pair(PROPOSED, PAXOS_TS, kv_ptr, loc_entry->opcode,
-                       (uint8_t) machine_id, loc_entry->rmw_id.id,
+                       (uint8_t) machine_id, NULL, loc_entry->rmw_id.id,
                        loc_entry->rmw_id.glob_sess_id, loc_entry->log_no, t_id,
                        ENABLE_ASSERTIONS ? "attempt_to_grab_kv_ptr_after_waiting" : NULL);
 
@@ -1263,7 +1316,7 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(p_ops_t *p_ops,
     loc_entry->log_no = kv_ptr->last_committed_log_no + 1;
     new_version = kv_ptr->prop_ts.version + 1;
     activate_kv_pair(PROPOSED, new_version, kv_ptr, loc_entry->opcode,
-                     (uint8_t) machine_id, loc_entry->rmw_id.id,
+                     (uint8_t) machine_id, NULL, loc_entry->rmw_id.id,
                      loc_entry->rmw_id.glob_sess_id, loc_entry->log_no, t_id,
                      ENABLE_ASSERTIONS ? "attempt_to_steal_a_proposed_kv_ptr" : NULL);
 
@@ -1591,7 +1644,8 @@ static inline void inspect_proposes(p_ops_t *p_ops,
   loc_entry_t tmp;
   loc_entry_t *dbg_loc_entry = &tmp;
   bool zero_out_log_too_high_cntr = true;
-  memcpy(dbg_loc_entry, loc_entry, sizeof(loc_entry_t));
+  if (ENABLE_ASSERTIONS) memcpy(dbg_loc_entry, loc_entry, sizeof(loc_entry_t));
+
   // RMW_ID COMMITTED
   if (loc_entry->rmw_reps.rmw_id_commited > 0) {
     debug_fail_help(loc_entry, " rmw id committed", t_id);
@@ -1690,7 +1744,6 @@ static inline void inspect_accepts(p_ops_t *p_ops,
 
   uint8_t remote_quorum = (uint8_t) (loc_entry->all_aboard ?
                                      MACHINE_NUM : QUORUM_NUM);
-
   uint32_t new_version = 0;
   if (loc_entry->helping_flag != NOT_HELPING) {
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == HELPING);
@@ -1718,6 +1771,10 @@ static inline void inspect_accepts(p_ops_t *p_ops,
       assert(loc_entry->state != COMMITTED);
       if (loc_entry->helping_flag == HELPING) assert(!loc_entry->all_aboard);
     }
+    assert(!loc_entry->avoid_val_in_com);
+    if (loc_entry->rmw_reps.acks == MACHINE_NUM) {
+      loc_entry->avoid_val_in_com = true;
+    }
     loc_entry->state = (uint8_t) (loc_entry->helping_flag == HELPING ?
                                   MUST_BCAST_COMMITS_FROM_HELP : MUST_BCAST_COMMITS);
   }
@@ -1734,9 +1791,8 @@ static inline void inspect_accepts(p_ops_t *p_ops,
     loc_entry->state = RETRY_WITH_BIGGER_TS;
     new_version = loc_entry->new_ts.version;
   }
-
-    // if a quorum of messages have been received but
-    // we are waiting for more, then we are doing all aboard
+  // if a quorum of messages have been received but
+  // we are waiting for more, then we are doing all aboard
   else if (ENABLE_ALL_ABOARD) {
     if (ENABLE_ASSERTIONS) assert(loc_entry->all_aboard);
     loc_entry->all_aboard_time_out++;
@@ -1763,60 +1819,51 @@ static inline void inspect_accepts(p_ops_t *p_ops,
  * --------------------------------------------------------------------------*/
 
 // Insert an RMW in the local RMW structs
-static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *prop,
-                              kv_resp_t *resp, uint16_t t_id)
+static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
+                              uint16_t t_id)
 {
-  uint16_t session_id = prop->session_id;
-  if (resp->type == RMW_FAILURE) {
+  uint16_t session_id = op->session_id;
+  loc_entry_t *loc_entry = &p_ops->prop_info->entry[session_id];
+  if (loc_entry->state == CAS_FAILED) {
     //printf("Wrkr%u, sess %u, entry %u rmw_failing \n", t_id, session_id, resp->rmw_entry);
-    signal_completion_to_client(session_id, prop->index_to_req_array, t_id);
+    signal_completion_to_client(session_id, op->index_to_req_array, t_id);
     p_ops->sess_info[session_id].stalled = false;
     p_ops->all_sessions_stalled = false;
     return;
   }
-  if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
-  loc_entry_t *loc_entry = &p_ops->prop_info->entry[session_id];
   if (ENABLE_ASSERTIONS) {
+    assert(session_id < SESSIONS_PER_THREAD);
     if (loc_entry->state != INVALID_RMW) {
       my_printf(red, "Wrkr %u Expected an invalid loc entry for session %u, loc_entry state %u \n",
                 t_id, session_id, loc_entry->state);
       assert(false);
     }
   }
-  init_loc_entry(resp, p_ops, prop, t_id, loc_entry);
-  p_ops->prop_info->l_id++;
+  uint8_t state = (uint8_t) (ENABLE_ALL_ABOARD && op->attempt_all_aboard ? ACCEPTED: PROPOSED);
   // if the kv_ptr was occupied, put in the next op to try next round
-  if (resp->type == RETRY_RMW_KEY_EXISTS) {
-    //if (DEBUG_RMW) my_printf(green, "Worker %u failed to do its RMW and moved "
-    //      "it from position %u to %u \n", t_id, op_i, *old_op_i);
-    loc_entry->state = NEEDS_KV_PTR;
-    // Set up the state that the RMW should wait on
-    loc_entry->help_rmw->rmw_id = resp->kv_ptr_rmw_id;
-    loc_entry->help_rmw->state = resp->kv_ptr_state;
-    loc_entry->help_rmw->ts = resp->kv_ptr_ts;
-    loc_entry->help_rmw->log_no = resp->log_no;
-  }
-  else if (resp->type == RMW_SUCCESS) { // the RMW has gotten an entry and is to be sent
-    fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops, loc_entry, prop->ts.version,
-                                          PROPOSED, session_id, t_id);
-    loc_entry->log_no = resp->log_no;
-    if (ENABLE_ALL_ABOARD && prop->attempt_all_aboard) {
-      if (ENABLE_ASSERTIONS) assert(prop->ts.version == ALL_ABOARD_TS);
-      act_on_quorum_of_prop_acks(p_ops, loc_entry, t_id);
-      //if the flag is ACCEPTED, that means that accept messages
-      // are already lined up to be broadcast, and thus you MUST do All aboard
-      if (loc_entry->state == ACCEPTED) {
-        loc_entry->all_aboard = true;
-        loc_entry->all_aboard_time_out = 0;
+  if (loc_entry->state == state) { // the RMW has gotten an entry and is to be sent
+    fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops, loc_entry, op->ts.version,
+                                          state, session_id, t_id);
+    if (state == ACCEPTED) {
+      if (ENABLE_ASSERTIONS) {
+        assert(op->ts.version == ALL_ABOARD_TS);
+        assert(loc_entry->rmw_id.id < B_4);
+        assert(glob_ses_id_to_t_id(loc_entry->rmw_id.glob_sess_id) == t_id &&
+               glob_ses_id_to_m_id(loc_entry->rmw_id.glob_sess_id) == machine_id);
       }
+      loc_entry->accepted_log_no = loc_entry->log_no;
+      insert_accept_in_writes_message_fifo(p_ops, loc_entry, false, t_id);
+      loc_entry->killable = false;
+      loc_entry->all_aboard = true;
+      loc_entry->all_aboard_time_out = 0;
     }
     else {
-      if (ENABLE_ASSERTIONS) assert(prop->ts.version == PAXOS_TS);
-      local_rmw_ack(loc_entry);
+      if (ENABLE_ASSERTIONS) assert(op->ts.version == PAXOS_TS);
       insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
     }
   }
-  else my_assert(false, "Wrong resp type in RMW");
+  else if (loc_entry->state == NEEDS_KV_PTR) loc_entry->all_aboard = false;
+  else my_assert(false, "Wrong loc_entry in RMW");
 }
 
 

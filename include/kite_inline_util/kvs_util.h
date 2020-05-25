@@ -193,41 +193,52 @@ static inline void KVS_from_trace_releases(trace_op_t *op,
 
 // Handle a local rmw in the KVS
 static inline void KVS_from_trace_rmw(trace_op_t *op,
-                                      mica_op_t *kv_ptr, kv_resp_t *resp,
+                                      mica_op_t *kv_ptr,
                                       p_ops_t *p_ops, uint64_t *rmw_l_id_,
                                       uint16_t op_i, uint16_t t_id)
 {
+  loc_entry_t *loc_entry = &p_ops->prop_info->entry[op->session_id];
+  init_loc_entry(p_ops, op, t_id, loc_entry);
   uint64_t rmw_l_id = *rmw_l_id_;
   if (DEBUG_RMW) my_printf(green, "Worker %u trying a local RMW on op %u\n", t_id, op_i);
   uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
                          ALL_ABOARD_TS : PAXOS_TS;
+  uint8_t state = (uint8_t) (ENABLE_ALL_ABOARD && op->attempt_all_aboard ? ACCEPTED : PROPOSED);
   lock_seqlock(&kv_ptr->seqlock);
   {
     check_trace_op_key_vs_kv_ptr(op, kv_ptr);
     check_log_nos_of_kv_ptr(kv_ptr, "KVS_batch_op_trace", t_id);
     if (kv_ptr->state == INVALID_RMW) {
-      if (!does_rmw_fail_early(op, kv_ptr, resp, t_id)) {
-        activate_kv_pair(PROPOSED, new_version, kv_ptr, op->opcode,
-                         (uint8_t) machine_id, rmw_l_id,
-                         get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
-                         kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
-        resp->type = RMW_SUCCESS;
+      if (!does_rmw_fail_early(op, kv_ptr, t_id)) {
+          activate_kv_pair(state, new_version, kv_ptr, op->opcode,
+                           (uint8_t) machine_id, loc_entry, rmw_l_id,
+                           get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
+                           kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
+        loc_entry->state = state;
         if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
+        loc_entry->log_no = kv_ptr->log_no;
       }
-    } else {
-      // This is the state the RMW will wait on
-      resp->kv_ptr_ts = kv_ptr->prop_ts;
-      resp->kv_ptr_state = kv_ptr->state;
-      resp->kv_ptr_rmw_id = kv_ptr->rmw_id;
-      resp->type = RETRY_RMW_KEY_EXISTS;
+      else loc_entry->state = CAS_FAILED;
     }
-    resp->log_no = kv_ptr->log_no;
-    resp->kv_ptr = kv_ptr;
-    // We need to put the new timestamp in the op too, both to send it and to store it for later
-    op->ts.version = new_version;
+    else {
+      // This is the state the RMW will wait on
+      loc_entry->state = NEEDS_KV_PTR;
+      // Set up the state that the RMW should wait on
+      loc_entry->help_rmw->rmw_id = kv_ptr->rmw_id;
+      loc_entry->help_rmw->state = kv_ptr->state;
+      loc_entry->help_rmw->ts = kv_ptr->prop_ts;
+      loc_entry->help_rmw->log_no = kv_ptr->log_no;
+    }
   }
   unlock_seqlock(&kv_ptr->seqlock);
-  if (resp->type != RMW_FAILURE) (*rmw_l_id_)++;
+
+  loc_entry->kv_ptr = kv_ptr;
+  if (ENABLE_ASSERTIONS) {
+    loc_entry->help_loc_entry->kv_ptr = kv_ptr;
+  }
+  // We need to put the new timestamp in the op too, both to send it and to store it for later
+  op->ts.version = new_version;
+  if (loc_entry->state != CAS_FAILED) (*rmw_l_id_)++;
 }
 
 // Handle a local rmw acquire in the KVS
@@ -357,7 +368,7 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
       // if the accepted is going to be acked record its information in the kv_ptr
       if (acc_rep->opcode == RMW_ACK) {
         activate_kv_pair(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
-                         acc->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                         acc->ts.m_id, NULL, rmw_l_id, glob_sess_id, log_no, t_id,
                          ENABLE_ASSERTIONS ? "received accept" : NULL);
         memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
         assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
@@ -491,7 +502,7 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
         if (prop_rep->opcode == RMW_ACK) {
           if (ENABLE_ASSERTIONS) assert(prop->log_no >= kv_ptr->log_no);
           activate_kv_pair(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
-                           prop->ts.m_id, rmw_l_id, glob_sess_id, log_no, t_id,
+                           prop->ts.m_id, NULL, rmw_l_id, glob_sess_id, log_no, t_id,
                            ENABLE_ASSERTIONS ? "received propose" : NULL);
         }
         if (ENABLE_ASSERTIONS) {
@@ -678,7 +689,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
         }
         else if (ENABLE_RMWS) {
           if (opcode_is_rmw(op[op_i].opcode)) {
-            KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i], &resp[op_i],
+            KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i],
                                p_ops, &rmw_l_id, op_i, t_id);
           }
           else if (ENABLE_RMW_ACQUIRES && op[op_i].opcode == OP_ACQUIRE) {
@@ -755,7 +766,7 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
           if (write->opcode == ACCEPT_OP) {
             KVS_updates_accepts((struct accept*) write, kv_ptr[op_i], p_ops, op_i, t_id);
           }
-          else if (write->opcode == COMMIT_OP) {
+          else if (write->opcode == COMMIT_OP || write->opcode == COMMIT_OP_NO_VAL) {
             KVS_updates_commits((struct commit*) write, kv_ptr[op_i], p_ops, op_i, t_id);
           }
           else if (ENABLE_ASSERTIONS) {

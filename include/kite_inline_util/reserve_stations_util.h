@@ -9,6 +9,10 @@
 #include "main.h"
 #include "latency_util.h"
 #include "debug_util.h"
+#include "config_util.h"
+#include "client_if_util.h"
+#include "paxos_util.h"
+
 
 //-------------------------------------------------------------------------------------
 // -------------------------------FORWARD DECLARATIONS--------------------------------
@@ -347,14 +351,15 @@ static inline bool coalesce_release(w_mes_info_t *info, struct w_message *w_mes,
 static inline void* get_w_ptr(p_ops_t *p_ops, uint8_t opcode,
                               uint16_t session_id, uint16_t t_id)
 {
-  check_state_with_allowed_flags(8, opcode, OP_RELEASE, KVS_OP_PUT, ACCEPT_OP,
+  check_state_with_allowed_flags(9, opcode, OP_RELEASE, KVS_OP_PUT, ACCEPT_OP,
                                  COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_SECOND_ROUND,
-                                 OP_ACQUIRE);
+                                 OP_ACQUIRE, COMMIT_OP_NO_VAL);
   if (ENABLE_ASSERTIONS) assert(session_id < SESSIONS_PER_THREAD);
 
   bool is_accept = opcode == ACCEPT_OP;
   bool is_release = opcode == OP_RELEASE;
-  bool release_or_acc = is_release || (is_accept && ACCEPT_IS_RELEASE); //is_accept || is_release;
+  bool release_or_acc = (!TURN_OFF_KITE) &&
+    (is_release || (is_accept && ACCEPT_IS_RELEASE)); //is_accept || is_release;
 
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   w_mes_info_t *info = &p_ops->w_fifo->info[w_mes_ptr];
@@ -433,6 +438,10 @@ static inline uint8_t get_write_opcode(const uint8_t source, trace_op_t *op,
         return RMW_ACQ_COMMIT_OP;
       else return r_info->opcode;
     case FROM_COMMIT:
+      if (loc_entry->avoid_val_in_com) {
+        //loc_entry->avoid_val_in_com = false;
+        return COMMIT_OP_NO_VAL;
+      }
       return COMMIT_OP;
     case RELEASE_THIRD:
       return OP_RELEASE_SECOND_ROUND;
@@ -500,7 +509,7 @@ static inline void
 set_w_sess_info_and_index_to_req_array(p_ops_t *p_ops, trace_op_t *write,
                                        const uint8_t source, uint32_t w_ptr,
                                        const uint32_t incoming_pull_ptr,
-                                       uint8_t opcode, uint16_t sess_id, const uint16_t t_id)
+                                       uint16_t sess_id, const uint16_t t_id)
 {
   p_ops->w_meta[w_ptr].sess_id = sess_id;
   switch (source) {
@@ -899,7 +908,7 @@ static inline void insert_write(p_ops_t *p_ops, trace_op_t *op, const uint8_t so
   uint8_t opcode = get_write_opcode(source, op, r_info, loc_entry);
   uint16_t sess_id =  get_w_sess_id(p_ops, op, source, incoming_pull_ptr, t_id);
   set_w_sess_info_and_index_to_req_array(p_ops, op, source, w_ptr, incoming_pull_ptr,
-                                         opcode, sess_id, t_id);
+                                         sess_id, t_id);
 
   if (ENABLE_ASSERTIONS && source == FROM_READ &&
       r_info->opcode == KVS_OP_PUT) {
@@ -1035,7 +1044,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
   op->real_val_len = real_val_len;
 
   if (is_rmw && ENABLE_ALL_ABOARD) {
-    op->attempt_all_aboard = p_ops->q_info->missing_num == 0 ? true : false;
+    op->attempt_all_aboard = p_ops->q_info->missing_num == 0;
   }
 
   if (opcode == KVS_OP_PUT) {
@@ -1083,9 +1092,8 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
   uint16_t byte_ptr = W_MES_HEADER;
   bool failure = false;
 
-  if (!EMULATE_ABD && info->is_release ) {//&& send_bit_vector.state == DOWN_STABLE)) {
-    if (add_failure_to_release_from_sess_id(p_ops, w_mes, info, q_info, backward_ptr, t_id))
-      failure = true;
+  if (info->is_release ) {
+    failure = add_failure_to_release_from_sess_id(p_ops, w_mes, info, q_info, backward_ptr, t_id);
   }
   for (uint8_t i = 0; i < coalesce_num; i++) {
     struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
@@ -1110,6 +1118,7 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
         *w_state = SENT_PUT;
         break;
       case COMMIT_OP:
+      case COMMIT_OP_NO_VAL:
         checks_when_forging_a_commit((struct commit*) write, send_sgl, br_i, i, coalesce_num, t_id);
         update_sess_info_missing_ids_when_sending(p_ops, info, q_info, i, t_id);
         w_meta->acks_expected = q_info->active_num;
@@ -1126,7 +1135,7 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
         *w_state = SENT_BIT_VECTOR;
         break;
       case OP_RELEASE:
-        if (failure) {
+        if (!TURN_OFF_KITE && failure) {
           write->opcode = NO_OP_RELEASE;
           //struct write *first_rel = (((write *)w_mes) + info->first_release_byte_ptr);
           //my_printf(yellow, "Wrkr %u Adding a no_op_release in position %u/%u, first opcode %u \n",
@@ -1172,7 +1181,9 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
 
 static inline bool release_not_ready(p_ops_t *p_ops,
                                      w_mes_info_t *info, struct w_message *w_mes,
-                                     uint32_t *release_rdy_dbg_cnt, uint16_t t_id) {
+                                     uint32_t *release_rdy_dbg_cnt, uint16_t t_id)
+{
+  if (TURN_OFF_KITE) return false;
   if (!info->is_release)
     return false; // not even a release
 

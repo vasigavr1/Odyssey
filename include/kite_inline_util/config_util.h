@@ -28,6 +28,7 @@
 // Make sure we avoid aliasing between local_r_ids of regular reads and rmw-ids, when trying to own configuration bits
 static inline void tag_rmw_id_when_owning_a_conf_bit(uint8_t *rmw_id)
 {
+  if (TURN_OFF_KITE) return;
   if (ENABLE_ASSERTIONS) assert(rmw_id[7] == 0);
   rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
 }
@@ -35,13 +36,16 @@ static inline void tag_rmw_id_when_owning_a_conf_bit(uint8_t *rmw_id)
 // Call this after an acquire/propose have detected a failure
 static inline void increment_epoch_id (uint64_t req_epoch_id,  uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   if (epoch_id <= req_epoch_id)
     epoch_id++;
 }
 
 
 // When an out-of-epoch request completes rectify the keys epoch
-static inline void rectify_key_epoch_id(uint64_t epoch_id, mica_op_t *kv_ptr, uint16_t t_id) {
+static inline void rectify_key_epoch_id(uint64_t epoch_id, mica_op_t *kv_ptr, uint16_t t_id)
+{
+  if (TURN_OFF_KITE) return;
   if (!MEASURE_SLOW_PATH) {
     if (epoch_id > kv_ptr->epoch_id)
       kv_ptr->epoch_id = epoch_id;
@@ -54,6 +58,7 @@ static inline void rectify_key_epoch_id(uint64_t epoch_id, mica_op_t *kv_ptr, ui
 // be more efficient with debugging information
 static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t m_id, uint8_t new_state)
 {
+  if (TURN_OFF_KITE) return;
   if (conf_bit_vec[m_id].bit != new_state) {
     while (!atomic_flag_test_and_set_explicit(&conf_bit_vec[m_id].lock, memory_order_acquire));
     conf_bit_vec[m_id].bit = new_state;
@@ -66,6 +71,7 @@ static inline void set_conf_bit_to_new_state(const uint16_t t_id, const uint16_t
 //    if some remote release has raised the bit, then increase epoch id and flip the bit
 static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id, uint64_t req_epoch_id)
 {
+  if (TURN_OFF_KITE) return;
   if (unlikely(conf_bit_vec[machine_id].bit == DOWN_STABLE)) {
     increment_epoch_id(req_epoch_id, t_id);
     set_conf_bit_to_new_state(t_id, (uint16_t) machine_id, UP_STABLE);
@@ -82,6 +88,7 @@ static inline void on_starting_an_acquire_query_the_conf(const uint16_t t_id, ui
 static inline bool take_ownership_of_a_conf_bit(const uint64_t local_r_id, const uint16_t acq_m_id,
                                                 bool is_rmw, const uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return false;
   if (conf_bit_vec[acq_m_id].bit == UP_STABLE) return false;
   if (DEBUG_BIT_VECS)
     my_printf(yellow, "Wrkr %u An acquire from machine %u  is looking to take ownership "
@@ -120,6 +127,7 @@ static inline bool take_ownership_of_a_conf_bit(const uint64_t local_r_id, const
 static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const uint16_t acq_m_id,
                                             bool is_rmw, const uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   if (DEBUG_BIT_VECS)
     my_printf(yellow, "Wrkr %u An acquire from machine %u  is looking if it owns a failure local_r_id %u \n",
               t_id, acq_m_id, local_r_id);
@@ -168,6 +176,8 @@ static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const ui
 // Detect a failure: Bring a given bit of config_bit_vector to state DOWN_STABLE
 static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, const uint16_t t_id)
 {
+
+  if (TURN_OFF_KITE) return;
   if (DEBUG_BIT_VECS)
     my_printf(yellow, "Wrkr %u handles Send and conf bit vec after failure to machine %u,"
                 " send bit %u, state %u, conf_bit %u \n",
@@ -186,6 +196,8 @@ static inline uint8_t create_bit_vec_of_failures(p_ops_t *p_ops, struct w_messag
                                                  w_mes_info_t *info, struct quorum_info *q_info,
                                                  uint8_t *bit_vector_to_send, uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return 0;
+
   bool bit_vec[MACHINE_NUM] = {0};
   uint8_t failed_machine_num = 0 ;
   // Then look at each release in the message sess_info
@@ -224,7 +236,9 @@ static inline bool add_failure_to_release_from_sess_id
    w_mes_info_t *info, struct quorum_info *q_info,
    uint32_t backward_ptr, uint16_t t_id)
 {
-  struct write *write = (struct write *) (((void *)w_mes) + info->first_release_byte_ptr);
+  if (TURN_OFF_KITE) return false;
+
+  struct write *write = (struct write *) (((void *) w_mes) + info->first_release_byte_ptr);
   bool is_release = write->opcode == OP_RELEASE;
   bool is_accept = write->opcode == ACCEPT_OP;
   //printf("opcode %u \n", write->opcode);
@@ -250,12 +264,11 @@ static inline bool add_failure_to_release_from_sess_id
                   *(uint16_t *) bit_vector_to_send);
       write->opcode = OP_RELEASE_BIT_VECTOR;
       p_ops->ptrs_to_local_w[backward_ptr] = write;
-    }
-    else if (is_accept) {
+    } else if (is_accept) {
       assert(ACCEPT_IS_RELEASE);
       struct accept *acc = (struct accept *) write;
       // Overload the last 2 bytes of the rmw-id
-      uint16_t *part_of_accept = (uint16_t *) (((void *)&acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+      uint16_t *part_of_accept = (uint16_t *) (((void *) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
 
       if (ENABLE_ASSERTIONS) {
         uint64_t rmw_id = *(uint64_t *) (((void *) &acc->glob_sess_id) - 8);
@@ -275,8 +288,7 @@ static inline bool add_failure_to_release_from_sess_id
       acc->opcode = ACCEPT_OP_BIT_VECTOR;
       //sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
       //reset_sess_info_on_accept(sess_info, t_id);
-    }
-    else if (ENABLE_ASSERTIONS) assert(false);
+    } else if (ENABLE_ASSERTIONS) assert(false);
     //if (DEBUG_SESSIONS)
     //  my_printf(cyan, "Wrkr %u release is from session %u, session has pending op: %u\n",
     //             t_id, p_ops->w_session_id[backward_ptr],
@@ -284,6 +296,7 @@ static inline bool add_failure_to_release_from_sess_id
     return true;
   }
   if (ENABLE_ASSERTIONS) assert(false);
+
   return false;
 }
 
@@ -293,6 +306,8 @@ static inline bool add_failure_to_release_from_sess_id
 static inline void signal_conf_bit_flip_in_accept(loc_entry_t *loc_entry,
                                                   struct accept *acc,  uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
+
   if (unlikely(loc_entry->fp_detected)) {
     if (loc_entry->helping_flag == NOT_HELPING) {
       uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->t_rmw_id;
@@ -308,13 +323,14 @@ static inline void signal_conf_bit_flip_in_accept(loc_entry_t *loc_entry,
 static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8_t acc_m_id,
                                                        uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
+
   if (unlikely(acc->t_rmw_id > B_512)) {
-    uint8_t *ptr_to_reged_rmw_id = (uint8_t *)&acc->t_rmw_id;
+    uint8_t *ptr_to_reged_rmw_id = (uint8_t *) &acc->t_rmw_id;
     if (ptr_to_reged_rmw_id[7] == ACCEPT_FLIPS_BIT_OP) {
       raise_conf_bit_iff_owned(acc->t_rmw_id, (uint16_t) acc_m_id, true, t_id);
       ptr_to_reged_rmw_id[7] = 0;
-    }
-    else if (ENABLE_ASSERTIONS) assert(false);
+    } else if (ENABLE_ASSERTIONS) assert(false);
 
   }
   if (ENABLE_ASSERTIONS) assert(acc->t_rmw_id < B_4);
@@ -324,43 +340,45 @@ static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8
 //Handle the configuration bit_vec vector on receiving a release
 static inline void handle_configuration_on_receiving_rel(struct write *write, uint16_t t_id)
 {
-
-  // On receiving the 1st round of a Release/ Accept:
-  // apply the change to the stable vector and set the bit_vec that gets changed to Stable state.
-  // Do not change the sent vector
-  uint16_t recv_conf_bit_vec = 0;
-  struct accept *acc;
-  switch (write->opcode) {
-    case OP_RELEASE_BIT_VECTOR :
-      recv_conf_bit_vec = *(uint16_t *) write->value;
-      if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
-      break;
-    case ACCEPT_OP_BIT_VECTOR:
-      acc = (struct accept *) write;
-      uint16_t *part_of_acc = (uint16_t *) (((void*) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
-      recv_conf_bit_vec = *part_of_acc;
-      //my_printf(yellow, "received %u bit vec \n", recv_conf_bit_vec);
-      *part_of_acc = 0;
-      write->opcode = ACCEPT_OP;
-      if (ENABLE_ASSERTIONS) {
-        assert(ACCEPT_IS_RELEASE);
-        assert(recv_conf_bit_vec > 0);
-        assert(acc->t_rmw_id < B_4);
-      }
-      break;
-    default: return;
-  }
-  if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
-  for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
-    if (recv_conf_bit_vec & machine_bit_id[m_i]) {
-      set_conf_bit_to_new_state(t_id, m_i, DOWN_STABLE);
-      if (DEBUG_BIT_VECS)
-        my_printf(green, "Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
-                  t_id, recv_conf_bit_vec, m_i);
+  if (!TURN_OFF_KITE) {
+    // On receiving the 1st round of a Release/ Accept:
+    // apply the change to the stable vector and set the bit_vec that gets changed to Stable state.
+    // Do not change the sent vector
+    uint16_t recv_conf_bit_vec = 0;
+    struct accept *acc;
+    switch (write->opcode) {
+      case OP_RELEASE_BIT_VECTOR :
+        recv_conf_bit_vec = *(uint16_t *) write->value;
+        if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
+        break;
+      case ACCEPT_OP_BIT_VECTOR:
+        acc = (struct accept *) write;
+        uint16_t *part_of_acc = (uint16_t *) (((void *) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+        recv_conf_bit_vec = *part_of_acc;
+        //my_printf(yellow, "received %u bit vec \n", recv_conf_bit_vec);
+        *part_of_acc = 0;
+        write->opcode = ACCEPT_OP;
+        if (ENABLE_ASSERTIONS) {
+          assert(ACCEPT_IS_RELEASE);
+          assert(recv_conf_bit_vec > 0);
+          assert(acc->t_rmw_id < B_4);
+        }
+        break;
+      default:
+        return;
     }
+    if (ENABLE_ASSERTIONS) assert(recv_conf_bit_vec > 0);
+    for (uint16_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+      if (recv_conf_bit_vec & machine_bit_id[m_i]) {
+        set_conf_bit_to_new_state(t_id, m_i, DOWN_STABLE);
+        if (DEBUG_BIT_VECS)
+          my_printf(green, "Worker %u updates the kept config bit_vec vector: received: %u, m_id %u \n",
+                    t_id, recv_conf_bit_vec, m_i);
+      }
+    }
+    // we do not change the op back to OP_RELEASE, because we want to avoid making the actual write to the KVS
+    // (because it only contains a bit vector)
   }
-  // we do not change the op back to OP_RELEASE, because we want to avoid making the actual write to the KVS
-  // (because it only contains a bit vector)
 }
 
 // Remove the false positive offset from the opcode
@@ -368,6 +386,7 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
                                                                    r_info_t *read_info,
                                                                    uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   // Check for acquires that detected a false positive
   if (unlikely(r_rep->opcode > ACQ_LOG_EQUAL)) {
     read_info->fp_detected = true;

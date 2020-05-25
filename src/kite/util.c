@@ -450,7 +450,7 @@ trace_t* parse_trace(char* path, int t_id){
 // Manufactures a trace with a uniform distrbution without a backing file
 trace_t* manufacture_trace(int t_id)
 {
-  trace_t *trace = (trace_t *)malloc((TRACE_SIZE + 1) * sizeof(trace_t));
+  trace_t *trace = (trace_t *) calloc ((TRACE_SIZE + 1), sizeof(trace_t));
   struct timespec time;
   //struct random_data *buf;
   clock_gettime(CLOCK_MONOTONIC, &time);
@@ -516,6 +516,7 @@ trace_t* manufacture_trace(int t_id)
            TRACE_SIZE, WRITE_RATIO);
   }
   trace[TRACE_SIZE].opcode = NOP;
+  return trace;
   // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
   //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
 }
@@ -542,6 +543,7 @@ trace_t* trace_init(uint16_t t_id) {
     else {
       trace = manufacture_trace(t_id);
     }
+  assert(trace != NULL);
   return trace;
 }
 
@@ -748,6 +750,7 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads)
     p_ops->prop_info->entry[i].help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
     p_ops->prop_info->entry[i].help_loc_entry = (loc_entry_t *) calloc(1, sizeof(loc_entry_t));
     p_ops->prop_info->entry[i].help_loc_entry->sess_id = (uint16_t) i;
+    p_ops->prop_info->entry[i].help_loc_entry->helping_flag = IS_HELPER;
   }
   p_ops->sess_info = (sess_info_t *) calloc(SESSIONS_PER_THREAD, sizeof(sess_info_t));
   p_ops->w_meta = (per_write_meta_t *) calloc(pending_writes, sizeof(per_write_meta_t));

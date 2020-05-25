@@ -155,11 +155,11 @@ struct remote_qp {
 
 typedef struct kv_resp {
   uint8_t type;
-  uint8_t kv_ptr_state;
-  uint32_t log_no; // the log_number of an RMW
-  mica_op_t *kv_ptr;
-  struct ts_tuple kv_ptr_ts;
-  struct rmw_id kv_ptr_rmw_id;
+//  uint8_t kv_ptr_state;
+//  uint32_t log_no; // the log_number of an RMW
+//  mica_op_t *kv_ptr;
+//  struct ts_tuple kv_ptr_ts;
+//  struct rmw_id kv_ptr_rmw_id;
 } kv_resp_t;
 
 typedef  struct r_mes_info {
@@ -279,7 +279,7 @@ struct rmw_help_entry{
 };
 
 
-struct rmw_rep_info {
+typedef struct rmw_rep_info {
   uint8_t tot_replies;
   uint8_t acks;
   uint8_t rmw_id_commited;
@@ -289,14 +289,13 @@ struct rmw_rep_info {
   uint8_t seen_higher_prop_acc; // Seen a higher prop or accept
   uint8_t log_too_high;
   uint8_t nacks;
-  bool no_need_to_bcast;
+  bool no_need_to_bcast; // raised when an alrea-committed reply does not trigger commit bcasts, because it refers to a later log
+  bool ready_to_inspect;
   // used to know whether to help after a prop-- if you have seen a higher acc,
   // then you should not try to help a lower accept, and thus dont try at all
-  bool seen_higher_acc;
-  struct ts_tuple kvs_higher_ts;
   uint32_t seen_higher_prop_version;
 
-};
+}rmw_rep_info_t;
 
 
 // Entry that keep pending thread-local RMWs, the entries are accessed with session id
@@ -311,6 +310,7 @@ typedef struct rmw_local_entry {
   bool must_release;
   bool rmw_is_successful; // was the RMW (if CAS) successful
   bool all_aboard;
+	bool avoid_val_in_com;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct ts_tuple base_ts;

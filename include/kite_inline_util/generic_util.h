@@ -484,10 +484,6 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
 
 // Returns the size of a write request given an opcode -- Accepts, commits, writes, releases
 static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
-  check_state_with_allowed_flags(11, opcode, OP_RELEASE, KVS_OP_PUT, ACCEPT_OP,
-                                 ACCEPT_OP_BIT_VECTOR,
-                                 COMMIT_OP, RMW_ACQ_COMMIT_OP, OP_RELEASE_BIT_VECTOR,
-                                 OP_RELEASE_SECOND_ROUND, OP_ACQUIRE, NO_OP_RELEASE);
   switch(opcode) {
     case OP_RELEASE:
     case OP_ACQUIRE:
@@ -502,6 +498,8 @@ static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
     case COMMIT_OP:
     case RMW_ACQ_COMMIT_OP:
       return COMMIT_SIZE;
+    case COMMIT_OP_NO_VAL:
+      return COMMIT_NO_VAL_SIZE;
     default: if (ENABLE_ASSERTIONS) assert(false);
   }
 }

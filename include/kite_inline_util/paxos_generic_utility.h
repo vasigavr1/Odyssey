@@ -62,7 +62,7 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
   struct top *comp_top =(struct top*) loc_entry->compare_val;
   struct top *new_top =(struct top*) loc_entry->value_to_write;
   // if (top->push_counter == top->pop_counter) assert(top->key_id == 0);
-  if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
+  //if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
   loc_entry->rmw_is_successful = true;
   loc_entry->base_ts = kv_ptr->ts;
   switch (loc_entry->opcode) {
@@ -87,6 +87,15 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
     default:
       if (ENABLE_ASSERTIONS) assert(false);
   }
+  loc_entry->accepted_log_no = kv_ptr->log_no;
+  // we need to remember the last accepted value
+  if (loc_entry->rmw_is_successful) {
+    memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
+  }
+  else {
+    memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+  }
+
 }
 
 
@@ -163,7 +172,7 @@ static inline bool rmw_compare_fails(uint8_t opcode, uint8_t *compare_val,
 
 // returns true if the RMW can be failed before allocating a local entry
 static inline bool does_rmw_fail_early(trace_op_t *op, mica_op_t *kv_ptr,
-                                       kv_resp_t *resp, uint16_t t_id)
+                                       uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= RMW_VALUE_SIZE);
   if (op->opcode == COMPARE_AND_SWAP_WEAK &&
@@ -173,7 +182,6 @@ static inline bool does_rmw_fail_early(trace_op_t *op, mica_op_t *kv_ptr,
 
     fill_req_array_on_rmw_early_fail(op->session_id, kv_ptr->value,
                                      op->index_to_req_array, t_id);
-    resp->type = RMW_FAILURE;
     return true;
   }
   else return  false;
@@ -307,24 +315,31 @@ static inline void free_kv_ptr_if_rmw_failed(loc_entry_t *loc_entry,
 static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entry_t *loc_entry,
                                                     uint8_t broadcast_state, uint16_t t_id)
 {
-  com->base_ts.m_id = loc_entry->base_ts.m_id;
-  com->base_ts.version = loc_entry->base_ts.version;
+
   memcpy(&com->key, &loc_entry->key, TRUE_KEY_SIZE);
-  com->opcode = COMMIT_OP;
   com->t_rmw_id = loc_entry->rmw_id.id;
   com->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
-  com->log_no = loc_entry->log_no;
-
-  if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
-    memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+  com->base_ts.m_id = loc_entry->base_ts.m_id;
+  if (loc_entry->avoid_val_in_com) {
+    com->opcode = COMMIT_OP_NO_VAL;
+    loc_entry->avoid_val_in_com = false;
+    com->base_ts.version = loc_entry->log_no;
   }
   else {
-    memcpy(com->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-  }
-  if (ENABLE_ASSERTIONS) {
-    assert(com->t_rmw_id < B_4);
-    assert(com->log_no > 0);
-    assert(com->t_rmw_id > 0);
+    com->opcode = COMMIT_OP;
+    com->log_no = loc_entry->log_no;
+    com->base_ts.version = loc_entry->base_ts.version;
+    if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
+      memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+    } else {
+      memcpy(com->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
+    }
+
+    if (ENABLE_ASSERTIONS) {
+      assert(com->t_rmw_id < B_4);
+      assert(com->log_no > 0);
+      assert(com->t_rmw_id > 0);
+    }
   }
 }
 

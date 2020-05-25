@@ -48,9 +48,14 @@
 #define COM_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_SIZE)
 #define COM_MES_SIZE (W_MES_HEADER + (COMMIT_SIZE * COM_COALESCE))
 
+// COMMIT_NO_VAL
+#define COMMIT_NO_VAL_SIZE (24)
+#define COM_NO_VAL_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_NO_VAL_SIZE)
+#define COM_NO_VAL_MES_SIZE (W_MES_HEADER + (COMMIT_NO_VAL_SIZE * COM_NO_VAL_COALESCE))
+
 // COMBINED FROM Writes, Releases, Accepts, Commits
-#define MAX_WRITE_COALESCE MAX_OF_3(W_COALESCE, COM_COALESCE, ACC_COALESCE)
-#define MAX_W_MES_SIZE MAX_OF_3(W_MES_SIZE, COM_MES_SIZE, ACC_MES_SIZE)
+#define MAX_WRITE_COALESCE MAX_OF_4(W_COALESCE, COM_COALESCE, ACC_COALESCE, COM_NO_VAL_COALESCE)
+#define MAX_W_MES_SIZE MAX_OF_4(W_MES_SIZE, COM_MES_SIZE, ACC_MES_SIZE, COM_NO_VAL_MES_SIZE)
 #define MAX_MES_IN_WRITE (MAX_WRITE_COALESCE)
 
 #define W_SEND_SIZE MAX_W_MES_SIZE
@@ -182,16 +187,24 @@ struct accept {
 } __attribute__((__packed__));
 
 
+struct commit_no_val {
+  uint8_t unused;
+  uint32_t log_no;
+  struct key key;
+  uint8_t opcode;
+  uint16_t glob_sess_id;
+  uint64_t t_rmw_id; //rmw lid to be committed
+}__attribute__((__packed__));
 
 struct commit {
   struct network_ts_tuple base_ts;
   struct key key;
   uint8_t opcode;
+  uint16_t glob_sess_id;
+  uint64_t t_rmw_id; //rmw lid to be committed
+  uint32_t log_no;
   uint8_t val_len;
   uint8_t value[RMW_VALUE_SIZE];
-  uint64_t t_rmw_id; //rmw lid to be committed
-  uint16_t glob_sess_id;
-  uint32_t log_no;
 } __attribute__((__packed__));
 
 //
