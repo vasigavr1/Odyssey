@@ -217,18 +217,10 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
         else if (loc_entry->must_release) loc_entry->must_release = false;
       }
 
-
-      uint8_t quorum = QUORUM_NUM;
-//      if (loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED)
-//        check_sum_of_reps(loc_entry);
-//      else quorum++;
       if (loc_entry->rmw_reps.ready_to_inspect) {
         // further responses for that broadcast of Propose must be disregarded
         advance_loc_entry_l_id(p_ops, loc_entry, t_id);
         inspect_proposes(p_ops, loc_entry, t_id);
-        if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED ||
-            loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED)
-          loc_entry->helping_flag = NOT_HELPING;
         check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
                                        ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
       }

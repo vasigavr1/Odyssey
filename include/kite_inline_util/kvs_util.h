@@ -203,7 +203,7 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
   if (DEBUG_RMW) my_printf(green, "Worker %u trying a local RMW on op %u\n", t_id, op_i);
   uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
                          ALL_ABOARD_TS : PAXOS_TS;
-  uint8_t state = (uint8_t) (ENABLE_ALL_ABOARD && op->attempt_all_aboard ? ACCEPTED : PROPOSED);
+  uint8_t state = (uint8_t) (loc_entry->all_aboard ? ACCEPTED : PROPOSED);
   lock_seqlock(&kv_ptr->seqlock);
   {
     check_trace_op_key_vs_kv_ptr(op, kv_ptr);

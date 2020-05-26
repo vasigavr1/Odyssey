@@ -303,8 +303,8 @@ struct rmw_rep_last_committed {
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
   uint16_t glob_sess_id; //accepted  OR last committed
-  uint32_t log_no_or_base_version; // last committed only
-  uint8_t base_m_id; //
+  uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted ts
+  uint8_t base_m_id; // base_ts.m_id used for accepts only
 } __attribute__((__packed__));
 
 //

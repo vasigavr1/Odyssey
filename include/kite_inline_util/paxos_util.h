@@ -1461,12 +1461,7 @@ static inline void take_kv_ptr_with_higher_TS(p_ops_t *p_ops,
     loc_entry->state = PROPOSED;
     if (help) {
       loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
-      //help_loc_entry->log_no = loc_entry->accepted_log_no;
       if (ENABLE_ASSERTIONS) assert(loc_entry->accepted_log_no == loc_entry->log_no);
-      //help_loc_entry->rmw_id = loc_entry->rmw_id;
-      //memcpy(help_loc_entry->value_to_write, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-      //help_loc_entry->base_ts = loc_entry->base_ts;
-//      set_up_a_proposed_but_not_locally_acked_entry(p_ops, kv_ptr, loc_entry, t_id);
       loc_entry->rmw_reps.tot_replies = 1;
       loc_entry->rmw_reps.already_accepted = 1;
       help_loc_entry->state = ACCEPTED;
@@ -1645,6 +1640,7 @@ static inline void inspect_proposes(p_ops_t *p_ops,
   loc_entry_t *dbg_loc_entry = &tmp;
   bool zero_out_log_too_high_cntr = true;
   if (ENABLE_ASSERTIONS) memcpy(dbg_loc_entry, loc_entry, sizeof(loc_entry_t));
+  uint8_t remote_quorum = QUORUM_NUM;
 
   // RMW_ID COMMITTED
   if (loc_entry->rmw_reps.rmw_id_commited > 0) {
@@ -1654,13 +1650,13 @@ static inline void inspect_proposes(p_ops_t *p_ops,
       free_kv_ptr_if_rmw_failed(loc_entry, PROPOSED, t_id);
     handle_already_committed_rmw(p_ops, loc_entry, t_id);
   }
-    // LOG_NO TOO SMALL
+  // LOG_NO TOO SMALL
   else if (loc_entry->rmw_reps.log_too_small > 0) {
     debug_fail_help(loc_entry, " log too small", t_id);
     //It is impossible for this RMW to still hold the kv_ptr
     loc_entry->state = NEEDS_KV_PTR;
   }
-    // SEEN HIGHER-TS PROPOSE OR ACCEPT
+  // SEEN HIGHER-TS PROPOSE OR ACCEPT
   else if (loc_entry->rmw_reps.seen_higher_prop_acc > 0) {
     debug_fail_help(loc_entry, " seen higher prop", t_id);
     // retry by incrementing the highest ts seen
@@ -1668,8 +1664,8 @@ static inline void inspect_proposes(p_ops_t *p_ops,
     new_version = loc_entry->rmw_reps.seen_higher_prop_version;
     check_version(new_version, "inspect_proposes: loc_entry->rmw_reps.seen_higher_prop > 0");
   }
-    // ACK QUORUM
-  else if (loc_entry->rmw_reps.acks >= QUORUM_NUM &&
+  // ACK QUORUM
+  else if (loc_entry->rmw_reps.acks >= remote_quorum &&
            loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED) {
     debug_fail_help(loc_entry, " quorum", t_id);
     // Quorum of prop acks gathered: send an accept
@@ -1677,7 +1673,7 @@ static inline void inspect_proposes(p_ops_t *p_ops,
     check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW,
                                    ACCEPTED, NEEDS_KV_PTR, MUST_BCAST_COMMITS);
   }
-    // ALREADY ACCEPTED AN RMW WITH LOWER_TS
+  // ALREADY ACCEPTED AN RMW WITH LOWER_TS
   else if (loc_entry->rmw_reps.already_accepted > 0) {
     debug_fail_help(loc_entry, " already accepted", t_id);
     if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED)
@@ -1686,12 +1682,11 @@ static inline void inspect_proposes(p_ops_t *p_ops,
     check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW, ACCEPTED,
                                    NEEDS_KV_PTR, MUST_BCAST_COMMITS);
   }
-    // LOG TOO HIGH
+  // LOG TOO HIGH
   else if (loc_entry->rmw_reps.log_too_high > 0) {
     react_on_log_too_high(loc_entry, true, t_id);
     new_version = loc_entry->new_ts.version;
     zero_out_log_too_high_cntr = false;
-
   }
   else if (ENABLE_ASSERTIONS) assert(false);
 
@@ -1708,7 +1703,7 @@ static inline void inspect_proposes(p_ops_t *p_ops,
   // CLEAN_UP
   if (loc_entry->state == RETRY_WITH_BIGGER_TS) {
     check_version(new_version, "inspect_proposes: loc_entry->state == RETRY_WITH_BIGGER_TS");
-    take_kv_ptr_with_higher_TS(p_ops, loc_entry, (new_version + 2), true, t_id);
+    take_kv_ptr_with_higher_TS(p_ops, loc_entry, (new_version + 1), true, t_id);
     check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW, PROPOSED,
                                    NEEDS_KV_PTR, MUST_BCAST_COMMITS);
     if (loc_entry->state == PROPOSED) {
@@ -1729,6 +1724,10 @@ static inline void inspect_proposes(p_ops_t *p_ops,
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
   }
 /* The loc_entry can be in Proposed only when it retried with bigger TS */
+  if (loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED ||
+      loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED)
+    loc_entry->helping_flag = NOT_HELPING;
+
 }
 
 
@@ -1796,12 +1795,12 @@ static inline void inspect_accepts(p_ops_t *p_ops,
   else if (ENABLE_ALL_ABOARD) {
     if (ENABLE_ASSERTIONS) assert(loc_entry->all_aboard);
     loc_entry->all_aboard_time_out++;
-    if (ENABLE_ASSERTIONS) assert(loc_entry->new_ts.version == 2);
+    if (ENABLE_ASSERTIONS) assert(loc_entry->new_ts.version == ALL_ABOARD_TS);
     if (loc_entry->all_aboard_time_out > ALL_ABOARD_TIMEOUT_CNT) {
       // printf("Wrkr %u, Timing out on key %u \n", t_id, loc_entry->key.bkt);
       loc_entry->state = RETRY_WITH_BIGGER_TS;
       loc_entry->all_aboard_time_out = 0;
-      new_version = 2;
+      new_version = PAXOS_TS;
     }
     else return; // avoid zeroing out the responses
   }
@@ -1833,11 +1832,6 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
   }
   if (ENABLE_ASSERTIONS) {
     assert(session_id < SESSIONS_PER_THREAD);
-    if (loc_entry->state != INVALID_RMW) {
-      my_printf(red, "Wrkr %u Expected an invalid loc entry for session %u, loc_entry state %u \n",
-                t_id, session_id, loc_entry->state);
-      assert(false);
-    }
   }
   uint8_t state = (uint8_t) (ENABLE_ALL_ABOARD && op->attempt_all_aboard ? ACCEPTED: PROPOSED);
   // if the kv_ptr was occupied, put in the next op to try next round
@@ -1862,7 +1856,9 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
       insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
     }
   }
-  else if (loc_entry->state == NEEDS_KV_PTR) loc_entry->all_aboard = false;
+  else if (loc_entry->state == NEEDS_KV_PTR) {
+    loc_entry->all_aboard = false;
+  }
   else my_assert(false, "Wrong loc_entry in RMW");
 }
 

@@ -245,7 +245,7 @@ typedef struct mica_ts {
 typedef atomic_uint_fast64_t seqlock_t;
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
-#define MICA_OP_SIZE_  (144 + (2 * (MICA_VALUE_SIZE)))
+#define MICA_OP_SIZE_  (128 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
@@ -276,14 +276,15 @@ typedef struct  {
 
   // Cache-line 3 -- each rmw_id takes up 16 bytes
   struct rmw_id rmw_id;
-  struct rmw_id unused4; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
+  //struct rmw_id unused4; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
   struct rmw_id last_committed_rmw_id;
   struct rmw_id accepted_rmw_id; // not really needed, but good for debug
 
 
-  // // Cache-line -4
+
   uint64_t epoch_id;
   uint64_t unused5;
+  // // Cache-line -4
   uint8_t padding[MICA_OP_PADDING_SIZE];
 
 } mica_op_t;
