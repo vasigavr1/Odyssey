@@ -892,7 +892,7 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
 
   p_ops->w_fifo->bcast_size++;
   if (ENABLE_ASSERTIONS) {
-    assert(acc->l_id < p_ops->prop_info->l_id);
+//    assert(acc->l_id < p_ops->prop_info->l_id);
   }
 }
 

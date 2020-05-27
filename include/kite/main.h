@@ -337,7 +337,7 @@ typedef struct rmw_local_entry {
 // Accessed with session id!
 struct prop_info {
   loc_entry_t entry[LOCAL_PROP_NUM];
-  uint64_t l_id; // highest l_id as of yet -- Starts from 1
+  // uint64_t l_id; // highest l_id as of yet -- Starts from 1
 };
 
 typedef struct sess_info {

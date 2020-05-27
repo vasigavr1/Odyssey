@@ -101,11 +101,13 @@ static inline bool is_log_too_high(uint32_t log_no, mica_op_t *kv_ptr,
 // Search in the prepare entries for an lid (used when receiving a prep reply)
 static inline int search_prop_entries_with_l_id(struct prop_info *prop_info, uint8_t state, uint64_t l_id)
 {
-  for (uint16_t i = 0; i < LOCAL_PROP_NUM; i++) {
-    if (prop_info->entry[i].state == state &&
-        prop_info->entry[i].l_id == l_id)
-      return i;
-  }
+  //for (uint16_t i = 0; i < LOCAL_PROP_NUM; i++) {
+  uint16_t entry = (uint16_t) (l_id % SESSIONS_PER_THREAD);
+  if (ENABLE_ASSERTIONS) assert(entry < LOCAL_PROP_NUM);
+  if (prop_info->entry[entry].state == state &&
+      prop_info->entry[entry].l_id == l_id)
+    return entry;
+  //}
   return -1; // i.e. l_id not found!!
 
 }
@@ -173,12 +175,14 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   loc_entry->log_too_high_cntr = 0;
   loc_entry->helping_flag = NOT_HELPING;
   // Give it an RMW-id as soon as it has a local entry, because the RMW must happen eventually
-  loc_entry->rmw_id.id = p_ops->prop_info->l_id;
+  loc_entry->rmw_id.id++; //p_ops->prop_info->l_id;
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.id < B_4);
-  loc_entry->l_id = p_ops->prop_info->l_id;
-  loc_entry->help_loc_entry->l_id = p_ops->prop_info->l_id;
-  p_ops->prop_info->l_id++;
+  advance_loc_entry_l_id(loc_entry, t_id);
+//  loc_entry->l_id += SESSIONS_PER_MACHINE; //p_ops->prop_info->l_id;
+//  loc_entry->help_loc_entry->l_id = loc_entry->l_id;// p_ops->prop_info->l_id;
+//  p_ops->prop_info->l_id++;
   loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id);
+  if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id == get_glob_sess_id((uint8_t) machine_id, t_id, loc_entry->sess_id));
   loc_entry->accepted_log_no = 0;
   //my_printf(yellow, "Init  RMW-id %u glob_sess_id %u \n", loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
   //loc_entry->help_loc_entry->log_no = 0;
@@ -189,7 +193,7 @@ static inline void init_loc_entry(p_ops_t* p_ops,
 // Activate the entry that belongs to a given key to initiate an RMW (either a local or a remote)
 static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op_t *kv_ptr,
                                     uint8_t opcode, uint8_t new_ts_m_id, loc_entry_t *loc_entry,
-                                    uint64_t l_id, uint16_t glob_sess_id,
+                                    uint64_t rmw_id, uint16_t glob_sess_id,
                                     uint32_t log_no, uint16_t t_id, const char *message)
 {
   if (ENABLE_ASSERTIONS) {
@@ -204,9 +208,9 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
   kv_ptr->prop_ts.m_id = new_ts_m_id;
   //if (ENABLE_ASSERTIONS) assert(new_version >= kv_ptr->prop_ts.version);
   kv_ptr->prop_ts.version = new_version;
-  //my_printf(cyan, "Kv_ptr version %u, m_id %u \n", kv_ptr->prop_ts.version, kv_ptr->new_ts.m_id);
+  //my_printf(cyan, "Wrkr %u Activating from remote accept rmw_id %u glob sess %u \n", t_id, rmw_id, glob_sess_id);
   kv_ptr->rmw_id.glob_sess_id = glob_sess_id;
-  kv_ptr->rmw_id.id = l_id;
+  kv_ptr->rmw_id.id = rmw_id;
   kv_ptr->state = state;
   kv_ptr->log_no = log_no;
 
@@ -623,6 +627,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
                   kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state,
                   loc_entry_to_commit->new_ts.version, kv_ptr->prop_ts.version,
                   loc_entry_to_commit->new_ts.m_id, kv_ptr->prop_ts.m_id);// this is a hard error
+        assert(false);
       }
       assert(rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->last_committed_rmw_id));
       assert(kv_ptr->last_committed_log_no == kv_ptr->log_no);
@@ -999,7 +1004,7 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
     }
   }
   rep_info->tot_replies++;
-  if (rep_info->tot_replies > QUORUM_NUM)  rep_info->ready_to_inspect = true;
+  if (rep_info->tot_replies >= QUORUM_NUM)  rep_info->ready_to_inspect = true;
   if (rep->opcode > RMW_ACK_ACC_SAME_RMW) rep_info->nacks++;
   switch (rep->opcode) {
     case RMW_ACK:
@@ -1085,21 +1090,23 @@ static inline void handle_single_rmw_rep(p_ops_t *p_ops, struct rmw_rep_last_com
              r_rep_i, rep->opcode, rep_mes->rmw_rep[0].opcode, byte_ptr);
     }
     assert(opcode_is_rmw_rep(rep->opcode));
-    if (prop_info->l_id <= rep->l_id)
-      my_printf(red, "Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
-                t_id, r_rep_i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
-
-    assert(prop_info->l_id > rep->l_id);
+//    if (prop_info->l_id <= rep->l_id)
+//      my_printf(red, "Wrkr %u, rep_i %u, opcode %u, is_accept %d, incoming rep l_id %u, max prop lid %u \n",
+//                t_id, r_rep_i, rep->opcode, is_accept, rep->l_id, prop_info->l_id);
+//
+//    assert(prop_info->l_id > rep->l_id);
   }
   //my_printf(cyan, "RMW rep opcode %u, l_id %u \n", rep->opcode, rep->l_id);
   int entry_i = search_prop_entries_with_l_id(prop_info, (uint8_t) (is_accept ? ACCEPTED : PROPOSED),
                                               rep->l_id);
   if (entry_i == -1) return;
   loc_entry_t *loc_entry = &prop_info->entry[entry_i];
-  if (unlikely(rep->opcode) > NO_OP_PROP_REP) {
-    increment_epoch_id(loc_entry->epoch_id, t_id);
-    rep->opcode -= FALSE_POSITIVE_OFFSET;
-    loc_entry->fp_detected = true;
+  if (!TURN_OFF_KITE) {
+    if (unlikely(rep->opcode) > NO_OP_PROP_REP) {
+      increment_epoch_id(loc_entry->epoch_id, t_id);
+      rep->opcode -= FALSE_POSITIVE_OFFSET;
+      loc_entry->fp_detected = true;
+    }
   }
   handle_prop_or_acc_rep(p_ops, rep_mes, rep, loc_entry, is_accept, t_id);
 }
@@ -1596,7 +1603,7 @@ static inline void clean_up_after_inspecting_accept(p_ops_t *p_ops,
                                                     uint16_t t_id)
 {
   //advance the entry's l_id such that subsequent responses are disregarded
-  advance_loc_entry_l_id(p_ops, loc_entry, t_id);
+  advance_loc_entry_l_id(loc_entry, t_id);
   // CLEAN_UP
   if (ENABLE_ALL_ABOARD && loc_entry->all_aboard) {
     if (ENABLE_STAT_COUNTING) {

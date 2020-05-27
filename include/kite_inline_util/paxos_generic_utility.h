@@ -239,12 +239,13 @@ static inline bool kv_ptr_state_has_changed(mica_op_t *kv_ptr,
 
 // When a propose/accept has inspected the responses (after they have reached at least a quorum),
 // advance the entry's l_id such that previous responses are disregarded
-static inline void advance_loc_entry_l_id(p_ops_t *p_ops, loc_entry_t *loc_entry,
+static inline void advance_loc_entry_l_id(loc_entry_t *loc_entry,
                                           uint16_t t_id)
 {
-  loc_entry->l_id = p_ops->prop_info->l_id;
-  loc_entry->help_loc_entry->l_id = p_ops->prop_info->l_id;
-  p_ops->prop_info->l_id++;
+  loc_entry->l_id += SESSIONS_PER_THREAD; //p_ops->prop_info->l_id;
+  loc_entry->help_loc_entry->l_id = loc_entry->l_id;// p_ops->prop_info->l_id;
+  if (ENABLE_ASSERTIONS) assert(loc_entry->l_id % SESSIONS_PER_THREAD == loc_entry->sess_id);
+  // p_ops->prop_info->l_id++;
 }
 
 //

@@ -219,7 +219,7 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
 
       if (loc_entry->rmw_reps.ready_to_inspect) {
         // further responses for that broadcast of Propose must be disregarded
-        advance_loc_entry_l_id(p_ops, loc_entry, t_id);
+        advance_loc_entry_l_id(loc_entry, t_id);
         inspect_proposes(p_ops, loc_entry, t_id);
         check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
                                        ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);

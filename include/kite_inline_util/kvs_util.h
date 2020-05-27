@@ -194,12 +194,11 @@ static inline void KVS_from_trace_releases(trace_op_t *op,
 // Handle a local rmw in the KVS
 static inline void KVS_from_trace_rmw(trace_op_t *op,
                                       mica_op_t *kv_ptr,
-                                      p_ops_t *p_ops, uint64_t *rmw_l_id_,
+                                      p_ops_t *p_ops,
                                       uint16_t op_i, uint16_t t_id)
 {
   loc_entry_t *loc_entry = &p_ops->prop_info->entry[op->session_id];
   init_loc_entry(p_ops, op, t_id, loc_entry);
-  uint64_t rmw_l_id = *rmw_l_id_;
   if (DEBUG_RMW) my_printf(green, "Worker %u trying a local RMW on op %u\n", t_id, op_i);
   uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
                          ALL_ABOARD_TS : PAXOS_TS;
@@ -211,8 +210,8 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
     if (kv_ptr->state == INVALID_RMW) {
       if (!does_rmw_fail_early(op, kv_ptr, t_id)) {
           activate_kv_pair(state, new_version, kv_ptr, op->opcode,
-                           (uint8_t) machine_id, loc_entry, rmw_l_id,
-                           get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id),
+                           (uint8_t) machine_id, loc_entry, loc_entry->rmw_id.id,
+                           loc_entry->rmw_id.glob_sess_id,
                            kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
         loc_entry->state = state;
         if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
@@ -238,7 +237,6 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
   }
   // We need to put the new timestamp in the op too, both to send it and to store it for later
   op->ts.version = new_version;
-  if (loc_entry->state != CAS_FAILED) (*rmw_l_id_)++;
 }
 
 // Handle a local rmw acquire in the KVS
@@ -662,7 +660,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
-  uint64_t rmw_l_id = p_ops->prop_info->l_id;
+  //uint64_t rmw_l_id = p_ops->prop_info->l_id;
   uint32_t r_push_ptr = p_ops->r_push_ptr;
   for(op_i = 0; op_i < op_num; op_i++) {
     if (kv_ptr[op_i] == NULL) assert(false);
@@ -690,7 +688,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
         else if (ENABLE_RMWS) {
           if (opcode_is_rmw(op[op_i].opcode)) {
             KVS_from_trace_rmw(&op[op_i], kv_ptr[op_i],
-                               p_ops, &rmw_l_id, op_i, t_id);
+                               p_ops, op_i, t_id);
           }
           else if (ENABLE_RMW_ACQUIRES && op[op_i].opcode == OP_ACQUIRE) {
             KVS_from_trace_rmw_acquire(&op[op_i], kv_ptr[op_i], &resp[op_i],
