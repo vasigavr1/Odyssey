@@ -39,6 +39,7 @@ int main(int argc, char *argv[])
 
 
   printf("Rmw-local_entry %ld \n", sizeof(loc_entry_t));
+	printf("quorum-num %d \n", QUORUM_NUM);
 
 	uint16_t i = 0;
   print_parameters_in_the_start();

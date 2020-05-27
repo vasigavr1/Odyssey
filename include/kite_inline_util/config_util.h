@@ -268,10 +268,10 @@ static inline bool add_failure_to_release_from_sess_id
       assert(ACCEPT_IS_RELEASE);
       struct accept *acc = (struct accept *) write;
       // Overload the last 2 bytes of the rmw-id
-      uint16_t *part_of_accept = (uint16_t *) (((void *) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+      uint16_t *part_of_accept = (uint16_t *) (((void *) &acc->log_no) - SEND_CONF_VEC_SIZE);
 
       if (ENABLE_ASSERTIONS) {
-        uint64_t rmw_id = *(uint64_t *) (((void *) &acc->glob_sess_id) - 8);
+        uint64_t rmw_id = *(uint64_t *) (((void *) &acc->log_no) - 8);
         assert(acc->t_rmw_id == rmw_id);
         if ((*part_of_accept) != 0) {
           printf("rmw_id %lu\n", acc->t_rmw_id);
@@ -353,7 +353,7 @@ static inline void handle_configuration_on_receiving_rel(struct write *write, ui
         break;
       case ACCEPT_OP_BIT_VECTOR:
         acc = (struct accept *) write;
-        uint16_t *part_of_acc = (uint16_t *) (((void *) &acc->glob_sess_id) - SEND_CONF_VEC_SIZE);
+        uint16_t *part_of_acc = (uint16_t *) (((void *) &acc->log_no) - SEND_CONF_VEC_SIZE);
         recv_conf_bit_vec = *part_of_acc;
         //my_printf(yellow, "received %u bit vec \n", recv_conf_bit_vec);
         *part_of_acc = 0;

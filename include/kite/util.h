@@ -183,7 +183,7 @@ void set_up_queue_depths(int**, int**);
 // Initialize the rmw struct
 void set_up_rmw_struct();
 // Initialize the struct that holds all pending ops
-p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads);
+p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uint16_t t_id);
 // Initialize the quorum info that contains the system configuration
 void set_up_q_info(struct quorum_info **q_info);
 // Set up the memory registrations in case inlining is disabled

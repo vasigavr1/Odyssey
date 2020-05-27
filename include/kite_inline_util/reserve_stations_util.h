@@ -772,7 +772,6 @@ static inline void insert_prop_to_read_fifo(p_ops_t *p_ops, loc_entry_t *loc_ent
   prop->opcode = PROPOSE_OP;
   prop->l_id = loc_entry->l_id;
   prop->t_rmw_id = loc_entry->rmw_id.id;
-  prop->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
   prop->log_no = loc_entry->log_no;
 
   // Query the conf to see if the machine has lost messages
@@ -878,7 +877,6 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
   acc->l_id = loc_entry->l_id;
   acc->t_rmw_id = loc_entry->rmw_id.id;
   if (ENABLE_ASSERTIONS) assert(acc->t_rmw_id < B_4);
-  acc->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
   assign_ts_to_netw_ts(&acc->base_ts, &loc_entry->base_ts);
   assign_ts_to_netw_ts(&acc->ts, &loc_entry->new_ts);
   memcpy(&acc->key, &loc_entry->key, TRUE_KEY_SIZE);

@@ -612,9 +612,9 @@ static inline void print_polled_write_message_info(struct w_message *w_mes, uint
              (write->opcode == ACCEPT_OP || write->opcode == ACCEPT_OP_BIT_VECTOR)) {
       struct accept *acc = (struct accept*) write;
       my_printf(yellow, "Worker %u sees an Accept: opcode %d at offset %d, rmw_id %lu, "
-               "glob_sess_id %u, log_no %u, coalesce_num %u \n",
+               "log_no %u, coalesce_num %u \n",
              t_id, acc->opcode, index, acc->t_rmw_id,
-             acc->glob_sess_id, acc->log_no,
+             acc->log_no,
              w_mes->coalesce_num);
     }
     else if (DEBUG_RMW && write->opcode == COMMIT_OP) {
@@ -961,9 +961,9 @@ static inline void check_for_same_ts_as_already_proposed(mica_op_t *kv_ptr, stru
     if (kv_ptr->state == PROPOSED) {
       if (compare_netw_ts_with_ts(&prop->ts, &kv_ptr->prop_ts) == EQUAL) {
         my_printf(red, "Wrkr %u Received a proposal with same TS as an already acked proposal, "
-                    " prop log/glob log %u/%u, glob sess %u/%u, rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
-                  t_id, prop->log_no, kv_ptr->log_no, prop->glob_sess_id,
-                  kv_ptr->rmw_id.glob_sess_id, prop->t_rmw_id, kv_ptr->rmw_id.id,
+                    " prop log/kv_ptr log %u/%u, , rmw_id %u/%u, version %u/%u, m_id %u/%u \n",
+                  t_id, prop->log_no, kv_ptr->log_no,
+                  prop->t_rmw_id, kv_ptr->rmw_id.id,
                   prop->ts.version, kv_ptr->prop_ts.version, prop->ts.m_id, kv_ptr->prop_ts.m_id);
         assert(false);
       }
@@ -1107,9 +1107,9 @@ static inline void check_when_polling_for_reads(struct r_message *r_mes, uint32_
     else if (DEBUG_RMW && r_mes->read[0].opcode == PROPOSE_OP) {
       //struct prop_message *prop_mes = (struct prop_message *) r_mes;
       my_printf(cyan, "Worker %u sees a Propose from m_id %u: opcode %d at offset %d, rmw_id %lu, "
-                  "glob_sess_id %u, log_no %u, coalesce_num %u version %u \n",
+                  "log_no %u, coalesce_num %u version %u \n",
                 t_id, r_mes->m_id, prop->opcode, index, prop->t_rmw_id,
-                prop->glob_sess_id, prop->log_no,
+                prop->log_no,
                 r_mes->coalesce_num, prop->ts.version);
     }
     if (polled_reads + r_num > MAX_INCOMING_R) assert(false);

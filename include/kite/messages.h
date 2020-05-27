@@ -78,7 +78,7 @@
 #define R_COALESCE (EFFECTIVE_MAX_R_SIZE / R_SIZE)
 #define R_MES_SIZE (R_MES_HEADER + (R_SIZE * R_COALESCE))
 // proposes
-#define PROP_SIZE 36  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
+#define PROP_SIZE 34  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
 #define PROP_COALESCE (EFFECTIVE_MAX_R_SIZE / PROP_SIZE)
 #define PROP_MES_SIZE (R_MES_HEADER + (PROP_SIZE * PROP_COALESCE))
 
@@ -220,7 +220,7 @@ struct propose {
   struct key key;
   uint8_t opcode;
   uint64_t t_rmw_id;
-  uint16_t glob_sess_id;
+  // uint16_t glob_sess_id;
   uint32_t log_no;
   uint64_t l_id; // the l_id of the rmw local_entry
 } __attribute__((__packed__));

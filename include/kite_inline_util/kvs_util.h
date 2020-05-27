@@ -211,7 +211,6 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
       if (!does_rmw_fail_early(op, kv_ptr, t_id)) {
           activate_kv_pair(state, new_version, kv_ptr, op->opcode,
                            (uint8_t) machine_id, loc_entry, loc_entry->rmw_id.id,
-                           loc_entry->rmw_id.glob_sess_id,
                            kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
         loc_entry->state = state;
         if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
@@ -333,7 +332,6 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
   }
   // on replying to the accept we may need to send on or more of TS, VALUE, RMW-id, log-no
   uint64_t rmw_l_id = acc->t_rmw_id;
-  uint16_t glob_sess_id = acc->glob_sess_id;
   //my_printf(cyan, "Received accept with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
   uint32_t log_no = acc->log_no;
   uint64_t l_id = acc->l_id;
@@ -350,12 +348,12 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
 
   if (DEBUG_RMW) my_printf(green, "Worker %u is handling a remote RMW accept on op %u from m_id %u "
                              "l_id %u, rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-                           t_id, op_i, acc_m_id, l_id, rmw_l_id, glob_sess_id, log_no, acc->ts.version);
+                           t_id, op_i, acc_m_id, l_id, rmw_l_id, (uint32_t) rmw_l_id % GLOBAL_SESSION_NUM, log_no, acc->ts.version);
   lock_seqlock(&kv_ptr->seqlock);
   // 1. check if it has been committed
   // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
   // Either way fill the reply_rmw fully, but have a specialized flag!
-  if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id, t_id, acc_rep)) {
+  if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, t_id, acc_rep)) {
     if (!is_log_too_high(log_no, kv_ptr, t_id, acc_rep)) {
       // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
       //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
@@ -366,7 +364,7 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
       // if the accepted is going to be acked record its information in the kv_ptr
       if (acc_rep->opcode == RMW_ACK) {
         activate_kv_pair(ACCEPTED, acc->ts.version, kv_ptr, acc->opcode,
-                         acc->ts.m_id, NULL, rmw_l_id, glob_sess_id, log_no, t_id,
+                         acc->ts.m_id, NULL, rmw_l_id, log_no, t_id,
                          ENABLE_ASSERTIONS ? "received accept" : NULL);
         memcpy(kv_ptr->last_accepted_value, acc->value, (size_t) RMW_VALUE_SIZE);
         assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
@@ -383,7 +381,7 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
   if (PRINT_LOGS)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acc: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",
-            kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, glob_sess_id ,acc->ts.version, acc->ts.m_id, acc_rep->opcode);
+            kv_ptr->key.bkt, log_no, number_of_reqs, acc_m_id, rmw_l_id, (uint32_t) rmw_l_id % GLOBAL_SESSION_NUM, acc->ts.version, acc->ts.m_id, acc_rep->opcode);
   //set_up_rmw_rep_message_size(p_ops, acc_rep->opcode, t_id);
   p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(acc_rep->opcode);
   if (ENABLE_ASSERTIONS) assert(p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
@@ -471,7 +469,6 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
   uint64_t number_of_reqs = 0;
   uint64_t rmw_l_id = prop->t_rmw_id;
   uint64_t l_id = prop->l_id;
-  uint16_t glob_sess_id = prop->glob_sess_id;
   //my_printf(cyan, "Received propose with rmw_id %u, glob_sess %u \n", rmw_l_id, glob_sess_id);
   uint32_t log_no = prop->log_no;
   uint8_t prop_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
@@ -487,7 +484,7 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
     // 1. check if it has been committed
     // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
     // Either way fill the reply_rmw fully, but have a specialized flag!
-    if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, glob_sess_id, t_id, prop_rep)) {
+    if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, t_id, prop_rep)) {
       if (!is_log_too_high(log_no, kv_ptr, t_id, prop_rep)) {
         // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
         //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->ts, prop_m_id, t_id, prop_rep)) {
@@ -500,7 +497,7 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
         if (prop_rep->opcode == RMW_ACK) {
           if (ENABLE_ASSERTIONS) assert(prop->log_no >= kv_ptr->log_no);
           activate_kv_pair(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
-                           prop->ts.m_id, NULL, rmw_l_id, glob_sess_id, log_no, t_id,
+                           prop->ts.m_id, NULL, rmw_l_id, log_no, t_id,
                            ENABLE_ASSERTIONS ? "received propose" : NULL);
         }
         if (ENABLE_ASSERTIONS) {
@@ -520,7 +517,7 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
   if (PRINT_LOGS && ENABLE_DEBUG_RMW_KV_PTR)
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Prop: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u, resp: %u \n",  kv_ptr->key.bkt, log_no, number_of_reqs, prop_m_id,
-            rmw_l_id, glob_sess_id, prop->ts.version, prop->ts.m_id, prop_rep->opcode);
+            rmw_l_id, (uint32_t) rmw_l_id % GLOBAL_SESSION_NUM, prop->ts.version, prop->ts.m_id, prop_rep->opcode);
   p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr]+= get_size_from_opcode(prop_rep->opcode);
   if (ENABLE_ASSERTIONS) assert(p_ops->r_rep_fifo->message_sizes[p_ops->r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
   bool false_pos = take_ownership_of_a_conf_bit(rmw_l_id, prop_m_id, true, t_id);

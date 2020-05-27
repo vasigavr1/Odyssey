@@ -195,7 +195,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
                 "rmw_id %u, glob_sess id %u, log_no %u, version %u \n",
               t_id, prop->opcode, coalesce_num, send_sgl[br_i].length,
               credits[vc][(machine_id + 1) % MACHINE_NUM], r_mes->l_id,
-              prop->t_rmw_id, prop->glob_sess_id,
+              prop->t_rmw_id, prop->t_rmw_id % GLOBAL_SESSION_NUM,
               prop->log_no, prop->ts.version);
   }
   if (has_reads) {
@@ -262,7 +262,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
                 "rmw_id %u, glob_sess id %u, log_no %u, version %u  \n",
               t_id, acc->opcode, coalesce_num,
               send_sgl[br_i].length,  credits[vc][(machine_id + 1) % MACHINE_NUM], acc->l_id,
-              acc->t_rmw_id, acc->glob_sess_id,
+              acc->t_rmw_id, (uint32_t) acc->t_rmw_id % GLOBAL_SESSION_NUM,
               acc->log_no, acc->ts.version);
   }
 

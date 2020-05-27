@@ -25,6 +25,7 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(loc_entry_t* loc_en
       assert(false);
     }
   }
+  //assert(loc_entry->state != ACCEPTED);
   loc_entry->help_loc_entry->state = INVALID_RMW;
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   loc_entry->back_off_cntr = 0;

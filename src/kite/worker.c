@@ -102,7 +102,7 @@ void *worker(void *arg)
   }
   p_ops_t *p_ops;
   struct ibv_mr *r_mr, *w_mr, *r_rep_mr;
-  p_ops = set_up_pending_ops(PENDING_WRITES, PENDING_READS);
+  p_ops = set_up_pending_ops(PENDING_WRITES, PENDING_READS, t_id);
   void *r_fifo_buf = p_ops->r_fifo->r_message;
   void *w_fifo_buf = p_ops->w_fifo->w_message;
   void *r_rep_fifo_buf = (void *)p_ops->r_rep_fifo->r_rep_message;
