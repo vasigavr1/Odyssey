@@ -396,7 +396,7 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
   if (DEBUG_RMW)
     my_printf(green, "Worker %u is handling a remote RMW commit on com %u, "
                 "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-              t_id, op_i, com->t_rmw_id, com->glob_sess_id, com->log_no, com->base_ts.version);
+              t_id, op_i, com->t_rmw_id, com->t_rmw_id % GLOBAL_SESSION_NUM, com->log_no, com->base_ts.version);
 
   uint64_t number_of_reqs;
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
@@ -405,7 +405,8 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
     uint8_t acc_m_id = com_mes->m_id;
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Com: m_id:%u, rmw_id %lu, glob_sess id: %u, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id, com->glob_sess_id, com->base_ts.version, com->base_ts.m_id);
+            kv_ptr->key.bkt, com->log_no, number_of_reqs, acc_m_id, com->t_rmw_id,
+            (uint32_t) (com->t_rmw_id % GLOBAL_SESSION_NUM), com->base_ts.version, com->base_ts.m_id);
   }
 }
 
@@ -545,7 +546,7 @@ static inline void KVS_reads_rmw_acquires(struct read *read, mica_op_t *kv_ptr,
     if (kv_ptr->last_committed_log_no > acq_log_no) {
       acq_rep->opcode = ACQ_LOG_TOO_SMALL;
       acq_rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
-      acq_rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
+      // acq_rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
       memcpy(acq_rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
       acq_rep->log_no = kv_ptr->last_committed_log_no;
       acq_rep->ts.version = kv_ptr->ts.version;

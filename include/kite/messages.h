@@ -37,19 +37,19 @@
 #define W_MES_SIZE (W_MES_HEADER + (W_SIZE * W_COALESCE))
 
 // ACCEPTS -- ACCEPT coalescing is derived from max write size. ACC reps are derived from accept coalescing
-#define ACCEPT_HEADER (37 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
+#define ACCEPT_HEADER (35 + 5) //original l_id 8 key 8 rmw-id 10, last-committed rmw_id 10, ts 5 log_no 4 opcode 1, val_len 1
 #define ACCEPT_SIZE (ACCEPT_HEADER + RMW_VALUE_SIZE)
 #define ACC_COALESCE (EFFECTIVE_MAX_W_SIZE / ACCEPT_SIZE)
 #define ACC_MES_SIZE (W_MES_HEADER + (ACCEPT_SIZE * ACC_COALESCE))
 
 // COMMITS
-#define COMMIT_HEADER (29)
+#define COMMIT_HEADER (27)
 #define COMMIT_SIZE (COMMIT_HEADER + RMW_VALUE_SIZE)
 #define COM_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_SIZE)
 #define COM_MES_SIZE (W_MES_HEADER + (COMMIT_SIZE * COM_COALESCE))
 
 // COMMIT_NO_VAL
-#define COMMIT_NO_VAL_SIZE (24)
+#define COMMIT_NO_VAL_SIZE (22)
 #define COM_NO_VAL_COALESCE (EFFECTIVE_MAX_W_SIZE / COMMIT_NO_VAL_SIZE)
 #define COM_NO_VAL_MES_SIZE (W_MES_HEADER + (COMMIT_NO_VAL_SIZE * COM_NO_VAL_COALESCE))
 
@@ -104,16 +104,16 @@
 #define R_REP_SMALL_SIZE (1)
 #define READ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
 // RMW_ACQUIRE
-#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + RMW_ID_SIZE + LOG_NO_SIZE + 1)
+#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + 8 + LOG_NO_SIZE + 1)
 #define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
 // PROPOSE REPLIES
-#define PROP_REP_LOG_TOO_LOW_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define PROP_REP_LOG_TOO_LOW_SIZE (26 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
 #define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
-#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
+#define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + 8 + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
 #define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_ACCEPTED_SIZE)) //Message size of replies to proposes
 // ACCEPT REPLIES
-#define ACC_REP_SIZE (28 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
+#define ACC_REP_SIZE (26 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define ACC_REP_SMALL_SIZE 9 // lid and opcode
 #define ACC_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
 //#define ACC_REP_ACCEPTED_SIZE (ACC_REP_ONLY_TS_SIZE + RMW_ID_SIZE + RMW_VALUE_SIZE)
@@ -180,7 +180,7 @@ struct accept {
   uint8_t val_len;
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t t_rmw_id ; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
-  uint16_t glob_sess_id ; // this is useful when helping
+  //uint16_t glob_sess_id ; // this is useful when helping
   uint32_t log_no ;
   uint64_t l_id;
   struct network_ts_tuple base_ts;
@@ -192,7 +192,7 @@ struct commit_no_val {
   uint32_t log_no;
   struct key key;
   uint8_t opcode;
-  uint16_t glob_sess_id;
+  // uint16_t glob_sess_id;
   uint64_t t_rmw_id; //rmw lid to be committed
 }__attribute__((__packed__));
 
@@ -200,7 +200,7 @@ struct commit {
   struct network_ts_tuple base_ts;
   struct key key;
   uint8_t opcode;
-  uint16_t glob_sess_id;
+  //uint16_t glob_sess_id;
   uint64_t t_rmw_id; //rmw lid to be committed
   uint32_t log_no;
   uint8_t val_len;
@@ -275,7 +275,7 @@ struct rmw_acq_rep {
   uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // last committed only
   uint64_t rmw_id; // last committed
-  uint16_t glob_sess_id; // last committed
+  // uint16_t glob_sess_id; // last committed
 } __attribute__((__packed__));
 
 //
@@ -302,7 +302,7 @@ struct rmw_rep_last_committed {
   struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
-  uint16_t glob_sess_id; //accepted  OR last committed
+  //uint16_t glob_sess_id; //accepted  OR last committed
   uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted ts
   uint8_t base_m_id; // base_ts.m_id used for accepts only
 } __attribute__((__packed__));

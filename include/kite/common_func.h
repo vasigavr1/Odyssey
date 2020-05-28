@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -104,7 +104,7 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 0500 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0

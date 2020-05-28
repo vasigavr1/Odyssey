@@ -159,8 +159,9 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   loc_entry->killable = op->opcode == COMPARE_AND_SWAP_WEAK;
   if (opcode_is_compare_rmw(op->opcode))
     loc_entry->compare_val = op->value_to_read; //expected value
-  else if (op->opcode == FETCH_AND_ADD)
+  else if (op->opcode == FETCH_AND_ADD) {
     loc_entry->compare_val = op->value_to_write; // value to be added
+  }
 
 
   loc_entry->must_release = ACCEPT_IS_RELEASE != 0;
@@ -270,7 +271,6 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
         assign_ts_to_netw_ts(&rep->ts, &kv_ptr->accepted_ts);
         return_flag = SEEN_LOWER_ACC;
         rep->rmw_id = kv_ptr->rmw_id.id;
-        rep->glob_sess_id = kv_ptr->rmw_id.glob_sess_id;
         memcpy(rep->value, kv_ptr->last_accepted_value, (size_t) RMW_VALUE_SIZE);
         rep->log_no_or_base_version = kv_ptr->base_acc_ts.version;
         rep->base_m_id = kv_ptr->base_acc_ts.m_id;
@@ -666,10 +666,8 @@ static inline void attempt_local_commit(p_ops_t *p_ops, loc_entry_t *loc_entry,
   if (loc_entry->state == COMMITTED)
     commit_helped_or_local_from_loc_entry(kv_ptr, loc_entry, loc_entry_to_commit, t_id);
   // Register the RMW-id
-  register_committed_global_sess_id(loc_entry_to_commit->rmw_id.glob_sess_id,
-                                    loc_entry_to_commit->rmw_id.id, t_id);
+  register_committed_global_sess_id(loc_entry_to_commit->rmw_id.id, t_id);
   check_registered_against_kv_ptr_last_committed(kv_ptr, loc_entry_to_commit->rmw_id.id,
-                                                 loc_entry_to_commit->rmw_id.glob_sess_id,
                                                  "attempt_local_commit", t_id);
 
   unlock_seqlock(&loc_entry->kv_ptr->seqlock);
@@ -693,7 +691,6 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
   mica_op_t *kv_ptr = loc_entry->kv_ptr;
   uint32_t new_log_no = rmw_rep->log_no_or_base_version;
   uint64_t new_rmw_id = rmw_rep->rmw_id;
-  uint16_t new_glob_sess_id = rmw_rep->glob_sess_id;
   if (kv_ptr->last_committed_log_no >= new_log_no) return;
   my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
             "Attempt local commit from rep: Local entry does not contain the same key as kv_ptr");
@@ -705,7 +702,7 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
     //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW_FROM_REP;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
-    kv_ptr->last_committed_rmw_id.glob_sess_id = new_glob_sess_id;
+    kv_ptr->last_committed_rmw_id.glob_sess_id = (uint16_t ) (new_rmw_id % GLOBAL_SESSION_NUM);
     update_commit_logs(t_id, kv_ptr->key.bkt, new_log_no, kv_ptr->value,
                        rmw_rep->value, "From rep ", LOG_COMS);
 
@@ -717,32 +714,31 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
 
 
     if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u commits locally rmw id %u, glob sess %u after resp with opcode %u \n",
-                t_id, new_rmw_id, new_glob_sess_id, rmw_rep->opcode);
+      my_printf(green, "Wrkr %u commits locally rmw id %u, after resp with opcode %u \n",
+                t_id, new_rmw_id, rmw_rep->opcode);
     // if the kv_ptr was working on an already committed log, or
     // if it's not active advance its log no and in both cases transition to INVALID RMW
-    if (kv_ptr->log_no <= new_log_no ||
-        rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, new_rmw_id, new_glob_sess_id)) {
+    if (kv_ptr->log_no <= new_log_no || kv_ptr->rmw_id.id == new_rmw_id) {
       kv_ptr->log_no = new_log_no;
       kv_ptr->state = INVALID_RMW;
     }
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
-    check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_glob_sess_id, new_log_no, rmw_rep->ts.version,
+    check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_log_no, rmw_rep->ts.version,
                                  rmw_rep->ts.m_id, "attempt_local_commit_from_rep", t_id);
   }
   check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_commit_from_rep", t_id);
   check_local_commit_from_rep(kv_ptr, loc_entry, rmw_rep, t_id);
 
-  register_committed_global_sess_id(new_glob_sess_id, new_rmw_id, t_id);
-  check_registered_against_kv_ptr_last_committed(kv_ptr, new_rmw_id, new_glob_sess_id,
+  register_committed_global_sess_id(new_rmw_id, t_id);
+  check_registered_against_kv_ptr_last_committed(kv_ptr, new_rmw_id,
                                                  "attempt_local_commit_from_rep", t_id);
   unlock_seqlock(&kv_ptr->seqlock);
 
 
   if (DEBUG_LOG)
-    my_printf(green, "Log %u: RMW_id %u glob_sess %u, loc entry state %u from reply \n",
-              new_log_no, new_rmw_id, new_glob_sess_id, loc_entry->state);
+    my_printf(green, "Log %u: RMW_id %u loc entry state %u from reply \n",
+              new_log_no, new_rmw_id, loc_entry->state);
 
 }
 
@@ -760,19 +756,19 @@ static inline bool attempt_remote_commit_no_value(mica_op_t *kv_ptr, struct comm
     if (ENABLE_ASSERTIONS) {
       assert(kv_ptr->state == ACCEPTED);
       assert(kv_ptr->log_no == com->log_no);
-      assert(rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->accepted_rmw_id, com->t_rmw_id, com->glob_sess_id));
+      assert(kv_ptr->accepted_rmw_id.id == com->t_rmw_id);
     }
     is_log_higher = true;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = com->t_rmw_id;
-    kv_ptr->last_committed_rmw_id.glob_sess_id = com->glob_sess_id;
+    kv_ptr->last_committed_rmw_id.glob_sess_id = (uint16_t) (com->t_rmw_id % GLOBAL_SESSION_NUM);
     kv_ptr->state = INVALID_RMW;
     if (DEBUG_LOG)
       my_printf(green, "Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
-                new_log_no, com->t_rmw_id, com->glob_sess_id);
+                new_log_no, com->t_rmw_id, (uint16_t) com->t_rmw_id % GLOBAL_SESSION_NUM);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
-    check_that_the_rmw_ids_match(kv_ptr, com->t_rmw_id, com->glob_sess_id, new_log_no,
+    check_that_the_rmw_ids_match(kv_ptr, com->t_rmw_id, new_log_no,
                                  kv_ptr->base_acc_ts.version, kv_ptr->base_acc_ts.m_id, "attempt_remote_commit without val", t_id);
   }
 
@@ -788,7 +784,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
 {
   uint32_t new_log_no = use_commit ? com->log_no : r_info->log_no;
   uint64_t new_rmw_id = use_commit ? com->t_rmw_id : r_info->rmw_id.id;
-  uint16_t glob_sess_id = use_commit ? com->glob_sess_id : r_info->rmw_id.glob_sess_id;
+  uint16_t glob_sess_id = use_commit ? (uint16_t) (com->t_rmw_id % GLOBAL_SESSION_NUM) : r_info->rmw_id.glob_sess_id;
   uint32_t new_version = use_commit ? com->base_ts.version : r_info->ts_to_read.version;
   uint8_t new_m_id = use_commit ? com->base_ts.m_id : r_info->ts_to_read.m_id;
   // the function is called with the lock in hand
@@ -805,7 +801,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
                 new_log_no, new_rmw_id, glob_sess_id);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
-    check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, glob_sess_id, new_log_no,
+    check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_log_no,
                                  new_version, new_m_id, "attempt_remote_commit", t_id);
   }
 
@@ -829,9 +825,8 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   bool is_log_higher;
   r_info_t * r_info = (r_info_t*) op;
   struct commit *com = (struct commit*) op;
-  struct rmw_id tmp_rmw_id;
-  tmp_rmw_id.id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
-  tmp_rmw_id.glob_sess_id = !use_commit ? r_info->rmw_id.glob_sess_id : com->glob_sess_id;
+
+  uint64_t tmp_rmw_id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
   uint32_t log_no = !use_commit ? r_info->log_no : com->log_no;
   struct key *key = !use_commit ? &r_info->key : &com->key;
   uint8_t *value = !use_commit ? r_info->value : com->value;
@@ -871,15 +866,15 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
 
   if (ENABLE_ASSERTIONS) {
     if (kv_ptr->state != INVALID_RMW)
-      assert(!rmw_ids_are_equal(&kv_ptr->rmw_id, &tmp_rmw_id));
+      assert(kv_ptr->rmw_id.id != tmp_rmw_id);
   }
   uint64_t number_of_reqs = 0;
   if (ENABLE_DEBUG_RMW_KV_PTR) {
     //kv_ptr->dbg->prop_acc_num++;
     //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
   }
-  register_committed_global_sess_id(tmp_rmw_id.glob_sess_id, tmp_rmw_id.id, t_id);
-  check_registered_against_kv_ptr_last_committed(kv_ptr, tmp_rmw_id.id, tmp_rmw_id.glob_sess_id,
+  register_committed_global_sess_id(tmp_rmw_id, t_id);
+  check_registered_against_kv_ptr_last_committed(kv_ptr, tmp_rmw_id,
                                                    "handle remote commit", t_id);
 
   unlock_seqlock(&kv_ptr->seqlock);
@@ -958,7 +953,7 @@ static inline void store_rmw_rep_to_help_loc_entry(loc_entry_t* loc_entry,
     help_loc_entry->log_no = loc_entry->log_no;
     help_loc_entry->state = ACCEPTED;
     help_loc_entry->rmw_id.id = prop_rep->rmw_id;
-    help_loc_entry->rmw_id.glob_sess_id = prop_rep->glob_sess_id;
+    help_loc_entry->rmw_id.glob_sess_id = (uint16_t) (prop_rep->rmw_id % GLOBAL_SESSION_NUM);
     memcpy(help_loc_entry->value_to_write, prop_rep->value, (size_t) RMW_VALUE_SIZE);
     help_loc_entry->key = loc_entry->key;
   }

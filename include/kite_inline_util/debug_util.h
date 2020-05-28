@@ -622,7 +622,7 @@ static inline void print_polled_write_message_info(struct w_message *w_mes, uint
       printf("Worker %u sees a Commit: opcode %d at offset %d, l_id %lu, "
                "glob_sess_id %u, log_no %u, coalesce_num %u \n",
              t_id, com->opcode, index, com->t_rmw_id,
-             com->glob_sess_id, com->log_no,
+             (uint32_t) com->t_rmw_id % GLOBAL_SESSION_NUM, com->log_no,
              w_mes->coalesce_num);
     }
   }
@@ -889,7 +889,6 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
 //      my_printf(red, "Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
 //    assert(rmw_rep->ts.version % 2  == 0 );
     // if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // this is the base ts and can be 0
-    assert(rmw_rep->glob_sess_id < GLOBAL_SESSION_NUM);
   }
 }
 
@@ -1015,10 +1014,11 @@ static inline void check_last_registered_rmw_id(loc_entry_t *loc_entry,
 
 
 static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_id,
-                                                uint16_t glob_sess_id, uint32_t log_no, uint32_t version,
+                                                 uint32_t log_no, uint32_t version,
                                                 uint8_t m_id, const char *message, uint16_t t_id)
 {
-  if (!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->last_committed_rmw_id, rmw_id, glob_sess_id)) {
+  uint64_t glob_sess_id = rmw_id % GLOBAL_SESSION_NUM;
+  if (kv_ptr->last_committed_rmw_id.id != rmw_id) {
     my_printf(red, "~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, %s ~~~~~~~~ \n", t_id, kv_ptr->key.bkt, message);
     /*if (ENABLE_DEBUG_RMW_KV_PTR) {
       my_printf(green, "GLOBAL ENTRY COMMITTED log %u: rmw_id %lu glob_sess-id- %u, FLAG %u\n",
@@ -1048,9 +1048,9 @@ static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_
 // After registering, make sure the registered is bigger/equal to what is saved as registered
 static inline void check_registered_against_kv_ptr_last_committed(mica_op_t *kv_ptr,
                                                                   uint64_t committed_id,
-                                                                  uint16_t committed_glob_ses_id,
                                                                   const char *message, uint16_t t_id)
 {
+  uint64_t committed_glob_ses_id = committed_id % GLOBAL_SESSION_NUM;
   if (ENABLE_ASSERTIONS) {
     uint16_t glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
     uint64_t id = kv_ptr->last_committed_rmw_id.id;
@@ -1077,17 +1077,17 @@ static inline void check_local_commit_from_rep(mica_op_t *kv_ptr, loc_entry_t *l
       loc_entry_t *working_entry = loc_entry->helping_flag == HELPING ?
                                               loc_entry->help_loc_entry : loc_entry;
       if (rmw_ids_are_equal(&kv_ptr->rmw_id, &working_entry->rmw_id) && kv_ptr->log_no == working_entry->log_no) {
-        my_printf(red, "Wrkr: %u Received a rep opcode %u for rmw id %lu glob_sess_id %u, log no %u "
-                    "received highest committed log %u with rmw_id id %u, glob_sess id %u,"
-                    "but kv_ptr is in state %u, for rmw_id %u, glob_sess id %u on log no %u\n",
-                  t_id, rmw_rep->opcode, working_entry->rmw_id.id, working_entry->rmw_id.glob_sess_id,
+        my_printf(red, "Wrkr: %u Received a rep opcode %u for rmw id %lu , log no %u "
+                    "received highest committed log %u with rmw_id id %u, "
+                    "but kv_ptr is in state %u, for rmw_id %u, on log no %u\n",
+                  t_id, rmw_rep->opcode, working_entry->rmw_id.id,
                   working_entry->log_no,
-                  rmw_rep->log_no_or_base_version, rmw_rep->rmw_id, rmw_rep->glob_sess_id,
-                  kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id,
+                  rmw_rep->log_no_or_base_version, rmw_rep->rmw_id,
+                  kv_ptr->state, kv_ptr->rmw_id.id,
                   kv_ptr->log_no);
         assert(rmw_rep->opcode == RMW_ID_COMMITTED);
       }
-      assert(!rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, rmw_rep->rmw_id, rmw_rep->glob_sess_id));
+      assert(kv_ptr->rmw_id.id !=rmw_rep->rmw_id);
     }
   }
 }

@@ -67,7 +67,8 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
     case FETCH_AND_ADD:
       memcpy(loc_entry->value_to_read, kv_ptr->value, loc_entry->rmw_val_len);
       *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + (*(uint64_t *)loc_entry->compare_val);
-      if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS) assert((*(uint64_t *)loc_entry->compare_val == 1));
+      if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && RMW_RATIO >= 1000 && RMW_ACQUIRE_RATIO == 0)
+        assert((*(uint64_t *)loc_entry->compare_val == 1));
       //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
       break;
     case COMPARE_AND_SWAP_WEAK:
@@ -124,8 +125,9 @@ static inline void local_rmw_ack(loc_entry_t *loc_entry)
 
 
 // when committing register global_sess id as committed
-static inline void register_committed_global_sess_id (uint16_t glob_sess_id, uint64_t rmw_id, uint16_t t_id)
+static inline void register_committed_global_sess_id (uint64_t rmw_id, uint16_t t_id)
 {
+  uint64_t glob_sess_id = rmw_id % GLOBAL_SESSION_NUM;
   uint64_t tmp_rmw_id, debug_cntr = 0;
   if (ENABLE_ASSERTIONS) assert(glob_sess_id < GLOBAL_SESSION_NUM);
   tmp_rmw_id = committed_glob_sess_rmw_id[glob_sess_id];
@@ -333,7 +335,6 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
 
   memcpy(&com->key, &loc_entry->key, TRUE_KEY_SIZE);
   com->t_rmw_id = loc_entry->rmw_id.id;
-  com->glob_sess_id = loc_entry->rmw_id.glob_sess_id;
   com->base_ts.m_id = loc_entry->base_ts.m_id;
   if (loc_entry->avoid_val_in_com) {
     com->opcode = COMMIT_OP_NO_VAL;
@@ -367,7 +368,6 @@ static inline void fill_commit_message_from_r_info(struct commit *com,
   com->opcode = RMW_ACQ_COMMIT_OP;
   memcpy(com->value, r_info->value, r_info->val_len);
   com->t_rmw_id = r_info->rmw_id.id;
-  com->glob_sess_id = r_info->rmw_id.glob_sess_id;
   com->log_no = r_info->log_no;
   if (ENABLE_ASSERTIONS) {
     assert(com->log_no > 0);
@@ -385,7 +385,6 @@ static inline void fill_reply_entry_with_committed_RMW (mica_op_t *kv_ptr,
   memcpy(rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
   rep->log_no_or_base_version = kv_ptr->last_committed_log_no;
   rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
-  rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
   //if (rep->ts.version == 0)
   //  my_printf(yellow, "Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
   //         t_id, rep->opcode, rep->log_no, rep->rmw_id, rep->glob_sess_id);

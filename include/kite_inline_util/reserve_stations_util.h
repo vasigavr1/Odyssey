@@ -1003,6 +1003,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
     key = (struct key *) &trace[trace_iter].key_hash;
     value_to_read = op->value;
     value_to_write = op->value;
+    if (opcode == FETCH_AND_ADD) *(uint64_t *) op->value = 1;
     real_val_len = (uint32_t) VALUE_SIZE;
   }
 
@@ -1035,6 +1036,8 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
 
   if (ENABLE_ASSERTIONS) assert(is_read || is_update || is_rmw);
   if (is_update || is_rmw) op->value_to_write = value_to_write;
+  if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && op->opcode == FETCH_AND_ADD)
+    assert(*(uint64_t *) op->value_to_write == 1);
   if (is_read || is_rmw ) {
     op->value_to_read = value_to_read;
   }
@@ -1428,7 +1431,7 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
       if (ENABLE_ASSERTIONS) assert(read_info->log_no < acq_rep->log_no);
       read_info->log_no = acq_rep->log_no;
       read_info->rmw_id.id = acq_rep->rmw_id;
-      read_info->rmw_id.glob_sess_id = acq_rep->glob_sess_id;
+      read_info->rmw_id.glob_sess_id = (uint16_t ) (acq_rep->rmw_id % GLOBAL_SESSION_NUM); //acq_rep->glob_sess_id;
       assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
       check_version(read_info->ts_to_read.version, "rmw_Acquire ");
       memcpy(read_info->value, acq_rep->value, read_info->val_len);
@@ -1440,7 +1443,7 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
       if (acq_rep->log_no > read_info->log_no) {
         read_info->log_no = acq_rep->log_no;
         read_info->rmw_id.id = acq_rep->rmw_id;
-        read_info->rmw_id.glob_sess_id = acq_rep->glob_sess_id;
+        read_info->rmw_id.glob_sess_id = (uint16_t ) (acq_rep->rmw_id % GLOBAL_SESSION_NUM); //acq_rep->glob_sess_id;
         assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
         check_version(read_info->ts_to_read.version, "rmw_Acquire ");
         memcpy(read_info->value, acq_rep->value, read_info->val_len);
