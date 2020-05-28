@@ -52,7 +52,7 @@ static inline void check_version(uint32_t version, const char *message) {
 //    if (version == 0 || version % 2 != 0) {
 //      my_printf(red, "Version %u %s\n", version, message);
 //    }
-    assert(version > 0);
+    assert(version >= ALL_ABOARD_TS);
 //    assert(version % 2 == 0);
   }
 }

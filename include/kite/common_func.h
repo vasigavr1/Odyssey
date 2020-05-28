@@ -80,7 +80,7 @@
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 20
-#define MACHINE_NUM 4
+#define MACHINE_NUM 5
 #define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -119,7 +119,7 @@
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 0
+#define ENABLE_ALL_ABOARD 1
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define LOG_TOO_HIGH_TIME_OUT 10
 #define ENABLE_LOCK_FREE_READING 1

@@ -28,6 +28,7 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(loc_entry_t* loc_en
   //assert(loc_entry->state != ACCEPTED);
   loc_entry->help_loc_entry->state = INVALID_RMW;
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
+  if (ENABLE_ASSERTIONS) assert(!loc_entry->rmw_reps.ready_to_inspect);
   loc_entry->back_off_cntr = 0;
   if (ENABLE_ALL_ABOARD) loc_entry->all_aboard_time_out = 0;
 }
@@ -36,14 +37,8 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(loc_entry_t* loc_en
 // After having helped another RMW, bring your own RMW back into the local entry
 static inline void reinstate_loc_entry_after_helping(loc_entry_t *loc_entry, uint16_t t_id)
 {
-  //if (loc_entry->helping_flag == HELPING_NEED_STASHING) {
-  //  loc_entry->opcode = loc_entry->help_rmw->opcode;
-  //  assign_second_rmw_id_to_first(&loc_entry->rmw_id, &loc_entry->help_rmw->rmw_id);
-  // }
   loc_entry->state = NEEDS_KV_PTR;
   loc_entry->helping_flag = NOT_HELPING;
-  zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
-
   if (DEBUG_RMW)
     my_printf(yellow, "Wrkr %u, sess %u reinstates its RMW id %u glob_sess-id %u after helping \n",
               t_id, loc_entry->sess_id, loc_entry->rmw_id.id,
@@ -309,6 +304,24 @@ static inline void free_kv_ptr_if_rmw_failed(loc_entry_t *loc_entry,
 }
 
 
+static inline void bookkeeping_after_gathering_accept_acks(loc_entry_t *loc_entry, uint16_t t_id)
+{
+
+  if (ENABLE_ASSERTIONS) {
+    assert(loc_entry->state != COMMITTED);
+    if (loc_entry->helping_flag == HELPING) assert(!loc_entry->all_aboard);
+    assert(!loc_entry->avoid_val_in_com);
+    assert(!loc_entry->avoid_val_in_com);
+    assert(!loc_entry->help_loc_entry->avoid_val_in_com);
+  }
+  // Should we send commits without value?
+  if (loc_entry->rmw_reps.acks == MACHINE_NUM) {
+    if (loc_entry->helping_flag == HELPING)
+      loc_entry->help_loc_entry->avoid_val_in_com = true;
+    else  loc_entry->avoid_val_in_com = true;
+  }
+}
+
 /*--------------------------------------------------------------------------
  * -------------------SENDING MESSAGES-----------------------------------
  * --------------------------------------------------------------------------*/
@@ -338,7 +351,6 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
     }
 
     if (ENABLE_ASSERTIONS) {
-      assert(com->t_rmw_id < B_4);
       assert(com->log_no > 0);
       assert(com->t_rmw_id > 0);
     }

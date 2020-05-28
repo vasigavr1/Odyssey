@@ -35,10 +35,10 @@
 
 
 allIPs=(192.168.8.4 #houston
+        192.168.8.6 #austin
         192.168.8.5 #sanantonio
         192.168.8.2 #philly
         192.168.8.3 #indianapolis
-        192.168.8.6 #austin
         192.168.5.11
         192.168.5.13 )
 localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
