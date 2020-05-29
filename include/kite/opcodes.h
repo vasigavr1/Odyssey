@@ -74,6 +74,7 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define TS_GREATER 31
 #define RMW_ACK 32 // 1 byte reply
 #define RMW_ACK_ACC_SAME_RMW 33 // only for proposes: Have accepted with lower TS the same RMW-id, it counts as an ack
+#define RMW_ACK_BASE_TS_STALE 33 // the propose is acked, but we let it know o f a recent ABD write
 #define SEEN_HIGHER_PROP 34 // send that TS
 #define SEEN_LOWER_ACC 35 // send value, rmw-id, TS
 #define RMW_ID_COMMITTED 36 // this is a 1-byte reply: it also tells me that the RMW has been committed in an older slot, and thus the issuer need not bcast commits
@@ -177,7 +178,7 @@ enum {
 #define ACCEPT_FLIPS_BIT_OP 128
 
 
-
+#define DO_NOT_CHECK_BASE_TS B_4_
 
 
 // CLIENT REQUESTS STATE

@@ -116,6 +116,7 @@ static inline void update_sess_info_missing_ids_when_sending
 static inline void update_sess_info_with_fully_acked_write(p_ops_t *p_ops,
                                                            uint32_t w_ptr, uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   sess_info_t *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
   // The write gathered all expected acks so it needs not update the missing num or ids of the sess info
   if (ENABLE_ASSERTIONS) assert(sess_info->live_writes > 0);
@@ -131,6 +132,7 @@ static inline void update_sess_info_with_fully_acked_write(p_ops_t *p_ops,
 static inline void update_sess_info_partially_acked_write(p_ops_t *p_ops,
                                                           uint32_t w_ptr, uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   sess_info_t *sess_info = &p_ops->sess_info[p_ops->w_meta[w_ptr].sess_id];
   per_write_meta_t *w_meta = &p_ops->w_meta[w_ptr];
 
@@ -195,6 +197,7 @@ static inline void update_sess_info_partially_acked_write(p_ops_t *p_ops,
 static inline void reset_sess_info_on_release(sess_info_t *sess_info,
                                               struct quorum_info *q_info, uint16_t t_id)
 {
+  if (TURN_OFF_KITE) return;
   sess_info->missing_num = q_info->missing_num;
   memcpy(sess_info->missing_ids, q_info->missing_ids, q_info->missing_num);
   if (ENABLE_ASSERTIONS) {
@@ -207,6 +210,7 @@ static inline void reset_sess_info_on_release(sess_info_t *sess_info,
 static inline void reset_sess_info_on_accept(sess_info_t *sess_info,
                                              uint16_t t_id)
 {
+  if (!ACCEPT_IS_RELEASE || TURN_OFF_KITE) return;
   sess_info->missing_num = 0;
   if (ENABLE_ASSERTIONS) {
     assert(sess_info->stalled);
@@ -773,6 +777,10 @@ static inline void insert_prop_to_read_fifo(p_ops_t *p_ops, loc_entry_t *loc_ent
   prop->l_id = loc_entry->l_id;
   prop->t_rmw_id = loc_entry->rmw_id.id;
   prop->log_no = loc_entry->log_no;
+
+  if (!loc_entry->base_ts_found)
+    prop->base_ts = loc_entry->base_ts;
+  else prop->base_ts.version = DO_NOT_CHECK_BASE_TS;
 
   // Query the conf to see if the machine has lost messages
   on_starting_an_acquire_query_the_conf(t_id, loc_entry->epoch_id);

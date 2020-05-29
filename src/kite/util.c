@@ -9,7 +9,7 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 void static_assert_compile_parameters()
 {
-  static_assert(RMW_ACK_ACC_SAME_RMW > RMW_ACK, "assumption used to check if replies are acks");
+  static_assert(RMW_ACK_BASE_TS_STALE > RMW_ACK, "assumption used to check if replies are acks");
   assert(MICA_OP_SIZE == sizeof(mica_op_t));
   static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
   static_assert(IS_ALIGNED(2 * MICA_VALUE_SIZE, 64), "2 * VALUE_SIZE must be aligned with 64 bytes");
@@ -745,14 +745,12 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uin
   p_ops->prop_info = (struct prop_info *) aligned_alloc(64, sizeof(struct prop_info));
   memset(p_ops->prop_info, 0, sizeof(struct prop_info));
   assert(IS_ALIGNED(p_ops->prop_info, 64));
-//  p_ops->prop_info->l_id = 1;
   for (i = 0; i < LOCAL_PROP_NUM; i++) {
     loc_entry_t *loc_entry = &p_ops->prop_info->entry[i];
     loc_entry->sess_id = (uint16_t) i;
     loc_entry->glob_sess_id = get_glob_sess_id((uint8_t)machine_id, t_id, (uint16_t) i);
     loc_entry->l_id = (uint64_t) loc_entry->sess_id;
     loc_entry->rmw_id.id = (uint64_t) loc_entry->glob_sess_id;
-    //loc_entry->rmw_id.glob_sess_id = loc_entry->glob_sess_id;
     loc_entry->help_rmw = (struct rmw_help_entry *) calloc(1, sizeof(struct rmw_help_entry));
     loc_entry->help_loc_entry = (loc_entry_t *) calloc(1, sizeof(loc_entry_t));
     loc_entry->help_loc_entry->sess_id = (uint16_t) i;

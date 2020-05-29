@@ -215,6 +215,7 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
         loc_entry->state = state;
         if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
         loc_entry->log_no = kv_ptr->log_no;
+
       }
       else loc_entry->state = CAS_FAILED;
     }
@@ -228,6 +229,7 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
       loc_entry->help_rmw->log_no = kv_ptr->log_no;
     }
   }
+  loc_entry->base_ts = kv_ptr->ts;
   unlock_seqlock(&kv_ptr->seqlock);
 
   loc_entry->kv_ptr = kv_ptr;
@@ -500,6 +502,9 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
           activate_kv_pair(PROPOSED, prop->ts.version, kv_ptr, prop->opcode,
                            prop->ts.m_id, NULL, rmw_l_id, log_no, t_id,
                            ENABLE_ASSERTIONS ? "received propose" : NULL);
+        }
+        if (prop_rep->opcode == RMW_ACK || prop_rep->opcode == RMW_ACK_ACC_SAME_RMW) {
+          prop_rep->opcode = is_base_ts_too_small(kv_ptr, prop, prop_rep, t_id);
         }
         if (ENABLE_ASSERTIONS) {
           assert(kv_ptr->prop_ts.version >= prop->ts.version);

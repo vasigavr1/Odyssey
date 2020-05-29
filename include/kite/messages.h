@@ -18,7 +18,7 @@
 #define EPOCH_BYTES 2
 #define TS_TUPLE_SIZE (5) // version and m_id consist the Timestamp tuple
 #define LOG_NO_SIZE 4
-#define RMW_ID_SIZE 10
+//#define RMW_ID_SIZE 8
 #define RMW_VALUE_SIZE VALUE_SIZE //
 #define SESSION_BYTES 2 // session ids must fit in 2 bytes i.e.
 // in the first round of a release the first bytes of the value get overwritten
@@ -78,7 +78,7 @@
 #define R_COALESCE (EFFECTIVE_MAX_R_SIZE / R_SIZE)
 #define R_MES_SIZE (R_MES_HEADER + (R_SIZE * R_COALESCE))
 // proposes
-#define PROP_SIZE 34  // l_id 8, RMW_id- 10, ts 5, key 8, log_number 4, opcode 1
+#define PROP_SIZE 42  // l_id 8, RMW_id- 8, ts 5, key 8, log_number 4, opcode 1 + basets 8
 #define PROP_COALESCE (EFFECTIVE_MAX_R_SIZE / PROP_SIZE)
 #define PROP_MES_SIZE (R_MES_HEADER + (PROP_SIZE * PROP_COALESCE))
 
@@ -110,6 +110,7 @@
 #define PROP_REP_LOG_TOO_LOW_SIZE (26 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
 #define PROP_REP_ONLY_TS_SIZE (9 + TS_TUPLE_SIZE)
+#define PROP_REP_BASE_TS_STALE_SIZE (9 + TS_TUPLE_SIZE + RMW_VALUE_SIZE)
 #define PROP_REP_ACCEPTED_SIZE (PROP_REP_ONLY_TS_SIZE + 8 + RMW_VALUE_SIZE + TS_TUPLE_SIZE) //with the base_ts
 #define PROP_REP_MES_SIZE (R_REP_MES_HEADER + (PROP_COALESCE * PROP_REP_ACCEPTED_SIZE)) //Message size of replies to proposes
 // ACCEPT REPLIES
@@ -180,7 +181,6 @@ struct accept {
   uint8_t val_len;
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t t_rmw_id ; // the upper bits are overloaded to indicate that the accept is trying to flip a bit
-  //uint16_t glob_sess_id ; // this is useful when helping
   uint32_t log_no ;
   uint64_t l_id;
   struct network_ts_tuple base_ts;
@@ -192,7 +192,6 @@ struct commit_no_val {
   uint32_t log_no;
   struct key key;
   uint8_t opcode;
-  // uint16_t glob_sess_id;
   uint64_t t_rmw_id; //rmw lid to be committed
 }__attribute__((__packed__));
 
@@ -200,7 +199,6 @@ struct commit {
   struct network_ts_tuple base_ts;
   struct key key;
   uint8_t opcode;
-  //uint16_t glob_sess_id;
   uint64_t t_rmw_id; //rmw lid to be committed
   uint32_t log_no;
   uint8_t val_len;
@@ -220,9 +218,9 @@ struct propose {
   struct key key;
   uint8_t opcode;
   uint64_t t_rmw_id;
-  // uint16_t glob_sess_id;
   uint32_t log_no;
   uint64_t l_id; // the l_id of the rmw local_entry
+  struct ts_tuple base_ts;
 } __attribute__((__packed__));
 
 
@@ -275,7 +273,6 @@ struct rmw_acq_rep {
   uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // last committed only
   uint64_t rmw_id; // last committed
-  // uint16_t glob_sess_id; // last committed
 } __attribute__((__packed__));
 
 //
@@ -302,7 +299,6 @@ struct rmw_rep_last_committed {
   struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
-  //uint16_t glob_sess_id; //accepted  OR last committed
   uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted ts
   uint8_t base_m_id; // base_ts.m_id used for accepts only
 } __attribute__((__packed__));

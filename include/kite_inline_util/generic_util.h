@@ -436,10 +436,11 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
     case SEEN_HIGHER_PROP:
     case SEEN_HIGHER_ACC:
       return PROP_REP_ONLY_TS_SIZE;
+    case RMW_ACK_BASE_TS_STALE:
+      return PROP_REP_BASE_TS_STALE_SIZE;
     case RMW_ID_COMMITTED:
     case RMW_ID_COMMITTED_SAME_LOG:
     case RMW_ACK:
-    case RMW_ACK_ACC_SAME_RMW:
     case LOG_TOO_HIGH:
     case NO_OP_PROP_REP:
       return PROP_REP_SMALL_SIZE;

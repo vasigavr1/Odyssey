@@ -82,3 +82,5 @@ To run Kite:
 ## Tested on
 * Infiniband cluster of 5 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
 * OS: Ubuntu 18.04.1 LTS (Kernel: 4.15.0-55-generic) 
+
+

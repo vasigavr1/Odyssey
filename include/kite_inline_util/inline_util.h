@@ -154,62 +154,13 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
       if (loc_entry->rmw_reps.ready_to_inspect) {
         inspect_accepts(p_ops, loc_entry, t_id);
-        check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
-                                       MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP, ACCEPTED);
+        check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, RETRY_WITH_BIGGER_TS,
+                                       NEEDS_KV_PTR, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
         if (ENABLE_ASSERTIONS && loc_entry->rmw_reps.ready_to_inspect)
             assert (loc_entry->state == ACCEPTED && loc_entry->all_aboard);
       }
     }
-    /* =============== BROADCAST COMMITS ======================== */
-    if (state == MUST_BCAST_COMMITS || state == MUST_BCAST_COMMITS_FROM_HELP) {
-      loc_entry_t *entry_to_commit =
-        state == MUST_BCAST_COMMITS ? loc_entry : loc_entry->help_loc_entry;
-      //bool is_commit_helping = loc_entry->helping_flag != NOT_HELPING;
-      if (p_ops->virt_w_size < MAX_ALLOWED_W_SIZE) {
-        if (state == MUST_BCAST_COMMITS_FROM_HELP && loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED) {
-          my_printf(green, "Wrkr %u sess %u will bcast commits for the latest committed RMW,"
-                         " after learning its proposed RMW has already been committed \n",
-                    t_id, loc_entry->sess_id);
-        }
-        insert_write(p_ops, (trace_op_t*) entry_to_commit, FROM_COMMIT, state, t_id);
-        loc_entry->state = COMMITTED;
-        continue;
-      }
-    }
-    /* =============== NEEDS_KV_PTR ======================== */
-    if (state == NEEDS_KV_PTR) {
-      mica_op_t *kv_ptr = loc_entry->kv_ptr;
-      // If this fails to grab a kv_ptr it will try to update
-      // the (rmw_id + state) that is being waited on.
-      // If it updates it will zero the back-off counter
-      if (!attempt_to_grab_kv_ptr_after_waiting(p_ops, kv_ptr, loc_entry,
-                                                sess_i, t_id)) {
-        if (ENABLE_ASSERTIONS) assert(p_ops->sess_info[sess_i].stalled);
-        loc_entry->back_off_cntr++;
-        if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
-//          my_printf(yellow, "Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
-//                        t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
-//                        loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
-//                        loc_entry->help_rmw->state);
 
-          // This is failure-related help/stealing it should not be that we are being held up by the local machine
-          // However we may wait on a "local" glob sess id, because it is being helped
-          // if have accepted a value help it
-          if (loc_entry->help_rmw->state == ACCEPTED)
-            attempt_to_help_a_locally_accepted_value(p_ops, loc_entry, kv_ptr, t_id); // zeroes the back-off counter
-          // if have received a proposal, send your own proposal
-          else  if (loc_entry->help_rmw->state == PROPOSED) {
-            attempt_to_steal_a_proposed_kv_ptr(p_ops, loc_entry, kv_ptr, sess_i, t_id); // zeroes the back-off counter
-          }
-        }
-      }
-      if (loc_entry->state == PROPOSED) {
-        loc_entry->back_off_cntr = 0;
-        insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
-      }
-      check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
-                                     ACCEPTED, MUST_BCAST_COMMITS);
-    }
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
       if (!TURN_OFF_KITE) {
@@ -224,11 +175,46 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
         // in addition we do this before inspecting, so that if we broadcast accepts, they have a fresh l_id
         advance_loc_entry_l_id(loc_entry, t_id);
         inspect_proposes(p_ops, loc_entry, t_id);
-        check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
-                                       ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
+        check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, RETRY_WITH_BIGGER_TS,
+                                       NEEDS_KV_PTR, ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
         if (ENABLE_ASSERTIONS) assert(!loc_entry->rmw_reps.ready_to_inspect);
       }
     }
+
+    /* =============== BROADCAST COMMITS ======================== */
+    if (state == MUST_BCAST_COMMITS || state == MUST_BCAST_COMMITS_FROM_HELP) {
+      loc_entry_t *entry_to_commit =
+        state == MUST_BCAST_COMMITS ? loc_entry : loc_entry->help_loc_entry;
+      //bool is_commit_helping = loc_entry->helping_flag != NOT_HELPING;
+      if (p_ops->virt_w_size < MAX_ALLOWED_W_SIZE) {
+        if (state == MUST_BCAST_COMMITS_FROM_HELP && loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED) {
+          my_printf(green, "Wrkr %u sess %u will bcast commits for the latest committed RMW,"
+                      " after learning its proposed RMW has already been committed \n",
+                    t_id, loc_entry->sess_id);
+        }
+        insert_write(p_ops, (trace_op_t*) entry_to_commit, FROM_COMMIT, state, t_id);
+        loc_entry->state = COMMITTED;
+        continue;
+      }
+    }
+
+    /* =============== RETRY ======================== */
+    if (state == RETRY_WITH_BIGGER_TS) {
+      take_kv_ptr_with_higher_TS(p_ops, loc_entry, false, t_id);
+      check_state_with_allowed_flags(5, (int) loc_entry->state, INVALID_RMW, PROPOSED,
+                                     NEEDS_KV_PTR, MUST_BCAST_COMMITS);
+      if (loc_entry->state == PROPOSED) {
+        insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
+      }
+    }
+
+    /* =============== NEEDS_KV_PTR ======================== */
+    if (state == NEEDS_KV_PTR) {
+      handle_needs_kv_ptr_state(p_ops, loc_entry, sess_i, t_id);
+      check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, PROPOSED, NEEDS_KV_PTR,
+                                     ACCEPTED, MUST_BCAST_COMMITS);
+    }
+
   }
 }
 

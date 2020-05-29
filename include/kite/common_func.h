@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -103,7 +103,7 @@
 #define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 500// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -119,7 +119,7 @@
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 1
+#define ENABLE_ALL_ABOARD 0
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define LOG_TOO_HIGH_TIME_OUT 10
 #define ENABLE_LOCK_FREE_READING 1
@@ -188,7 +188,7 @@ typedef struct {
 } mica_key_t;
 
 //enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
-enum ts_compare{SMALLER, EQUAL, GREATER, ERROR};
+typedef enum ts_compare{SMALLER, EQUAL, GREATER, ERROR} ts_compare_t;
 
 struct quorum_info {
   uint8_t missing_num;
@@ -263,7 +263,7 @@ typedef struct  {
   uint32_t last_committed_log_no;
 
   // BYTES: 32 - 64 -- each takes 8
-  struct ts_tuple ts;
+  struct ts_tuple ts; // base ts
   struct ts_tuple prop_ts;
   struct ts_tuple accepted_ts;
   struct ts_tuple base_acc_ts;

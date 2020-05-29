@@ -311,6 +311,7 @@ typedef struct rmw_local_entry {
   bool rmw_is_successful; // was the RMW (if CAS) successful
   bool all_aboard;
 	bool avoid_val_in_com;
+  bool base_ts_found;
   uint8_t value_to_write[RMW_VALUE_SIZE];
   uint8_t value_to_read[RMW_VALUE_SIZE];
   struct ts_tuple base_ts;
