@@ -296,7 +296,7 @@ static inline uint8_t rmid_to_mid(uint8_t rm_id)
 }
 
 // Calculate the global session id
-static inline uint16_t get_glob_sess_id(uint8_t m_id, uint16_t t_id, uint16_t sess_id)
+static inline uint32_t get_glob_sess_id(uint8_t m_id, uint16_t t_id, uint16_t sess_id)
 {
   return (uint16_t) ((m_id * SESSIONS_PER_MACHINE) +
                      (t_id * SESSIONS_PER_THREAD)  +
@@ -304,24 +304,24 @@ static inline uint16_t get_glob_sess_id(uint8_t m_id, uint16_t t_id, uint16_t se
 }
 
 // Get the machine id out of a global session id
-static inline uint8_t glob_ses_id_to_m_id(uint16_t glob_sess_id)
+static inline uint8_t glob_ses_id_to_m_id(uint32_t glob_sess_id)
 {
   return (uint8_t) (glob_sess_id / SESSIONS_PER_MACHINE);
 }
 
 // Get the machine id out of a global session id
-static inline uint16_t glob_ses_id_to_t_id(uint16_t glob_sess_id)
+static inline uint16_t glob_ses_id_to_t_id(uint32_t glob_sess_id)
 {
   return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) / SESSIONS_PER_THREAD);
 }
 
 // Get the sess id out of a global session id
-static inline uint16_t glob_ses_id_to_sess_id(uint16_t glob_sess_id)
+static inline uint16_t glob_ses_id_to_sess_id(uint32_t glob_sess_id)
 {
   return (uint16_t) ((glob_sess_id % SESSIONS_PER_MACHINE) % SESSIONS_PER_THREAD);
 }
 
-static inline bool is_global_ses_id_local(uint16_t glob_sess_id, uint16_t t_id)
+static inline bool is_global_ses_id_local(uint32_t glob_sess_id, uint16_t t_id)
 {
   return glob_ses_id_to_t_id(glob_sess_id) == t_id &&
          glob_ses_id_to_m_id(glob_sess_id) == machine_id;
@@ -335,33 +335,15 @@ static inline bool cas_a_state(atomic_uint_fast8_t * state, uint8_t old_state, u
 
 static inline bool rmw_ids_are_equal(struct rmw_id *id1, struct rmw_id *id2)
 {
-  return id1->glob_sess_id == id2->glob_sess_id && id1->id == id2->id;
+  return id1->id == id2->id;
 }
 
-static inline bool rmw_id_is_equal_with_id_and_glob_sess_id(struct rmw_id *id1, uint64_t id, uint16_t glob_sess_id)
-{
-  return id1->glob_sess_id == glob_sess_id && id1->id == id;
-}
 
 static inline void assign_second_rmw_id_to_first(struct rmw_id* rmw_id1, struct rmw_id* rmw_id2)
 {
   rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
 }
 
-// assign second argument to the first
-static inline void assign_rmw_id_to_net_rmw_id(struct net_rmw_id* rmw_id1, struct rmw_id* rmw_id2)
-{
-  rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
-}
-
-// assign second argument to the first
-static inline void assign_net_rmw_id_to_rmw_id(struct rmw_id* rmw_id1, struct net_rmw_id* rmw_id2)
-{
-  rmw_id1->id = rmw_id2->id;
-  rmw_id1->glob_sess_id = rmw_id2->glob_sess_id;
-}
 
 static inline void swap_rmw_ids(struct rmw_id* rmw_id1, struct rmw_id* rmw_id2)
 {

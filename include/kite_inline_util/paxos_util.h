@@ -127,7 +127,7 @@ static inline void fill_loc_rmw_entry_on_grabbing_kv_ptr(p_ops_t *p_ops,
 {
   if (ENABLE_ASSERTIONS) {
     check_global_sess_id((uint8_t) machine_id, t_id,
-                         (uint16_t) sess_i, loc_entry->rmw_id.glob_sess_id);
+                         (uint16_t) sess_i, loc_entry->rmw_id.id);
     check_version(version, "fill_loc_rmw_entry_on_grabbing_global");
     assert(!loc_entry->rmw_reps.ready_to_inspect);
     assert(loc_entry->rmw_reps.tot_replies == 0);
@@ -181,12 +181,9 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   loc_entry->rmw_id.id+= GLOBAL_SESSION_NUM; //p_ops->prop_info->l_id;
   if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.id % GLOBAL_SESSION_NUM == loc_entry->glob_sess_id);
   advance_loc_entry_l_id(loc_entry, t_id);
-  loc_entry->rmw_id.glob_sess_id = get_glob_sess_id((uint8_t) machine_id, t_id, op->session_id);
-  if (ENABLE_ASSERTIONS)
-    assert(loc_entry->rmw_id.glob_sess_id == loc_entry->glob_sess_id);
   loc_entry->accepted_log_no = 0;
-  //my_printf(yellow, "Init  RMW-id %u glob_sess_id %u \n",
-  // loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
+  //my_printf(yellow, "Init  RMW-id %u  \n",
+  // loc_entry->rmw_id.id);
   loc_entry->help_loc_entry->state = INVALID_RMW;
 }
 
@@ -209,8 +206,7 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
   kv_ptr->prop_ts.m_id = new_ts_m_id;
   //if (ENABLE_ASSERTIONS) assert(new_version >= kv_ptr->prop_ts.version);
   kv_ptr->prop_ts.version = new_version;
-  //my_printf(cyan, "Wrkr %u Activating from remote accept rmw_id %u glob sess %u \n", t_id, rmw_id, glob_sess_id);
-  kv_ptr->rmw_id.glob_sess_id = rmw_id % GLOBAL_SESSION_NUM;
+  //my_printf(cyan, "Wrkr %u Activating from remote accept rmw_id %u \n", t_id, rmw_id);
   kv_ptr->rmw_id.id = rmw_id;
   kv_ptr->state = state;
   kv_ptr->log_no = log_no;
@@ -228,11 +224,10 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
     }
   }
   if (ENABLE_ASSERTIONS) {
-    assert(kv_ptr->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
-    if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
+    if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM] >= kv_ptr->rmw_id.id) {
       //my_printf(red, "Wrkr %u, attempts to activate with already committed RMW id %u/%u glob_sess id %u, state %u: %s \n",
-      //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
-      //           kv_ptr->rmw_id.glob_sess_id, state, message);
+      //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM],
+      //           kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM, state, message);
     }
     //assert(kv_ptr->new_ts.version % 2 == 0);
     assert(state == PROPOSED || state == ACCEPTED); // TODO accepted is allowed?
@@ -375,11 +370,10 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
   my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
             "Attempt local accept: Local entry does not contain the same key as kv_ptr");
 
-  if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
+  if (ENABLE_ASSERTIONS) assert(loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
 
   lock_seqlock(&loc_entry->kv_ptr->seqlock);
   if (if_already_committed_bcast_commits(p_ops, loc_entry, t_id)) {
-    //if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
     return NACK_ALREADY_COMMITTED;
   }
@@ -394,8 +388,8 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
     }
     //state would be typically proposed, but may also be accepted if someone has helped
     if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u got rmw id %u, glob sess %u accepted locally \n",
-                t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id);
+      my_printf(green, "Wrkr %u got rmw id %u, accepted locally \n",
+                t_id, loc_entry->rmw_id.id);
     kv_ptr->state = ACCEPTED;
     // calculate the new value depending on the type of RMW
     perform_the_rmw_on_the_loc_entry(loc_entry, kv_ptr, t_id);
@@ -427,10 +421,10 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
       //Otherwise the RMW that won is still in progress
     else return_flag = NACK_ACCEPT_SEEN_HIGHER_TS;
     if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
-                  "kv_ptr rmw id %u, glob sess %u, state %u \n",
-                t_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
-                kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+      my_printf(green, "Wrkr %u failed to get rmw id %u, accepted locally opcode %u,"
+                  "kv_ptr rmw id %u, state %u \n",
+                t_id, loc_entry->rmw_id.id, return_flag,
+                kv_ptr->rmw_id.id, kv_ptr->state);
     // --CHECKS--
     if (ENABLE_ASSERTIONS) {
       if (kv_ptr->state == PROPOSED || kv_ptr->state == ACCEPTED) {
@@ -450,7 +444,7 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
       else if (kv_ptr->state == INVALID_RMW) // some other rmw committed
         assert(kv_ptr->last_committed_log_no >= loc_entry->log_no);
       // The RMW can have been committed, because some may have helped it
-      //assert (committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id] < loc_entry->rmw_id.id);
+      //assert (committed_glob_sess_rmw_id[loc_entry->glob_sess_id] < loc_entry->rmw_id.id);
     }
 
 
@@ -472,7 +466,7 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
             "Attempt local accpet to help: Local entry does not contain the same key as kv_ptr");
   my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
             " the help entry and the regular have not the same log nos");
-  if (ENABLE_ASSERTIONS) assert(help_loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
+  if (ENABLE_ASSERTIONS) assert(help_loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
   lock_seqlock(&loc_entry->kv_ptr->seqlock);
 
 
@@ -532,10 +526,10 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
     //if the kv_ptr has accepted a higher TS then again abort help
     return_flag = ABORT_HELP;
     if (DEBUG_RMW)// || (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED))
-      my_printf(green, "Wrkr %u sess %u failed to get rmw id %u, glob sess %u accepted locally opcode %u,"
-                  "kv_ptr rmw id %u, glob sess %u, state %u \n",
-                t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id, return_flag,
-                kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+      my_printf(green, "Wrkr %u sess %u failed to get rmw id %u, accepted locally opcode %u,"
+                  "kv_ptr rmw id %u, state %u \n",
+                t_id, loc_entry->sess_id, loc_entry->rmw_id.id, return_flag,
+                kv_ptr->rmw_id.id, kv_ptr->state);
 
 
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and fail", t_id);
@@ -602,10 +596,10 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
   if (kv_ptr->last_committed_log_no < loc_entry_to_commit->log_no) {
     take_actions_to_commit_rmw(loc_entry_to_commit, loc_entry, t_id);
     if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u got rmw id %u, kv_ptr sess %u, log %u committed locally,"
-                  "kv_ptr stats: state %u, rmw_id &u, glob sess_id %u, log no %u  \n",
-                t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry_to_commit->log_no,
-                kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->log_no);
+      my_printf(green, "Wrkr %u got rmw id %u, log %u committed locally,"
+                  "kv_ptr stats: state %u, rmw_id &u, , log no %u  \n",
+                t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->log_no,
+                kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->log_no);
   }
   // Check if the entry is still working on that log, or whether it has moved on
   // (because the current rmw is already committed)
@@ -614,11 +608,11 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
     if (ENABLE_ASSERTIONS) {
       if (!rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->rmw_id)) {
         my_printf(red, "Wrkr %u kv_ptr is on same log as what is about to be committed but on different rmw-id:"
-                    " committed rmw id %u, glob sess %u, "
-                    "kv_ptr rmw id %u, glob sess %u, state %u,"
+                    " committed rmw id %u, "
+                    "kv_ptr rmw id %u, state %u,"
                     " committed version %u/%u m_id %u/%u \n",
-                  t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id,
-                  kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state,
+                  t_id, loc_entry_to_commit->rmw_id.id,
+                  kv_ptr->rmw_id.id, kv_ptr->state,
                   loc_entry_to_commit->new_ts.version, kv_ptr->prop_ts.version,
                   loc_entry_to_commit->new_ts.m_id, kv_ptr->prop_ts.m_id);// this is a hard error
         assert(false);
@@ -672,15 +666,15 @@ static inline void attempt_local_commit(p_ops_t *p_ops, loc_entry_t *loc_entry,
 
   unlock_seqlock(&loc_entry->kv_ptr->seqlock);
   if (DEBUG_RMW)
-    my_printf(green, "Wrkr %u will broadcast commits for rmw id %u, glob sess %u, "
-                "kv_ptr rmw id %u, glob sess %u, state %u \n",
-              t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->rmw_id.glob_sess_id,
-              kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+    my_printf(green, "Wrkr %u will broadcast commits for rmw id %u, "
+                "kv_ptr rmw id %u, state %u \n",
+              t_id, loc_entry_to_commit->rmw_id.id,
+              kv_ptr->rmw_id.id,kv_ptr->state);
 
   if (DEBUG_LOG)
-    my_printf(green, "Log %u: RMW_id %u glob_sess %u, loc entry state %u, local commit\n",
+    my_printf(green, "Log %u: RMW_id %u, loc entry state %u, local commit\n",
               loc_entry_to_commit->log_no, loc_entry_to_commit->rmw_id.id,
-              loc_entry_to_commit->rmw_id.glob_sess_id, loc_entry->state);
+              loc_entry->state);
 }
 
 // A reply to a propose/accept may include an RMW to be committed,
@@ -702,7 +696,6 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
     //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW_FROM_REP;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
-    kv_ptr->last_committed_rmw_id.glob_sess_id = (uint16_t ) (new_rmw_id % GLOBAL_SESSION_NUM);
     update_commit_logs(t_id, kv_ptr->key.bkt, new_log_no, kv_ptr->value,
                        rmw_rep->value, "From rep ", LOG_COMS);
 
@@ -761,7 +754,6 @@ static inline bool attempt_remote_commit_no_value(mica_op_t *kv_ptr, struct comm
     is_log_higher = true;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = com->t_rmw_id;
-    kv_ptr->last_committed_rmw_id.glob_sess_id = (uint16_t) (com->t_rmw_id % GLOBAL_SESSION_NUM);
     kv_ptr->state = INVALID_RMW;
     if (DEBUG_LOG)
       my_printf(green, "Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
@@ -784,7 +776,6 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
 {
   uint32_t new_log_no = use_commit ? com->log_no : r_info->log_no;
   uint64_t new_rmw_id = use_commit ? com->t_rmw_id : r_info->rmw_id.id;
-  uint16_t glob_sess_id = use_commit ? (uint16_t) (com->t_rmw_id % GLOBAL_SESSION_NUM) : r_info->rmw_id.glob_sess_id;
   uint32_t new_version = use_commit ? com->base_ts.version : r_info->ts_to_read.version;
   uint8_t new_m_id = use_commit ? com->base_ts.m_id : r_info->ts_to_read.m_id;
   // the function is called with the lock in hand
@@ -795,10 +786,9 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
     //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW;
     kv_ptr->last_committed_log_no = new_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
-    kv_ptr->last_committed_rmw_id.glob_sess_id = glob_sess_id;
     if (DEBUG_LOG)
-      my_printf(green, "Log %u: RMW_id %u glob_sess %u ,from remote_commit \n",
-                new_log_no, new_rmw_id, glob_sess_id);
+      my_printf(green, "Log %u: RMW_id %u ,from remote_commit \n",
+                new_log_no, new_rmw_id);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
     check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_log_no,
@@ -807,14 +797,14 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
 
   // now check if the entry was waiting for this message to get cleared
   if (kv_ptr->state != INVALID_RMW && (kv_ptr->log_no <= new_log_no ||
-                                       rmw_id_is_equal_with_id_and_glob_sess_id(&kv_ptr->rmw_id, new_rmw_id, glob_sess_id))) {
+                                       kv_ptr->rmw_id.id == new_rmw_id)) {
     kv_ptr->state = INVALID_RMW;
   }
   else if (kv_ptr->log_no > new_log_no && kv_ptr->state != INVALID_RMW) {
-    if (kv_ptr->rmw_id.id == new_rmw_id && kv_ptr->rmw_id.glob_sess_id == glob_sess_id)
-      my_printf(red, "Wrkr %u, committed rmw_id %u and glob ses id %u on log no %u, but the kv_ptr is working on "
-                  "log %u, state %u rmw_id %u glob sess id %u \n", t_id, new_rmw_id, glob_sess_id, new_log_no,
-                kv_ptr->log_no, kv_ptr->state, kv_ptr->rmw_id.id,  kv_ptr->rmw_id.glob_sess_id);
+    if (kv_ptr->rmw_id.id == new_rmw_id)
+      my_printf(red, "Wrkr %u, committed rmw_id %u and  on log no %u, but the kv_ptr is working on "
+                  "log %u, state %u rmw_id %u \n", t_id, new_rmw_id,  new_log_no,
+                kv_ptr->log_no, kv_ptr->state, kv_ptr->rmw_id.id);
   }
   return is_log_higher;
 }
@@ -953,7 +943,6 @@ static inline void store_rmw_rep_to_help_loc_entry(loc_entry_t* loc_entry,
     help_loc_entry->log_no = loc_entry->log_no;
     help_loc_entry->state = ACCEPTED;
     help_loc_entry->rmw_id.id = prop_rep->rmw_id;
-    help_loc_entry->rmw_id.glob_sess_id = (uint16_t) (prop_rep->rmw_id % GLOBAL_SESSION_NUM);
     memcpy(help_loc_entry->value_to_write, prop_rep->value, (size_t) RMW_VALUE_SIZE);
     help_loc_entry->key = loc_entry->key;
   }
@@ -1125,14 +1114,13 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(p_ops_t *p_ops,
 {
   loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
   if (DEBUG_RMW)
-    my_printf(cyan, "Wrkr %u, session %u helps RMW id %u glob_sess_id %u with version %u, m_id %u,"
-                " kv_ptr log/help log %u/%u kv_ptr committed log %u , biggest committed rmw_id %u for kv_ptr sess %u"
-                " stashed rmw_id: %u, global_sess id %u, state %u \n",
-              t_id, loc_entry->sess_id, loc_entry->rmw_id.id, loc_entry->rmw_id.glob_sess_id,
+    my_printf(cyan, "Wrkr %u, session %u helps RMW id %u with version %u, m_id %u,"
+                " kv_ptr log/help log %u/%u kv_ptr committed log %u , "
+                " stashed rmw_id: %u state %u \n",
+              t_id, loc_entry->sess_id, loc_entry->rmw_id.id,
               loc_entry->new_ts.version, loc_entry->new_ts.m_id,
               kv_ptr->log_no, loc_entry->log_no, kv_ptr->last_committed_log_no,
-              committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id], kv_ptr->rmw_id.glob_sess_id,
-              loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id, loc_entry->help_rmw->state);
+              loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->state);
   loc_entry->state = PROPOSED;
 
   help_loc_entry->state = ACCEPTED;
@@ -1148,11 +1136,10 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(p_ops_t *p_ops,
   loc_entry->rmw_reps.tot_replies = 1;
   loc_entry->rmw_reps.already_accepted = 1;
   if (PRINT_LOGS && ENABLE_DEBUG_RMW_KV_PTR)
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Prop-not-locally accepted: helping rmw_id %lu, glob_sess id: %u, "
-              "version %u, m_id: %u, From: rmw_id %lu, glob_sess id: %u with version %u, m_id: %u \n",
-            loc_entry->key.bkt, loc_entry->log_no, help_loc_entry->rmw_id.id, help_loc_entry->rmw_id.glob_sess_id,
+    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Prop-not-locally accepted: helping rmw_id %lu, "
+              "version %u, m_id: %u, From: rmw_id %lu, with version %u, m_id: %u \n",
+            loc_entry->key.bkt, loc_entry->log_no, help_loc_entry->rmw_id.id,
             help_loc_entry->new_ts.version, help_loc_entry->new_ts.m_id, loc_entry->rmw_id.id,
-            loc_entry->rmw_id.glob_sess_id,
             loc_entry->new_ts.version, loc_entry->new_ts.m_id);
 }
 
@@ -1178,17 +1165,16 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(p_ops_t *p_ops,
   }
   if (kv_ptr->state == INVALID_RMW) {
     if (!rmw_fails_with_loc_entry(loc_entry, kv_ptr, &rmw_fails, t_id)) {
-      if (ENABLE_ASSERTIONS) assert(kv_ptr->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
       if (ENABLE_ASSERTIONS && kv_ptr->state != INVALID_RMW &&
-          committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
-        //my_printf(red, "Wrkr: %u waiting on an rmw id %u/%u glob_sess_id %u that has been committed, so we free it"
-        //             "last committed rmw id %u , glob sess id %u, "
-        //             "state %u, committed log/log %u/%u, version %u \n",
-        //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
-        //           kv_ptr->rmw_id.glob_sess_id, kv_ptr->last_committed_rmw_id.id,
-        //           kv_ptr->last_committed_rmw_id.glob_sess_id,
-        //           kv_ptr->state, kv_ptr->last_committed_log_no,
-        //           kv_ptr->log_no, kv_ptr->new_ts.version);
+          committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM] >= kv_ptr->rmw_id.id) {
+//        my_printf(red, "Wrkr: %u waiting on an rmw id %u/%u glob_sess_id %u that has been committed, so we free it"
+//                     "last committed rmw id %u , glob sess id %u, "
+//                     "state %u, committed log/log %u/%u, version %u \n",
+//                  t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM],
+//                  kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM, kv_ptr->last_committed_rmw_id.id,
+//                  kv_ptr->last_committed_rmw_id.id  % GLOBAL_SESSION_NUM,
+//                  kv_ptr->state, kv_ptr->last_committed_log_no,
+//                  kv_ptr->log_no, kv_ptr->prop_ts.version);
       }
       loc_entry->log_no = kv_ptr->last_committed_log_no + 1;
       activate_kv_pair(PROPOSED, PAXOS_TS, kv_ptr, loc_entry->opcode,
@@ -1204,24 +1190,24 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(p_ops_t *p_ops,
   }
   else if (kv_ptr_state_has_changed(kv_ptr, loc_entry->help_rmw)) {
     if (ENABLE_ASSERTIONS) {
-      if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id] >= kv_ptr->rmw_id.id) {
-        //my_printf(red, "Wrkr: %u The saved rmw id %u/%u glob_sess_id %u has been committed, "
-        //             "last committed rmw id %u , glob sess id %u, "
-        //             "state %u, committed log/log %u/%u, version %u \n",
-        //           t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.glob_sess_id],
-        //           kv_ptr->rmw_id.glob_sess_id, kv_ptr->last_committed_rmw_id.id,
-        //           kv_ptr->last_committed_rmw_id.glob_sess_id,
-        //           kv_ptr->state, kv_ptr->last_committed_log_no,
-        //           kv_ptr->log_no, kv_ptr->new_ts.version);
-        //assert(false);
+      if (committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM] >= kv_ptr->rmw_id.id) {
+//        my_printf(red, "Wrkr: %u The saved rmw id %u/%u glob_sess_id %u has been committed, "
+//                     "last committed rmw id %u , glob sess id %u, "
+//                     "state %u, committed log/log %u/%u, version %u \n",
+//                  t_id, kv_ptr->rmw_id.id, committed_glob_sess_rmw_id[kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM],
+//                  kv_ptr->rmw_id.id % GLOBAL_SESSION_NUM, kv_ptr->last_committed_rmw_id.id,
+//                  kv_ptr->last_committed_rmw_id.id  % GLOBAL_SESSION_NUM,
+//                  kv_ptr->state, kv_ptr->last_committed_log_no,
+//                  kv_ptr->log_no, kv_ptr->prop_ts.version);
+//        assert(false);
       }
     }
     if (DEBUG_RMW)
       my_printf(yellow, "Wrkr %u, session %u changed who is waiting: waited for %u cycles on "
-                  "state %u rmw_id %u glob_sess_id %u, now waiting on rmw_id %u glob_sess_id %u, state %u\n",
+                  "state %u rmw_id %u , now waiting on rmw_id %u , state %u\n",
                 t_id, loc_entry->sess_id, loc_entry->back_off_cntr,
-                loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
-                kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+                loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id,
+                kv_ptr->rmw_id.id, kv_ptr->state);
     loc_entry->help_rmw->state = kv_ptr->state;
     assign_second_rmw_id_to_first(&loc_entry->help_rmw->rmw_id, &kv_ptr->rmw_id);
     loc_entry->help_rmw->ts = kv_ptr->prop_ts;
@@ -1321,10 +1307,10 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(p_ops_t *p_ops,
     if (DEBUG_RMW)
       my_printf(yellow, "Wrkr %u, session %u on attempting to steal the propose, changed who is "
                   "waiting: waited for %u cycles for state %u "
-                  "rmw_id %u glob_sess_id %u, state %u,  now waiting on rmw_id % glob_sess_id %u, state %u\n",
+                  "rmw_id %u  state %u,  now waiting on rmw_id % , state %u\n",
                 t_id, loc_entry->sess_id, loc_entry->back_off_cntr,
-                loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
-                kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+                loc_entry->help_rmw->state, loc_entry->help_rmw->rmw_id.id,
+                kv_ptr->rmw_id.id, kv_ptr->state);
     loc_entry->help_rmw->log_no = kv_ptr->log_no;
     loc_entry->help_rmw->state = kv_ptr->state;
     loc_entry->help_rmw->ts = kv_ptr->prop_ts;
@@ -1477,9 +1463,9 @@ static inline void take_kv_ptr_with_higher_TS(p_ops_t *p_ops,
       if (DEBUG_RMW)
         my_printf(yellow, "Wrkr %u, session %u  failed when attempting to get/regain the kv_ptr, "
                     "waiting: waited for %u cycles for "
-                    "now waiting on rmw_id % glob_sess_id %u, state %u\n",
+                    "now waiting on rmw_id %, state %u\n",
                   t_id, loc_entry->sess_id,
-                  kv_ptr->rmw_id.id, kv_ptr->rmw_id.glob_sess_id, kv_ptr->state);
+                  kv_ptr->rmw_id.id, kv_ptr->state);
     }
     check_log_nos_of_kv_ptr(kv_ptr, "take_kv_ptr_with_higher_TS", t_id);
   }
@@ -1518,8 +1504,8 @@ static inline void act_on_quorum_of_prop_acks(p_ops_t *p_ops, loc_entry_t *loc_e
     check_loc_entry_metadata_is_reset(loc_entry, "act_on_quorum_of_prop_acks", t_id);
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, false, t_id);
     if (ENABLE_ASSERTIONS) {
-      assert(glob_ses_id_to_t_id(loc_entry->rmw_id.glob_sess_id) == t_id &&
-             glob_ses_id_to_m_id(loc_entry->rmw_id.glob_sess_id) == machine_id);
+      assert(glob_ses_id_to_t_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == t_id &&
+             glob_ses_id_to_m_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == machine_id);
       assert(loc_entry->state == PROPOSED);
     }
     loc_entry->state = ACCEPTED;
@@ -1898,8 +1884,6 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
     if (state == ACCEPTED) {
       if (ENABLE_ASSERTIONS) {
         assert(op->ts.version == ALL_ABOARD_TS);
-        assert(glob_ses_id_to_t_id(loc_entry->rmw_id.glob_sess_id) == t_id &&
-               glob_ses_id_to_m_id(loc_entry->rmw_id.glob_sess_id) == machine_id);
       }
       loc_entry->accepted_log_no = loc_entry->log_no;
       insert_accept_in_writes_message_fifo(p_ops, loc_entry, false, t_id);

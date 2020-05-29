@@ -320,7 +320,7 @@ typedef struct rmw_local_entry {
   struct rmw_rep_info rmw_reps;
   uint64_t epoch_id;
   uint16_t sess_id;
-  uint16_t glob_sess_id;
+  uint32_t glob_sess_id;
   uint32_t index_to_req_array;
   uint32_t back_off_cntr;
   uint16_t log_too_high_cntr;

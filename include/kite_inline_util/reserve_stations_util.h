@@ -866,9 +866,8 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
   if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag != PROPOSE_NOT_LOCALLY_ACKED);
   if (DEBUG_RMW) {
     my_printf(yellow, "Wrkr %u Inserting an accept, bcast size %u, "
-                "rmw_id %lu, global_sess_id %u, fifo push_ptr %u, fifo pull ptr %u\n",
+                "rmw_id %lu, fifo push_ptr %u, fifo pull ptr %u\n",
               t_id, p_ops->w_fifo->bcast_size, loc_entry->rmw_id.id,
-              loc_entry->rmw_id.glob_sess_id,
               p_ops->w_fifo->push_ptr, p_ops->w_fifo->bcast_pull_ptr);
   }
   struct accept *acc = (struct accept *)
@@ -1431,7 +1430,6 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
       if (ENABLE_ASSERTIONS) assert(read_info->log_no < acq_rep->log_no);
       read_info->log_no = acq_rep->log_no;
       read_info->rmw_id.id = acq_rep->rmw_id;
-      read_info->rmw_id.glob_sess_id = (uint16_t ) (acq_rep->rmw_id % GLOBAL_SESSION_NUM); //acq_rep->glob_sess_id;
       assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
       check_version(read_info->ts_to_read.version, "rmw_Acquire ");
       memcpy(read_info->value, acq_rep->value, read_info->val_len);
@@ -1443,7 +1441,6 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
       if (acq_rep->log_no > read_info->log_no) {
         read_info->log_no = acq_rep->log_no;
         read_info->rmw_id.id = acq_rep->rmw_id;
-        read_info->rmw_id.glob_sess_id = (uint16_t ) (acq_rep->rmw_id % GLOBAL_SESSION_NUM); //acq_rep->glob_sess_id;
         assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
         check_version(read_info->ts_to_read.version, "rmw_Acquire ");
         memcpy(read_info->value, acq_rep->value, read_info->val_len);

@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -104,7 +104,7 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 0500 // this is the ratio out of all RMWs and is out of 1000
+#define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
 #define EMULATE_ABD 0
@@ -205,14 +205,9 @@ struct quorum_info {
 // unique RMW id-- each machine must remember how many
 // RMW each thread has committed, to avoid committing an RMW twice
 struct rmw_id {
-  uint16_t glob_sess_id; // global session id
+  //uint32_t glob_sess_id; // global session id
   uint64_t id; // the local rmw id of the source
 };
-
-struct net_rmw_id {
-  uint16_t glob_sess_id; // global session id
-  uint64_t id; // the local rmw id of the source
-}__attribute__((__packed__));
 
 
 // flags that help to compare TS
@@ -245,7 +240,7 @@ typedef struct mica_ts {
 typedef atomic_uint_fast64_t seqlock_t;
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
-#define MICA_OP_SIZE_  (128 + (2 * (MICA_VALUE_SIZE)))
+#define MICA_OP_SIZE_  (96 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
@@ -274,17 +269,17 @@ typedef struct  {
   struct ts_tuple base_acc_ts;
 
 
-  // Cache-line 3 -- each rmw_id takes up 16 bytes
+  // Cache-line 3 -- each rmw_id takes up 8 bytes
   struct rmw_id rmw_id;
-  //struct rmw_id unused4; // not really needed. i was using it to put in accepts, but you cant send an accept unless you know the most recently committed -rmw
+  //struct rmw_id last_registered_rmw_id; // i was using it to put in accepts, when accepts carried last-registered-rmw-id
   struct rmw_id last_committed_rmw_id;
   struct rmw_id accepted_rmw_id; // not really needed, but good for debug
 
 
 
   uint64_t epoch_id;
-  uint64_t unused5;
-  // // Cache-line -4
+
+
   uint8_t padding[MICA_OP_PADDING_SIZE];
 
 } mica_op_t;

@@ -40,11 +40,10 @@ static inline void reinstate_loc_entry_after_helping(loc_entry_t *loc_entry, uin
   loc_entry->state = NEEDS_KV_PTR;
   loc_entry->helping_flag = NOT_HELPING;
   if (DEBUG_RMW)
-    my_printf(yellow, "Wrkr %u, sess %u reinstates its RMW id %u glob_sess-id %u after helping \n",
-              t_id, loc_entry->sess_id, loc_entry->rmw_id.id,
-              loc_entry->rmw_id.glob_sess_id);
+    my_printf(yellow, "Wrkr %u, sess %u reinstates its RMW id %u after helping \n",
+              t_id, loc_entry->sess_id, loc_entry->rmw_id.id);
   if (ENABLE_ASSERTIONS)
-    assert(glob_ses_id_to_m_id(loc_entry->rmw_id.glob_sess_id) == (uint8_t) machine_id);
+    assert(glob_ses_id_to_m_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == (uint8_t) machine_id);
 
 }
 
@@ -252,12 +251,11 @@ static inline bool if_already_committed_bcast_commits(p_ops_t *p_ops,
                                                       uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    assert(loc_entry->rmw_id.glob_sess_id < GLOBAL_SESSION_NUM);
     assert(loc_entry->state != INVALID_RMW);
     assert(loc_entry == &p_ops->prop_info->entry[loc_entry->sess_id]);
     assert(loc_entry->helping_flag != HELPING);
   }
-  if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->rmw_id.glob_sess_id]) {
+  if (loc_entry->rmw_id.id <= committed_glob_sess_rmw_id[loc_entry->glob_sess_id]) {
     //my_printf(yellow, "Wrkr %u, sess: %u Bcast rmws %u \n", t_id, loc_entry->sess_id);
     loc_entry->log_no = loc_entry->accepted_log_no;
     loc_entry->state = MUST_BCAST_COMMITS;

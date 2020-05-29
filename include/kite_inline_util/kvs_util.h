@@ -616,15 +616,15 @@ static inline void KVS_rmw_acquire_commits(r_info_t *op, mica_op_t *kv_ptr,
   if (ENABLE_ASSERTIONS) assert(op->ts_to_read.version > 0);
   if (DEBUG_RMW)
     my_printf(green, "Worker %u is handling a remote RMW commit on op %u, "
-                "rmw_l_id %u, glob_ses_id %u, log_no %u, version %u  \n",
-              t_id, op_i, op->rmw_id.id, op->rmw_id.glob_sess_id,
+                "rmw_l_id %u,log_no %u, version %u  \n",
+              t_id, op_i, op->rmw_id.id,
               op->log_no, op->ts_to_read.version);
   uint64_t number_of_reqs;
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
   if (PRINT_LOGS) {
-    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, glob_sess id: %u, "
+    fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, op->log_no, number_of_reqs,  op->rmw_id.id, op->rmw_id.glob_sess_id,
+            kv_ptr->key.bkt, op->log_no, number_of_reqs,  op->rmw_id.id,
             op->ts_to_read.version, op->ts_to_read.m_id);
   }
 }
