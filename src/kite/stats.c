@@ -156,8 +156,6 @@ void *print_stats(void* no_arg) {
     printf("---------------------------------------\n");
     my_printf(green, "SYSTEM MIOPS: %.2f \n", total_throughput);
   }
-    if (ENABLE_CACHE_STATS == 1)
-      print_cache_stats(start, machine_id);
     // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
     if (DUMP_STATS_2_FILE == 1)
       dump_stats_2_file(&all_stats);

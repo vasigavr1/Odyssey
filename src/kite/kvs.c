@@ -153,9 +153,6 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
 
   assert(kvs != NULL);
   assert(op != NULL);
-  //assert(op->opcode == MICA_OP_PUT);
-  //assert(op->val_len > 0 && op->val_len <= MICA_MAX_VALUE);
-  //assert(resp != NULL);
   int i;
   unsigned int bkt = op->key.bkt & kvs->bkt_mask;
   struct mica_bkt *bkt_ptr = &kvs->ht_index[bkt];

@@ -203,6 +203,7 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
   uint32_t new_version = (ENABLE_ALL_ABOARD && op->attempt_all_aboard) ?
                          ALL_ABOARD_TS : PAXOS_TS;
   uint8_t state = (uint8_t) (loc_entry->all_aboard ? ACCEPTED : PROPOSED);
+  __builtin_prefetch(loc_entry->compare_val, 0, 0);
   lock_seqlock(&kv_ptr->seqlock);
   {
     check_trace_op_key_vs_kv_ptr(op, kv_ptr);

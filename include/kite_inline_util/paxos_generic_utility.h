@@ -60,6 +60,8 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
   //if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
   loc_entry->rmw_is_successful = true;
   loc_entry->base_ts = kv_ptr->ts;
+  loc_entry->accepted_log_no = kv_ptr->log_no;
+
   switch (loc_entry->opcode) {
     case RMW_PLAIN_WRITE:
       break;
@@ -83,8 +85,7 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
     default:
       if (ENABLE_ASSERTIONS) assert(false);
   }
-  loc_entry->accepted_log_no = kv_ptr->log_no;
-  // we need to remember the last accepted value
+    // we need to remember the last accepted value
   if (loc_entry->rmw_is_successful) {
     memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
   }

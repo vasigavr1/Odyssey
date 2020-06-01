@@ -7,6 +7,7 @@ CMakeLists.txt
 *.csv
 src/PaxosVerifier/pv
 src/PaxosVerifier/copy_from_remote_machines
+src/kite/profile_info
 include/optik/
 cmake-build-debug
 *ignore

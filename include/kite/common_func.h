@@ -54,7 +54,7 @@
 #define VALUE_SIZE (VALUE_SIZE_ + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE_, 8)))
 
 
-#define KVS_NUM_KEYS (1000 * 1000)
+#define KVS_NUM_KEYS (1 * 1000 * 1000)
 
 /* Request sizes */
 #define KEY_SIZE 16
@@ -91,7 +91,7 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define USE_QUORUM 1
 #define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
 #define WRITE_FIFO_TIMEOUT M_1
@@ -103,7 +103,7 @@
 #define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 500// this is out of 1000, e.g. 10 means 1%
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
 #define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
 #define ENABLE_RMW_ACQUIRES_ 1
@@ -112,14 +112,14 @@
 #define TURN_OFF_KITE (EMULATE_ABD ? 1 : TURN_OFF_KITE_)
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ACCEPT_IS_RELEASE 0
-#define PUT_A_MACHINE_TO_SLEEP 1
+#define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 4
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 0
+#define ENABLE_ALL_ABOARD 1
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define LOG_TOO_HIGH_TIME_OUT 10
 #define ENABLE_LOCK_FREE_READING 1
@@ -139,7 +139,6 @@
 #define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
 // PRINTS -- STATS
-#define ENABLE_CACHE_STATS 0
 #define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
 #define VERIFY_PAXOS 0
