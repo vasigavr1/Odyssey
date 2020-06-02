@@ -197,8 +197,12 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   loc_entry->back_off_cntr = 0;
   loc_entry->log_too_high_cntr = 0;
   loc_entry->helping_flag = NOT_HELPING;
-  loc_entry->rmw_id.id+= GLOBAL_SESSION_NUM; //p_ops->prop_info->l_id;
-  if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_id.id % GLOBAL_SESSION_NUM == loc_entry->glob_sess_id);
+  loc_entry->rmw_id.id+= GLOBAL_SESSION_NUM;
+  if (ENABLE_ASSERTIONS) {
+    assert(loc_entry->rmw_id.id % GLOBAL_SESSION_NUM == loc_entry->glob_sess_id);
+    assert(glob_ses_id_to_t_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == t_id &&
+           glob_ses_id_to_m_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == machine_id);
+  }
   advance_loc_entry_l_id(loc_entry, t_id);
   loc_entry->accepted_log_no = 0;
   //my_printf(yellow, "Init  RMW-id %u  \n",
@@ -912,8 +916,10 @@ static inline void act_on_quorum_of_commit_acks(p_ops_t *p_ops, uint32_t ack_ptr
   }
 
   if (loc_entry->helping_flag == HELPING &&
-      rmw_ids_are_equal(&loc_entry->help_loc_entry->rmw_id, &loc_entry->rmw_id))
+      rmw_ids_are_equal(&loc_entry->help_loc_entry->rmw_id, &loc_entry->rmw_id)) {
     loc_entry->helping_flag = HELPING_MYSELF;
+    my_printf(red, "Helping myself, byt should not\n");
+  }
 
   if (loc_entry->helping_flag != HELP_PREV_COMMITTED_LOG_TOO_HIGH)
     attempt_local_commit(p_ops, loc_entry, t_id);
@@ -922,7 +928,7 @@ static inline void act_on_quorum_of_commit_acks(p_ops_t *p_ops, uint32_t ack_ptr
   {
     case NOT_HELPING:
     case PROPOSE_NOT_LOCALLY_ACKED:
-    case HELPING_MYSELF:
+    case HELPING_MYSELF: // Deprecated
     case PROPOSE_LOCALLY_ACCEPTED:
       loc_entry->state = INVALID_RMW;
       free_session_from_rmw(p_ops, loc_entry->sess_id, true, t_id);
@@ -1013,7 +1019,7 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
   switch (rep->opcode) {
     case RMW_ACK_BASE_TS_STALE:
       commit_when_base_ts_is_stale(loc_entry->kv_ptr, rep);
-      assign_netw_ts_to_ts(&loc_entry->base_ts, &rep->ts);
+      assign_netw_ts_to_ts(&loc_entry->base_ts, &rep->ts); // this is an optimization, in case we send proposes again
     case RMW_ACK:
       loc_entry->base_ts_found = true;
       rep_info->acks++;
@@ -1143,7 +1149,8 @@ static inline void handle_rmw_rep_replies(p_ops_t *p_ops, struct r_rep_message *
 //------------------------------HELP STUCK RMW------------------------------------------
 // When time-out-ing on a stuck Accepted value, and try to help it, you need to first propose your own
 static inline void set_up_a_proposed_but_not_locally_acked_entry(p_ops_t *p_ops, mica_op_t  *kv_ptr,
-                                                                 loc_entry_t *loc_entry, uint16_t t_id)
+                                                                 loc_entry_t *loc_entry,
+                                                                 bool help_myself, uint16_t t_id)
 {
   loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
   if (DEBUG_RMW)
@@ -1154,18 +1161,21 @@ static inline void set_up_a_proposed_but_not_locally_acked_entry(p_ops_t *p_ops,
               loc_entry->new_ts.version, loc_entry->new_ts.m_id,
               kv_ptr->log_no, loc_entry->log_no, kv_ptr->last_committed_log_no,
               loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->state);
-  loc_entry->state = PROPOSED;
 
+  loc_entry->state = PROPOSED;
   help_loc_entry->state = ACCEPTED;
   if (ENABLE_ASSERTIONS) {
     assert(p_ops->sess_info[loc_entry->sess_id].stalled);
     assert(loc_entry->rmw_reps.tot_replies == 0);
   }
-  loc_entry->helping_flag = PROPOSE_NOT_LOCALLY_ACKED;
-  //  my_printf(cyan, "Wrkr %u Sess %u initiates prop help, key %u, log no %u \n", t_id,
-  //             loc_entry->sess_id, loc_entry->key.bkt, loc_entry->log_no);
-  help_loc_entry->log_no = loc_entry->log_no;
-  help_loc_entry->key = loc_entry->key;
+  if (help_myself) {
+    loc_entry->helping_flag = PROPOSE_LOCALLY_ACCEPTED;
+  }
+  else {
+    loc_entry->helping_flag = PROPOSE_NOT_LOCALLY_ACKED;
+    help_loc_entry->log_no = loc_entry->log_no;
+    help_loc_entry->key = loc_entry->key;
+  }
   loc_entry->rmw_reps.tot_replies = 1;
   loc_entry->rmw_reps.already_accepted = 1;
   if (PRINT_LOGS && ENABLE_DEBUG_RMW_KV_PTR)
@@ -1307,7 +1317,8 @@ static inline void attempt_to_help_a_locally_accepted_value(p_ops_t *p_ops,
   if (help) {
     // Helping means we are proposing, but we are not locally acked:
     // We store a reply from the local machine that says already ACCEPTED
-    set_up_a_proposed_but_not_locally_acked_entry(p_ops, kv_ptr, loc_entry, t_id);
+    bool helping_myself = help_loc_entry->rmw_id.id == loc_entry->rmw_id.id;
+    set_up_a_proposed_but_not_locally_acked_entry(p_ops, kv_ptr, loc_entry, helping_myself, t_id);
   }
 }
 
@@ -1333,7 +1344,7 @@ static inline void attempt_to_steal_a_proposed_kv_ptr(p_ops_t *p_ops,
                      (uint8_t) machine_id, NULL, loc_entry->rmw_id.id,
                      loc_entry->log_no, t_id,
                      ENABLE_ASSERTIONS ? "attempt_to_steal_a_proposed_kv_ptr" : NULL);
-
+    loc_entry->base_ts = kv_ptr->ts;
     kv_ptr_was_grabbed = true;
   }
   else if (kv_ptr_state_has_changed(kv_ptr, loc_entry->help_rmw)) {
@@ -1418,8 +1429,8 @@ static inline void act_on_quorum_of_prop_acks(p_ops_t *p_ops, loc_entry_t *loc_e
     check_loc_entry_metadata_is_reset(loc_entry, "act_on_quorum_of_prop_acks", t_id);
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, false, t_id);
     if (ENABLE_ASSERTIONS) {
-      assert(glob_ses_id_to_t_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == t_id &&
-             glob_ses_id_to_m_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == machine_id);
+      assert(glob_ses_id_to_t_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == t_id &&
+             glob_ses_id_to_m_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == machine_id);
       assert(loc_entry->state == PROPOSED);
     }
     loc_entry->state = ACCEPTED;
@@ -1516,14 +1527,8 @@ static inline void clean_up_after_retrying(p_ops_t *p_ops, mica_op_t *kv_ptr,
       my_printf(cyan, "Wrkr %u: session %u gets/regains the kv_ptr log %u to do its propose \n",
                 t_id, loc_entry->sess_id, kv_ptr->log_no);
     loc_entry->state = PROPOSED;
-    if (help_locally_acced) {
-      loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
-      if (ENABLE_ASSERTIONS) assert(loc_entry->accepted_log_no == loc_entry->log_no);
-      loc_entry->rmw_reps.tot_replies = 1;
-      loc_entry->rmw_reps.already_accepted = 1;
-      help_loc_entry->state = ACCEPTED;
-      loc_entry->helping_flag = PROPOSE_LOCALLY_ACCEPTED;
-    }
+    if (help_locally_acced)
+      set_up_a_proposed_but_not_locally_acked_entry(p_ops, kv_ptr, loc_entry, true, t_id);
     else local_rmw_ack(loc_entry);
   }
   else if (rmw_fails) {
@@ -1661,8 +1666,8 @@ static inline void take_kv_ptr_with_higher_TS(p_ops_t *p_ops,
           }
         }
         loc_entry->log_no = kv_ptr->last_committed_log_no + 1;
-
         loc_entry->new_ts.version = MAX(loc_entry->new_ts.version, kv_ptr->prop_ts.version) + 1;
+        loc_entry->base_ts = kv_ptr->ts; // Minimize the possibility for RMW_ACK_BASE_TS_STALE
         if (ENABLE_ASSERTIONS) {
           assert(loc_entry->new_ts.version > kv_ptr->prop_ts.version);
         }
@@ -1889,6 +1894,7 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
     signal_completion_to_client(session_id, op->index_to_req_array, t_id);
     p_ops->sess_info[session_id].stalled = false;
     p_ops->all_sessions_stalled = false;
+    loc_entry->state = INVALID_RMW;
     return;
   }
   if (ENABLE_ASSERTIONS) {

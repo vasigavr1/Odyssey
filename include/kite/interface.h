@@ -90,11 +90,11 @@ static inline void fill_client_op(client_op_t *cl_op, uint32_t key_id, uint8_t t
       cl_op->opcode = (uint8_t) OP_ACQUIRE;
       break;
     case RLXD_WRITE_BLOCKING:
-      cl_op->opcode = (uint8_t) (key_id >= NUM_OF_RMW_KEYS ? KVS_OP_PUT : RMW_PLAIN_WRITE);
+      cl_op->opcode = (uint8_t) KVS_OP_PUT;
       memcpy(cl_op->value_to_write, value_to_write, val_len);
       break;
     case RELEASE_BLOCKING:
-      cl_op->opcode = (uint8_t) (key_id >= NUM_OF_RMW_KEYS ? OP_RELEASE : RMW_PLAIN_WRITE);
+      cl_op->opcode = (uint8_t) OP_RELEASE;
       memcpy(cl_op->value_to_write, value_to_write, val_len);
       break;
     case CAS_BLOCKING:

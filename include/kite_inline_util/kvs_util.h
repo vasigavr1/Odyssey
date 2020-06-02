@@ -251,20 +251,17 @@ static inline void KVS_from_trace_rmw_acquire(trace_op_t *op, mica_op_t *kv_ptr,
   //printf("rmw acquire\n");
   uint32_t r_push_ptr = *r_push_ptr_;
   r_info_t *r_info = &p_ops->read_info[r_push_ptr];
-  lock_seqlock(&kv_ptr->seqlock);
-//  if (kv_ptr->opcode == KEY_HAS_NEVER_BEEN_RMWED) {
-//    r_info->log_no = 0;
-//  }
-//  else {
-//    if (ENABLE_ASSERTIONS) assert(kv_ptr->opcode == KEY_HAS_BEEN_RMWED);
-  check_keys_with_one_trace_op(&op->key, kv_ptr);
-  r_info->log_no = kv_ptr->last_committed_log_no;
-  r_info->rmw_id = kv_ptr->last_committed_rmw_id;
-//  }
-  r_info->ts_to_read.version = kv_ptr->ts.version;
-  r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
-  memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
-  unlock_seqlock(&kv_ptr->seqlock);
+  //lock_seqlock(&kv_ptr->seqlock);
+  uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
+  do {
+    check_keys_with_one_trace_op(&op->key, kv_ptr);
+    r_info->log_no = kv_ptr->last_committed_log_no;
+    r_info->rmw_id = kv_ptr->last_committed_rmw_id; // needed? i think not
+    r_info->ts_to_read.version = kv_ptr->ts.version;
+    r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
+    memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
+  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
+  //unlock_seqlock(&kv_ptr->seqlock);
 
   // Copy the value to the read_info too
   memcpy(r_info->value, op->value_to_read, op->real_val_len);

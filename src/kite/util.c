@@ -26,7 +26,7 @@ void static_assert_compile_parameters()
   static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   //static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
-  static_assert(VALUE_SIZE >= (RMW_VALUE_SIZE), "RMW requires the value to be at least this many bytes");
+  static_assert(VALUE_SIZE == (RMW_VALUE_SIZE), "RMW requires the value to be at least this many bytes");
   static_assert(MACHINE_NUM <= 255, ""); // kvs meta has 1 B for machine id
 
   // WRITES
@@ -81,7 +81,6 @@ void static_assert_compile_parameters()
   // RMWs
   static_assert(!ENABLE_RMWS || LOCAL_PROP_NUM >= SESSIONS_PER_THREAD, "");
   static_assert(GLOBAL_SESSION_NUM < K_64, "global session ids are stored in uint16_t");
-  static_assert(NUM_OF_RMW_KEYS < KVS_NUM_KEYS, "");
 
   // ACCEPT REPLIES MAP TO PROPOSE REPLIES
   static_assert(ACC_REP_SIZE == PROP_REP_LOG_TOO_LOW_SIZE, "");
@@ -102,6 +101,8 @@ void static_assert_compile_parameters()
 //  printf("Client op  %u  %u \n", sizeof(client_op_t), PADDING_BYTES_CLIENT_OP);
 //  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
+  static_assert(!(ENABLE_CLIENTS && !ACCEPT_IS_RELEASE && CLIENT_MODE > CLIENT_UI),
+                "If we are using the lock-free data structures rmws must act as releases");
   static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
   static_assert(sizeof(client_op_t) % 64 == 0, "");
   static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
@@ -458,11 +459,7 @@ trace_t* manufacture_trace(int t_id)
   uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)trace);
   srand (seed);
   struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
-  uint32_t i, keys_that_get_rmwed[NUM_OF_RMW_KEYS];
-  if (ENABLE_RMWS) {
-    for (i = 0; i < NUM_OF_RMW_KEYS; i++)
-      keys_that_get_rmwed[i] = i;
-  }
+  uint32_t i;
   //parse file line by line and insert trace to cmd.
   for (i = 0; i < TRACE_SIZE; i++) {
     trace[i].opcode = 0;
@@ -481,20 +478,14 @@ trace_t* manufacture_trace(int t_id)
         key_id = (uint32_t) t_id;
       else if (ENABLE_NO_CONFLICT_RMW)
         key_id = (uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
-      else key_id = (uint32_t) (rand_r(&seed) % KVS_NUM_KEYS); //NUM_OF_RMW_KEYS);
+      else key_id = (uint32_t) (rand_r(&seed) % KVS_NUM_KEYS);
 
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     else
     {
-      bool found = false;
-      do {
-        key_id = (uint32) rand() % KVS_NUM_KEYS; //rand_r(&seed) % CACHE_NUM_KEYS;
-        found = false;
-        for (uint32_t j = 0; j < NUM_OF_RMW_KEYS; j++)
-          if (key_id == keys_that_get_rmwed[j]) found = true;
-      } while (found);
+      key_id = (uint32) rand() % KVS_NUM_KEYS;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     memcpy(trace[i].key_hash, &(key_hash.second), 8);

@@ -43,7 +43,7 @@ static inline void reinstate_loc_entry_after_helping(loc_entry_t *loc_entry, uin
     my_printf(yellow, "Wrkr %u, sess %u reinstates its RMW id %u after helping \n",
               t_id, loc_entry->sess_id, loc_entry->rmw_id.id);
   if (ENABLE_ASSERTIONS)
-    assert(glob_ses_id_to_m_id((uint32_t) loc_entry->rmw_id.id % GLOBAL_SESSION_NUM) == (uint8_t) machine_id);
+    assert(glob_ses_id_to_m_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == (uint8_t) machine_id);
 
 }
 

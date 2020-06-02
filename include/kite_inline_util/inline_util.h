@@ -163,12 +163,8 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
 
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
-      if (!TURN_OFF_KITE) {
-        if (loc_entry->must_release && !p_ops->sess_info[sess_i].ready_to_release) {
-          continue;
-        }
-        else if (loc_entry->must_release) loc_entry->must_release = false;
-      }
+      if (cannot_accept_if_unsatisfied_release(loc_entry, &p_ops->sess_info[sess_i]))
+        continue;
 
       if (loc_entry->rmw_reps.ready_to_inspect) {
         // further responses for that broadcast of Propose must be disregarded;

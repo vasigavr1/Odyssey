@@ -74,7 +74,7 @@
 #define EFFECTIVE_MAX_R_SIZE (MAX_READ_SIZE - R_MES_HEADER)
 
 // reads/acquires/rmw-acquire
-#define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1)// key+ version + m_id + opcode
+#define R_SIZE (TRUE_KEY_SIZE + TS_TUPLE_SIZE + 1 + 4)// key+ version + m_id + opcode + log_no
 #define R_COALESCE (EFFECTIVE_MAX_R_SIZE / R_SIZE)
 #define R_MES_SIZE (R_MES_HEADER + (R_SIZE * R_COALESCE))
 // proposes
@@ -210,6 +210,7 @@ struct read {
   struct network_ts_tuple ts;
   struct key key;
   uint8_t opcode;
+  uint32_t log_no;
 } __attribute__((__packed__));
 
 //

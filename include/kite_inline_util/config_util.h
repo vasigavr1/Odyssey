@@ -29,7 +29,13 @@
 static inline void tag_rmw_id_when_owning_a_conf_bit(uint8_t *rmw_id)
 {
   if (TURN_OFF_KITE) return;
-  if (ENABLE_ASSERTIONS) assert(rmw_id[7] == 0);
+  if (ENABLE_ASSERTIONS) {
+    if (rmw_id[7] != 0) {
+      uint64_t tmp_rmw_id = *(uint64_t *) rmw_id;
+      printf("Rmw %lu \n", tmp_rmw_id);
+    }
+    assert(rmw_id[7] == 0);
+  }
   rmw_id[7] = ACCEPT_FLIPS_BIT_OP;
 }
 
@@ -137,10 +143,12 @@ static inline void raise_conf_bit_iff_owned(const uint64_t local_r_id,  const ui
     return;
   }
 
-  // add an offset to the id, to make sure rmw-ids cannot conflict with local_r_ids
+  // Make sure rmw-ids cannot conflict with local_r_ids
   if (is_rmw) {
-    tag_rmw_id_when_owning_a_conf_bit((uint8_t *) &local_r_id);
-    if (ENABLE_ASSERTIONS) assert(local_r_id > B_512);
+    if (ENABLE_ASSERTIONS) {
+      uint8_t *tmp_rmw_id = (uint8_t *)&local_r_id;
+      assert(tmp_rmw_id[7] == ACCEPT_FLIPS_BIT_OP);
+    }
   }
 
 
@@ -316,7 +324,6 @@ static inline void signal_conf_bit_flip_in_accept(loc_entry_t *loc_entry,
       loc_entry->fp_detected = false;
     }
   }
-
 }
 
 // When receiving an accept, check if it is trying to raise  its configuration bit
@@ -325,7 +332,7 @@ static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8
 {
   if (TURN_OFF_KITE) return;
 
-  if (unlikely(acc->t_rmw_id > B_512)) {
+  if (unlikely(acc->t_rmw_id > SIXTY_THREE_ONES)) {
     uint8_t *ptr_to_reged_rmw_id = (uint8_t *) &acc->t_rmw_id;
     if (ptr_to_reged_rmw_id[7] == ACCEPT_FLIPS_BIT_OP) {
       raise_conf_bit_iff_owned(acc->t_rmw_id, (uint16_t) acc_m_id, true, t_id);
@@ -333,7 +340,7 @@ static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8
     } else if (ENABLE_ASSERTIONS) assert(false);
 
   }
-  if (ENABLE_ASSERTIONS) assert(acc->t_rmw_id < B_4);
+  if (ENABLE_ASSERTIONS) assert(acc->t_rmw_id < SIXTY_THREE_ONES);
 }
 
 
@@ -361,7 +368,6 @@ static inline void handle_configuration_on_receiving_rel(struct write *write, ui
         if (ENABLE_ASSERTIONS) {
           assert(ACCEPT_IS_RELEASE);
           assert(recv_conf_bit_vec > 0);
-          assert(acc->t_rmw_id < B_4);
         }
         break;
       default:

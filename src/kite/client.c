@@ -9,7 +9,7 @@
 
 
 #define CLIENT_ASSERTIONS 1
-
+#define NUM_OF_RMW_KEYS 50000
 
 /* --------------------------------------------------------------------------------------
  * ----------------------------------TRACE-----------------------------------------------
@@ -286,7 +286,7 @@ static inline bool check_top(struct top *top, char *message,
                              uint32_t stack_id)
 {
   if (ENABLE_ASSERTIONS) {
-    bool silent = memcmp(message, "Pop-new_top before CAS ", strlen(message)) == 0;
+    bool silent = strcmp(message, "Pop-new_top before CAS ") == 0;
     assert(top->push_counter >= top->pop_counter);
 
     if (top->push_counter == top->pop_counter) {

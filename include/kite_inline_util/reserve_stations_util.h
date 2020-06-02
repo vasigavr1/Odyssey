@@ -822,7 +822,8 @@ static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
     if (is_rmw_acquire) read->ts.version = r_info->log_no;
     else assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
     read->key = r_info->key;
-    r_info->epoch_id = (uint64_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
+    if (!TURN_OFF_KITE)
+      r_info->epoch_id = (uint64_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
     uint8_t opcode = r_info->opcode;
     read->opcode = (opcode == OP_RELEASE || opcode == KVS_OP_PUT) ?
                    (uint8_t) CACHE_OP_GET_TS : opcode;
@@ -1014,6 +1015,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
     real_val_len = (uint32_t) VALUE_SIZE;
   }
 
+  op->opcode = opcode;
   uint16_t writes_num = *writes_num_, reads_num = *reads_num_;
   // Create some back pressure from the buffers, since the sessions may never be stalled
   if (!EMULATE_ABD) {
@@ -1043,8 +1045,11 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
 
   if (ENABLE_ASSERTIONS) assert(is_read || is_update || is_rmw);
   if (is_update || is_rmw) op->value_to_write = value_to_write;
-  if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && op->opcode == FETCH_AND_ADD)
+  if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && op->opcode == FETCH_AND_ADD) {
+    assert(is_rmw);
+    assert(op->value_to_write == op->value);
     assert(*(uint64_t *) op->value_to_write == 1);
+  }
   if (is_read || is_rmw ) {
     op->value_to_read = value_to_read;
   }
@@ -1059,7 +1064,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
   }
   increment_per_req_counters(opcode, t_id);
 
-  op->opcode = opcode;
+
   op->val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
   if (op->opcode == OP_RELEASE ||
       op->opcode == OP_ACQUIRE || is_rmw) {
@@ -1217,8 +1222,19 @@ static inline bool release_not_ready(p_ops_t *p_ops,
 }
 
 
-
-
+// return true if the loc_entry cannot be inspected
+static inline bool cannot_accept_if_unsatisfied_release(loc_entry_t* loc_entry,
+                                                        sess_info_t *sess_info)
+{
+  if (TURN_OFF_KITE || (!ACCEPT_IS_RELEASE)) return false;
+  if (loc_entry->must_release && !sess_info->ready_to_release) {
+    return true;
+  }
+  else if (loc_entry->must_release) {
+    loc_entry->must_release = false;
+    return false;
+  }
+}
 
 /*----------------------------------------------------
  * ---------------COMMITTING----------------------------

@@ -28,9 +28,9 @@ void *print_stats(void*);
 #define HML_ASYNC 7 // Harris & Michael List
 #define PRODUCER_CONSUMER 16
 
-#define CLIENT_MODE HML_ASYNC
+#define CLIENT_MODE TREIBER_ASYNC
 
-#define TREIBER_WRITES_NUM 1
+#define TREIBER_WRITES_NUM 4
 #define TREIBER_NO_CONFLICTS 0
 
 #define MS_WRITES_NUM 4
@@ -43,7 +43,7 @@ void *print_stats(void*);
 #define PC_WRITES_NUM 5
 #define PC_IDEAL 0
 
-#define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 3) // (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -77,7 +77,7 @@ void *print_stats(void*);
 #define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
 //#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
 #define SHOW_STATS_LATENCY_STYLE 1
-#define NUM_OF_RMW_KEYS 50000
+
 #define TRACE_ONLY_CAS 0
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
@@ -384,7 +384,6 @@ typedef struct pending_ops {
   uint8_t *overwritten_values;
   struct r_message **ptrs_to_mes_headers;
   bool *coalesce_r_rep;
-//  struct read_payload *r_payloads;
   r_info_t *read_info;
 
   struct prop_info *prop_info;
@@ -394,11 +393,9 @@ typedef struct pending_ops {
   uint64_t local_w_id;
   uint64_t local_r_id;
   uint32_t *r_session_id;
-  //uint32_t *w_session_id;
   uint32_t *w_index_to_req_array;
   uint32_t *r_index_to_req_array;
 
-  //uint8_t *w_state;
   uint8_t *r_state;
   uint32_t w_push_ptr;
   uint32_t r_push_ptr;
@@ -412,11 +409,8 @@ typedef struct pending_ops {
   // getting incremented by 2, every time an acquire is inserted
 	uint32_t virt_r_size;
   uint32_t virt_w_size;  //
-  //uint32_t prop_size; // TODO add this if needed
-  //uint8_t *acks_seen;
   per_write_meta_t *w_meta;
   uint32_t full_w_q_fifo;
-  //bool *session_has_pending_op;
   bool all_sessions_stalled;
   struct quorum_info *q_info;
 } p_ops_t;

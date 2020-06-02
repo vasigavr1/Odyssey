@@ -23,7 +23,7 @@ static inline void lock_seqlock(seqlock_t *seqlock)
   uint64_t tmp_lock, new_lock;
   tmp_lock = (uint64_t) atomic_load_explicit(seqlock, memory_order_acquire);
   do {
-    // First spin in your L1, reading until the lock is
+    // First spin in your L1, reading until the lock is even
     while (is_odd(tmp_lock)) {
       tmp_lock = (uint64_t) atomic_load_explicit(seqlock, memory_order_acquire);
     }
