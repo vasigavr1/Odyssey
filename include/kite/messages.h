@@ -202,7 +202,7 @@ struct commit {
   uint64_t t_rmw_id; //rmw lid to be committed
   uint32_t log_no;
   uint8_t val_len;
-  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__));
 
 //
@@ -270,7 +270,7 @@ struct r_rep_big {
 
 struct rmw_acq_rep {
   uint8_t opcode;
-  struct network_ts_tuple ts;
+  struct network_ts_tuple base_ts;
   uint8_t value[RMW_VALUE_SIZE];
   uint32_t log_no; // last committed only
   uint64_t rmw_id; // last committed
@@ -297,10 +297,10 @@ struct r_rep_message_ud_req {
 struct rmw_rep_last_committed {
   uint8_t opcode;
   uint64_t l_id; // the l_id of the rmw local_entry
-  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
+  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted base_ts for the rest
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
-  uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted ts
+  uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted base_ts
   uint8_t base_m_id; // base_ts.m_id used for accepts only
 } __attribute__((__packed__));
 

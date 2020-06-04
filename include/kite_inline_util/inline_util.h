@@ -403,7 +403,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
   uint32_t recvs_to_post_num = 0;
 
   for (uint8_t i = 0; i < MACHINE_NUM; i++) {
-    if (acks[i].opcode == CACHE_OP_ACK) continue;
+    if (acks[i].opcode == OP_ACK) continue;
     if (ENABLE_STAT_COUNTING) {
       t_stats[t_id].per_worker_acks_sent[i] += acks[i].ack_num;
       t_stats[t_id].per_worker_acks_mes_sent[i]++;
@@ -414,7 +414,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
       my_printf(yellow, "Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
                 t_id, acks[i].local_id, acks[i].credits, acks[i].ack_num, acks[i].m_id);
 
-    acks[i].opcode = CACHE_OP_ACK;
+    acks[i].opcode = OP_ACK;
     if (ENABLE_ASSERTIONS) {
       assert(acks[i].credits <= acks[i].ack_num);
       if (acks[i].ack_num > MAX_MES_IN_WRITE) assert(acks[i].credits > 1);
@@ -878,7 +878,7 @@ static inline void commit_reads(p_ops_t *p_ops,
   // or if it is the first round of a release or an out-of-epoch write
   bool insert_write_flag;
 
-  // write_local_kvs : Write the local KVS if the ts has not been seen locally
+  // write_local_kvs : Write the local KVS if the base_ts has not been seen locally
   // or if it is an out-of-epoch write (but NOT a Release!!)
   bool write_local_kvs;
 
@@ -917,7 +917,7 @@ static inline void commit_reads(p_ops_t *p_ops,
 
     //CACHE: Reads that need to go to kvs
     if (write_local_kvs) {
-      // if a read did not see a larger ts it should only change the epoch
+      // if a read did not see a larger base_ts it should only change the epoch
       if (read_info->opcode == KVS_OP_GET &&
         (!read_info->seen_larger_ts)) {
         read_info->opcode = UPDATE_EPOCH_OP_GET;
@@ -952,6 +952,8 @@ static inline void commit_reads(p_ops_t *p_ops,
     }
     // insert commit after rmw acquire if not a quorum of people have seen the last committed value
     else if (insert_commit_flag) {
+      if (ENABLE_ASSERTIONS) assert(WRITE_RATIO > 0 || RMW_RATIO > 0);
+      if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
 

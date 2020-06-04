@@ -73,7 +73,7 @@ inline void check_mica_op_t_allignement(mica_op_t *kv_ptr)
 
     printf(" key: %lu \n opc %lu \n state %lu \n log %lu \n"
              "accepted log %lu \n last committed log %lu \n"
-             "seq_lock %lu \n ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
+             "seq_lock %lu \n base_ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
              "rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
            key_al, opc_al, state_al, log_no, accepted_log_no, last_committed_log_no,
            seq_lock, ts, prop_ts, accepted_ts,

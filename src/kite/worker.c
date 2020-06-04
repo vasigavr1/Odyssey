@@ -98,7 +98,7 @@ void *worker(void *arg)
   struct ack_message acks[MACHINE_NUM] = {0};
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {
     acks[i].m_id = (uint8_t) machine_id;
-    acks[i].opcode = CACHE_OP_ACK;
+    acks[i].opcode = OP_ACK;
   }
   p_ops_t *p_ops;
   struct ibv_mr *r_mr, *w_mr, *r_rep_mr;

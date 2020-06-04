@@ -82,9 +82,8 @@ static inline void KVS_from_trace_reads_and_acquires(trace_op_t *op,
       //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
   }
-  // Do a quorum read if the stored value is old and may be stale or it is an Acquire!
-  if (!value_forwarded &&
-      (kv_epoch < epoch_id || op->opcode == OP_ACQUIRE)) {
+  // Do a quorum read if the stored value is old and may be stale
+  if (!value_forwarded && kv_epoch < epoch_id) {// || op->opcode == OP_ACQUIRE)) {
     r_info->opcode = op->opcode;
     r_info->ts_to_read.m_id = kvs_tuple.m_id;
     r_info->ts_to_read.version = kvs_tuple.version;
@@ -246,8 +245,8 @@ static inline void KVS_from_trace_rmw_acquire(trace_op_t *op, mica_op_t *kv_ptr,
                                               kv_resp_t *resp, p_ops_t *p_ops,
                                               uint32_t *r_push_ptr_, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS)
-    assert((ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO) || ENABLE_CLIENTS > 0);
+ // if (ENABLE_ASSERTIONS)
+ //   assert((ENABLE_RMW_ACQUIRES && RMW_ACQUIRE_RATIO) || ENABLE_CLIENTS > 0);
   //printf("rmw acquire\n");
   uint32_t r_push_ptr = *r_push_ptr_;
   r_info_t *r_info = &p_ops->read_info[r_push_ptr];
@@ -256,7 +255,7 @@ static inline void KVS_from_trace_rmw_acquire(trace_op_t *op, mica_op_t *kv_ptr,
   do {
     check_keys_with_one_trace_op(&op->key, kv_ptr);
     r_info->log_no = kv_ptr->last_committed_log_no;
-    r_info->rmw_id = kv_ptr->last_committed_rmw_id; // needed? i think not
+    r_info->rmw_id = kv_ptr->last_committed_rmw_id;
     r_info->ts_to_read.version = kv_ptr->ts.version;
     r_info->ts_to_read.m_id = kv_ptr->ts.m_id;
     memcpy(op->value_to_read, kv_ptr->value, op->real_val_len);
@@ -351,12 +350,12 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
                            t_id, op_i, acc_m_id, l_id, rmw_l_id, (uint32_t) rmw_l_id % GLOBAL_SESSION_NUM, log_no, acc->ts.version);
   lock_seqlock(&kv_ptr->seqlock);
   // 1. check if it has been committed
-  // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
+  // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS base_ts is also checked)
   // Either way fill the reply_rmw fully, but have a specialized flag!
   if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, t_id, acc_rep)) {
     if (!is_log_too_high(log_no, kv_ptr, t_id, acc_rep)) {
       // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-      //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->ts, acc_m_id, t_id, acc_rep)) {
+      //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &acc->base_ts, acc_m_id, t_id, acc_rep)) {
       // 4. If the kv-pair has not been RMWed before grab an entry and ack
       // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
       // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
@@ -418,6 +417,7 @@ static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct read *read, 
                                                              p_ops_t *p_ops, uint16_t op_i,
                                                              uint16_t t_id)
 {
+  assert(false);
   //Lock free reads through versioning (successful when version is even)
   uint32_t debug_cntr = 0;
   uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
@@ -438,6 +438,54 @@ static inline void KVS_reads_gets_or_acquires_or_acquires_fp(struct read *read, 
   //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode leaves \n");
 
 }
+
+// Handle remote rmw-acquires and rmw-acquires-fp
+// (acquires-fp are acquires renamed by the receiver when a false positive is detected)
+static inline void KVS_reads_rmw_acquires(struct read *read, mica_op_t *kv_ptr,
+                                          p_ops_t *p_ops, uint16_t op_i,
+                                          uint16_t t_id)
+{
+  uint32_t debug_cntr = 0;
+  uint64_t l_id = p_ops->ptrs_to_mes_headers[op_i]->l_id;
+  uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
+  struct rmw_acq_rep *acq_rep =
+    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, read->opcode,
+                                         p_ops->coalesce_r_rep[op_i], t_id);
+
+  uint32_t acq_log_no = read->log_no;
+
+  uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
+  do {
+    debug_stalling_on_lock(&debug_cntr, "reads: gets_or_acquires_or_acquires_fp", t_id);
+    check_keys_with_one_trace_op(&read->key, kv_ptr);
+    compare_t carts_comp = compare_netw_carts_with_carts(&read->ts, acq_log_no,
+                                                         &kv_ptr->ts, kv_ptr->last_committed_log_no);
+    if (carts_comp == SMALLER) {
+      if (ENABLE_ASSERTIONS) {
+        assert(read->ts.version <= kv_ptr->ts.version);
+      }
+      acq_rep->opcode = ACQ_LOG_TOO_SMALL;
+      acq_rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
+      acq_rep->log_no = kv_ptr->last_committed_log_no;
+      memcpy(acq_rep->value, kv_ptr->value, (size_t) VALUE_SIZE);
+      acq_rep->base_ts.version = kv_ptr->ts.version;
+      acq_rep->base_ts.m_id = kv_ptr->ts.m_id;
+    }
+    else if (carts_comp == EQUAL) {
+      acq_rep->opcode = ACQ_LOG_TOO_HIGH;
+    }
+    else {
+      if (ENABLE_ASSERTIONS)
+        assert(carts_comp == GREATER);
+      acq_rep->opcode = ACQ_LOG_EQUAL;
+    }
+  } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
+
+  set_up_rmw_acq_rep_message_size(p_ops, acq_rep->opcode, t_id);
+  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep,
+                           read->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
+}
+
 
 // Handle remote requests to get TS that are the first round of a release or of an out-of-epoch write
 static inline void KVS_reads_get_TS(struct read *read, mica_op_t *kv_ptr,
@@ -483,12 +531,12 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
   {
     //check_for_same_ts_as_already_proposed(kv_ptr[I], prop, t_id);
     // 1. check if it has been committed
-    // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS ts is also checked)
+    // 2. first check the log number to see if it's SMALLER!! (leave the "higher" part after the KVS base_ts is also checked)
     // Either way fill the reply_rmw fully, but have a specialized flag!
     if (!is_log_smaller_or_has_rmw_committed(log_no, kv_ptr, rmw_l_id, t_id, prop_rep)) {
       if (!is_log_too_high(log_no, kv_ptr, t_id, prop_rep)) {
         // 3. Check that the TS is higher than the KVS TS, setting the flag accordingly
-        //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->ts, prop_m_id, t_id, prop_rep)) {
+        //if (!ts_is_not_greater_than_kvs_ts(kv_ptr, &prop->base_ts, prop_m_id, t_id, prop_rep)) {
         // 4. If the kv-pair has not been RMWed before grab an entry and ack
         // 5. Else if log number is bigger than the current one, ack without caring about the ongoing RMWs
         // 6. Else check the kv_ptr and send a response depending on whether there is an ongoing RMW and what that is
@@ -530,42 +578,6 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
 
 }
 
-// Handle remote rmw-acquires and rmw-acquires-fp
-// (acquires-fp are acquires renamed by the receiver when a false positive is detected)
-static inline void KVS_reads_rmw_acquires(struct read *read, mica_op_t *kv_ptr,
-                                          p_ops_t *p_ops, uint16_t op_i,
-                                          uint16_t t_id)
-{
-  uint64_t  l_id = p_ops->ptrs_to_mes_headers[op_i]->l_id;
-  uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct rmw_acq_rep *acq_rep =
-    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, read->opcode, p_ops->coalesce_r_rep[op_i], t_id);
-
-  uint32_t acq_log_no = read->ts.version;
-  lock_seqlock(&kv_ptr->seqlock);
-  {
-
-    check_keys_with_one_trace_op(&read->key, kv_ptr);
-    if (kv_ptr->last_committed_log_no > acq_log_no) {
-      acq_rep->opcode = ACQ_LOG_TOO_SMALL;
-      acq_rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
-      // acq_rep->glob_sess_id = kv_ptr->last_committed_rmw_id.glob_sess_id;
-      memcpy(acq_rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
-      acq_rep->log_no = kv_ptr->last_committed_log_no;
-      acq_rep->ts.version = kv_ptr->ts.version;
-      acq_rep->ts.m_id = kv_ptr->ts.m_id;
-    }
-    else if (kv_ptr->last_committed_log_no < acq_log_no) {
-      acq_rep->opcode = ACQ_LOG_TOO_HIGH;
-    }
-    else acq_rep->opcode = ACQ_LOG_EQUAL;
-
-  }
-  unlock_seqlock(&kv_ptr->seqlock);
-  set_up_rmw_acq_rep_message_size(p_ops, acq_rep->opcode, t_id);
-  finish_r_rep_bookkeeping(p_ops, (struct r_rep_big *) acq_rep,
-                           read->opcode == OP_ACQUIRE_FP, rem_m_id, t_id);
-}
 
 
 /*-----------------------------READ-COMMITTING---------------------------------------------*/
@@ -576,7 +588,7 @@ static inline void KVS_out_of_epoch_writes(r_info_t *op, mica_op_t *kv_ptr,
   uint32_t r_info_version =  op->ts_to_read.version;
   lock_seqlock(&kv_ptr->seqlock);
   rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
-  // find the the max ts and write it in the kvs
+  // find the the max base_ts and write it in the kvs
   if (kv_ptr->ts.version > op->ts_to_read.version)
     op->ts_to_read.version = kv_ptr->ts.version;
   memcpy(kv_ptr->value, op->value, op->val_len);
@@ -596,9 +608,10 @@ static inline void KVS_out_of_epoch_writes(r_info_t *op, mica_op_t *kv_ptr,
 }
 
 // Handle acquires/out-of-epoch-reads that have received a bigger version than locally stored, and need to apply the data
-static inline void KVS_acquires_and_out_of_epoch_reads(r_info_t *op, mica_op_t *kv_ptr,
-                                                       uint16_t t_id)
+static inline void KVS_out_of_epoch_reads(r_info_t *op, mica_op_t *kv_ptr,
+                                          uint16_t t_id)
 {
+  assert(false);
   lock_seqlock(&kv_ptr->seqlock);
 
   if (compare_ts(&kv_ptr->ts, &op->ts_to_read) == SMALLER) {
@@ -613,22 +626,21 @@ static inline void KVS_acquires_and_out_of_epoch_reads(r_info_t *op, mica_op_t *
 
 
 // Handle committing an RMW from a response to an rmw acquire
-static inline void KVS_rmw_acquire_commits(r_info_t *op, mica_op_t *kv_ptr,
+static inline void KVS_rmw_acquire_commits(r_info_t *r_info, mica_op_t *kv_ptr,
                                            uint16_t op_i, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(op->ts_to_read.version > 0);
   if (DEBUG_RMW)
-    my_printf(green, "Worker %u is handling a remote RMW commit on op %u, "
+    my_printf(green, "Worker %u is handling a remote RMW commit on r_info %u, "
                 "rmw_l_id %u,log_no %u, version %u  \n",
-              t_id, op_i, op->rmw_id.id,
-              op->log_no, op->ts_to_read.version);
+              t_id, op_i, r_info->rmw_id.id,
+              r_info->log_no, r_info->ts_to_read.version);
   uint64_t number_of_reqs;
-  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) op, false, t_id);
+  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) r_info, false, t_id);
   if (PRINT_LOGS) {
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, "
               "version %u, m_id: %u \n",
-            kv_ptr->key.bkt, op->log_no, number_of_reqs,  op->rmw_id.id,
-            op->ts_to_read.version, op->ts_to_read.m_id);
+            kv_ptr->key.bkt, r_info->log_no, number_of_reqs,  r_info->rmw_id.id,
+            r_info->ts_to_read.version, r_info->ts_to_read.m_id);
   }
 }
 
@@ -673,7 +685,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
 //                   op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt ,op[op_i].key.server,
 //                   kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
         key_in_store[op_i] = 1;
-        if (op[op_i].opcode == KVS_OP_GET || op[op_i].opcode == OP_ACQUIRE) {
+        if (op[op_i].opcode == KVS_OP_GET) { // || op[op_i].opcode == OP_ACQUIRE) {
           KVS_from_trace_reads_and_acquires(&op[op_i], kv_ptr[op_i], &resp[op_i],
                                             p_ops, &r_push_ptr, t_id);
         }
@@ -789,7 +801,7 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
   }
 }
 
-// The worker send here the incoming reads, the reads check the incoming ts if it is  bigger/equal to the local
+// The worker send here the incoming reads, the reads check the incoming base_ts if it is  bigger/equal to the local
 // the just ack it, otherwise they send the value back
 static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p_ops,
                                       uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
@@ -834,12 +846,13 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
         key_in_store[op_i] = 1;
 
         check_state_with_allowed_flags(6, read->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
-                                       CACHE_OP_GET_TS, PROPOSE_OP);
+                                       OP_GET_TS, PROPOSE_OP);
         if (read->opcode == KVS_OP_GET || read->opcode == OP_ACQUIRE ||
           read->opcode == OP_ACQUIRE_FP) {
-          KVS_reads_gets_or_acquires_or_acquires_fp(read, kv_ptr[op_i], p_ops, op_i, t_id);
+          KVS_reads_rmw_acquires(read, kv_ptr[op_i], p_ops, op_i, t_id);
+//          KVS_reads_gets_or_acquires_or_acquires_fp(read, kv_ptr[op_i], p_ops, op_i, t_id);
         }
-        else if (read->opcode == CACHE_OP_GET_TS) {
+        else if (read->opcode == OP_GET_TS) {
           KVS_reads_get_TS(read, kv_ptr[op_i], p_ops, op_i, t_id);
         }
         else if (ENABLE_RMWS) {
@@ -847,8 +860,8 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
             KVS_reads_proposes(read, kv_ptr[op_i], p_ops, op_i, t_id);
           }
           else if (read->opcode == OP_ACQUIRE || read->opcode == OP_ACQUIRE_FP) {
-            assert(ENABLE_RMW_ACQUIRES);
-            KVS_reads_rmw_acquires(read, kv_ptr[op_i], p_ops, op_i, t_id);
+            //assert(ENABLE_RMW_ACQUIRES);
+//            KVS_reads_rmw_acquires(read, kv_ptr[op_i], p_ops, op_i, t_id);
           }
           else if (ENABLE_ASSERTIONS){
             //my_printf(red, "wrong Opcode in KVS: %d, req %d, m_id %u, val_len %u, version %u , \n",
@@ -910,10 +923,11 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
         // The write must be performed with the max TS out of the one stored in the KV and read_info
         if (op->opcode == KVS_OP_PUT) {
           KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
-        } else if (op->opcode == OP_ACQUIRE ||
-                   op->opcode == KVS_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-          KVS_acquires_and_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
-        } else if (op->opcode == UPDATE_EPOCH_OP_GET) {
+        }
+        else if (op->opcode == KVS_OP_GET) { // a read resulted on receiving a higher timestamp than expected
+          KVS_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
+        }
+        else if (op->opcode == UPDATE_EPOCH_OP_GET) {
           if (!MEASURE_SLOW_PATH && op->epoch_id > kv_ptr[op_i]->epoch_id) {
             lock_seqlock(&kv_ptr[op_i]->seqlock);
             kv_ptr[op_i]->epoch_id = op->epoch_id;
@@ -921,12 +935,9 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
             if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
           }
         }
-        else if (ENABLE_RMWS) {
-          if (op->opcode == OP_ACQUIRE) {
+        else if (op->opcode == OP_ACQUIRE) {
             KVS_rmw_acquire_commits(op, kv_ptr[op_i], op_i, t_id);
           }
-          else if (ENABLE_ASSERTIONS) assert(false);
-        }
         else if (ENABLE_ASSERTIONS) assert(false);
       }
     }

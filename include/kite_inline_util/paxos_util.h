@@ -6,7 +6,7 @@
 #define KITE_PAXOS_UTIL_H
 
 #include <common_func.h>
-#include "paxos_generic_utility.h"
+#include "paxos_generic_util.h"
 
 
 /*--------------------------------------------------------------------------
@@ -101,7 +101,7 @@ static inline uint8_t is_base_ts_too_small(mica_op_t *kv_ptr,
 {
   if (prop->base_ts.version == DO_NOT_CHECK_BASE_TS) return RMW_ACK;
 
-  ts_compare_t  comp_ts = compare_ts(&kv_ptr->ts, &prop->base_ts);
+  compare_t  comp_ts = compare_ts(&kv_ptr->ts, &prop->base_ts);
   if (comp_ts == GREATER) {
     rep->ts.version = kv_ptr->ts.version;
     rep->ts.m_id = kv_ptr->ts.m_id;
@@ -224,7 +224,7 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
     }
     assert(kv_ptr->log_no <= log_no);
   }
-  // pass the new ts!
+  // pass the new base_ts!
   kv_ptr->opcode = opcode;
   kv_ptr->prop_ts.m_id = new_ts_m_id;
   //if (ENABLE_ASSERTIONS) assert(new_version >= kv_ptr->prop_ts.version);
@@ -276,11 +276,11 @@ static inline uint8_t propose_snoops_entry(struct propose *prop, mica_op_t *kv_p
 
   if (ENABLE_ASSERTIONS)
     assert(check_entry_validity_with_key(&prop->key, kv_ptr));
-  enum ts_compare prop_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->prop_ts);
+  compare_t prop_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->prop_ts);
 
   if (prop_ts_comp == GREATER) {
     assign_netw_ts_to_ts(&kv_ptr->prop_ts, &prop->ts);
-    enum ts_compare acc_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->accepted_ts);
+    compare_t acc_ts_comp = compare_netw_ts_with_ts(&prop->ts, &kv_ptr->accepted_ts);
     if (kv_ptr->state == ACCEPTED && acc_ts_comp == GREATER) {
       if (kv_ptr->rmw_id.id == prop->t_rmw_id) {
         return_flag = RMW_ACK_ACC_SAME_RMW;
@@ -322,7 +322,7 @@ static inline uint8_t accept_snoops_entry(struct accept *acc, mica_op_t *kv_ptr,
 
   if (kv_ptr->state != INVALID_RMW) {
     // Higher Ts  = Success,  Lower Ts  = Failure
-    enum ts_compare ts_comp = compare_netw_ts_with_ts(&acc->ts, &kv_ptr->prop_ts);
+    compare_t ts_comp = compare_netw_ts_with_ts(&acc->ts, &kv_ptr->prop_ts);
     // Higher Ts  = Success
     if (ts_comp == EQUAL || ts_comp == GREATER) {
       return_flag = RMW_ACK;
@@ -348,8 +348,8 @@ static inline uint8_t accept_snoops_entry(struct accept *acc, mica_op_t *kv_ptr,
   }
 
   if (DEBUG_RMW)
-    my_printf(yellow, "Wrkr %u: %s Accept with rmw_id %u, log_no: %u, ts.version: %u, ts_m_id %u,"
-                "locally stored state: %u, locally stored ts: version %u, m_id %u \n",
+    my_printf(yellow, "Wrkr %u: %s Accept with rmw_id %u, log_no: %u, base_ts.version: %u, ts_m_id %u,"
+                "locally stored state: %u, locally stored base_ts: version %u, m_id %u \n",
               t_id, return_flag == RMW_ACK ? "Acks" : "Nacks",
               acc->t_rmw_id, acc->log_no,
               acc->ts.version, acc->ts.m_id, kv_ptr->state, kv_ptr->prop_ts.version,
@@ -453,7 +453,7 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
       if (kv_ptr->state == PROPOSED || kv_ptr->state == ACCEPTED) {
         if(!(compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == GREATER ||
              kv_ptr->log_no > loc_entry->log_no)) {
-          my_printf(red, "State: %s,  loc-entry-helping %d, Kv prop/ts %u/%u -- loc-entry ts %u/%u, "
+          my_printf(red, "State: %s,  loc-entry-helping %d, Kv prop/base_ts %u/%u -- loc-entry base_ts %u/%u, "
                       "kv-log/loc-log %u/%u kv-rmw_id/loc-rmw-id %u/%u\n",
                     kv_ptr->state == ACCEPTED ? "ACCEPTED" : "PROPOSED",
                     loc_entry->helping_flag,
@@ -497,9 +497,9 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
   // but if the RMW has been committed, it will be in the present log_no
   // and we will not be able to accept locally anyway.
 
-  // the kv_ptr has seen a higher ts if
+  // the kv_ptr has seen a higher base_ts if
   // (its state is not invalid and its TS is higher) or  (it has committed the log)
-  enum ts_compare comp = compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts);
+  compare_t comp = compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts);
 
 
   bool kv_ptr_is_the_same = kv_ptr->state == PROPOSED  &&
@@ -539,7 +539,7 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
 
     }
     memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-    kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base ts of the RMW we are helping
+    kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base base_ts of the RMW we are helping
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
     return_flag = ACCEPT_ACK;
@@ -596,7 +596,7 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
   kv_ptr->last_committed_log_no = loc_entry_to_commit->log_no;
   kv_ptr->last_committed_rmw_id = loc_entry_to_commit->rmw_id;
   bool overwrite_kv = compare_ts(&loc_entry_to_commit->base_ts, &kv_ptr->ts) != SMALLER;
-  // Update the KVS if the base ts of the entry to be committed is equal or greater than the locally stored
+  // Update the KVS if the base base_ts of the entry to be committed is equal or greater than the locally stored
   // Beyond that there are two cases:
   // 1. When not helping and the RMW is successful
   // 2  When helping
@@ -825,8 +825,12 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
                 new_log_no, new_rmw_id);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
+    const char * mes;
+    if (use_commit) mes = com->opcode == RMW_ACQ_COMMIT_OP ?
+                          "attempt_remote_commit from acq-com" : "attempt_remote_commit from com";
+    else mes =" attempt_remote_commit from r_info";
     check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_log_no,
-                                 new_version, new_m_id, "attempt_remote_commit", t_id);
+                                 new_version, new_m_id, mes, t_id);
   }
 
   // now check if the entry was waiting for this message to get cleared
@@ -843,6 +847,8 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
   return is_log_higher;
 }
 
+
+// Could be a reply to a read, or a commit message (which could be created by a read)
 static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op, bool use_commit, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) if (!use_commit) assert(ENABLE_RMW_ACQUIRES);
@@ -853,15 +859,20 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   uint64_t tmp_rmw_id = !use_commit ? r_info->rmw_id.id : com->t_rmw_id;
   uint32_t log_no = !use_commit ? r_info->log_no : com->log_no;
   struct key *key = !use_commit ? &r_info->key : &com->key;
-  uint8_t *value = !use_commit ? r_info->value : com->value;
+  uint8_t *value = !use_commit ? (uint8_t *) r_info->value : com->value;
   struct ts_tuple tmp_ts;
   tmp_ts.version = !use_commit ? r_info->ts_to_read.version : com->base_ts.version;
   tmp_ts.m_id = !use_commit ? r_info->ts_to_read.m_id : com->base_ts.m_id;
 
-
-
   lock_seqlock(&kv_ptr->seqlock);
   check_keys_with_one_trace_op(key, kv_ptr);
+
+
+//  if(cart_comp == EQUAL) {
+//    unlock_seqlock(&kv_ptr->seqlock);
+//    return 0;
+//  }
+
   if (use_commit && com->opcode == COMMIT_OP_NO_VAL) {
     is_log_higher = attempt_remote_commit_no_value(kv_ptr, (struct commit_no_val*) com, t_id);
     if (is_log_higher) {
@@ -872,22 +883,17 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   }
   else is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
-//  else if (ENABLE_ASSERTIONS) assert(false);
-  // The commit must be applied to the KVS if
-  //   1. the commit has a higher base-ts than the kv or
-  //   2. the commit has the same base with the kv, but higher log
-  // But if the kv-ptr has a greater base-ts, then its value should not be overwritten
-  if (is_log_higher) {
-    if (compare_ts(&kv_ptr->ts, &tmp_ts) != GREATER) {
-      kv_ptr->ts = tmp_ts;
-      memcpy(kv_ptr->value, value, (size_t) RMW_VALUE_SIZE);
-    }
+  compare_t cart_comp = compare_carts(&tmp_ts, log_no, &kv_ptr->ts,
+                                      kv_ptr->last_committed_log_no);
+  if (cart_comp == GREATER) {
+    kv_ptr->ts = tmp_ts;
+    memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
+  }
+  if (COMMIT_LOGS && is_log_higher) {
     update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
                        value, "From remote commit ", LOG_COMS);
   }
-
   check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received commit", t_id);
-
   if (ENABLE_ASSERTIONS) {
     if (kv_ptr->state != INVALID_RMW)
       assert(kv_ptr->rmw_id.id != tmp_rmw_id);
@@ -959,7 +965,7 @@ static inline void store_rmw_rep_to_help_loc_entry(loc_entry_t* loc_entry,
                                                    struct rmw_rep_last_committed* prop_rep, uint16_t t_id)
 {
   loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
-  enum ts_compare ts_comp = compare_netw_ts_with_ts(&prop_rep->ts, &help_loc_entry->new_ts);
+  compare_t ts_comp = compare_netw_ts_with_ts(&prop_rep->ts, &help_loc_entry->new_ts);
   if (ENABLE_ASSERTIONS) {
     if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED) {
       assert(help_loc_entry->new_ts.version > 0);
@@ -1295,7 +1301,7 @@ static inline void attempt_to_help_a_locally_accepted_value(p_ops_t *p_ops,
     help_loc_entry->base_ts = kv_ptr->base_acc_ts;
 
     // we must make it appear as if the kv_ptr has seen our propose
-    // and has replied with a lower-ts-accept
+    // and has replied with a lower-base_ts-accept
     loc_entry->new_ts.version = kv_ptr->prop_ts.version + 1;
     loc_entry->new_ts.m_id = (uint8_t) machine_id;
     kv_ptr->prop_ts = loc_entry->new_ts;
@@ -1774,7 +1780,7 @@ static inline void inspect_proposes(p_ops_t *p_ops,
   // SEEN HIGHER-TS PROPOSE OR ACCEPT
   else if (rep_info->seen_higher_prop_acc > 0) {
     debug_fail_help(loc_entry, " seen higher prop", t_id);
-    // retry by incrementing the highest ts seen
+    // retry by incrementing the highest base_ts seen
     loc_entry->state = RETRY_WITH_BIGGER_TS;
     loc_entry->new_ts.version = rep_info->seen_higher_prop_version;
   }
@@ -1847,7 +1853,7 @@ static inline void inspect_accepts(p_ops_t *p_ops,
   }
   // SEEN HIGHER-TS PROPOSE
   else if (rep_info->seen_higher_prop_acc > 0) {
-    // retry by incrementing the highest ts seen
+    // retry by incrementing the highest base_ts seen
     loc_entry->state = RETRY_WITH_BIGGER_TS;
     loc_entry->new_ts.version = rep_info->seen_higher_prop_version;
     if (ENABLE_ASSERTIONS) assert(loc_entry->helping_flag == NOT_HELPING);

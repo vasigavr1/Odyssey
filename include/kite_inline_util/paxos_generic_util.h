@@ -364,13 +364,16 @@ static inline void fill_commit_message_from_r_info(struct commit *com,
   com->base_ts.m_id = r_info->ts_to_read.m_id;
   com->base_ts.version = r_info->ts_to_read.version;
   memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);
+  assert(r_info->key.bkt != 0);
+  assert(com->key.bkt != 0);
   com->opcode = RMW_ACQ_COMMIT_OP;
   memcpy(com->value, r_info->value, r_info->val_len);
   com->t_rmw_id = r_info->rmw_id.id;
   com->log_no = r_info->log_no;
+  //my_printf(yellow, "Broadcasting commit log %u, rmw_id %u, key %u \n", com->log_no, com->t_rmw_id, com->key.bkt);
   if (ENABLE_ASSERTIONS) {
-    assert(com->log_no > 0);
-    assert(com->t_rmw_id > 0);
+    //assert(com->log_no > 0);
+    //assert(com->t_rmw_id > 0);
   }
 }
 
@@ -384,7 +387,7 @@ static inline void fill_reply_entry_with_committed_RMW (mica_op_t *kv_ptr,
   memcpy(rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
   rep->log_no_or_base_version = kv_ptr->last_committed_log_no;
   rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
-  //if (rep->ts.version == 0)
+  //if (rep->base_ts.version == 0)
   //  my_printf(yellow, "Wrkr %u replies with flag %u Log_no %u, rmw_id %lu glob_sess id %u\n",
   //         t_id, rep->opcode, rep->log_no, rep->rmw_id, rep->glob_sess_id);
 }

@@ -12,7 +12,7 @@
 #include "config_util.h"
 #include "client_if_util.h"
 #include "paxos_util.h"
-
+#include "paxos_generic_util.h"
 
 //-------------------------------------------------------------------------------------
 // -------------------------------FORWARD DECLARATIONS--------------------------------
@@ -230,7 +230,7 @@ static inline void reset_sess_info_on_accept(sess_info_t *sess_info,
 // Returns the size of a read request given an opcode -- Proposes, reads, acquires
 static inline uint16_t get_read_size_from_opcode(uint8_t opcode) {
   check_state_with_allowed_flags(9, opcode, OP_RELEASE, OP_ACQUIRE, KVS_OP_PUT,
-                                 KVS_OP_GET, OP_ACQUIRE_FLIP_BIT, CACHE_OP_GET_TS,
+                                 KVS_OP_GET, OP_ACQUIRE_FLIP_BIT, OP_GET_TS,
                                  PROPOSE_OP, OP_ACQUIRE_FP);
   switch(opcode) {
     case OP_RELEASE:
@@ -238,7 +238,7 @@ static inline uint16_t get_read_size_from_opcode(uint8_t opcode) {
     case KVS_OP_PUT:
     case KVS_OP_GET:
     case OP_ACQUIRE_FLIP_BIT:
-    case CACHE_OP_GET_TS:
+    case OP_GET_TS:
     case OP_ACQUIRE_FP:
       return R_SIZE;
     case PROPOSE_OP:
@@ -266,15 +266,16 @@ static inline void reset_read_message(p_ops_t *p_ops)
 
 // Returns a pointer, where the next request can be created -- Proposes, reads, acquires
 static inline void* get_r_ptr(p_ops_t *p_ops, uint8_t opcode,
-                              bool is_rmw_acquire, uint16_t t_id)
+                              bool is_get_ts, uint16_t t_id)
 {
   bool is_propose = opcode == PROPOSE_OP;
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   r_mes_info_t *info = &p_ops->r_fifo->info[r_mes_ptr];
   uint16_t new_size = get_read_size_from_opcode(opcode);
   if (is_propose) info->max_rep_message_size += PROP_REP_ACCEPTED_SIZE;
-  else if (is_rmw_acquire) info->max_rep_message_size += RMW_ACQ_REP_SIZE;
-  else info->max_rep_message_size += R_REP_SIZE;
+  else if (is_get_ts) info->max_rep_message_size += R_REP_ONLY_TS_SIZE;
+  else info->max_rep_message_size += RMW_ACQ_REP_SIZE;
+
 
   bool new_message_because_of_r_rep = info->max_rep_message_size > MTU;
   bool new_message = (info->message_size + new_size) > R_SEND_SIZE ||
@@ -552,7 +553,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     write->key = op->key;
     write->opcode = op->opcode;
     write->val_len = op->val_len;
-    //memcpy(&write->version, (void *) &op->ts.version, 4 + TRUE_KEY_SIZE + 2);
+    //memcpy(&write->version, (void *) &op->base_ts.version, 4 + TRUE_KEY_SIZE + 2);
     if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
     memcpy(write->value, op->value_to_write, op->real_val_len);
     write->m_id = (uint8_t) machine_id;
@@ -575,7 +576,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     if (source == FROM_READ)
       fill_commit_message_from_r_info((struct commit *) write, r_info, t_id);
     else {
-      uint8_t broadcast_state = (uint8_t)incoming_pull_ptr;
+      uint8_t broadcast_state = (uint8_t) incoming_pull_ptr;
       fill_commit_message_from_l_entry((struct commit *) write,
                                        (loc_entry_t *) op, broadcast_state,  t_id);
     }
@@ -629,7 +630,7 @@ static inline struct r_rep_big* get_r_rep_ptr(p_ops_t *p_ops, uint64_t l_id,
                                               uint16_t t_id)
 {
   check_state_with_allowed_flags(9, read_opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
-                                 PROPOSE_OP, ACCEPT_OP, ACCEPT_OP_NO_CREDITS, OP_ACQUIRE_FP, CACHE_OP_GET_TS);
+                                 PROPOSE_OP, ACCEPT_OP, ACCEPT_OP_NO_CREDITS, OP_ACQUIRE_FP, OP_GET_TS);
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   //struct r_rep_message *r_rep_mes = r_rep_fifo->r_rep_message;
   bool is_propose = read_opcode == PROPOSE_OP,
@@ -699,7 +700,7 @@ static inline void set_up_r_rep_message_size(p_ops_t *p_ops,
                                              uint16_t t_id)
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
-  enum ts_compare ts_comp = compare_netw_ts(&r_rep->ts, remote_ts);
+  compare_t ts_comp = compare_netw_ts(&r_rep->ts, remote_ts);
   if (machine_id == 0 && R_TO_W_DEBUG) {
     if (ts_comp == EQUAL)
       my_printf(green, "L/R:  m_id: %u/%u version %u/%u \n", r_rep->ts.m_id, remote_ts->m_id,
@@ -788,7 +789,7 @@ static inline void insert_prop_to_read_fifo(p_ops_t *p_ops, loc_entry_t *loc_ent
 
   if (ENABLE_ASSERTIONS) {
     assert(prop->ts.version >= PAXOS_TS);
-    //check_version(prop->ts.version, "insert_prop_to_read_fifo");
+    //check_version(prop->base_ts.version, "insert_prop_to_read_fifo");
     assert(r_mes->coalesce_num > 0);
     assert(r_mes->m_id == (uint8_t) machine_id);
   }
@@ -804,29 +805,28 @@ static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
   check_state_with_allowed_flags(3, source, FROM_TRACE, FROM_ACQUIRE);
   const uint32_t r_ptr = p_ops->r_push_ptr;
   r_info_t *r_info = &p_ops->read_info[r_ptr];
-  bool is_rmw_acquire = source == FROM_TRACE && r_info->opcode == OP_ACQUIRE && r_info->is_rmw;
+  uint8_t opcode = r_info->opcode;
+  bool is_get_ts = source == FROM_TRACE && (opcode == OP_RELEASE || opcode == KVS_OP_PUT);
 
-  struct read *read = (struct read*) get_r_ptr(p_ops, r_info->opcode, is_rmw_acquire, t_id);
+  struct read *read = (struct read*) get_r_ptr(p_ops, opcode, is_get_ts, t_id);
 
   // this means that the purpose of the read is solely to flip remote bits
   if (source == FROM_ACQUIRE) {
     // overload the key with local_r_id
     memcpy(&read->key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
     read->opcode = OP_ACQUIRE_FLIP_BIT;
-    if (ENABLE_ASSERTIONS) assert(r_info->opcode == OP_ACQUIRE_FLIP_BIT);
+    if (ENABLE_ASSERTIONS) assert(opcode == OP_ACQUIRE_FLIP_BIT);
     if (DEBUG_BIT_VECS)
       my_printf(cyan, "Wrkr: %u Acquire generates a read with op %u and key %u \n",
                 t_id, read->opcode, *(uint64_t *)&read->key);
   }
   else { // FROM TRACE: out of epoch reads/writes, acquires and releases
-    if (is_rmw_acquire) read->ts.version = r_info->log_no;
-    else assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
+    assign_ts_to_netw_ts(&read->ts, &r_info->ts_to_read);
+    read->log_no = r_info->log_no;
     read->key = r_info->key;
     if (!TURN_OFF_KITE)
       r_info->epoch_id = (uint64_t) atomic_load_explicit(&epoch_id, memory_order_seq_cst);
-    uint8_t opcode = r_info->opcode;
-    read->opcode = (opcode == OP_RELEASE || opcode == KVS_OP_PUT) ?
-                   (uint8_t) CACHE_OP_GET_TS : opcode;
+    read->opcode = is_get_ts ? (uint8_t) OP_GET_TS : opcode;
   }
 
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
@@ -845,12 +845,12 @@ static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
       p_ops->r_index_to_req_array[r_ptr] = op->index_to_req_array;
     }
     // Query the conf to see if the machine has lost messages
-    if (r_info->opcode == OP_ACQUIRE)
+    if (opcode == OP_ACQUIRE)
       on_starting_an_acquire_query_the_conf(t_id, r_info->epoch_id);
   }
 
   // Increase the virtual size by 2 if the req is an acquire
-  p_ops->virt_r_size+= r_info->opcode == OP_ACQUIRE ? 2 : 1;
+  p_ops->virt_r_size+= opcode == OP_ACQUIRE ? 2 : 1;
   p_ops->r_size++;
   p_ops->r_fifo->bcast_size++;
 
@@ -1408,7 +1408,7 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read
     if (r_rep->opcode == TS_GREATER_TS_ONLY)
       check_state_with_allowed_flags(3, read_info->opcode, OP_RELEASE, KVS_OP_PUT);
     else check_state_with_disallowed_flags(3, read_info->opcode, OP_RELEASE, KVS_OP_PUT);
-    // If this is the first "Greater" ts
+    // If this is the first "Greater" base_ts
     if (!read_info->seen_larger_ts) {
       assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
       read_info->times_seen_ts = 1;
@@ -1418,8 +1418,8 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read
       }
       read_info->seen_larger_ts = true;
     }
-    else { // if the read has already received a "greater" ts
-      enum ts_compare ts_comp = compare_netw_ts_with_ts(&r_rep->ts, &read_info->ts_to_read);
+    else { // if the read has already received a "greater" base_ts
+      compare_t ts_comp = compare_netw_ts_with_ts(&r_rep->ts, &read_info->ts_to_read);
       if (ts_comp == GREATER) {
         assign_netw_ts_to_ts(&read_info->ts_to_read, &r_rep->ts);
         read_info->times_seen_ts = 1;
@@ -1433,15 +1433,38 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read
     }
   }
   else if (r_rep->opcode == TS_EQUAL) {
-    if (!read_info->seen_larger_ts)  // If it has not seen a "greater ts"
+    if (!read_info->seen_larger_ts)  // If it has not seen a "greater base_ts"
       read_info->times_seen_ts++;
-    // Nothing to do if the already stored ts is greater than the incoming
+    // Nothing to do if the already stored base_ts is greater than the incoming
   }
-  else if (r_rep->opcode == TS_SMALLER) { // Nothing to do if the already stored ts is greater than the incoming
+  else if (r_rep->opcode == TS_SMALLER) { // Nothing to do if the already stored base_ts is greater than the incoming
 
   }
   // assert(read_info->rep_num == 0);
   read_info->rep_num++;
+}
+
+static inline void fill_read_info_from_read_rep(struct rmw_acq_rep *acq_rep, r_info_t *read_info,
+                                                uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (compare_netw_carts_with_carts(&acq_rep->base_ts, acq_rep->log_no,
+                                      &read_info->ts_to_read, read_info->log_no)
+        != GREATER) {
+      my_printf(red, "Rep version/m_id/log: %u/%u/%u, r_info version/m_id/logno: %u/%u/%u \n",
+                acq_rep->base_ts.version, acq_rep->base_ts.m_id, acq_rep->log_no,
+                read_info->ts_to_read.version, read_info->ts_to_read.m_id, read_info->log_no);
+      assert(false);
+    }
+    //assert(acq_rep->log_no >= read_info->log_no);
+    assert(acq_rep->base_ts.version >= read_info->ts_to_read.version);
+    if (acq_rep->log_no == 0) assert(acq_rep->rmw_id == 0);
+  }
+  read_info->log_no = acq_rep->log_no;
+  read_info->rmw_id.id = acq_rep->rmw_id;
+  assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->base_ts);
+  memcpy(read_info->value, acq_rep->value, read_info->val_len);
+  read_info->times_seen_ts = 1;
 }
 
 // Each read has an associated read_info structure that keeps track of the incoming replies, value, opcode etc.
@@ -1450,39 +1473,28 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
 {
   detect_false_positives_on_read_info_bookkeeping((struct r_rep_big *) acq_rep, read_info, t_id);
   if (acq_rep->opcode == ACQ_LOG_TOO_SMALL) {
-    if (!read_info->seen_larger_ts) { // If this is the first "Greater" ts
-      if (ENABLE_ASSERTIONS) assert(read_info->log_no < acq_rep->log_no);
-      read_info->log_no = acq_rep->log_no;
-      read_info->rmw_id.id = acq_rep->rmw_id;
-      assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
-      check_version(read_info->ts_to_read.version, "rmw_Acquire ");
-      memcpy(read_info->value, acq_rep->value, read_info->val_len);
-      read_info->times_seen_ts = 1;
+    if (!read_info->seen_larger_ts) { // If this is the first "Greater" base_ts
+      fill_read_info_from_read_rep(acq_rep, read_info, t_id);
       read_info->seen_larger_ts = true;
     }
-    else { // if the read has already received a "greater" ts
-      //enum ts_compare ts_comp = compare_netw_ts_with_ts(&acq_rep->ts,&read_info->ts_to_read);
-      if (acq_rep->log_no > read_info->log_no) {
-        read_info->log_no = acq_rep->log_no;
-        read_info->rmw_id.id = acq_rep->rmw_id;
-        assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->ts);
-        check_version(read_info->ts_to_read.version, "rmw_Acquire ");
-        memcpy(read_info->value, acq_rep->value, read_info->val_len);
-        read_info->times_seen_ts = 1;
+    else { // if the read has already received a "greater" base_ts
+      compare_t carts_comp = compare_netw_carts_with_carts(&acq_rep->base_ts, acq_rep->log_no,
+                                                           &read_info->ts_to_read, read_info->log_no);
+      if (carts_comp == GREATER) {
+        fill_read_info_from_read_rep(acq_rep, read_info, t_id);
       }
-      else if (acq_rep->log_no == read_info->log_no) read_info->times_seen_ts++;
-      // Nothing to do if the already stored ts is greater than the incoming
+      else if (carts_comp == EQUAL) read_info->times_seen_ts++;
+      // Nothing to do if the already stored base_ts is greater than the incoming
     }
   }
   else if (acq_rep->opcode == ACQ_LOG_EQUAL) {
-    if (!read_info->seen_larger_ts)  // If it has not seen a "greater ts"
+    if (!read_info->seen_larger_ts)  // If it has not seen a "greater base_ts"
       read_info->times_seen_ts++;
-    // Nothing to do if the already stored ts is greater than the incoming
+    // Nothing to do if the already stored base_ts is greater than the incoming
   }
-  else if (acq_rep->opcode == ACQ_LOG_TOO_HIGH) { // Nothing to do if the already stored ts is greater than the incoming
-
+  else if (acq_rep->opcode == ACQ_LOG_TOO_HIGH) {
+    // Nothing to do if the already stored base_ts is greater than the incoming
   }
-  // assert(read_info->rep_num == 0);
   read_info->rep_num++;
 }
 

@@ -37,9 +37,9 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define KVS_OP_PUT 112
 
 
-#define CACHE_OP_ACK 115
+#define OP_ACK 115
 #define ACK_NOT_YET_SENT 117
-#define CACHE_OP_GET_TS 118 // first round of release, or out-of-epoch write
+#define OP_GET_TS 118 // first round of release, or out-of-epoch write
 #define UPDATE_EPOCH_OP_GET 119
 
 
@@ -148,7 +148,7 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 // Possible write sources
 #define FROM_TRACE 0
 #define FROM_READ 1
-//#define RELEASE_SECOND 2 // after the read ts for a release
+//#define RELEASE_SECOND 2 // after the read base_ts for a release
 #define RELEASE_THIRD 3 // for the third round of a release
 #define FOR_ACCEPT 4
 #define FROM_ACQUIRE 5

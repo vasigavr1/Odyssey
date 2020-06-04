@@ -115,7 +115,7 @@ static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_re
   }
   if (ENABLE_ASSERTIONS && completed_messages > 0) {
     for (int i = 0; i < MACHINE_NUM; i++)
-      assert(acks[i].opcode == CACHE_OP_ACK);
+      assert(acks[i].opcode == OP_ACK);
   }
   return completed_messages;
 }
@@ -205,7 +205,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
         my_printf(yellow, "Read %d/%u, message mes_size %d, version %u \n", i, coalesce_num,
                   send_sgl[br_i].length, r_mes->read[i].ts.version);
       if (ENABLE_ASSERTIONS && all_reads) {
-        check_state_with_allowed_flags(5, r_mes->read[i].opcode, KVS_OP_GET, CACHE_OP_GET_TS,
+        check_state_with_allowed_flags(5, r_mes->read[i].opcode, KVS_OP_GET, OP_GET_TS,
                                        OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
       }
     }
@@ -304,7 +304,7 @@ static inline void post_receives_for_r_reps_for_accepts(struct recv_info *r_rep_
 static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint64_t l_id,
                                    const uint8_t m_id, const uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS && ack->opcode != CACHE_OP_ACK) {
+  if (ENABLE_ASSERTIONS && ack->opcode != OP_ACK) {
     if(unlikely(ack->local_id) + ack->ack_num != l_id) {
       my_printf(red, "Wrkr %u: Adding to existing ack for machine %u  with l_id %lu, "
                   "ack_num %u with new l_id %lu, coalesce_num %u, opcode %u\n", t_id, m_id,
@@ -313,7 +313,7 @@ static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
       return false;
     }
   }
-  if (ack->opcode == CACHE_OP_ACK) {// new ack
+  if (ack->opcode == OP_ACK) {// new ack
     //if (ENABLE_ASSERTIONS) assert((ack->local_id) + ack->ack_num == l_id);
     memcpy(&ack->local_id, &l_id, sizeof(uint64_t));
     ack->credits = 1;

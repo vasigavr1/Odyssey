@@ -127,7 +127,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
       my_printf(cyan, "Next index %u,polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
                 ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
       for (int i = 0; i < ACK_BUF_SLOTS; ++i) {
-        if (ack_buf[i].ack.opcode == CACHE_OP_ACK) {
+        if (ack_buf[i].ack.opcode == OP_ACK) {
           my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, ack_buf[i].ack.local_id);
         } else
           my_printf(red, "BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, ack_buf[i].ack.local_id,
@@ -748,7 +748,7 @@ static inline void check_read_state_and_key(p_ops_t *p_ops, uint32_t r_ptr, uint
     //struct read *read = &r_mes[r_mes_ptr].read[inside_r_ptr];
 //    if (read->opcode == 0) my_printf(red, "R_mes_ptr %u, inside_r_ptr %u, first read opcode %u source %u \n",
 //      r_mes_ptr, inside_r_ptr, r_mes[r_mes_ptr].read[0].opcode);
-    check_state_with_allowed_flags(5, read->opcode, KVS_OP_GET, CACHE_OP_GET_TS,
+    check_state_with_allowed_flags(5, read->opcode, KVS_OP_GET, OP_GET_TS,
                                    OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
     if (source == FROM_TRACE) {
       assert(keys_are_equal(&read->key, &r_info->key));
@@ -774,7 +774,7 @@ static inline void check_ack_message_count_stats(p_ops_t* p_ops, struct ack_mess
 {
   if (ENABLE_ASSERTIONS) {
     assert(ack_num > 0);
-    assert(ack->opcode == CACHE_OP_ACK);
+    assert(ack->opcode == OP_ACK);
     //      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
     assert(ack->m_id < MACHINE_NUM);
     uint64_t l_id = ack->local_id;
@@ -886,10 +886,10 @@ static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw
 {
   if (ENABLE_ASSERTIONS) {
     assert(rmw_rep->opcode == RMW_ID_COMMITTED || rmw_rep->opcode == LOG_TOO_SMALL);
-//    if ((rmw_rep->ts.version % 2  != 0) )
-//      my_printf(red, "Checking the ptr to rmw_rep, version %u \n", (rmw_rep->ts.version));
-//    assert(rmw_rep->ts.version % 2  == 0 );
-    // if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->ts.version > 0 ); // this is the base ts and can be 0
+//    if ((rmw_rep->base_ts.version % 2  != 0) )
+//      my_printf(red, "Checking the ptr to rmw_rep, version %u \n", (rmw_rep->base_ts.version));
+//    assert(rmw_rep->base_ts.version % 2  == 0 );
+    // if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->base_ts.version > 0 ); // this is the base base_ts and can be 0
   }
 }
 
@@ -1019,7 +1019,12 @@ static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_
 {
   uint64_t glob_sess_id = rmw_id % GLOBAL_SESSION_NUM;
   if (kv_ptr->last_committed_rmw_id.id != rmw_id) {
-    my_printf(red, "~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, %s ~~~~~~~~ \n", t_id, kv_ptr->key.bkt, message);
+    my_printf(red, "~~~~~~~~COMMIT MISSMATCH Worker %u key: %u, Log %u %s ~~~~~~~~ \n", t_id, kv_ptr->key.bkt, log_no, message);
+    my_printf(green, "GLOBAL ENTRY COMMITTED log %u: rmw_id %lu glob_sess-id- %u\n",
+              kv_ptr->last_committed_log_no, kv_ptr->last_committed_rmw_id.id,
+              kv_ptr->last_committed_rmw_id.id % GLOBAL_SESSION_NUM);
+    my_printf(yellow, "COMMIT log %u: rmw_id %lu glob_sess-id-%u version %u m_id %u \n",
+              log_no, rmw_id, glob_sess_id, version, m_id);
     /*if (ENABLE_DEBUG_RMW_KV_PTR) {
       my_printf(green, "GLOBAL ENTRY COMMITTED log %u: rmw_id %lu glob_sess-id- %u, FLAG %u\n",
                    kv_ptr->last_committed_log_no, kv_ptr->last_committed_rmw_id.id,
@@ -1040,7 +1045,7 @@ static inline void check_that_the_rmw_ids_match(mica_op_t *kv_ptr, uint64_t rmw_
 
       }
     }*/
-    exit(0);
+    assert(false);
   }
 }
 
@@ -1128,10 +1133,10 @@ static inline void check_read_opcode_when_polling_for_reads(struct read *read, u
   if (ENABLE_ASSERTIONS) {
     //assert(MAX_PROP_COALESCE == 1); // this function won't work otherwise
     check_state_with_allowed_flags(5, read->opcode,
-                                   CACHE_OP_GET_TS, OP_ACQUIRE,
+                                   OP_GET_TS, OP_ACQUIRE,
                                    KVS_OP_GET, OP_ACQUIRE_FLIP_BIT);
     if (read->opcode != KVS_OP_GET && read->opcode != OP_ACQUIRE &&
-        read->opcode != CACHE_OP_GET_TS &&
+        read->opcode != OP_GET_TS &&
         read->opcode != OP_ACQUIRE_FLIP_BIT)
       my_printf(red, "Receiving read: Opcode %u, i %u/%u \n", read->opcode, read_i, r_num);
   }

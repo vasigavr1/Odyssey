@@ -76,6 +76,9 @@ static inline bool check_seqlock_lock_free(seqlock_t *seqlock,
   uint64_t tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
   if (*read_lock == tmp_lock) return true;
   else {
+    while (is_odd(tmp_lock)) {
+      tmp_lock = (uint64_t) atomic_load_explicit (seqlock, memory_order_acquire);
+    }
     *read_lock = tmp_lock;
     return false;
   }
@@ -122,7 +125,7 @@ static inline bool keys_are_equal(struct key *key1, struct key *key2) {
 }
 
 // Compares two network timestamps, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_netw_ts(struct network_ts_tuple *ts1, struct network_ts_tuple *ts2)
+static inline compare_t compare_netw_ts(struct network_ts_tuple *ts1, struct network_ts_tuple *ts2)
 {
   if ((ts1->version == ts2->version) &&
       (ts1->m_id == ts2->m_id))
@@ -140,7 +143,7 @@ static inline enum ts_compare compare_netw_ts(struct network_ts_tuple *ts1, stru
 }
 
 // Compares two timestamps, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_ts(struct ts_tuple *ts1, struct ts_tuple *ts2)
+static inline compare_t compare_ts(struct ts_tuple *ts1, struct ts_tuple *ts2)
 {
   if ((ts1->version == ts2->version) &&
       (ts1->m_id == ts2->m_id))
@@ -156,8 +159,8 @@ static inline enum ts_compare compare_ts(struct ts_tuple *ts1, struct ts_tuple *
   return ERROR;
 }
 
-// Compares a network ts with a regular ts, returns SMALLER if ts1 < ts2
-static inline enum ts_compare compare_netw_ts_with_ts(struct network_ts_tuple *ts1, struct ts_tuple *ts2)
+// Compares a network base_ts with a regular base_ts, returns SMALLER if ts1 < ts2
+static inline compare_t compare_netw_ts_with_ts(struct network_ts_tuple *ts1, struct ts_tuple *ts2)
 {
   if ((ts1->version == ts2->version) &&
       (ts1->m_id == ts2->m_id))
@@ -174,7 +177,7 @@ static inline enum ts_compare compare_netw_ts_with_ts(struct network_ts_tuple *t
   return ERROR;
 }
 
-static inline enum ts_compare compare_ts_with_flat(struct ts_tuple *ts1, uint32_t version2, uint8_t m_id2) {
+static inline compare_t compare_ts_with_flat(struct ts_tuple *ts1, uint32_t version2, uint8_t m_id2) {
   if ((ts1->version == version2) &&
       (ts1->m_id == m_id2))
     return EQUAL;
@@ -190,7 +193,7 @@ static inline enum ts_compare compare_ts_with_flat(struct ts_tuple *ts1, uint32_
   return ERROR;
 }
 
-static inline enum ts_compare compare_ts_with_netw_ts(struct ts_tuple *ts1, struct network_ts_tuple *ts2) {
+static inline compare_t compare_ts_with_netw_ts(struct ts_tuple *ts1, struct network_ts_tuple *ts2) {
   if ((ts1->version == ts2->version) &&
       (ts1->m_id == ts2->m_id))
     return EQUAL;
@@ -208,7 +211,7 @@ static inline enum ts_compare compare_ts_with_netw_ts(struct ts_tuple *ts1, stru
 
 
 
-static inline enum ts_compare compare_ts_generic(struct ts_tuple *ts1, uint8_t flag1, struct ts_tuple *ts2, uint8_t flag2)
+static inline compare_t compare_ts_generic(struct ts_tuple *ts1, uint8_t flag1, struct ts_tuple *ts2, uint8_t flag2)
 {
   uint32_t version1 = ts1->version;
   uint32_t version2 = ts1->version;
@@ -256,18 +259,54 @@ static inline enum ts_compare compare_ts_generic(struct ts_tuple *ts1, uint8_t f
 }
 
 
-// First argument is the network ts
+// First argument is the network base_ts
 static inline void assign_ts_to_netw_ts(struct network_ts_tuple *ts1, struct ts_tuple *ts2)
 {
   ts1->m_id = ts2->m_id;
   ts1->version = ts2->version;
 }
 
-// First argument is the ts
+// First argument is the base_ts
 static inline void assign_netw_ts_to_ts(struct ts_tuple *ts1, struct network_ts_tuple *ts2)
 {
   ts1->m_id = ts2->m_id;
   ts1->version = ts2->version;
+}
+
+
+static inline compare_t compare_carts_esoteric(compare_t ts_comp, uint32_t log1, uint32_t log2)
+{
+  compare_t log_comp = log1 == log2 ? EQUAL : SMALLER;
+  if (log1 > log2) log_comp = GREATER;
+
+  switch (ts_comp) {
+    case EQUAL:
+      return log_comp;
+    case  GREATER:
+      //if (ENABLE_ASSERTIONS) assert(log_comp != SMALLER);
+      return GREATER;
+    default:
+      if (ENABLE_ASSERTIONS) {
+        assert(ts_comp == SMALLER);
+      }
+      return SMALLER;
+  }
+}
+
+// Compares two timestamps, returns SMALLER if ts1 < ts2
+static inline compare_t compare_carts(struct ts_tuple *ts1, uint32_t log1, struct ts_tuple *ts2, uint32_t log2)
+{
+  compare_t ts_comp = compare_ts(ts1, ts2);
+  return compare_carts_esoteric(ts_comp, log1, log2);
+
+}
+
+// Compares a network base_ts with a regular base_ts, returns SMALLER if ts1 < ts2
+static inline compare_t compare_netw_carts_with_carts(struct network_ts_tuple *ts1, uint32_t log1,
+                                                      struct ts_tuple *ts2, uint32_t log2)
+{
+  compare_t ts_comp = compare_netw_ts_with_ts(ts1, ts2);
+  return compare_carts_esoteric(ts_comp, log1, log2);
 }
 
 
