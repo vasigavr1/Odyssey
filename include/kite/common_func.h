@@ -79,10 +79,10 @@
 #define MAX_SERVER_PORTS 1 // better not change that
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 5
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define SESSIONS_PER_THREAD 60
+#define SESSIONS_PER_THREAD 1
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -100,7 +100,7 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 1000// this is out of 1000, e.g. 10 means 1%
+#define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 300// this is out of 1000, e.g. 10 means 1%
@@ -111,15 +111,15 @@
 #define TURN_OFF_KITE_ 0
 #define TURN_OFF_KITE (EMULATE_ABD ? 1 : TURN_OFF_KITE_)
 #define FEED_FROM_TRACE 0 // used to enable skew++
-#define ACCEPT_IS_RELEASE 0
+#define ACCEPT_IS_RELEASE 1
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-#define ENABLE_CLIENTS 0
-#define CLIENTS_PER_MACHINE_ 4
+#define ENABLE_CLIENTS 1
+#define CLIENTS_PER_MACHINE_ 1
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
-#define ENABLE_ALL_ABOARD 1
+#define ENABLE_ALL_ABOARD 0
 #define ALL_ABOARD_TIMEOUT_CNT K_16
 #define LOG_TOO_HIGH_TIME_OUT 10
 #define ENABLE_LOCK_FREE_READING 1
@@ -290,8 +290,8 @@ typedef struct  {
 //////////////////////////////////////////////////////
 /////////////~~~~FUNCTIONS~~~~~~/////////////////////////
 //////////////////////////////////////////////////////
-typedef enum {yellow, red, green, cyan, magenta, regular} Color;
-static void my_printf(Color color, const char *format, ...)
+typedef enum {yellow, red, green, cyan, magenta, regular} color_t;
+static void my_printf(color_t color, const char *format, ...)
 {
 
   size_t LIMIT = 1000;

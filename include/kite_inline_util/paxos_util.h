@@ -539,6 +539,7 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
 
     }
     memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
+    print_treiber_top((struct top *) kv_ptr->last_accepted_value, "writing help to last_accepted", green);
     kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base base_ts of the RMW we are helping
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
@@ -596,6 +597,8 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
   kv_ptr->last_committed_log_no = loc_entry_to_commit->log_no;
   kv_ptr->last_committed_rmw_id = loc_entry_to_commit->rmw_id;
   bool overwrite_kv = compare_ts(&loc_entry_to_commit->base_ts, &kv_ptr->ts) != SMALLER;
+  assert(loc_entry_to_commit->base_ts.version == 0);
+  assert(kv_ptr->ts.version == 0);
   // Update the KVS if the base base_ts of the entry to be committed is equal or greater than the locally stored
   // Beyond that there are two cases:
   // 1. When not helping and the RMW is successful
@@ -872,22 +875,28 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
 //    unlock_seqlock(&kv_ptr->seqlock);
 //    return 0;
 //  }
-
+  assert(use_commit);
+  uint32_t last_committed_log_no = kv_ptr->last_committed_log_no;
   if (use_commit && com->opcode == COMMIT_OP_NO_VAL) {
     is_log_higher = attempt_remote_commit_no_value(kv_ptr, (struct commit_no_val*) com, t_id);
     if (is_log_higher) {
       value = kv_ptr->last_accepted_value;
       tmp_ts = kv_ptr->base_acc_ts;
       log_no = kv_ptr->log_no;
+      assert(kv_ptr->base_acc_ts.version == 0);
+      assert(tmp_ts.version == 0);
     }
   }
   else is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
   compare_t cart_comp = compare_carts(&tmp_ts, log_no, &kv_ptr->ts,
-                                      kv_ptr->last_committed_log_no);
+                                      last_committed_log_no);
   if (cart_comp == GREATER) {
     kv_ptr->ts = tmp_ts;
+    assert(kv_ptr->ts.version == 0);
     memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
+    const char* message = com->opcode == COMMIT_OP_NO_VAL ? "Commit no value" : "Commit with value";
+    if (com->opcode == COMMIT_OP_NO_VAL) print_treiber_top((struct top *) kv_ptr->value, message, red);
   }
   if (COMMIT_LOGS && is_log_higher) {
     update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,

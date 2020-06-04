@@ -78,6 +78,11 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
       loc_entry->rmw_is_successful = memcmp(loc_entry->compare_val,
                                             kv_ptr->value,
                                             loc_entry->rmw_val_len) == 0;
+      if (loc_entry->rmw_is_successful) {
+        print_treiber_top(comp_top, "Comp top", green);
+        print_treiber_top(top, "Stored top", green);
+        print_treiber_top(new_top, "New top", green);
+      }
       if (!loc_entry->rmw_is_successful)
         memcpy(loc_entry->value_to_read, kv_ptr->value,
                loc_entry->rmw_val_len);
@@ -344,12 +349,13 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
     com->opcode = COMMIT_OP;
     com->log_no = loc_entry->log_no;
     com->base_ts.version = loc_entry->base_ts.version;
+    assert(com->base_ts.version == 0);
     if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
       memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
     } else {
       memcpy(com->value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     }
-
+    //print_treiber_top((struct top *) com->value, "Sending commit", cyan);
     if (ENABLE_ASSERTIONS) {
       assert(com->log_no > 0);
       assert(com->t_rmw_id > 0);
@@ -361,6 +367,7 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
 static inline void fill_commit_message_from_r_info(struct commit *com,
                                                    r_info_t* r_info, uint16_t t_id)
 {
+  assert(false);
   com->base_ts.m_id = r_info->ts_to_read.m_id;
   com->base_ts.version = r_info->ts_to_read.version;
   memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);

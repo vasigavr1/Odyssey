@@ -13,6 +13,7 @@ void static_assert_compile_parameters()
   assert(MICA_OP_SIZE == sizeof(mica_op_t));
   static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
   static_assert(IS_ALIGNED(2 * MICA_VALUE_SIZE, 64), "2 * VALUE_SIZE must be aligned with 64 bytes");
+  static_assert(MICA_VALUE_SIZE >= VALUE_SIZE, "");
   static_assert(PAXOS_TS > ALL_ABOARD_TS, "Paxos TS must be bigger than ALL Aboard TS");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");

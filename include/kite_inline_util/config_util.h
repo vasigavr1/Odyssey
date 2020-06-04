@@ -409,8 +409,8 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
   if (ENABLE_ASSERTIONS) {
     if (r_rep->opcode > TS_GREATER) {
       check_state_with_allowed_flags(4, r_rep->opcode, ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
-      assert(read_info->is_rmw);
-      assert(read_info->opcode == OP_ACQUIRE);
+      //assert(read_info->is_rmw);
+      //assert(read_info->opcode == OP_ACQUIRE); // could also be ooe read!
     }
     else {
       check_state_with_allowed_flags(5, r_rep->opcode, TS_SMALLER, TS_EQUAL,

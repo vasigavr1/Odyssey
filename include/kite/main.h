@@ -43,7 +43,7 @@ void *print_stats(void*);
 #define PC_WRITES_NUM 5
 #define PC_IDEAL 0
 
-#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 3) // (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM  (TREIBER_WRITES_NUM + 3) // (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -82,10 +82,10 @@ void *print_stats(void*);
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
 #define TRACE_CAS_RATIO 500 // out of a 1000
-#define ENABLE_CAS_CANCELLING 1
+#define ENABLE_CAS_CANCELLING 0
 #define RMW_CAS_CANCEL_RATIO 400 // out of 1000
 #define USE_WEAK_CAS 1
-#define MAX_TR_NODE_KEY ((GLOBAL_SESSION_NUM * TREIBER_WRITES_NUM) + NUM_OF_RMW_KEYS)
+
 
 // QUORUM
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)

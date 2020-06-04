@@ -487,12 +487,12 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     find_how_many_write_messages_can_be_polled(w_recv_cq, w_recv_wc, w_recv_info,
                                                acks, completed_but_not_polled_writes, t_id);
   if (completed_messages <= 0) return;
-  uint32_t index = *pull_ptr;
+  uint32_t buf_ptr = *pull_ptr;
   // Start polling
   while (polled_messages < completed_messages) {
-    struct w_message *w_mes = (struct w_message*) &incoming_ws[index].w_mes;
-    check_the_polled_write_message(w_mes, index, writes_for_kvs, t_id);
-    print_polled_write_message_info(w_mes, index, t_id);
+    struct w_message *w_mes = (struct w_message*) &incoming_ws[buf_ptr].w_mes;
+    check_the_polled_write_message(w_mes, buf_ptr, writes_for_kvs, t_id);
+    print_polled_write_message_info(w_mes, buf_ptr, t_id);
     uint8_t w_num = w_mes->coalesce_num;
     check_state_with_allowed_flags(4, w_mes->opcode, ONLY_WRITES, ONLY_ACCEPTS, WRITES_AND_ACCEPTS);
     bool is_only_accepts = w_mes->opcode == ONLY_ACCEPTS;
@@ -540,10 +540,10 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
     writes_for_kvs = running_writes_for_kvs;
     count_stats_on_receiving_w_mes_reset_w_num(w_mes, w_num, t_id);
-    MOD_ADD(index, W_BUF_SLOTS);
+    MOD_ADD(buf_ptr, W_BUF_SLOTS);
     polled_messages++;
   }
-  (*pull_ptr) = index;
+  (*pull_ptr) = buf_ptr;
 
   if (writes_for_kvs > 0) {
     if (DEBUG_WRITES) my_printf(yellow, "Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);

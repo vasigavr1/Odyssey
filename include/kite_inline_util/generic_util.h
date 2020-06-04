@@ -526,5 +526,10 @@ static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
   }
 }
 
+static inline void print_treiber_top(struct top* top, const char *message, color_t color)
+{
+ //my_printf(color, "%s: key_id %u push/pop %u, %u \n", message,  top->key_id, top->push_counter, top->pop_counter);
+}
+
 
 #endif //KITE_GENERIC_UTILITY_H

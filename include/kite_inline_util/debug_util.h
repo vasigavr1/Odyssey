@@ -560,10 +560,10 @@ static inline void check_the_polled_write_message(struct w_message *w_mes,
                                                   uint32_t index, uint32_t polled_writes, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
-    assert(w_mes->m_id < MACHINE_NUM);
+//    assert(w_mes->m_id < MACHINE_NUM);
     assert(w_mes->coalesce_num <= MAX_MES_IN_WRITE);
     uint32_t debug_cntr = 0;
-    if (w_mes->coalesce_num == 0) {
+    if (w_mes->coalesce_num == 0 || w_mes->m_id >= MACHINE_NUM) {
       my_printf(red, "Wrkr %u received a write with coalesce_num %u, op %u from machine %u with lid %lu \n",
                 t_id, w_mes->coalesce_num, w_mes->write[0].opcode, w_mes->m_id, w_mes->l_id);
       assert(false);
