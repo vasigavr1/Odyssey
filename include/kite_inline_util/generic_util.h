@@ -448,7 +448,7 @@ static inline bool r_rep_has_big_size(uint8_t opcode)
 
 static inline bool r_rep_has_rmw_acq_size(uint8_t opcode)
 {
-  return opcode == ACQ_LOG_TOO_SMALL || (opcode == ACQ_LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET);
+  return opcode == ACQ_CARTS_TOO_SMALL || (opcode == ACQ_CARTS_TOO_SMALL + FALSE_POSITIVE_OFFSET);
 }
 
 static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
@@ -465,7 +465,7 @@ static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
 // Give an opcode to get the size of the read rep messages
 static inline uint16_t get_size_from_opcode(uint8_t opcode)
 {
-  if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+  if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
   switch(opcode) {
     // ----RMWS-----
     case LOG_TOO_SMALL:
@@ -484,10 +484,10 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
     case NO_OP_PROP_REP:
       return PROP_REP_SMALL_SIZE;
       //---- RMW ACQUIRES--------
-    case ACQ_LOG_TOO_HIGH:
-    case ACQ_LOG_EQUAL:
+    case ACQ_CARTS_TOO_HIGH:
+    case ACQ_CARTS_EQUAL:
       return R_REP_SMALL_SIZE;
-    case ACQ_LOG_TOO_SMALL:
+    case ACQ_CARTS_TOO_SMALL:
       return RMW_ACQ_REP_SIZE;
       // -----REGULAR READS/ACQUIRES----
     case TS_SMALLER:

@@ -89,29 +89,25 @@ void print_cache_stats(struct timespec start, int id);
 // Locate the buckets for the requested keys
 static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key op_key,
 																				 struct mica_bkt **bkt_ptr, uint *tag,
-																				 mica_op_t **kv_ptr, uint8_t *key_in_store,
-																				 mica_kv_t *KVS)
+																				 mica_op_t **kv_ptr, mica_kv_t *KVS)
 {
 	bkt[op_i] = op_key.bkt & KVS->bkt_mask;
 	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
 //  printf("bkt %u \n", bkt[op_i]);
 	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
 	tag[op_i] = op_key.tag;
-	key_in_store[op_i] = 0;
 	kv_ptr[op_i] = NULL;
 }
 
 // Locate the buckets for the requested keys
 static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, struct key *op_key,
 																									struct mica_bkt **bkt_ptr, uint *tag,
-																									mica_op_t **kv_ptr,
-																									uint8_t *key_in_store, mica_kv_t *KVS)
+																									mica_op_t **kv_ptr, mica_kv_t *KVS)
 {
 	bkt[op_i] = op_key->bkt & KVS->bkt_mask;
 	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
 	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
 	tag[op_i] = op_key->tag;
-	key_in_store[op_i] = 0;
 	kv_ptr[op_i] = NULL;
 }
 

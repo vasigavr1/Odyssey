@@ -86,9 +86,9 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 // for the same RMW-id and TS, that means the proposer will never see this opcode because
 // it has already gathered prop reps quorum and sent accepts
 #define NO_OP_PROP_REP 41
-#define ACQ_LOG_TOO_SMALL 42
-#define ACQ_LOG_TOO_HIGH 43
-#define ACQ_LOG_EQUAL 44 // for acquires on rmws, the response is with respect to the log numbers
+#define ACQ_CARTS_TOO_SMALL 42
+#define ACQ_CARTS_TOO_HIGH 43
+#define ACQ_CARTS_EQUAL 44
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was

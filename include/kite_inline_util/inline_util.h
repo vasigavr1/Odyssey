@@ -154,10 +154,10 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
       if (loc_entry->rmw_reps.ready_to_inspect) {
         inspect_accepts(p_ops, loc_entry, t_id);
-        check_state_with_allowed_flags(6, (int) loc_entry->state, INVALID_RMW, RETRY_WITH_BIGGER_TS,
+        check_state_with_allowed_flags(7, (int) loc_entry->state, ACCEPTED, INVALID_RMW, RETRY_WITH_BIGGER_TS,
                                        NEEDS_KV_PTR, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
         if (ENABLE_ASSERTIONS && loc_entry->rmw_reps.ready_to_inspect)
-            assert (loc_entry->state == ACCEPTED && loc_entry->all_aboard);
+            assert(loc_entry->state == ACCEPTED && loc_entry->all_aboard);
       }
     }
 
@@ -548,7 +548,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
   if (writes_for_kvs > 0) {
     if (DEBUG_WRITES) my_printf(yellow, "Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);
     KVS_batch_op_updates((uint16_t) writes_for_kvs, t_id, (struct write **) p_ops->ptrs_to_mes_ops,
-                         p_ops, 0, (uint32_t) MAX_INCOMING_W, ENABLE_ASSERTIONS == 1);
+                         p_ops, 0, (uint32_t) MAX_INCOMING_W);
     if (DEBUG_WRITES) my_printf(yellow, "Worker %u propagated %u writes to the kvs \n", t_id, writes_for_kvs);
   }
 }
@@ -607,7 +607,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
   (*pull_ptr) = index;
   // Poll for the completion of the receives
   if (polled_messages > 0) {
-    KVS_batch_op_reads(polled_reads, t_id, p_ops, 0, MAX_INCOMING_R, ENABLE_ASSERTIONS == 1);
+    KVS_batch_op_reads(polled_reads, t_id, p_ops, 0, MAX_INCOMING_R);
     if (ENABLE_ASSERTIONS) dbg_counter[R_QP_ID] = 0;
   }
   else if (ENABLE_ASSERTIONS && p_ops->r_rep_fifo->mes_size == 0) dbg_counter[R_QP_ID]++;
@@ -819,7 +819,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     int read_i = -1; // count non-rmw read replies
     for (uint16_t i = 0; i < r_rep_num; i++) {
       struct r_rep_big *r_rep = (struct r_rep_big *)(((void *) r_rep_mes) + byte_ptr);
-      //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode comes \n");
+      //if (r_rep->opcode > ACQ_CARTS_EQUAL) printf("big opcode comes \n");
       check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
       byte_ptr += get_size_from_opcode(r_rep->opcode);
       bool is_rmw_rep = opcode_is_rmw_rep(r_rep->opcode);
@@ -882,10 +882,6 @@ static inline void commit_reads(p_ops_t *p_ops,
   // or if it is an out-of-epoch write (but NOT a Release!!)
   bool write_local_kvs;
 
-  // Acquires on RMWs: In the same spirit we need a flag to denote whether we should broadcast commits
-  // while the flag 'write_local_kvs' denotes whether we should commit to the local KVS
-  bool insert_commit_flag;
-
   // Signal completion before going to the KVS on an Acquire that needs not go to the KVS
   bool signal_completion;
   // Signal completion after going to the KVS on an Acquire that needs to go to the KVS but does not need to be sent out (!!),
@@ -903,14 +899,13 @@ static inline void commit_reads(p_ops_t *p_ops,
     r_info_t *read_info = &p_ops->read_info[pull_ptr];
     //set the flags for each read
     set_flags_before_committing_a_read(read_info, &acq_second_round_to_flip_bit, &insert_write_flag,
-                                       &write_local_kvs, &insert_commit_flag,
+                                       &write_local_kvs,
                                        &signal_completion, &signal_completion_after_kvs_write, t_id);
     checks_when_committing_a_read(p_ops, pull_ptr, acq_second_round_to_flip_bit, insert_write_flag,
-                                  write_local_kvs, insert_commit_flag,
-                                  signal_completion, signal_completion_after_kvs_write, t_id);
+                                  write_local_kvs, signal_completion, signal_completion_after_kvs_write, t_id);
 
     // Break condition: this read cannot be processed, and thus no subsequent read will be processed
-    if (((insert_write_flag || insert_commit_flag) && ((p_ops->virt_w_size + 1) >= MAX_ALLOWED_W_SIZE)) ||
+    if (((insert_write_flag) && ((p_ops->virt_w_size + 1) >= MAX_ALLOWED_W_SIZE)) ||
         (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R)))// ||
        // (acq_second_round_to_flip_bit) && (p_ops->virt_r_size >= MAX_ALLOWED_R_SIZE))
       break;
@@ -950,12 +945,6 @@ static inline void commit_reads(p_ops_t *p_ops,
       else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
-    // insert commit after rmw acquire if not a quorum of people have seen the last committed value
-    else if (insert_commit_flag) {
-      if (ENABLE_ASSERTIONS) assert(WRITE_RATIO > 0 || RMW_RATIO > 0);
-      if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
-      insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
-    }
 
 
     // FAULT_TOLERANCE: In the off chance that the acquire needs a second round for fault tolerance
@@ -977,7 +966,7 @@ static inline void commit_reads(p_ops_t *p_ops,
     }
 
     // SESSION: Acquires that wont have a second round and thus must free the session
-    if (!insert_write_flag && !insert_commit_flag && (read_info->opcode == OP_ACQUIRE)) {
+    if (!insert_write_flag && (read_info->opcode == OP_ACQUIRE)) {
       if (ENABLE_ASSERTIONS) {
         assert(p_ops->r_session_id[pull_ptr] < SESSIONS_PER_THREAD);
         assert(p_ops->sess_info[p_ops->r_session_id[pull_ptr]].stalled);

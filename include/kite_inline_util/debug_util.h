@@ -490,8 +490,8 @@ static inline void print_q_info(struct quorum_info *q_info)
 // From commit reads
 static inline void checks_when_committing_a_read(p_ops_t *p_ops, uint32_t pull_ptr,
                                                  bool acq_second_round_to_flip_bit, bool insert_write_flag,
-                                                 bool write_local_kvs, bool insert_commit_flag,
-                                                 bool signal_completion, bool signal_completion_after_kvs_write,
+                                                 bool write_local_kvs, bool signal_completion,
+                                                 bool signal_completion_after_kvs_write,
                                                  uint16_t t_id)
 {
   r_info_t *read_info = &p_ops->read_info[pull_ptr];
@@ -502,31 +502,28 @@ static inline void checks_when_committing_a_read(p_ops_t *p_ops, uint32_t pull_p
     assert(!(signal_completion && signal_completion_after_kvs_write));
     if (read_info->is_rmw) {
       assert(read_info->opcode == OP_ACQUIRE);
-      assert(!insert_write_flag);
-      assert(ENABLE_RMW_ACQUIRES);
     }
     if (read_info->opcode == OP_ACQUIRE_FLIP_BIT) {
       //printf("%d, %d, %d, %d, %d, %d \n", acq_second_round_to_flip_bit, insert_write_flag, write_local_kvs, insert_commit_flag,
       //                               signal_completion, signal_completion_after_kvs_write);
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs && !insert_commit_flag &&
+      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !write_local_kvs &&
              !signal_completion && !signal_completion_after_kvs_write);
     }
     if (read_info->opcode == KVS_OP_GET) {
       assert(epoch_id > 0);
-      assert(!acq_second_round_to_flip_bit && !insert_write_flag && !insert_commit_flag &&
+      assert(!acq_second_round_to_flip_bit && !insert_write_flag &&
              !signal_completion && signal_completion_after_kvs_write && write_local_kvs);
     }
     if (read_info->opcode == OP_RELEASE)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs && !insert_commit_flag &&
+      assert(!acq_second_round_to_flip_bit && insert_write_flag && !write_local_kvs &&
              !signal_completion && !signal_completion_after_kvs_write);
     if (read_info->opcode == KVS_OP_PUT)
-      assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs && !insert_commit_flag &&
+      assert(!acq_second_round_to_flip_bit && insert_write_flag && write_local_kvs &&
              !signal_completion && signal_completion_after_kvs_write);
     if (read_info->opcode == OP_ACQUIRE) {
-      if (insert_write_flag || insert_commit_flag) assert(!signal_completion && !signal_completion_after_kvs_write);
+      if (insert_write_flag) assert(!signal_completion && !signal_completion_after_kvs_write);
       else if (write_local_kvs) assert(signal_completion_after_kvs_write);
       else assert(signal_completion);
-      if (insert_commit_flag) assert(read_info->is_rmw);
     }
   }
   if (DEBUG_READS || DEBUG_TS)
@@ -697,13 +694,13 @@ static inline void check_a_polled_r_rep(struct r_rep_big *r_rep,
                                         uint16_t t_id) {
   if (ENABLE_ASSERTIONS) {
     uint8_t opcode = r_rep->opcode;
-    if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+    if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
     //check_state_with_allowed_flags(8, opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
     //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
 
-    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > ACQ_LOG_EQUAL) &&
+    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > ACQ_CARTS_EQUAL) &&
         (r_rep->opcode < TS_SMALLER + FALSE_POSITIVE_OFFSET ||
-         r_rep->opcode > ACQ_LOG_EQUAL + FALSE_POSITIVE_OFFSET)) {
+         r_rep->opcode > ACQ_CARTS_EQUAL + FALSE_POSITIVE_OFFSET)) {
       my_printf(red, "Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, r_rep_i, r_rep_num);
       assert(false);
     }
@@ -1276,14 +1273,14 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
       uint8_t opcode = r_rep->opcode;
       //if (byte_ptr > 505)
       //printf("%u/%u \n", byte_ptr, r_rep_fifo->message_sizes[pull_ptr]);
-      if (opcode > ACQ_LOG_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
-      if (opcode < TS_SMALLER || opcode > ACQ_LOG_EQUAL)
+      if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+      if (opcode < TS_SMALLER || opcode > ACQ_CARTS_EQUAL)
         printf("R_rep %u/%u, byte ptr %u/%u opcode %u/%u \n",
                i, r_rep_mes->coalesce_num, byte_ptr, r_rep_fifo->message_sizes[pull_ptr],
                opcode, r_rep_mes->opcode);
 
 
-      assert(opcode >= TS_SMALLER && opcode <= ACQ_LOG_EQUAL);
+      assert(opcode >= TS_SMALLER && opcode <= ACQ_CARTS_EQUAL);
       bool is_rmw = false, is_rmw_acquire = false;
       if (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP)
         is_rmw = true;
@@ -1299,7 +1296,7 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
       byte_ptr += get_size_from_opcode(r_rep->opcode);
 
     }
-    //if (r_rep->opcode > ACQ_LOG_EQUAL) printf("big opcode comes \n");
+    //if (r_rep->opcode > ACQ_CARTS_EQUAL) printf("big opcode comes \n");
     //check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
     if (DEBUG_READ_REPS)
       printf("Wrkr %d has %u read replies to send \n", t_id, r_rep_fifo->total_size);

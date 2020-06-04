@@ -581,7 +581,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
                                        (loc_entry_t *) op, broadcast_state,  t_id);
     }
   }
-  else { //source = FROM_READ: 2nd round of read/write/acquire/release
+  else { //source = FROM_READ: 2nd round of ooe-write/release
     write->m_id = r_info->ts_to_read.m_id;
     write->version = r_info->ts_to_read.version;
     write->key = r_info->key;
@@ -591,7 +591,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     if (ENABLE_ASSERTIONS) {
       assert(!r_info->is_rmw);
       assert(source == FROM_READ);
-      check_state_with_allowed_flags(4, r_info->opcode, KVS_OP_PUT, OP_RELEASE, OP_ACQUIRE);
+      check_state_with_allowed_flags(4, r_info->opcode, KVS_OP_PUT, OP_RELEASE);
     }
   }
   // Make sure the pointed values are correct
@@ -655,7 +655,6 @@ static inline struct r_rep_big* get_r_rep_ptr(p_ops_t *p_ops, uint64_t l_id,
     }
     else if (is_propose && r_rep_mes->opcode == READ_REPLY)
       r_rep_mes->opcode = READ_PROP_REPLY;
-    //if (ENABLE_ASSERTIONS) assert(!is_accept);
   }
 
   if (ENABLE_ASSERTIONS) {
@@ -742,13 +741,15 @@ static inline void set_up_rmw_acq_rep_message_size(p_ops_t *p_ops,
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
 
-  check_state_with_allowed_flags(7, opcode, ACQ_LOG_TOO_SMALL, ACQ_LOG_TOO_HIGH, ACQ_LOG_EQUAL,
-                                 ACQ_LOG_TOO_SMALL + FALSE_POSITIVE_OFFSET,
-                                 ACQ_LOG_TOO_HIGH + FALSE_POSITIVE_OFFSET,
-                                 ACQ_LOG_EQUAL + FALSE_POSITIVE_OFFSET);
+  check_state_with_allowed_flags(7, opcode, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_TOO_HIGH, ACQ_CARTS_EQUAL,
+                                 ACQ_CARTS_TOO_SMALL + FALSE_POSITIVE_OFFSET,
+                                 ACQ_CARTS_TOO_HIGH + FALSE_POSITIVE_OFFSET,
+                                 ACQ_CARTS_EQUAL + FALSE_POSITIVE_OFFSET);
 
-  if (opcode == ACQ_LOG_TOO_SMALL)
+  if (opcode == ACQ_CARTS_TOO_SMALL) {
     r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (RMW_ACQ_REP_SIZE - R_REP_SMALL_SIZE);
+  }
+
 
   if (ENABLE_ASSERTIONS) assert(r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] <= R_REP_SEND_SIZE);
 }
@@ -922,7 +923,7 @@ static inline void insert_write(p_ops_t *p_ops, trace_op_t *op, const uint8_t so
   }
 
   struct write *write = (struct write *)
-    get_w_ptr(p_ops, opcode, (uint16_t)p_ops->w_meta[w_ptr].sess_id, t_id);
+    get_w_ptr(p_ops, opcode, (uint16_t) p_ops->w_meta[w_ptr].sess_id, t_id);
 
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[w_mes_ptr];
@@ -1339,7 +1340,7 @@ static inline void clear_after_release_quorum(p_ops_t *p_ops,
 // When committing reads
 static inline void set_flags_before_committing_a_read(r_info_t *read_info,
                                                       bool *acq_second_round_to_flip_bit, bool *insert_write_flag,
-                                                      bool *write_local_kvs, bool *insert_commit_flag,
+                                                      bool *write_local_kvs,
                                                       bool *signal_completion, bool *signal_completion_after_kvs_write,
                                                       uint16_t t_id)
 {
@@ -1347,9 +1348,8 @@ static inline void set_flags_before_committing_a_read(r_info_t *read_info,
   bool acq_needs_second_round = (!read_info->seen_larger_ts && read_info->times_seen_ts < REMOTE_QUORUM) ||
                                 (read_info->seen_larger_ts && read_info->times_seen_ts <= REMOTE_QUORUM);
 
-  (*insert_commit_flag) = read_info->is_rmw && acq_needs_second_round;
 
-  (*insert_write_flag) = (read_info->opcode != KVS_OP_GET)  && !read_info->is_rmw &&
+  (*insert_write_flag) = (read_info->opcode != KVS_OP_GET) &&
                          (read_info->opcode == OP_RELEASE ||
                           read_info->opcode == KVS_OP_PUT || acq_needs_second_round);
 
@@ -1363,7 +1363,7 @@ static inline void set_flags_before_committing_a_read(r_info_t *read_info,
 
 
   (*signal_completion) = (read_info->opcode == OP_ACQUIRE) && !(*insert_write_flag) &&
-                         !(*insert_commit_flag) && !(*write_local_kvs);
+                         !(*write_local_kvs);
 
   //all requests that will not be early signaled except: releases and acquires that actually have a second round
   //That leaves: out-of-epoch writes/reads & acquires that want to write the KVS
@@ -1472,7 +1472,7 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
                                                  uint16_t t_id)
 {
   detect_false_positives_on_read_info_bookkeeping((struct r_rep_big *) acq_rep, read_info, t_id);
-  if (acq_rep->opcode == ACQ_LOG_TOO_SMALL) {
+  if (acq_rep->opcode == ACQ_CARTS_TOO_SMALL) {
     if (!read_info->seen_larger_ts) { // If this is the first "Greater" base_ts
       fill_read_info_from_read_rep(acq_rep, read_info, t_id);
       read_info->seen_larger_ts = true;
@@ -1487,12 +1487,12 @@ static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_
       // Nothing to do if the already stored base_ts is greater than the incoming
     }
   }
-  else if (acq_rep->opcode == ACQ_LOG_EQUAL) {
+  else if (acq_rep->opcode == ACQ_CARTS_EQUAL) {
     if (!read_info->seen_larger_ts)  // If it has not seen a "greater base_ts"
       read_info->times_seen_ts++;
     // Nothing to do if the already stored base_ts is greater than the incoming
   }
-  else if (acq_rep->opcode == ACQ_LOG_TOO_HIGH) {
+  else if (acq_rep->opcode == ACQ_CARTS_TOO_HIGH) {
     // Nothing to do if the already stored base_ts is greater than the incoming
   }
   read_info->rep_num++;
