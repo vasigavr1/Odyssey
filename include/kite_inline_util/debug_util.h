@@ -466,6 +466,35 @@ static inline void debug_all_sessions(struct session_dbg *ses_dbg, p_ops_t *p_op
   }
 }
 
+static inline void print_all_stalled_sessions(p_ops_t *p_ops, uint16_t t_id)
+{
+  uint32_t count = 0;
+  for (uint16_t sess_i = 0; sess_i < SESSIONS_PER_THREAD; sess_i++) {
+    uint32_t glob_sess_i = get_glob_sess_id((uint8_t) machine_id, t_id, sess_i);
+
+    if (p_ops->sess_info[sess_i].stalled) {
+      loc_entry_t *loc_entry = &p_ops->prop_info->entry[sess_i];
+      if (!count) {
+        my_printf(yellow, "----------------------------------------\n");
+        my_printf(yellow, "WORKER %u STALLED SESSIONS\n", t_id);
+        my_printf(yellow, "----------------------------------------\n");
+      }
+      count++;
+      my_printf(magenta, "Session %u state %u reason %u \n",
+                glob_sess_i, loc_entry->state, loc_entry->stalled_reason);
+      if (loc_entry->stalled_reason == STALLED_BECAUSE_NOT_ENOUGH_REPS) {
+        rmw_rep_info_t *reps = &loc_entry->rmw_reps;
+        my_printf(red, "Session %u, reps %u\n", glob_sess_i, reps->tot_replies);
+      }
+    }
+  }
+  if (count) {
+    my_printf(yellow, "----------------------------------------\n");
+    my_printf(yellow, "%u STALLED SESSIONS FOUND FOR WORKER %u \n", count, t_id);
+    my_printf(yellow, "----------------------------------------\n");
+  }
+}
+
 
 // Prints out information about the participants
 static inline void print_q_info(struct quorum_info *q_info)

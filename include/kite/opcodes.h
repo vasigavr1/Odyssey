@@ -239,4 +239,7 @@ typedef enum {
   READ_REQ,
 } req_type;
 
+
+enum {NO_REASON = 0, STALLED_BECAUSE_ACC_RELEASE = 1, STALLED_BECAUSE_NOT_ENOUGH_REPS};
+
 #endif //KITE_OPCODES_H

@@ -886,6 +886,7 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
   acc->l_id = loc_entry->l_id;
   acc->t_rmw_id = loc_entry->rmw_id.id;
   assign_ts_to_netw_ts(&acc->base_ts, &loc_entry->base_ts);
+  assert(acc->base_ts.version == 0);
   assign_ts_to_netw_ts(&acc->ts, &loc_entry->new_ts);
   memcpy(&acc->key, &loc_entry->key, TRUE_KEY_SIZE);
   acc->opcode = ACCEPT_OP;
@@ -1229,12 +1230,14 @@ static inline bool cannot_accept_if_unsatisfied_release(loc_entry_t* loc_entry,
 {
   if (TURN_OFF_KITE || (!ACCEPT_IS_RELEASE)) return false;
   if (loc_entry->must_release && !sess_info->ready_to_release) {
+    loc_entry->stalled_reason = STALLED_BECAUSE_ACC_RELEASE;
     return true;
   }
   else if (loc_entry->must_release) {
+    loc_entry->stalled_reason = NO_REASON;
     loc_entry->must_release = false;
-    return false;
   }
+  return false;
 }
 
 /*----------------------------------------------------

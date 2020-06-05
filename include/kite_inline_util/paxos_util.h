@@ -106,6 +106,7 @@ static inline uint8_t is_base_ts_too_small(mica_op_t *kv_ptr,
     rep->ts.version = kv_ptr->ts.version;
     rep->ts.m_id = kv_ptr->ts.m_id;
     memcpy(rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
+    check_top((struct top *) kv_ptr->value, "base_too_small", 0);
 //    assert(false);
     return RMW_ACK_BASE_TS_STALE;
 
@@ -170,6 +171,7 @@ static inline void init_loc_entry(p_ops_t* p_ops,
     assert(op->real_val_len <= RMW_VALUE_SIZE);
     assert(!loc_entry->rmw_reps.ready_to_inspect);
     assert(loc_entry->rmw_reps.tot_replies == 0);
+    assert(loc_entry->state == INVALID_RMW);
 
   }
   if (opcode_is_compare_rmw(op->opcode) || op->opcode == RMW_PLAIN_WRITE)
@@ -180,8 +182,6 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   else if (op->opcode == FETCH_AND_ADD) {
     loc_entry->compare_val = op->value_to_write; // value to be added
   }
-
-
   loc_entry->must_release = ACCEPT_IS_RELEASE != 0;
   loc_entry->fp_detected = false;
   loc_entry->rmw_val_len = op->real_val_len;
@@ -573,6 +573,8 @@ static inline void commit_when_base_ts_is_stale(mica_op_t *kv_ptr, struct rmw_re
     if (compare_netw_ts_with_ts(&rep->ts, &kv_ptr->ts) == GREATER) {
       assign_netw_ts_to_ts(&kv_ptr->ts, &rep->ts);
       memcpy(kv_ptr->value, rep->value, (size_t) RMW_VALUE_SIZE);
+      check_treiber_values(kv_ptr->value, rep->value);
+      check_top((struct top *) kv_ptr->value, "com_when_base_ts_is_stale", 0);
     }
   unlock_seqlock(&kv_ptr->seqlock);
 }
@@ -599,6 +601,7 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
   bool overwrite_kv = compare_ts(&loc_entry_to_commit->base_ts, &kv_ptr->ts) != SMALLER;
   assert(loc_entry_to_commit->base_ts.version == 0);
   assert(kv_ptr->ts.version == 0);
+
   // Update the KVS if the base base_ts of the entry to be committed is equal or greater than the locally stored
   // Beyond that there are two cases:
   // 1. When not helping and the RMW is successful
@@ -607,17 +610,28 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
     update_commit_logs(t_id, kv_ptr->key.bkt, loc_entry_to_commit->log_no,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
-    if (overwrite_kv) memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
+    if (overwrite_kv) {
+      check_treiber_values(kv_ptr->value, loc_entry_to_commit->value_to_write);
+      memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
+    }
+    check_top((struct top *) kv_ptr->value, "take_actions_to_commit_rmw-succ-not-helping", 0);
   }
   else if (loc_entry->helping_flag == HELPING) {
     update_commit_logs(t_id, kv_ptr->key.bkt, loc_entry_to_commit->log_no,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
-    if (overwrite_kv) memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
+    if (overwrite_kv) {
+      check_treiber_values(kv_ptr->value, loc_entry_to_commit->value_to_write);
+      memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
+    }
+    check_top((struct top *) kv_ptr->value, "take_actions_to_commit_rmw-helping", 0);
   }
   if (overwrite_kv) {
     kv_ptr->ts.m_id = loc_entry_to_commit->base_ts.m_id;
     kv_ptr->ts.version = loc_entry_to_commit->base_ts.version;
+
+
+    assert(kv_ptr->ts.version == 0);
   }
 
 }
@@ -641,7 +655,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
   // Check if the entry is still working on that log, or whether it has moved on
   // (because the current rmw is already committed)
   if (kv_ptr->log_no == loc_entry_to_commit->log_no && kv_ptr->state != INVALID_RMW) {
-    //the log numbers should match
+    //the rmw-ids should match
     if (ENABLE_ASSERTIONS) {
       if (!rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->rmw_id)) {
         my_printf(red, "Wrkr %u kv_ptr is on same log as what is about to be committed but on different rmw-id:"
@@ -737,7 +751,9 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
                        rmw_rep->value, "From rep ", LOG_COMS);
 
     if (compare_ts_with_netw_ts(&kv_ptr->ts, &rmw_rep->ts) != GREATER) {
+      check_treiber_values(kv_ptr->value, rmw_rep->value);
       memcpy(kv_ptr->value, rmw_rep->value, (size_t) RMW_VALUE_SIZE);
+      check_top((struct top *) kv_ptr->value, "attempt local commit from rep", 0);
       kv_ptr->ts.m_id = rmw_rep->ts.m_id;
       kv_ptr->ts.version = rmw_rep->ts.version;
     }
@@ -828,10 +844,8 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
                 new_log_no, new_rmw_id);
   }
   else if (kv_ptr->last_committed_log_no == new_log_no) {
-    const char * mes;
-    if (use_commit) mes = com->opcode == RMW_ACQ_COMMIT_OP ?
-                          "attempt_remote_commit from acq-com" : "attempt_remote_commit from com";
-    else mes =" attempt_remote_commit from r_info";
+    const char * mes = use_commit ?  "attempt_remote_commit from com" :
+                                    " attempt_remote_commit from r_info";
     check_that_the_rmw_ids_match(kv_ptr,  new_rmw_id, new_log_no,
                                  new_version, new_m_id, mes, t_id);
   }
@@ -854,7 +868,7 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
 // Could be a reply to a read, or a commit message (which could be created by a read)
 static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op, bool use_commit, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) if (!use_commit) assert(ENABLE_RMW_ACQUIRES);
+  uint64_t number_of_reqs = 0;
   bool is_log_higher;
   r_info_t * r_info = (r_info_t*) op;
   struct commit *com = (struct commit*) op;
@@ -870,11 +884,8 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   lock_seqlock(&kv_ptr->seqlock);
   check_keys_with_one_trace_op(key, kv_ptr);
 
+  bool can_commit = true;
 
-//  if(cart_comp == EQUAL) {
-//    unlock_seqlock(&kv_ptr->seqlock);
-//    return 0;
-//  }
   assert(use_commit);
   uint32_t last_committed_log_no = kv_ptr->last_committed_log_no;
   if (use_commit && com->opcode == COMMIT_OP_NO_VAL) {
@@ -883,36 +894,48 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
       value = kv_ptr->last_accepted_value;
       tmp_ts = kv_ptr->base_acc_ts;
       log_no = kv_ptr->log_no;
-      assert(kv_ptr->base_acc_ts.version == 0);
-      assert(tmp_ts.version == 0);
     }
+    else can_commit = false;
   }
   else is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
-  compare_t cart_comp = compare_carts(&tmp_ts, log_no, &kv_ptr->ts,
-                                      last_committed_log_no);
-  if (cart_comp == GREATER) {
-    kv_ptr->ts = tmp_ts;
-    assert(kv_ptr->ts.version == 0);
-    memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
-    const char* message = com->opcode == COMMIT_OP_NO_VAL ? "Commit no value" : "Commit with value";
-    if (com->opcode == COMMIT_OP_NO_VAL) print_treiber_top((struct top *) kv_ptr->value, message, red);
+  if (can_commit) {
+    if (tmp_ts.version != 0)
+      my_printf(red, "Use commit %u, commit_op %u, tmp version %u \n",
+                use_commit, com->opcode, tmp_ts.version);
+
+    compare_t cart_comp = compare_carts(&tmp_ts, log_no, &kv_ptr->ts,
+                                        last_committed_log_no);
+    if (cart_comp == GREATER) {
+      assert(is_log_higher);
+      kv_ptr->ts = tmp_ts;
+      assert(kv_ptr->ts.version == 0);
+      if (!check_treiber_values(kv_ptr->value, value)) {
+        my_printf(green, "Use commit %u, commit_op %u, tmp version %u is_log_higher %d\n",
+                  use_commit, com->opcode, tmp_ts.version, is_log_higher);
+        assert(false);
+      }
+      memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
+
+      const char *message = com->opcode == COMMIT_OP_NO_VAL ? "Commit no value" : "Commit with value";
+      if (com->opcode == COMMIT_OP_NO_VAL) print_treiber_top((struct top *) kv_ptr->value, message, red);
+      check_top((struct top *) kv_ptr->value, message, 0);
+    }
+    if (COMMIT_LOGS && is_log_higher) {
+      update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
+                         value, "From remote commit ", LOG_COMS);
+    }
+    check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received commit", t_id);
+    if (ENABLE_ASSERTIONS) {
+      if (kv_ptr->state != INVALID_RMW)
+        assert(kv_ptr->rmw_id.id != tmp_rmw_id);
+    }
+    if (ENABLE_DEBUG_RMW_KV_PTR) {
+      //kv_ptr->dbg->prop_acc_num++;
+      //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
+    }
+    register_committed_global_sess_id(tmp_rmw_id, t_id);
   }
-  if (COMMIT_LOGS && is_log_higher) {
-    update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
-                       value, "From remote commit ", LOG_COMS);
-  }
-  check_log_nos_of_kv_ptr(kv_ptr, "Unlocking after received commit", t_id);
-  if (ENABLE_ASSERTIONS) {
-    if (kv_ptr->state != INVALID_RMW)
-      assert(kv_ptr->rmw_id.id != tmp_rmw_id);
-  }
-  uint64_t number_of_reqs = 0;
-  if (ENABLE_DEBUG_RMW_KV_PTR) {
-    //kv_ptr->dbg->prop_acc_num++;
-    //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
-  }
-  register_committed_global_sess_id(tmp_rmw_id, t_id);
   check_registered_against_kv_ptr_last_committed(kv_ptr, tmp_rmw_id,
                                                    "handle remote commit", t_id);
 
@@ -933,7 +956,7 @@ static inline void act_on_quorum_of_commit_acks(p_ops_t *p_ops, uint32_t ack_ptr
   if (loc_entry->helping_flag == HELPING &&
       rmw_ids_are_equal(&loc_entry->help_loc_entry->rmw_id, &loc_entry->rmw_id)) {
     loc_entry->helping_flag = HELPING_MYSELF;
-    my_printf(red, "Helping myself, byt should not\n");
+    my_printf(red, "Helping myself, but should not\n");
   }
 
   if (loc_entry->helping_flag != HELP_PREV_COMMITTED_LOG_TOO_HIGH)
@@ -957,7 +980,6 @@ static inline void act_on_quorum_of_commit_acks(p_ops_t *p_ops, uint32_t ack_ptr
       //  t_id, loc_entry->sess_id, loc_entry->rmw_id.id, p_ops->sess_info[loc_entry->sess_id].stalled);
       loc_entry->state = RETRY_WITH_BIGGER_TS;
       loc_entry->helping_flag = NOT_HELPING;
-
       break;
     default: if (ENABLE_ASSERTIONS) assert(false);
   }
@@ -1286,6 +1308,7 @@ static inline bool attempt_to_grab_kv_ptr_after_waiting(p_ops_t *p_ops,
     loc_entry->state = INVALID_RMW;
     //printf("Cancelling on needing kv_ptr Wrkr%u, sess %u, entry %u rmw_failing \n",
     //     t_id, loc_entry->sess_id, loc_entry->index_to_rmw);
+    assert(ENABLE_CAS_CANCELLING);
     free_session_from_rmw(p_ops, loc_entry->sess_id, false, t_id);
     return true;
   }
@@ -1500,23 +1523,24 @@ static inline void react_on_log_too_high(loc_entry_t *loc_entry, bool is_propose
   loc_entry->state = RETRY_WITH_BIGGER_TS;
   loc_entry->log_too_high_cntr++;
   if (loc_entry->log_too_high_cntr == LOG_TOO_HIGH_TIME_OUT) {
-    my_printf(red, "Worker: %u session %u, %s for rmw-id %u Timed out on log_too-high \n",
+    my_printf(red, "Worker: %u session %u, %s for rmw-id %u Timed out on log_too-high, key %u, log %u \n",
               t_id, loc_entry->sess_id,
               is_propose? "Prop" : "Acc",
-              loc_entry->rmw_id.id);
+              loc_entry->rmw_id.id, loc_entry->key.bkt, loc_entry->log_no);
     mica_op_t *kv_ptr = loc_entry->kv_ptr;
     lock_seqlock(&kv_ptr->seqlock);
     if (kv_ptr->last_committed_log_no + 1 == loc_entry->log_no) {
       loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
       loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
-      memcpy(help_loc_entry->value_to_write, kv_ptr->value, RMW_VALUE_SIZE);
+      memcpy(help_loc_entry->value_to_write, kv_ptr->value, (size_t) VALUE_SIZE);
+      check_top((struct top *) kv_ptr->value, "react_on_log_too_high", 0);
       assign_second_rmw_id_to_first(&help_loc_entry->rmw_id, &kv_ptr->last_committed_rmw_id);
       help_loc_entry->base_ts = kv_ptr->ts;
     }
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
 
 
-    if (loc_entry->state == MUST_BCAST_COMMITS_FROM_HELP) {
+    if (unlikely(loc_entry->state == MUST_BCAST_COMMITS_FROM_HELP)) {
       loc_entry->helping_flag = HELP_PREV_COMMITTED_LOG_TOO_HIGH;
       loc_entry->help_loc_entry->log_no = loc_entry->log_no - 1;
       loc_entry->help_loc_entry->key = loc_entry->key;
@@ -1555,6 +1579,7 @@ static inline void clean_up_after_retrying(p_ops_t *p_ops, mica_op_t *kv_ptr,
     loc_entry->state = INVALID_RMW;
     //printf("Cancelling on needing kv_ptr Wrkr%u, sess %u, entry %u rmw_failing \n",
     //     t_id, loc_entry->sess_id, loc_entry->index_to_rmw);
+    assert(ENABLE_CAS_CANCELLING);
     free_session_from_rmw(p_ops, loc_entry->sess_id, false, t_id);
   }
   else loc_entry->state = NEEDS_KV_PTR;
@@ -1739,10 +1764,10 @@ static inline void handle_needs_kv_ptr_state(p_ops_t *p_ops,
     if (ENABLE_ASSERTIONS) assert(p_ops->sess_info[sess_i].stalled);
     loc_entry->back_off_cntr++;
     if (loc_entry->back_off_cntr == RMW_BACK_OFF_TIMEOUT) {
-//          my_printf(yellow, "Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u glob_sess id %u, state %u \n",
-//                        t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
-//                        loc_entry->help_rmw->rmw_id.id, loc_entry->help_rmw->rmw_id.glob_sess_id,
-//                        loc_entry->help_rmw->state);
+       //   my_printf(yellow, "Wrkr %u  sess %u waiting for an rmw on key %u on log %u, back_of cntr %u waiting on rmw_id %u state %u \n",
+       //                 t_id, sess_i,loc_entry->key.bkt, loc_entry->help_rmw->log_no, loc_entry->back_off_cntr,
+       //                 loc_entry->help_rmw->rmw_id.id,
+       //                 loc_entry->help_rmw->state);
 
       // This is failure-related help/stealing it should not be that we are being held up by the local machine
       // However we may wait on a "local" glob sess id, because it is being helped
@@ -1905,6 +1930,7 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
   uint16_t session_id = op->session_id;
   loc_entry_t *loc_entry = &p_ops->prop_info->entry[session_id];
   if (loc_entry->state == CAS_FAILED) {
+    assert(false);
     //printf("Wrkr%u, sess %u, entry %u rmw_failing \n", t_id, session_id, resp->rmw_entry);
     signal_completion_to_client(session_id, op->index_to_req_array, t_id);
     p_ops->sess_info[session_id].stalled = false;
@@ -1915,6 +1941,8 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
   if (ENABLE_ASSERTIONS) {
     assert(session_id < SESSIONS_PER_THREAD);
   }
+
+  // my_printf(green, "Session %u starts an rmw \n", loc_entry->glob_sess_id);
   uint8_t state = (uint8_t) (ENABLE_ALL_ABOARD && op->attempt_all_aboard ? ACCEPTED: PROPOSED);
   // if the kv_ptr was occupied, put in the next op to try next round
   if (loc_entry->state == state) { // the RMW has gotten an entry and is to be sent
@@ -1936,7 +1964,7 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
     }
   }
   else if (loc_entry->state == NEEDS_KV_PTR) {
-    loc_entry->all_aboard = false;
+    if (ENABLE_ALL_ABOARD) loc_entry->all_aboard = false;
   }
   else my_assert(false, "Wrong loc_entry in RMW");
 }

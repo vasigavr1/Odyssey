@@ -18,15 +18,18 @@ void *print_stats(void*);
 /*-------------------------------------------------
 	-----------------CLIENT---------------------------
 --------------------------------------------------*/
-#define CLIENT_USE_TRACE 0
-#define CLIENT_UI 1
-#define BLOCKING_TEST_CASE 2
-#define ASYNC_TEST_CASE 3
-#define TREIBER_BLOCKING 4
-#define TREIBER_ASYNC 5 // Treiber Stack
-#define MSQ_ASYNC 6 // Michael & Scott Queue
-#define HML_ASYNC 7 // Harris & Michael List
-#define PRODUCER_CONSUMER 16
+enum {
+  CLIENT_USE_TRACE,
+  CLIENT_UI,
+  BLOCKING_TEST_CASE,
+  ASYNC_TEST_CASE,
+  TREIBER_BLOCKING,
+  TREIBER_DEBUG,
+  TREIBER_ASYNC, // Treiber Stack
+  MSQ_ASYNC, // Michael & Scott Queue
+  HML_ASYNC, // Harris & Michael List
+  PRODUCER_CONSUMER
+};
 
 #define CLIENT_MODE TREIBER_ASYNC
 
@@ -82,7 +85,7 @@ void *print_stats(void*);
 #define TRACE_ONLY_FA 1
 #define TRACE_MIXED_RMWS 0
 #define TRACE_CAS_RATIO 500 // out of a 1000
-#define ENABLE_CAS_CANCELLING 0
+
 #define RMW_CAS_CANCEL_RATIO 400 // out of 1000
 #define USE_WEAK_CAS 1
 
@@ -291,6 +294,7 @@ typedef struct rmw_rep_info {
   uint8_t nacks;
   bool no_need_to_bcast; // raised when an alrea-committed reply does not trigger commit bcasts, because it refers to a later log
   bool ready_to_inspect;
+  bool inspected;
   // used to know whether to help after a prop-- if you have seen a higher acc,
   // then you should not try to help a lower accept, and thus dont try at all
   uint32_t seen_higher_prop_version;
@@ -332,6 +336,7 @@ typedef struct rmw_local_entry {
   mica_op_t *kv_ptr;
   struct rmw_help_entry *help_rmw;
   struct rmw_local_entry* help_loc_entry;
+  uint32_t stalled_reason;
 } loc_entry_t;
 
 

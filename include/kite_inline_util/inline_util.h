@@ -153,6 +153,7 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
       check_sum_of_reps(loc_entry);
       //printf("reps %u \n", loc_entry->rmw_reps.tot_replies);
       if (loc_entry->rmw_reps.ready_to_inspect) {
+        loc_entry->rmw_reps.inspected = true;
         inspect_accepts(p_ops, loc_entry, t_id);
         check_state_with_allowed_flags(7, (int) loc_entry->state, ACCEPTED, INVALID_RMW, RETRY_WITH_BIGGER_TS,
                                        NEEDS_KV_PTR, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
@@ -163,17 +164,26 @@ static inline void inspect_rmws(p_ops_t *p_ops, uint16_t t_id)
 
     /* =============== PROPOSED ======================== */
     if (state == PROPOSED) {
-      if (cannot_accept_if_unsatisfied_release(loc_entry, &p_ops->sess_info[sess_i]))
+      if (cannot_accept_if_unsatisfied_release(loc_entry, &p_ops->sess_info[sess_i])) {
         continue;
+      }
 
       if (loc_entry->rmw_reps.ready_to_inspect) {
+        loc_entry->stalled_reason = NO_REASON;
         // further responses for that broadcast of Propose must be disregarded;
         // in addition we do this before inspecting, so that if we broadcast accepts, they have a fresh l_id
+        loc_entry->rmw_reps.inspected = true;
         advance_loc_entry_l_id(loc_entry, t_id);
         inspect_proposes(p_ops, loc_entry, t_id);
         check_state_with_allowed_flags(7, (int) loc_entry->state, INVALID_RMW, RETRY_WITH_BIGGER_TS,
                                        NEEDS_KV_PTR, ACCEPTED, MUST_BCAST_COMMITS, MUST_BCAST_COMMITS_FROM_HELP);
         if (ENABLE_ASSERTIONS) assert(!loc_entry->rmw_reps.ready_to_inspect);
+        if (loc_entry->state != ACCEPTED) assert(loc_entry->rmw_reps.tot_replies == 0);
+        else assert(loc_entry->rmw_reps.tot_replies == 1);
+      }
+      else {
+        assert(loc_entry->rmw_reps.tot_replies < QUORUM_NUM);
+        loc_entry->stalled_reason = STALLED_BECAUSE_NOT_ENOUGH_REPS;
       }
     }
 

@@ -748,6 +748,7 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uin
     loc_entry->help_loc_entry->sess_id = (uint16_t) i;
     loc_entry->help_loc_entry->helping_flag = IS_HELPER;
     loc_entry->help_loc_entry->glob_sess_id = loc_entry->glob_sess_id;
+    loc_entry->state = INVALID_RMW;
   }
   p_ops->sess_info = (sess_info_t *) calloc(SESSIONS_PER_THREAD, sizeof(sess_info_t));
   p_ops->w_meta = (per_write_meta_t *) calloc(pending_writes, sizeof(per_write_meta_t));

@@ -136,5 +136,54 @@ struct node {
   uint32_t next_key_id;
 };
 
+#define NUMBER_OF_STACKS (GLOBAL_SESSION_NUM)
+#define TR_KEY_OFFSET NUMBER_OF_STACKS
+#define MAX_TR_NODE_KEY ((GLOBAL_SESSION_NUM * TREIBER_WRITES_NUM) + TR_KEY_OFFSET)
+#define DEBUG_MAX 100
+static inline bool check_top(struct top *top, const char *message,
+                             uint32_t stack_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    bool silent = strcmp(message, "Pop-new_top before CAS ") == 0;
+    //assert(top->push_counter >= top->pop_counter);
+
+    if (top->push_counter == top->pop_counter) {
+      if (top->key_id != 0) { // Stack must be empty
+        if (!silent) my_printf(red, "%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
+                               message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        return false;
+        assert(false);
+      }
+    } else if (top->push_counter > top->pop_counter) {
+      if (top->key_id < TR_KEY_OFFSET) { // Stack cannot be empty
+        if (!silent)  my_printf(red, "%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
+                                message, stack_id, top->push_counter, top->pop_counter, top->key_id);
+        return false;
+        assert(false);
+      }
+    }
+  }
+  return true;
+}
+
+
+static inline bool check_treiber_values(uint8_t *old_val, uint8_t *new_val)
+{
+  struct top *new_top = (struct top *) new_val;
+  struct top *old_top = (struct top *) old_val;
+
+  if (new_top->push_counter < old_top->push_counter) {
+    my_printf(red, "New-push/old-push %u/%u \n",
+              new_top->push_counter , old_top->push_counter);
+    return false;
+  }
+  if (new_top->pop_counter < old_top->pop_counter) {
+    my_printf(red, "New-pop/old-pop %u/%u \n",
+              new_top->pop_counter , old_top->pop_counter);
+    return false;
+  }
+  return true;
+
+}
 
 #endif //KITE_STATS_H

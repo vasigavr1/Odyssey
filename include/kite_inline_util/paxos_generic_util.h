@@ -27,6 +27,8 @@ static inline void zero_out_the_rmw_reply_loc_entry_metadata(loc_entry_t* loc_en
   }
   //assert(loc_entry->state != ACCEPTED);
   loc_entry->help_loc_entry->state = INVALID_RMW;
+  assert(loc_entry->rmw_reps.ready_to_inspect);
+  assert(loc_entry->rmw_reps.inspected);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   if (ENABLE_ASSERTIONS) assert(!loc_entry->rmw_reps.ready_to_inspect);
   loc_entry->back_off_cntr = 0;
@@ -116,6 +118,7 @@ static inline void free_session_from_rmw(p_ops_t *p_ops, uint16_t sess_id, bool 
   }
   fill_req_array_when_after_rmw(loc_entry, t_id);
   if (VERIFY_PAXOS && allow_paxos_log) verify_paxos(loc_entry, t_id);
+  // my_printf(cyan, "Session %u completing \n", loc_entry->glob_sess_id);
   signal_completion_to_client(sess_id, loc_entry->index_to_req_array, t_id);
   p_ops->sess_info[sess_id].stalled = false;
   p_ops->all_sessions_stalled = false;
@@ -320,7 +323,8 @@ static inline void bookkeeping_after_gathering_accept_acks(loc_entry_t *loc_entr
     assert(!loc_entry->avoid_val_in_com);
     assert(!loc_entry->help_loc_entry->avoid_val_in_com);
   }
-  // Should we send commits without value?
+  if (!ENABLE_COMMITS_WITH_NO_VAL) return;
+   // Should we send commits without value?
   if (loc_entry->rmw_reps.acks == MACHINE_NUM) {
     if (loc_entry->helping_flag == HELPING)
       loc_entry->help_loc_entry->avoid_val_in_com = true;

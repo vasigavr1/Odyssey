@@ -171,9 +171,10 @@ void *worker(void *arg)
       print_verbouse_debug_info(p_ops, t_id, credits);
     }
     if (ENABLE_ASSERTIONS) {
-      if (ENABLE_ASSERTIONS && t_id == 0) time_approx++;
+      if (ENABLE_ASSERTIONS && t_id == 0)  time_approx++;
       loop_counter++;
       if (loop_counter == M_16) {
+
         //printf("Wrkr %u is working rectified keys %lu \n",
         //       t_id, t_stats[t_id].rectified_keys);
 
@@ -187,6 +188,12 @@ void *worker(void *arg)
 //        }
         loop_counter = 0;
       }
+    }
+
+    loop_counter++;
+    if (loop_counter == M_16) {
+      if (t_id == 0) print_all_stalled_sessions(p_ops, t_id);
+      loop_counter = 0;
     }
 
     /* ---------------------------------------------------------------------------
@@ -230,8 +237,7 @@ void *worker(void *arg)
     /* ---------------------------------------------------------------------------
 		------------------------------ INSPECT RMWS----------------------------------
 		---------------------------------------------------------------------------*/
-    if (ENABLE_RMWS)
-      inspect_rmws(p_ops, t_id);
+    inspect_rmws(p_ops, t_id);
 
     /* ---------------------------------------------------------------------------
     ------------------------------ POLL FOR ACKS--------------------------------
