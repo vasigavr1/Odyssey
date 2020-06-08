@@ -191,17 +191,16 @@ static inline void KVS_from_trace_rmw(trace_op_t *op,
   {
     check_trace_op_key_vs_kv_ptr(op, kv_ptr);
     check_log_nos_of_kv_ptr(kv_ptr, "KVS_batch_op_trace", t_id);
-    if (kv_ptr->state == INVALID_RMW) {
-      if (!does_rmw_fail_early(op, kv_ptr, t_id)) {
-          activate_kv_pair(state, new_version, kv_ptr, op->opcode,
-                           (uint8_t) machine_id, loc_entry, loc_entry->rmw_id.id,
-                           kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
-        loc_entry->state = state;
-        if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
-        loc_entry->log_no = kv_ptr->log_no;
-
-      }
-      else loc_entry->state = CAS_FAILED;
+    if (does_rmw_fail_early(op, kv_ptr, t_id)) {
+      loc_entry->state = CAS_FAILED;
+    }
+    else if (kv_ptr->state == INVALID_RMW) {
+      activate_kv_pair(state, new_version, kv_ptr, op->opcode,
+                       (uint8_t) machine_id, loc_entry, loc_entry->rmw_id.id,
+                       kv_ptr->last_committed_log_no + 1, t_id, ENABLE_ASSERTIONS ? "batch to trace" : NULL);
+      loc_entry->state = state;
+      if (ENABLE_ASSERTIONS) assert(kv_ptr->log_no == kv_ptr->last_committed_log_no + 1);
+      loc_entry->log_no = kv_ptr->log_no;
     }
     else {
       // This is the state the RMW will wait on
@@ -229,7 +228,6 @@ static inline void KVS_from_trace_acquires_ooe_reads(trace_op_t *op, mica_op_t *
                                                      kv_resp_t *resp, p_ops_t *p_ops,
                                                      uint32_t *r_push_ptr_, uint16_t t_id)
 {
-  assert(op->opcode != OP_ACQUIRE);
   if(ENABLE_ASSERTIONS)
     if (op->opcode != OP_ACQUIRE) assert(!TURN_OFF_KITE);
   uint32_t r_push_ptr = *r_push_ptr_;
@@ -334,7 +332,6 @@ static inline void KVS_updates_accepts(struct accept *acc, mica_op_t *kv_ptr,
         //print_treiber_top((struct top *) kv_ptr->last_accepted_value, "Receiving remote accept", green);
 //        my_printf(green, " kv_ptr Last committed log no log_no %u acc logno %u\n",
 //                  kv_ptr->last_committed_log_no, kv_ptr->log_no, acc->log_no);
-        assert(acc->base_ts.version == 0);
         assign_netw_ts_to_ts(&kv_ptr->base_acc_ts, &acc->base_ts);
       }
     }
@@ -367,7 +364,6 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
               t_id, op_i, com->t_rmw_id, com->t_rmw_id % GLOBAL_SESSION_NUM, com->log_no, com->base_ts.version);
 
   uint64_t number_of_reqs;
-  if (com->opcode != COMMIT_OP_NO_VAL) assert(com->base_ts.version == 0);
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
   if (PRINT_LOGS) {
     struct w_message *com_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
@@ -579,7 +575,6 @@ static inline void KVS_acquire_commits(r_info_t *r_info, mica_op_t *kv_ptr,
               t_id, op_i, r_info->rmw_id.id,
               r_info->log_no, r_info->ts_to_read.version);
   uint64_t number_of_reqs;
-  assert(false);
   number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) r_info, false, t_id);
   if (PRINT_LOGS) {
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, "

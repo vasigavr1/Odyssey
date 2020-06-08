@@ -174,6 +174,7 @@ void *worker(void *arg)
       if (ENABLE_ASSERTIONS && t_id == 0)  time_approx++;
       loop_counter++;
       if (loop_counter == M_16) {
+        // if (t_id == 0) print_all_stalled_sessions(p_ops, t_id);
 
         //printf("Wrkr %u is working rectified keys %lu \n",
         //       t_id, t_stats[t_id].rectified_keys);
@@ -188,12 +189,6 @@ void *worker(void *arg)
 //        }
         loop_counter = 0;
       }
-    }
-
-    loop_counter++;
-    if (loop_counter == M_16) {
-      if (t_id == 0) print_all_stalled_sessions(p_ops, t_id);
-      loop_counter = 0;
     }
 
     /* ---------------------------------------------------------------------------

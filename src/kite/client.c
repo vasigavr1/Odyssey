@@ -1799,9 +1799,8 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
     ms_set_up_tail_and_head(t_id);
   else ms_wait_for_init(t_id);
 
-  assert(sizeof(struct ms_ptr) == RMW_VALUE_SIZE);
-  assert(sizeof(struct ms_node) == VALUE_SIZE);
-  assert(NUM_OF_RMW_KEYS > LAST_MS_NODE_PTR);
+  assert(sizeof(struct ms_ptr) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct ms_node) <= VALUE_SIZE);
   assert(MS_WRITES_NUM > 0);
   uint16_t s_i = 0;
   uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
@@ -2466,8 +2465,8 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
   }
   else hm_wait_for_init(t_id);
 
-  assert(sizeof(struct hm_ptr) == RMW_VALUE_SIZE);
-  assert(sizeof(struct hm_node) == VALUE_SIZE);
+  assert(sizeof(struct hm_ptr) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct hm_node) <= VALUE_SIZE);
   assert(NUM_OF_RMW_KEYS > LAST_HM_NODE_PTR);
   assert(HM_WRITES_NUM > 0);
   assert(HM_FREE_NODE_NUM >= GLOBAL_SESSION_NUM);

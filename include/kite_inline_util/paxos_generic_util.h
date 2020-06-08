@@ -299,7 +299,7 @@ static inline void free_kv_ptr_if_rmw_failed(loc_entry_t *loc_entry,
         kv_ptr->log_no == loc_entry->log_no &&
         rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id)) {
       if (state == PROPOSED && compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL) {
-        printf("clearing\n");
+        printf("Free_kv_ptr_if_prop_already_committed\n");
         print_rmw_rep_info(loc_entry, t_id);
         //assert(false);
         kv_ptr->state = INVALID_RMW;
@@ -353,7 +353,6 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
     com->opcode = COMMIT_OP;
     com->log_no = loc_entry->log_no;
     com->base_ts.version = loc_entry->base_ts.version;
-    assert(com->base_ts.version == 0);
     if (broadcast_state == MUST_BCAST_COMMITS && !loc_entry->rmw_is_successful) {
       memcpy(com->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
     } else {
@@ -371,7 +370,6 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
 static inline void fill_commit_message_from_r_info(struct commit *com,
                                                    r_info_t* r_info, uint16_t t_id)
 {
-  assert(false);
   com->base_ts.m_id = r_info->ts_to_read.m_id;
   com->base_ts.version = r_info->ts_to_read.version;
   memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);

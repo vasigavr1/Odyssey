@@ -886,7 +886,6 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
   acc->l_id = loc_entry->l_id;
   acc->t_rmw_id = loc_entry->rmw_id.id;
   assign_ts_to_netw_ts(&acc->base_ts, &loc_entry->base_ts);
-  assert(acc->base_ts.version == 0);
   assign_ts_to_netw_ts(&acc->ts, &loc_entry->new_ts);
   memcpy(&acc->key, &loc_entry->key, TRUE_KEY_SIZE);
   acc->opcode = ACCEPT_OP;

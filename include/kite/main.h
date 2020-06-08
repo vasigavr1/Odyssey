@@ -40,13 +40,13 @@ enum {
 #define MS_NO_CONFLICT 0
 #define CLIENT_LOGS 0
 
-#define HM_NO_CONFLICT 1
+#define HM_NO_CONFLICT 0
 #define HM_WRITES_NUM 4
 
 #define PC_WRITES_NUM 5
 #define PC_IDEAL 0
 
-#define PER_SESSION_REQ_NUM  (TREIBER_WRITES_NUM + 3) // (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 3) // (HM_WRITES_NUM + 15) // (MS_WRITES_NUM + 4) // (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------

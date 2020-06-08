@@ -106,8 +106,6 @@ static inline uint8_t is_base_ts_too_small(mica_op_t *kv_ptr,
     rep->ts.version = kv_ptr->ts.version;
     rep->ts.m_id = kv_ptr->ts.m_id;
     memcpy(rep->value, kv_ptr->value, (size_t) RMW_VALUE_SIZE);
-    check_top((struct top *) kv_ptr->value, "base_too_small", 0);
-//    assert(false);
     return RMW_ACK_BASE_TS_STALE;
 
 
@@ -465,9 +463,8 @@ static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entr
         }
       }
       else if (kv_ptr->state == INVALID_RMW) // some other rmw committed
-        assert(kv_ptr->last_committed_log_no >= loc_entry->log_no);
-      // The RMW can have been committed, because some may have helped it
-      //assert (committed_glob_sess_rmw_id[loc_entry->glob_sess_id] < loc_entry->rmw_id.id);
+        // with cancelling it is possible for some other RMW to stole and then cancelled itself
+       if (!ENABLE_CAS_CANCELLING) assert(kv_ptr->last_committed_log_no >= loc_entry->log_no);
     }
 
 
@@ -539,8 +536,7 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
 
     }
     memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
-    print_treiber_top((struct top *) kv_ptr->last_accepted_value, "writing help to last_accepted", green);
-    kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base base_ts of the RMW we are helping
+    kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base_ts of the RMW we are helping
     check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
     return_flag = ACCEPT_ACK;
@@ -572,9 +568,7 @@ static inline void commit_when_base_ts_is_stale(mica_op_t *kv_ptr, struct rmw_re
   lock_seqlock(&kv_ptr->seqlock);
     if (compare_netw_ts_with_ts(&rep->ts, &kv_ptr->ts) == GREATER) {
       assign_netw_ts_to_ts(&kv_ptr->ts, &rep->ts);
-      memcpy(kv_ptr->value, rep->value, (size_t) RMW_VALUE_SIZE);
-      check_treiber_values(kv_ptr->value, rep->value);
-      check_top((struct top *) kv_ptr->value, "com_when_base_ts_is_stale", 0);
+      memcpy(kv_ptr->value, rep->value, (size_t) VALUE_SIZE);
     }
   unlock_seqlock(&kv_ptr->seqlock);
 }
@@ -598,9 +592,10 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
 
   kv_ptr->last_committed_log_no = loc_entry_to_commit->log_no;
   kv_ptr->last_committed_rmw_id = loc_entry_to_commit->rmw_id;
+  if (kv_ptr->log_no < kv_ptr->last_committed_log_no)
+    kv_ptr->log_no = kv_ptr->last_committed_log_no;
   bool overwrite_kv = compare_ts(&loc_entry_to_commit->base_ts, &kv_ptr->ts) != SMALLER;
-  assert(loc_entry_to_commit->base_ts.version == 0);
-  assert(kv_ptr->ts.version == 0);
+
 
   // Update the KVS if the base base_ts of the entry to be committed is equal or greater than the locally stored
   // Beyond that there are two cases:
@@ -611,27 +606,20 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
     if (overwrite_kv) {
-      check_treiber_values(kv_ptr->value, loc_entry_to_commit->value_to_write);
       memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
     }
-    check_top((struct top *) kv_ptr->value, "take_actions_to_commit_rmw-succ-not-helping", 0);
   }
   else if (loc_entry->helping_flag == HELPING) {
     update_commit_logs(t_id, kv_ptr->key.bkt, loc_entry_to_commit->log_no,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
     if (overwrite_kv) {
-      check_treiber_values(kv_ptr->value, loc_entry_to_commit->value_to_write);
       memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
     }
-    check_top((struct top *) kv_ptr->value, "take_actions_to_commit_rmw-helping", 0);
   }
   if (overwrite_kv) {
     kv_ptr->ts.m_id = loc_entry_to_commit->base_ts.m_id;
     kv_ptr->ts.version = loc_entry_to_commit->base_ts.version;
-
-
-    assert(kv_ptr->ts.version == 0);
   }
 
 }
@@ -654,7 +642,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
   }
   // Check if the entry is still working on that log, or whether it has moved on
   // (because the current rmw is already committed)
-  if (kv_ptr->log_no == loc_entry_to_commit->log_no && kv_ptr->state != INVALID_RMW) {
+  if (kv_ptr->log_no == loc_entry_to_commit->log_no) {
     //the rmw-ids should match
     if (ENABLE_ASSERTIONS) {
       if (!rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->rmw_id)) {
@@ -668,14 +656,21 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
                   loc_entry_to_commit->new_ts.m_id, kv_ptr->prop_ts.m_id);// this is a hard error
         assert(false);
       }
-      assert(rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->last_committed_rmw_id));
-      assert(kv_ptr->last_committed_log_no == kv_ptr->log_no);
-      if (kv_ptr->state != ACCEPTED) {
-        my_printf(red, "Wrkr %u, sess %u  Logs are equal, rmw-ids are equal "
-          "but state is not accepted %u \n", t_id, loc_entry->sess_id, kv_ptr->state);
+      if (kv_ptr->last_committed_log_no != kv_ptr->log_no) {
+        print_loc_entry(loc_entry, yellow);
+        print_kv_pair(kv_ptr, green);
         assert(false);
       }
-      assert(kv_ptr->state == ACCEPTED);
+      assert(rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->last_committed_rmw_id));
+
+      if (kv_ptr->state != INVALID_RMW) {
+        if (kv_ptr->state != ACCEPTED) {
+          my_printf(red, "Wrkr %u, sess %u  Logs are equal, rmw-ids are equal "
+            "but state is not accepted %u \n", t_id, loc_entry->sess_id, kv_ptr->state);
+          assert(false);
+        }
+        assert(kv_ptr->state == ACCEPTED);
+      }
     }
     kv_ptr->state = INVALID_RMW;
   }
@@ -751,9 +746,7 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
                        rmw_rep->value, "From rep ", LOG_COMS);
 
     if (compare_ts_with_netw_ts(&kv_ptr->ts, &rmw_rep->ts) != GREATER) {
-      check_treiber_values(kv_ptr->value, rmw_rep->value);
       memcpy(kv_ptr->value, rmw_rep->value, (size_t) RMW_VALUE_SIZE);
-      check_top((struct top *) kv_ptr->value, "attempt local commit from rep", 0);
       kv_ptr->ts.m_id = rmw_rep->ts.m_id;
       kv_ptr->ts.version = rmw_rep->ts.version;
     }
@@ -838,6 +831,8 @@ static inline bool attempt_remote_commit(mica_op_t *kv_ptr, struct commit *com,
     is_log_higher = true;
     //if (ENABLE_DEBUG_RMW_KV_PTR) kv_ptr->dbg->last_committed_flag = REMOTE_RMW;
     kv_ptr->last_committed_log_no = new_log_no;
+    if (kv_ptr->log_no < kv_ptr->last_committed_log_no)
+      kv_ptr->log_no = kv_ptr->last_committed_log_no;
     kv_ptr->last_committed_rmw_id.id = new_rmw_id;
     if (DEBUG_LOG)
       my_printf(green, "Log %u: RMW_id %u ,from remote_commit \n",
@@ -886,7 +881,6 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
 
   bool can_commit = true;
 
-  assert(use_commit);
   uint32_t last_committed_log_no = kv_ptr->last_committed_log_no;
   if (use_commit && com->opcode == COMMIT_OP_NO_VAL) {
     is_log_higher = attempt_remote_commit_no_value(kv_ptr, (struct commit_no_val*) com, t_id);
@@ -900,26 +894,11 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
   else is_log_higher = attempt_remote_commit(kv_ptr, com, r_info, use_commit, t_id);
 
   if (can_commit) {
-    if (tmp_ts.version != 0)
-      my_printf(red, "Use commit %u, commit_op %u, tmp version %u \n",
-                use_commit, com->opcode, tmp_ts.version);
-
     compare_t cart_comp = compare_carts(&tmp_ts, log_no, &kv_ptr->ts,
                                         last_committed_log_no);
     if (cart_comp == GREATER) {
-      assert(is_log_higher);
       kv_ptr->ts = tmp_ts;
-      assert(kv_ptr->ts.version == 0);
-      if (!check_treiber_values(kv_ptr->value, value)) {
-        my_printf(green, "Use commit %u, commit_op %u, tmp version %u is_log_higher %d\n",
-                  use_commit, com->opcode, tmp_ts.version, is_log_higher);
-        assert(false);
-      }
       memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
-
-      const char *message = com->opcode == COMMIT_OP_NO_VAL ? "Commit no value" : "Commit with value";
-      if (com->opcode == COMMIT_OP_NO_VAL) print_treiber_top((struct top *) kv_ptr->value, message, red);
-      check_top((struct top *) kv_ptr->value, message, 0);
     }
     if (COMMIT_LOGS && is_log_higher) {
       update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
@@ -1008,8 +987,7 @@ static inline void store_rmw_rep_to_help_loc_entry(loc_entry_t* loc_entry,
 
   if (help_loc_entry->state == INVALID_RMW ||
       ts_comp == GREATER) {
-    if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED)
-      loc_entry->helping_flag = NOT_HELPING;
+    if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED) loc_entry->helping_flag = NOT_HELPING;
     assign_netw_ts_to_ts(&help_loc_entry->new_ts, &prop_rep->ts);
     help_loc_entry->base_ts.version = prop_rep->log_no_or_base_version;
     help_loc_entry->base_ts.m_id = prop_rep->base_m_id;
@@ -1088,8 +1066,8 @@ static inline void handle_prop_or_acc_rep(p_ops_t *p_ops, struct rmw_rep_message
         assert(!is_accept);
       }
       // Store the accepted rmw only if no higher priority reps have been seen
-      if (!rep_info->seen_higher_prop_acc +
-          (rep_info->rmw_id_commited + rep_info->log_too_small == 0)) {
+      if (rep_info->seen_higher_prop_acc +
+          rep_info->rmw_id_commited + rep_info->log_too_small == 0) {
         store_rmw_rep_to_help_loc_entry(loc_entry, rep, t_id);
       }
       break;
@@ -1437,7 +1415,6 @@ static inline void handle_already_committed_rmw(p_ops_t *p_ops,
     loc_entry->state = INVALID_RMW;
     free_session_from_rmw(p_ops, loc_entry->sess_id, true, t_id);
   }
-
 }
 
 
@@ -1533,7 +1510,6 @@ static inline void react_on_log_too_high(loc_entry_t *loc_entry, bool is_propose
       loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
       loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
       memcpy(help_loc_entry->value_to_write, kv_ptr->value, (size_t) VALUE_SIZE);
-      check_top((struct top *) kv_ptr->value, "react_on_log_too_high", 0);
       assign_second_rmw_id_to_first(&help_loc_entry->rmw_id, &kv_ptr->last_committed_rmw_id);
       help_loc_entry->base_ts = kv_ptr->ts;
     }
@@ -1692,7 +1668,11 @@ static inline void take_kv_ptr_with_higher_TS(p_ops_t *p_ops,
 
     // if either state is invalid or we own it
     if (kv_ptr_can_be_taken_with_higher_TS) {
-      if (!rmw_fails_with_loc_entry(loc_entry, kv_ptr, &rmw_fails, t_id)) {
+      if (rmw_fails_with_loc_entry(loc_entry, kv_ptr, &rmw_fails, t_id)) {
+        if (ENABLE_ASSERTIONS) assert(kv_ptr->state != ACCEPTED);
+        kv_ptr->state = INVALID_RMW;
+      }
+      else {
         if (kv_ptr->state == INVALID_RMW) {
           kv_ptr->log_no = kv_ptr->last_committed_log_no + 1;
           kv_ptr->opcode = loc_entry->opcode;
@@ -1726,7 +1706,7 @@ static inline void take_kv_ptr_with_higher_TS(p_ops_t *p_ops,
           loc_entry->help_loc_entry->new_ts = kv_ptr->accepted_ts;
         }
         kv_ptr_was_grabbed = true;
-      } else kv_ptr->state = INVALID_RMW;
+      }
     } else {
       if (DEBUG_RMW)
         my_printf(yellow, "Wrkr %u, session %u  failed when attempting to get/regain the kv_ptr, "
@@ -1784,6 +1764,7 @@ static inline void handle_needs_kv_ptr_state(p_ops_t *p_ops,
     loc_entry->back_off_cntr = 0;
     insert_prop_to_read_fifo(p_ops, loc_entry, t_id);
   }
+
 }
 
 // Inspect each propose that has gathered a quorum of replies
@@ -1930,7 +1911,6 @@ static inline void insert_rmw(p_ops_t *p_ops, trace_op_t *op,
   uint16_t session_id = op->session_id;
   loc_entry_t *loc_entry = &p_ops->prop_info->entry[session_id];
   if (loc_entry->state == CAS_FAILED) {
-    assert(false);
     //printf("Wrkr%u, sess %u, entry %u rmw_failing \n", t_id, session_id, resp->rmw_entry);
     signal_completion_to_client(session_id, op->index_to_req_array, t_id);
     p_ops->sess_info[session_id].stalled = false;

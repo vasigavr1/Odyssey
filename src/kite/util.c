@@ -104,6 +104,8 @@ void static_assert_compile_parameters()
   static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
   static_assert(!(ENABLE_CLIENTS && !ACCEPT_IS_RELEASE && CLIENT_MODE > CLIENT_UI),
                 "If we are using the lock-free data structures rmws must act as releases");
+
+  static_assert(!(ENABLE_CLIENTS && CLIENT_MODE > CLIENT_UI && ENABLE_ALL_ABOARD), "All-aboard does not work with the RC semantics");
   static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
   static_assert(sizeof(client_op_t) % 64 == 0, "");
   static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");

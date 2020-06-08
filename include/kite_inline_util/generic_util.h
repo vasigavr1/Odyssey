@@ -7,6 +7,7 @@
 
 
 #include <stdint.h>
+#include <common_func.h>
 #include "main.h"
 
 static inline bool is_odd(uint64_t var) {
@@ -530,6 +531,89 @@ static inline void print_treiber_top(struct top* top, const char *message, color
 {
  //my_printf(color, "%s: key_id %u push/pop %u, %u \n", message,  top->key_id, top->push_counter, top->pop_counter);
 }
+static inline void print_ts(struct ts_tuple ts, const char* mess, color_t color)
+{
+  my_printf(color, "%s: <%u, %u> \n", mess, ts.version, ts.m_id);
+}
 
+static inline const char* state_to_str(uint8_t state)
+{
+  switch (state)
+  {
+    case INVALID_RMW:
+      return "INVALID_RMW";
+    case PROPOSED:
+      return "PROPOSED";
+    case ACCEPTED:
+      return "ACCEPTED";
+    case NEEDS_KV_PTR:
+      return "NEEDS_KV_PTR";
+    case RETRY_WITH_BIGGER_TS:
+      return "RETRY_WITH_BIGGER_TS";
+    case MUST_BCAST_COMMITS:
+      return "MUST_BCAST_COMMITS";
+    case MUST_BCAST_COMMITS_FROM_HELP:
+      return "MUST_BCAST_COMMITS_FROM_HELP";
+    case COMMITTED:
+      return "COMMITTED";
+    case CAS_FAILED:
+      return "CAS_FAILED";
+    default: return "Unknown";
+  }
+}
+
+static inline const char* help_state_to_str(uint8_t state)
+{
+  switch (state)
+  {
+    case NOT_HELPING:
+      return "NOT_HELPING";
+    case PROPOSE_NOT_LOCALLY_ACKED:
+      return "PROPOSE_NOT_LOCALLY_ACKED";
+    case HELPING:
+      return "HELPING";
+    case PROPOSE_LOCALLY_ACCEPTED:
+      return "PROPOSE_LOCALLY_ACCEPTED";
+    case HELP_PREV_COMMITTED_LOG_TOO_HIGH:
+      return "HELP_PREV_COMMITTED_LOG_TOO_HIGH";
+    case HELPING_MYSELF:
+      return "HELPING_MYSELF";
+    case IS_HELPER:
+      return "IS_HELPER";
+    default: return "Unknown";
+  }
+}
+
+
+static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color)
+{
+  my_printf(color, "------- %s Local Entry----------- \n",
+            loc_entry->help_loc_entry == NULL ? "HELP" : "-");
+  my_printf(color, "Key : %u \n", loc_entry->key.bkt);
+  my_printf(color, "State %s \n", state_to_str(loc_entry->state));
+  my_printf(color, "*****Committed RMW***** \n");
+  my_printf(color, "Log no %u\n", loc_entry->log_no);
+  my_printf(color, "Last committed rmw %u\n", loc_entry->rmw_id.id);
+  print_ts(loc_entry->base_ts, "Base ts:", color);
+  print_ts(loc_entry->new_ts, "Propose ts:", color);
+  my_printf(color, "Helping state %s \n", help_state_to_str(loc_entry->helping_flag));
+}
+
+static inline void print_kv_pair(mica_op_t *kv_ptr, color_t color)
+{
+  my_printf(color, "-------KV_ptr----------- \n");
+  my_printf(color, "Key : %u \n", kv_ptr->key.bkt);
+  my_printf(color, "*****Committed RMW***** \n");
+  my_printf(color, "Last committed log %u\n", kv_ptr->last_committed_log_no);
+  my_printf(color, "Last committed rmw %u\n", kv_ptr->last_committed_rmw_id.id);
+  print_ts(kv_ptr->base_acc_ts, "Base ts:", color);
+
+  my_printf(color, "*****Active RMW*****\n");
+  my_printf(color, "State %s \n", state_to_str(kv_ptr->state));
+  my_printf(color, "Log %u\n", kv_ptr->log_no);
+  my_printf(color, "RMW-id %u \n", kv_ptr->rmw_id.id);
+  print_ts(kv_ptr->prop_ts, "Proposed ts:", color);
+  print_ts(kv_ptr->accepted_ts, "Accepted ts:", color);
+}
 
 #endif //KITE_GENERIC_UTILITY_H
