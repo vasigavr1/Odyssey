@@ -58,6 +58,7 @@ static inline bool KVS_from_trace_reads_value_forwarded(trace_op_t *op,
     uint8_t *val_ptr;
     if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
       memcpy(op->value_to_read, val_ptr, op->real_val_len);
+      check_value_is_tr_top(op->value_to_read, "read-forwarded");
       //my_printf(red, "Wrkr %u Forwarding a value \n", t_id);
       value_forwarded = true;
     }
@@ -88,7 +89,10 @@ static inline bool KVS_from_trace_reads(trace_op_t *op,
     //printf("Reading val %u from key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
 
-  if (TURN_OFF_KITE) return true;
+  if (TURN_OFF_KITE) {
+    check_value_is_tr_top(op->value_to_read, "read-typical");
+    return true;
+  }
   else return kv_epoch >= epoch_id; //return success if the kv_epoch is not left behind the epoch-id
 }
 
@@ -131,7 +135,7 @@ static inline void KVS_from_trace_writes(trace_op_t *op,
       update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
                          op->value_to_write, "local write", LOG_WS);
     }
-    memcpy(kv_ptr->value, op->value_to_write, op->real_val_len);
+    write_kv_ptr_val(kv_ptr, op->value_to_write, op->real_val_len);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     // This also writes the new version to op
     kv_ptr->ts.m_id = (uint8_t) machine_id;
@@ -248,7 +252,7 @@ static inline void KVS_from_trace_acquires_ooe_reads(trace_op_t *op, mica_op_t *
   r_info->value_to_read = op->value_to_read;
   r_info->val_len = op->real_val_len;
   r_info->key = op->key;
-  r_info->is_rmw = op->opcode == OP_ACQUIRE;
+  r_info->is_read = true;
   r_info->opcode = op->opcode; // it could be an acquire or an out-of-epoch read
   r_info->r_ptr = r_push_ptr;
   MOD_ADD(r_push_ptr, PENDING_READS);
@@ -413,8 +417,7 @@ static inline void KVS_reads_acquires_acquire_fp_and_reads(struct read *read, mi
       acq_rep->opcode = ACQ_CARTS_EQUAL;
     }
     else {
-      if (ENABLE_ASSERTIONS)
-        assert(carts_comp == GREATER);
+      if (ENABLE_ASSERTIONS) assert(carts_comp == GREATER);
       acq_rep->opcode = ACQ_CARTS_TOO_HIGH;
     }
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
@@ -547,17 +550,17 @@ static inline void KVS_out_of_epoch_writes(r_info_t *op, mica_op_t *kv_ptr,
 }
 
 // Handle acquires/out-of-epoch-reads that have received a bigger version than locally stored, and need to apply the data
-static inline void KVS_out_of_epoch_reads(r_info_t *op, mica_op_t *kv_ptr,
+static inline void KVS_out_of_epoch_reads(r_info_t *r_info, mica_op_t *kv_ptr,
                                           uint16_t t_id)
 {
   assert(!TURN_OFF_KITE);
   lock_seqlock(&kv_ptr->seqlock);
 
-  if (compare_ts(&kv_ptr->ts, &op->ts_to_read) == SMALLER) {
-    rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
-    memcpy(kv_ptr->value, op->value, op->val_len);
-    kv_ptr->ts.m_id =  op->ts_to_read.m_id;
-    kv_ptr->ts.version = op->ts_to_read.version;
+  if (compare_ts(&kv_ptr->ts, &r_info->ts_to_read) == SMALLER) {
+    rectify_key_epoch_id(r_info->epoch_id, kv_ptr, t_id);
+    memcpy(kv_ptr->value, r_info->value, r_info->val_len);
+    kv_ptr->ts.m_id =  r_info->ts_to_read.m_id;
+    kv_ptr->ts.version = r_info->ts_to_read.version;
   }
   else if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
   unlock_seqlock(&kv_ptr->seqlock);
@@ -763,7 +766,6 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
       if (read->opcode == KVS_OP_GET || read->opcode == OP_ACQUIRE ||
         read->opcode == OP_ACQUIRE_FP) {
         KVS_reads_acquires_acquire_fp_and_reads(read, kv_ptr[op_i], p_ops, op_i, t_id);
-//          KVS_reads_gets_or_acquires_or_acquires_fp(read, kv_ptr[op_i], p_ops, op_i, t_id);
       }
       else if (read->opcode == OP_GET_TS) {
         KVS_reads_get_TS(read, kv_ptr[op_i], p_ops, op_i, t_id);
@@ -820,49 +822,46 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
 
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(op_i = 0; op_i < op_num; op_i++) {
-    r_info_t *op = writes[(pull_ptr + op_i) % max_op_size];
+    r_info_t *r_info = writes[(pull_ptr + op_i) % max_op_size];
     if(ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) {assert(false);}
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr[op_i]->key, &r_info->key, TRUE_KEY_SIZE) == 0;
     if(likely(key_found)) { //Cache Hit
       // The write must be performed with the max TS out of the one stored in the KV and read_info
-      if (op->opcode == KVS_OP_PUT) {
-        KVS_out_of_epoch_writes(op, kv_ptr[op_i], p_ops, t_id);
+      if (r_info->opcode == KVS_OP_PUT) {
+        KVS_out_of_epoch_writes(r_info, kv_ptr[op_i], p_ops, t_id);
       }
-      else if (op->opcode == KVS_OP_GET) { // a read resulted on receiving a higher timestamp than expected
-        KVS_out_of_epoch_reads(op, kv_ptr[op_i], t_id);
-      }
-      else if (op->opcode == UPDATE_EPOCH_OP_GET) {
-        if (!MEASURE_SLOW_PATH && op->epoch_id > kv_ptr[op_i]->epoch_id) {
+      else if (r_info->opcode == UPDATE_EPOCH_OP_GET) {
+        if (!MEASURE_SLOW_PATH && r_info->epoch_id > kv_ptr[op_i]->epoch_id) {
           lock_seqlock(&kv_ptr[op_i]->seqlock);
-          kv_ptr[op_i]->epoch_id = op->epoch_id;
+          kv_ptr[op_i]->epoch_id = r_info->epoch_id;
           unlock_seqlock(&kv_ptr[op_i]->seqlock);
           if (ENABLE_STAT_COUNTING) t_stats[t_id].rectified_keys++;
         }
       }
-      else if (op->opcode == OP_ACQUIRE) {
-        KVS_acquire_commits(op, kv_ptr[op_i], op_i, t_id);
-        }
+      else if (r_info->opcode == OP_ACQUIRE || KVS_OP_GET) {
+        KVS_acquire_commits(r_info, kv_ptr[op_i], op_i, t_id);
+      }
       else if (ENABLE_ASSERTIONS) assert(false);
     }
     else {  //Cache miss --> We get here if either tag or log key match failed
       if (ENABLE_ASSERTIONS) assert(false);
     }
     if (zero_ops) {
-      // printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
-      op->opcode = 5;
+      // printf("Zero out %d at address %lu \n", r_info->opcode, &r_info->opcode);
+      r_info->opcode = 5;
     }
 
-    if (op->complete_flag) {
-      if (ENABLE_ASSERTIONS) assert(&p_ops->read_info[op->r_ptr] == op);
-      if (op->opcode == OP_ACQUIRE || op->opcode == KVS_OP_GET)
-        memcpy(op->value_to_read, op->value, op->val_len);
-      signal_completion_to_client(p_ops->r_session_id[op->r_ptr],
-                                  p_ops->r_index_to_req_array[op->r_ptr], t_id);
-      op->complete_flag = false;
+    if (r_info->complete_flag) {
+      if (ENABLE_ASSERTIONS) assert(&p_ops->read_info[r_info->r_ptr] == r_info);
+      if (r_info->opcode == OP_ACQUIRE || r_info->opcode == KVS_OP_GET)
+        memcpy(r_info->value_to_read, r_info->value, r_info->val_len);
+      signal_completion_to_client(p_ops->r_session_id[r_info->r_ptr],
+                                  p_ops->r_index_to_req_array[r_info->r_ptr], t_id);
+      r_info->complete_flag = false;
     }
     else if (ENABLE_ASSERTIONS)
-      check_state_with_allowed_flags(3, op->opcode, UPDATE_EPOCH_OP_GET,
+      check_state_with_allowed_flags(3, r_info->opcode, UPDATE_EPOCH_OP_GET,
                                      OP_ACQUIRE, OP_RELEASE);
   }
 

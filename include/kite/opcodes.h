@@ -26,7 +26,7 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
 #define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
 // The sender sends this opcode to flip a bit it owns after an acquire detected a failure
-#define OP_ACQUIRE_FLIP_BIT 107
+#define OP_ACQUIRE_FLIP_BIT 107 //the reply to this is always TS_EQUAL (not needed just for ease)
 #define NO_OP_RELEASE 9 // on a coalesced Release which detected failure, but is behind an OP_RELEASE_BIT_VECTOR
 #define OP_RELEASE 109
 #define OP_ACQUIRE 110
@@ -156,12 +156,8 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 
 // Possible flags when accepting locally
 #define ACCEPT_ACK 1
-#define NACK_ACCEPT_SEEN_HIGHER_TS 2
-#define NACK_ACCEPT_LOG_OUT_OF_DATE 3
-#define BROADCAST_COMMITS 4
-#define DO_NOT_BROAD_CAST_COMMITS 5
 #define ABORT_HELP 6
-#define NACK_ALREADY_COMMITTED 7
+
 
 // Possible Helping flags
 enum {

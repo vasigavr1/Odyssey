@@ -439,7 +439,8 @@ static inline uint8_t get_write_opcode(const uint8_t source, trace_op_t *op,
     case FROM_TRACE:
       return op->opcode;
     case FROM_READ:
-      if (r_info->is_rmw)
+      check_state_with_allowed_flags(4, r_info->opcode, OP_ACQUIRE, OP_RELEASE, KVS_OP_PUT);
+      if (r_info->opcode == OP_ACQUIRE)
         return RMW_ACQ_COMMIT_OP;
       else return r_info->opcode;
     case FROM_COMMIT:
@@ -571,10 +572,10 @@ static inline void write_bookkeeping_in_insertion_based_on_source
       print_true_key(&write->key);
     }
   }
-  else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_rmw)) {
-
-    if (source == FROM_READ)
-      fill_commit_message_from_r_info((struct commit *) write, r_info, t_id);
+  else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_read)) {
+    if (source == FROM_READ){
+      if (ENABLE_ASSERTIONS) assert(r_info->opcode == OP_ACQUIRE);
+      fill_commit_message_from_r_info((struct commit *) write, r_info, t_id);}
     else {
       uint8_t broadcast_state = (uint8_t) incoming_pull_ptr;
       fill_commit_message_from_l_entry((struct commit *) write,
@@ -589,7 +590,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     write->opcode = r_info->opcode;
     write->val_len = VALUE_SIZE >> SHIFT_BITS;
     if (ENABLE_ASSERTIONS) {
-      assert(!r_info->is_rmw);
+      assert(!r_info->is_read);
       assert(source == FROM_READ);
       check_state_with_allowed_flags(4, r_info->opcode, KVS_OP_PUT, OP_RELEASE);
     }
@@ -1404,6 +1405,7 @@ static inline bool find_the_r_ptr_rep_refers_to(uint32_t *r_ptr, uint64_t l_id, 
 static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read_info,
                                          uint16_t t_id)
 {
+  check_state_with_allowed_flags(4, read_info->opcode, OP_RELEASE, KVS_OP_PUT, OP_ACQUIRE_FLIP_BIT);
   // Check for acquires that detected a false positive
   detect_false_positives_on_read_info_bookkeeping(r_rep, read_info, t_id);
   if (r_rep->opcode == TS_GREATER || r_rep->opcode == TS_GREATER_TS_ONLY) {
@@ -1442,6 +1444,7 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep, r_info_t *read
   else if (r_rep->opcode == TS_SMALLER) { // Nothing to do if the already stored base_ts is greater than the incoming
 
   }
+  else assert(false);
   // assert(read_info->rep_num == 0);
   read_info->rep_num++;
 }
@@ -1466,6 +1469,8 @@ static inline void fill_read_info_from_read_rep(struct rmw_acq_rep *acq_rep, r_i
   read_info->rmw_id.id = acq_rep->rmw_id;
   assign_netw_ts_to_ts(&read_info->ts_to_read, &acq_rep->base_ts);
   memcpy(read_info->value, acq_rep->value, read_info->val_len);
+  check_value_is_tr_top(read_info->value, "fill_read_info_from_rep");
+  check_value_is_tr_top(acq_rep->value, "fill_read_info_from_rep---acq-rep val");
   read_info->times_seen_ts = 1;
 }
 
@@ -1473,6 +1478,7 @@ static inline void fill_read_info_from_read_rep(struct rmw_acq_rep *acq_rep, r_i
 static inline void rmw_acq_read_info_bookkeeping(struct rmw_acq_rep *acq_rep, r_info_t *read_info,
                                                  uint16_t t_id)
 {
+  check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, KVS_OP_GET);
   detect_false_positives_on_read_info_bookkeeping((struct r_rep_big *) acq_rep, read_info, t_id);
   if (acq_rep->opcode == ACQ_CARTS_TOO_SMALL) {
     if (!read_info->seen_larger_ts) { // If this is the first "Greater" base_ts
@@ -1515,7 +1521,7 @@ static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_
   if (DEBUG_READ_REPS)
     my_printf(yellow, "Read reply %u, Received replies %u/%d at r_ptr %u \n",
               r_rep_i, read_info->rep_num, REMOTE_QUORUM, r_ptr);
-  if (read_info->is_rmw) {
+  if (read_info->is_read) {
     rmw_acq_read_info_bookkeeping((struct rmw_acq_rep *) r_rep, read_info, t_id);
   }
   else {

@@ -31,10 +31,12 @@ enum {
   PRODUCER_CONSUMER
 };
 
-#define CLIENT_MODE TREIBER_ASYNC
+#define CLIENT_MODE MSQ_ASYNC
 
-#define TREIBER_WRITES_NUM 4
+#define TREIBER_WRITES_NUM 1
 #define TREIBER_NO_CONFLICTS 0
+#define ENABLE_TR_ASSERTIONS_ 1
+#define ENABLE_TR_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == TREIBER_ASYNC ? ENABLE_TR_ASSERTIONS_ : 0)
 
 #define MS_WRITES_NUM 4
 #define MS_NO_CONFLICT 0
@@ -46,7 +48,7 @@ enum {
 #define PC_WRITES_NUM 5
 #define PC_IDEAL 0
 
-#define PER_SESSION_REQ_NUM (TREIBER_WRITES_NUM + 3) // (HM_WRITES_NUM + 15) // (MS_WRITES_NUM + 4) // (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
+#define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //(TREIBER_WRITES_NUM + 3) //   (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
 /*-------------------------------------------------
@@ -245,7 +247,7 @@ typedef struct read_info{
   uint8_t *value_to_read;
   bool fp_detected; //detected false positive
   uint64_t epoch_id;
-  bool is_rmw;
+  bool is_read;
   bool complete_flag; // denotes whether completion must be signaled to the client
   uint32_t r_ptr; // reverse ptr to the p_ops
   uint32_t log_no;

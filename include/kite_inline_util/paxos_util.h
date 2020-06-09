@@ -241,7 +241,7 @@ static inline void activate_kv_pair(uint8_t state, uint32_t new_version, mica_op
     kv_ptr->accepted_ts = kv_ptr->prop_ts;
     kv_ptr->accepted_log_no = log_no;
     if (loc_entry != NULL && loc_entry->all_aboard) {
-      perform_the_rmw_on_the_loc_entry(loc_entry, kv_ptr, t_id);
+      perform_the_rmw_on_the_loc_entry(kv_ptr, loc_entry, t_id);
     }
   }
   if (ENABLE_ASSERTIONS) {
@@ -383,179 +383,82 @@ static inline uint8_t handle_remote_prop_or_acc_in_kvs(mica_op_t *kv_ptr, void *
 
 // After gathering a quorum of proposal acks, check if you can accept locally-- THIS IS STRICTLY LOCAL RMWS -- no helps
 // Every RMW that gets committed must pass through this function successfully (at least one time)
-static inline uint8_t attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entry,
-                                           uint16_t t_id)
+static inline void attempt_local_accept(p_ops_t *p_ops, loc_entry_t *loc_entry,
+                                        uint16_t t_id)
 {
-  uint8_t return_flag;
   mica_op_t *kv_ptr = loc_entry->kv_ptr;
-  my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
-            "Attempt local accept: Local entry does not contain the same key as kv_ptr");
-
-  if (ENABLE_ASSERTIONS) assert(loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
+  checks_preliminary_local_accept(kv_ptr, loc_entry, t_id);
 
   lock_seqlock(&loc_entry->kv_ptr->seqlock);
   if (if_already_committed_bcast_commits(p_ops, loc_entry, t_id)) {
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-    return NACK_ALREADY_COMMITTED;
+    return;
   }
 
-  if (rmw_ids_are_equal(&loc_entry->rmw_id, &kv_ptr->rmw_id) &&
-      kv_ptr->state != INVALID_RMW &&
-      compare_ts(&loc_entry->new_ts, &kv_ptr->prop_ts) == EQUAL) {
-    if (ENABLE_ASSERTIONS) {
-      //assert(compare_ts(&loc_entry->new_ts, &kv_ptr->prop_ts) == EQUAL);
-      assert(kv_ptr->log_no == loc_entry->log_no);
-      assert(kv_ptr->last_committed_log_no == loc_entry->log_no - 1);
-    }
+  if (same_rmw_id_same_ts_and_invalid(kv_ptr, loc_entry)) {
+    checks_before_local_accept(kv_ptr, loc_entry, t_id);
     //state would be typically proposed, but may also be accepted if someone has helped
-    if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u got rmw id %u, accepted locally \n",
-                t_id, loc_entry->rmw_id.id);
+
     kv_ptr->state = ACCEPTED;
     // calculate the new value depending on the type of RMW
-    perform_the_rmw_on_the_loc_entry(loc_entry, kv_ptr, t_id);
+    perform_the_rmw_on_the_loc_entry(kv_ptr, loc_entry, t_id);
     //when last_accepted_value is update also update the acc_base_ts
     kv_ptr->base_acc_ts = kv_ptr->ts;
     kv_ptr->accepted_ts = loc_entry->new_ts;
     kv_ptr->accepted_log_no = kv_ptr->log_no;
-
-    if (ENABLE_ASSERTIONS) {
-      assert(loc_entry->accepted_log_no == loc_entry->log_no);
-      assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
-      assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
-      kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
-    }
-    if (ENABLE_DEBUG_RMW_KV_PTR) {
-      //kv_ptr->dbg->proposed_ts = loc_entry->new_ts;
-      //kv_ptr->dbg->proposed_log_no = loc_entry->log_no;
-      //kv_ptr->dbg->proposed_rmw_id = loc_entry->rmw_id;
-    }
-    check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and succeed", t_id);
+    checks_after_local_accept(kv_ptr, loc_entry, t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-    return_flag = ACCEPT_ACK;
+    loc_entry->state = ACCEPTED;
   }
   else { // the entry stores a different rmw_id and thus our proposal has been won by another
     // Some other RMW has won the RMW we are trying to get accepted
     // If the other RMW has been committed then the last_committed_log_no will be bigger/equal than the current log no
-    if (kv_ptr->last_committed_log_no >= loc_entry->log_no)
-      return_flag = NACK_ACCEPT_LOG_OUT_OF_DATE;
-      //Otherwise the RMW that won is still in progress
-    else return_flag = NACK_ACCEPT_SEEN_HIGHER_TS;
-    if (DEBUG_RMW)
-      my_printf(green, "Wrkr %u failed to get rmw id %u, accepted locally opcode %u,"
-                  "kv_ptr rmw id %u, state %u \n",
-                t_id, loc_entry->rmw_id.id, return_flag,
-                kv_ptr->rmw_id.id, kv_ptr->state);
-    // --CHECKS--
-    if (ENABLE_ASSERTIONS) {
-      if (kv_ptr->state == PROPOSED || kv_ptr->state == ACCEPTED) {
-        if(!(compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == GREATER ||
-             kv_ptr->log_no > loc_entry->log_no)) {
-          my_printf(red, "State: %s,  loc-entry-helping %d, Kv prop/base_ts %u/%u -- loc-entry base_ts %u/%u, "
-                      "kv-log/loc-log %u/%u kv-rmw_id/loc-rmw-id %u/%u\n",
-                    kv_ptr->state == ACCEPTED ? "ACCEPTED" : "PROPOSED",
-                    loc_entry->helping_flag,
-                    kv_ptr->prop_ts.version, kv_ptr->prop_ts.m_id,
-                    loc_entry->new_ts.version, loc_entry->new_ts.m_id,
-                    kv_ptr->log_no, loc_entry->log_no,
-                    kv_ptr->rmw_id.id, loc_entry->rmw_id.id);
-          assert(false);
-        }
-      }
-      else if (kv_ptr->state == INVALID_RMW) // some other rmw committed
-        // with cancelling it is possible for some other RMW to stole and then cancelled itself
-       if (!ENABLE_CAS_CANCELLING) assert(kv_ptr->last_committed_log_no >= loc_entry->log_no);
-    }
 
-
-    check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and fail", t_id);
+    loc_entry->state = NEEDS_KV_PTR;
+    checks_after_failure_to_locally_accept(kv_ptr, loc_entry, t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
   }
-  return return_flag;
 }
 
 // After gathering a quorum of proposal reps, one of them was a lower TS accept, try and help it
-static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *loc_entry,
+static inline void attempt_local_accept_to_help(loc_entry_t *loc_entry,
                                                    uint16_t t_id)
 {
-  uint8_t return_flag;
+  bool kv_ptr_is_the_same, kv_ptr_is_invalid_but_not_committed,
+       helping_stuck_accept, propose_locally_accepted;
   mica_op_t *kv_ptr = loc_entry->kv_ptr;
   loc_entry_t* help_loc_entry = loc_entry->help_loc_entry;
   help_loc_entry->new_ts = loc_entry->new_ts;
-  my_assert(keys_are_equal(&help_loc_entry->key, &kv_ptr->key),
-            "Attempt local accpet to help: Local entry does not contain the same key as kv_ptr");
-  my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
-            " the help entry and the regular have not the same log nos");
-  if (ENABLE_ASSERTIONS) assert(help_loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
+  checks_preliminary_local_accept_help(kv_ptr, loc_entry, help_loc_entry);
+
   lock_seqlock(&loc_entry->kv_ptr->seqlock);
 
-
-  //We don't need to check the registered RMW here -- it's not wrong to do so--
+  //We don't need to check if the RMW is already registered here -- it's not wrong to do so--
   // but if the RMW has been committed, it will be in the present log_no
   // and we will not be able to accept locally anyway.
 
-  // the kv_ptr has seen a higher base_ts if
-  // (its state is not invalid and its TS is higher) or  (it has committed the log)
-  compare_t comp = compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts);
-
-
-  bool kv_ptr_is_the_same = kv_ptr->state == PROPOSED  &&
-                            help_loc_entry->log_no == kv_ptr->log_no &&
-                            comp == EQUAL &&
-                            rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id);
-
-  bool kv_ptr_is_invalid_but_not_committed = kv_ptr->state == INVALID_RMW &&
-                                             kv_ptr->last_committed_log_no < help_loc_entry->log_no;// && comp != GREATER;
-
-  bool helping_stuck_accept = loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED &&
-                              help_loc_entry->log_no == kv_ptr->log_no &&
-                              kv_ptr->state == ACCEPTED &&
-                              rmw_ids_are_equal(&kv_ptr->rmw_id, &help_loc_entry->rmw_id) &&
-                              comp != GREATER;
-  // When retrying after accepts fail, i must first send proposes but if the local state is still accepted,
-  // i can't downgrade it to proposed, so if i am deemed to help another RMW, i may come back to find
-  // my original Accept still here
-  bool propose_locally_accepted = kv_ptr->state == ACCEPTED  &&
-                                  loc_entry->log_no == kv_ptr->log_no &&
-                                  comp == EQUAL &&
-                                  rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id);
+  find_out_if_can_accept_help_locally(kv_ptr, loc_entry, help_loc_entry, &kv_ptr_is_the_same,
+                                      &kv_ptr_is_invalid_but_not_committed,
+                                      &helping_stuck_accept, &propose_locally_accepted, t_id);
 
   if (kv_ptr_is_the_same   || kv_ptr_is_invalid_but_not_committed ||
       helping_stuck_accept || propose_locally_accepted) {
-    checks_and_prints_local_accept_help(loc_entry, help_loc_entry, kv_ptr, kv_ptr_is_the_same,
-                                        kv_ptr_is_invalid_but_not_committed,
-                                        helping_stuck_accept, propose_locally_accepted, t_id);
     kv_ptr->state = ACCEPTED;
-    assign_second_rmw_id_to_first(&kv_ptr->rmw_id, &help_loc_entry->rmw_id);
+    kv_ptr->rmw_id = help_loc_entry->rmw_id;
     kv_ptr->accepted_ts = help_loc_entry->new_ts;
     kv_ptr->accepted_log_no = kv_ptr->log_no;
-
-    if (ENABLE_ASSERTIONS) {
-      assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
-      kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
-
-    }
-    memcpy(kv_ptr->last_accepted_value, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
+    write_kv_ptr_acc_val(kv_ptr, help_loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
     kv_ptr->base_acc_ts = help_loc_entry->base_ts;// the base_ts of the RMW we are helping
-    check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
+    checks_after_local_accept_help(kv_ptr, loc_entry, t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-    return_flag = ACCEPT_ACK;
+    loc_entry->state = ACCEPTED;
   }
   else {
-    //If the log entry is committed locally abort the help
-    //if the kv_ptr has accepted a higher TS then again abort help
-    return_flag = ABORT_HELP;
-    if (DEBUG_RMW)// || (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED))
-      my_printf(green, "Wrkr %u sess %u failed to get rmw id %u, accepted locally opcode %u,"
-                  "kv_ptr rmw id %u, state %u \n",
-                t_id, loc_entry->sess_id, loc_entry->rmw_id.id, return_flag,
-                kv_ptr->rmw_id.id, kv_ptr->state);
-
-
-    check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and fail", t_id);
+    checks_after_failure_to_locally_accept_help(kv_ptr, loc_entry, t_id);
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
+    loc_entry->state = NEEDS_KV_PTR;
+    help_loc_entry->state = INVALID_RMW;
   }
-  return return_flag;
 }
 
 
@@ -565,6 +468,7 @@ static inline uint8_t attempt_local_accept_to_help(p_ops_t *p_ops, loc_entry_t *
 
 static inline void commit_when_base_ts_is_stale(mica_op_t *kv_ptr, struct rmw_rep_last_committed *rep)
 {
+  if (ENABLE_TR_ASSERTIONS) assert(false);
   lock_seqlock(&kv_ptr->seqlock);
     if (compare_netw_ts_with_ts(&rep->ts, &kv_ptr->ts) == GREATER) {
       assign_netw_ts_to_ts(&kv_ptr->ts, &rep->ts);
@@ -606,7 +510,7 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
     if (overwrite_kv) {
-      memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
+      write_kv_ptr_val(kv_ptr, loc_entry_to_commit->value_to_write, loc_entry->rmw_val_len);
     }
   }
   else if (loc_entry->helping_flag == HELPING) {
@@ -614,7 +518,7 @@ static inline void take_actions_to_commit_rmw(loc_entry_t *loc_entry_to_commit,
                        kv_ptr->value, loc_entry_to_commit->value_to_write,
                        " local_commit", LOG_COMS);
     if (overwrite_kv) {
-      memcpy(kv_ptr->value, loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
+      write_kv_ptr_val(kv_ptr, loc_entry_to_commit->value_to_write, (size_t) RMW_VALUE_SIZE);
     }
   }
   if (overwrite_kv) {
@@ -640,6 +544,7 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
                 t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->log_no,
                 kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->log_no);
   }
+
   // Check if the entry is still working on that log, or whether it has moved on
   // (because the current rmw is already committed)
   if (kv_ptr->log_no == loc_entry_to_commit->log_no) {
@@ -657,8 +562,8 @@ static inline void commit_helped_or_local_from_loc_entry(mica_op_t *kv_ptr,
         assert(false);
       }
       if (kv_ptr->last_committed_log_no != kv_ptr->log_no) {
-        print_loc_entry(loc_entry, yellow);
-        print_kv_pair(kv_ptr, green);
+        print_loc_entry(loc_entry, yellow, t_id);
+        print_kv_ptr(kv_ptr, green, t_id);
         assert(false);
       }
       assert(rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->last_committed_rmw_id));
@@ -746,7 +651,7 @@ static inline void attempt_local_commit_from_rep(p_ops_t *p_ops, struct rmw_rep_
                        rmw_rep->value, "From rep ", LOG_COMS);
 
     if (compare_ts_with_netw_ts(&kv_ptr->ts, &rmw_rep->ts) != GREATER) {
-      memcpy(kv_ptr->value, rmw_rep->value, (size_t) RMW_VALUE_SIZE);
+      write_kv_ptr_val(kv_ptr, rmw_rep->value, (size_t) RMW_VALUE_SIZE);
       kv_ptr->ts.m_id = rmw_rep->ts.m_id;
       kv_ptr->ts.version = rmw_rep->ts.version;
     }
@@ -898,7 +803,7 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
                                         last_committed_log_no);
     if (cart_comp == GREATER) {
       kv_ptr->ts = tmp_ts;
-      memcpy(kv_ptr->value, value, (size_t) VALUE_SIZE);
+      write_kv_ptr_val(kv_ptr, value, (size_t) VALUE_SIZE);
     }
     if (COMMIT_LOGS && is_log_higher) {
       update_commit_logs(t_id, kv_ptr->key.bkt, log_no, kv_ptr->value,
@@ -913,8 +818,8 @@ static inline uint64_t handle_remote_commit_message(mica_op_t *kv_ptr, void* op,
       //kv_ptr->dbg->prop_acc_num++;
       //number_of_reqs = kv_ptr->.dbg->prop_acc_num;
     }
-    register_committed_global_sess_id(tmp_rmw_id, t_id);
   }
+  register_committed_global_sess_id(tmp_rmw_id, t_id);
   check_registered_against_kv_ptr_last_committed(kv_ptr, tmp_rmw_id,
                                                    "handle remote commit", t_id);
 
@@ -1426,35 +1331,17 @@ static inline void act_on_quorum_of_prop_acks(p_ops_t *p_ops, loc_entry_t *loc_e
                                               uint16_t t_id)
 {
   // first we need to accept locally,
-  uint8_t local_state = attempt_local_accept(p_ops, loc_entry, t_id);
-  if (ENABLE_ASSERTIONS) {
-    assert(local_state == ACCEPT_ACK || local_state == NACK_ACCEPT_SEEN_HIGHER_TS ||
-           local_state == NACK_ACCEPT_LOG_OUT_OF_DATE || local_state == NACK_ALREADY_COMMITTED);
-    if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED) {
-      assert(loc_entry->rmw_reps.tot_replies >= QUORUM_NUM);
-      assert(loc_entry->rmw_reps.already_accepted >= 0);
-      assert(loc_entry->rmw_reps.seen_higher_prop_acc == 0);
-    }
-  }
+  attempt_local_accept(p_ops, loc_entry, t_id);
+  check_state_with_allowed_flags(4, loc_entry->state, ACCEPTED, NEEDS_KV_PTR, MUST_BCAST_COMMITS);
+  checks_acting_on_quorum_of_prop_ack(loc_entry, t_id);
 
-
-  if (local_state == ACCEPT_ACK) {
+  if (loc_entry->state == ACCEPTED) {
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
     local_rmw_ack(loc_entry);
     check_loc_entry_metadata_is_reset(loc_entry, "act_on_quorum_of_prop_acks", t_id);
     insert_accept_in_writes_message_fifo(p_ops, loc_entry, false, t_id);
-    if (ENABLE_ASSERTIONS) {
-      assert(glob_ses_id_to_t_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == t_id &&
-             glob_ses_id_to_m_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == machine_id);
-      assert(loc_entry->state == PROPOSED);
-    }
-    loc_entry->state = ACCEPTED;
-    loc_entry->killable = false;
+        loc_entry->killable = false;
   }
-  else if (local_state == NACK_ALREADY_COMMITTED) {
-    //printf("Already-committed when accepting locally--bcast commits \n");
-  }
-  else loc_entry->state = NEEDS_KV_PTR;
 }
 
 
@@ -1467,26 +1354,13 @@ static inline void act_on_receiving_already_accepted_rep_to_prop(p_ops_t *p_ops,
                                                                  loc_entry_t* loc_entry,
                                                                  uint16_t t_id)
 {
-  loc_entry_t* help_loc_entry = loc_entry->help_loc_entry;
-  if (ENABLE_ASSERTIONS) {
-    assert(loc_entry->log_no == help_loc_entry->log_no);
-    assert(loc_entry->help_loc_entry->state == ACCEPTED);
-    assert(compare_ts(&help_loc_entry->new_ts, &loc_entry->new_ts) == SMALLER);
-    //assert(loc_entry->rmw_reps.acks < REMOTE_QUORUM);
-    //assert(ts_comp != EQUAL);
-  }
-  // help the accepted
-  uint8_t flag = attempt_local_accept_to_help(p_ops, loc_entry, t_id);
-  if (flag == ACCEPT_ACK) {
+  checks_acting_on_already_accepted_rep(loc_entry, t_id);
+  attempt_local_accept_to_help(loc_entry, t_id);
+  if (loc_entry->state == ACCEPTED) {
     loc_entry->helping_flag = HELPING;
-    loc_entry->state = ACCEPTED;
     zero_out_the_rmw_reply_loc_entry_metadata(loc_entry);
     local_rmw_ack(loc_entry);
-    insert_accept_in_writes_message_fifo(p_ops, help_loc_entry, true, t_id);
-  }
-  else { // abort the help, on failing to accept locally
-    loc_entry->state = NEEDS_KV_PTR;
-    help_loc_entry->state = INVALID_RMW;
+    insert_accept_in_writes_message_fifo(p_ops, loc_entry->help_loc_entry, true, t_id);
   }
 
 }
@@ -1494,33 +1368,32 @@ static inline void act_on_receiving_already_accepted_rep_to_prop(p_ops_t *p_ops,
 
 //------------------------------LOG-TOO_HIGH------------------------------------------
 
-static inline void react_on_log_too_high(loc_entry_t *loc_entry, bool is_propose,
-                                         uint16_t t_id)
+static inline void react_on_log_too_high_for_prop(loc_entry_t *loc_entry,
+                                                  uint16_t t_id)
 {
   loc_entry->state = RETRY_WITH_BIGGER_TS;
   loc_entry->log_too_high_cntr++;
   if (loc_entry->log_too_high_cntr == LOG_TOO_HIGH_TIME_OUT) {
-    my_printf(red, "Worker: %u session %u, %s for rmw-id %u Timed out on log_too-high, key %u, log %u \n",
-              t_id, loc_entry->sess_id,
-              is_propose? "Prop" : "Acc",
-              loc_entry->rmw_id.id, loc_entry->key.bkt, loc_entry->log_no);
+    if (ENABLE_ASSERTIONS) {
+      my_printf(red, "Timed out on log_too-high\n",
+                t_id, loc_entry->sess_id);
+      print_loc_entry(loc_entry, yellow, t_id);
+    }
     mica_op_t *kv_ptr = loc_entry->kv_ptr;
     lock_seqlock(&kv_ptr->seqlock);
     if (kv_ptr->last_committed_log_no + 1 == loc_entry->log_no) {
       loc_entry->state = MUST_BCAST_COMMITS_FROM_HELP;
       loc_entry_t *help_loc_entry = loc_entry->help_loc_entry;
       memcpy(help_loc_entry->value_to_write, kv_ptr->value, (size_t) VALUE_SIZE);
-      assign_second_rmw_id_to_first(&help_loc_entry->rmw_id, &kv_ptr->last_committed_rmw_id);
+      help_loc_entry->rmw_id = kv_ptr->last_committed_rmw_id;
       help_loc_entry->base_ts = kv_ptr->ts;
     }
     unlock_seqlock(&loc_entry->kv_ptr->seqlock);
-
 
     if (unlikely(loc_entry->state == MUST_BCAST_COMMITS_FROM_HELP)) {
       loc_entry->helping_flag = HELP_PREV_COMMITTED_LOG_TOO_HIGH;
       loc_entry->help_loc_entry->log_no = loc_entry->log_no - 1;
       loc_entry->help_loc_entry->key = loc_entry->key;
-      // loc_entry->help_loc_entry->sess_id = loc_entry->sess_id;
     }
 
     loc_entry->log_too_high_cntr = 0;
@@ -1819,7 +1692,7 @@ static inline void inspect_proposes(p_ops_t *p_ops,
   }
   // LOG TOO HIGH
   else if (rep_info->log_too_high > 0) {
-    react_on_log_too_high(loc_entry, true, t_id);
+    react_on_log_too_high_for_prop(loc_entry, t_id);
     loc_entry->new_ts.version = loc_entry->new_ts.version;
     zero_out_log_too_high_cntr = false;
   }

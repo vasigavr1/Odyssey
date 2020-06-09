@@ -105,7 +105,8 @@ void static_assert_compile_parameters()
   static_assert(!(ENABLE_CLIENTS && !ACCEPT_IS_RELEASE && CLIENT_MODE > CLIENT_UI),
                 "If we are using the lock-free data structures rmws must act as releases");
 
-  static_assert(!(ENABLE_CLIENTS && CLIENT_MODE > CLIENT_UI && ENABLE_ALL_ABOARD), "All-aboard does not work with the RC semantics");
+  static_assert(!(ENABLE_CLIENTS && CLIENT_MODE > CLIENT_UI && ENABLE_ALL_ABOARD),
+                "All-aboard does not work with the RC semantics");
   static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
   static_assert(sizeof(client_op_t) % 64 == 0, "");
   static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
@@ -404,7 +405,7 @@ trace_t* parse_trace(char* path, int t_id){
         trace[i].opcode = 0;
 
         //Before reading the request deside if it's gone be r_rep or write
-       //bool is_rmw = false, is_update = false, is_sc = false;
+       //bool is_read = false, is_update = false, is_sc = false;
       trace[i].opcode = compute_opcode(opc_info, &seed);
 
       while (word != NULL) {

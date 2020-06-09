@@ -527,10 +527,39 @@ static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
   }
 }
 
-static inline void print_treiber_top(struct top* top, const char *message, color_t color)
+static inline void print_treiber_top(struct top* top, const char *generic_message,
+                                     const char *special_message, color_t color)
 {
- //my_printf(color, "%s: key_id %u push/pop %u, %u \n", message,  top->key_id, top->push_counter, top->pop_counter);
+  my_printf(red, "%s\n", generic_message);
+  my_printf(color, "%s: key_id %u push/pop %u, %u \n", special_message,  top->key_id, top->push_counter, top->pop_counter);
 }
+
+static inline bool check_value_is_tr_top(uint8_t *val, const char *message)
+{
+  struct top *top = (struct top *) val;
+  if (ENABLE_TR_ASSERTIONS) {
+
+    //assert(top->push_counter >= top->pop_counter);
+    if (top->push_counter == 0) {
+      print_treiber_top(top, message, "Zero push counter", yellow);
+    }
+
+    if (top->push_counter == top->pop_counter) {
+      if (top->key_id != 0) { // Stack must be empty
+        print_treiber_top(top, message, "Stack must be empty", yellow);
+        assert(false);
+      }
+    } else if (top->push_counter > top->pop_counter) {
+      if (top->key_id < TR_KEY_OFFSET) { // Stack cannot be empty
+        print_treiber_top(top, message, "Stack cannot be empty", yellow);
+        assert(false);
+      }
+    }
+  }
+  return true;
+}
+
+
 static inline void print_ts(struct ts_tuple ts, const char* mess, color_t color)
 {
   my_printf(color, "%s: <%u, %u> \n", mess, ts.version, ts.m_id);
@@ -585,11 +614,12 @@ static inline const char* help_state_to_str(uint8_t state)
 }
 
 
-static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color)
+static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color, uint16_t t_id)
 {
-  my_printf(color, "------- %s Local Entry----------- \n",
+  my_printf(color, "WORKER %u -------%s-Local Entry------------ \n", t_id,
             loc_entry->help_loc_entry == NULL ? "HELP" : "-");
   my_printf(color, "Key : %u \n", loc_entry->key.bkt);
+  my_printf(color, "Session %u/%u \n", loc_entry->sess_id, loc_entry->glob_sess_id);
   my_printf(color, "State %s \n", state_to_str(loc_entry->state));
   my_printf(color, "*****Committed RMW***** \n");
   my_printf(color, "Log no %u\n", loc_entry->log_no);
@@ -599,9 +629,9 @@ static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color)
   my_printf(color, "Helping state %s \n", help_state_to_str(loc_entry->helping_flag));
 }
 
-static inline void print_kv_pair(mica_op_t *kv_ptr, color_t color)
+static inline void print_kv_ptr(mica_op_t *kv_ptr, color_t color, uint16_t t_id)
 {
-  my_printf(color, "-------KV_ptr----------- \n");
+  my_printf(color, "WORKER %u-------KV_ptr----------- \n", t_id);
   my_printf(color, "Key : %u \n", kv_ptr->key.bkt);
   my_printf(color, "*****Committed RMW***** \n");
   my_printf(color, "Last committed log %u\n", kv_ptr->last_committed_log_no);
@@ -614,6 +644,40 @@ static inline void print_kv_pair(mica_op_t *kv_ptr, color_t color)
   my_printf(color, "RMW-id %u \n", kv_ptr->rmw_id.id);
   print_ts(kv_ptr->prop_ts, "Proposed ts:", color);
   print_ts(kv_ptr->accepted_ts, "Accepted ts:", color);
+}
+
+
+static inline void write_kv_ptr_val(mica_op_t *kv_ptr, uint8_t *new_val, size_t val_size)
+{
+  memcpy(kv_ptr->value, new_val, val_size);
+  check_value_is_tr_top(kv_ptr->value, "Writing kv_ptr value");
+}
+
+static inline void write_kv_ptr_acc_val(mica_op_t *kv_ptr, uint8_t *new_val, size_t val_size)
+{
+  memcpy(kv_ptr->last_accepted_value, new_val, val_size);
+  check_value_is_tr_top(kv_ptr->last_accepted_value, "Writing kv_ptr accepted value");
+}
+
+
+static inline bool same_rmw_id_same_ts_and_invalid(mica_op_t *kv_ptr, loc_entry_t *loc_entry)
+{
+  return rmw_ids_are_equal(&loc_entry->rmw_id, &kv_ptr->rmw_id) &&
+         kv_ptr->state != INVALID_RMW &&
+         compare_ts(&loc_entry->new_ts, &kv_ptr->prop_ts) == EQUAL;
+}
+
+static inline bool same_rmw_id_same_log_same_ts(mica_op_t *kv_ptr, loc_entry_t *loc_entry)
+{
+  return rmw_ids_are_equal(&loc_entry->rmw_id, &kv_ptr->rmw_id) &&
+         loc_entry->log_no == kv_ptr->log_no &&
+         compare_ts(&loc_entry->new_ts, &kv_ptr->prop_ts) == EQUAL;
+}
+
+static inline bool same_rmw_id_same_log(mica_op_t *kv_ptr, loc_entry_t *loc_entry)
+{
+  return rmw_ids_are_equal(&loc_entry->rmw_id, &kv_ptr->rmw_id) &&
+         loc_entry->log_no == kv_ptr->log_no;
 }
 
 #endif //KITE_GENERIC_UTILITY_H

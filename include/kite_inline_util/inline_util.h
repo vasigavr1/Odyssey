@@ -120,7 +120,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     else if (ENABLE_RMWS && opcode_is_rmw(ops[i].opcode)) {
        insert_rmw(p_ops, &ops[i], t_id);
     }
-    // CACHE_GET_SUCCESS: Acquires, out-of-epoch reads, CACHE_GET_TS_SUCCESS: Releases, out-of-epoch Writes
+    // KVS_GET_SUCCESS: Acquires, out-of-epoch reads, KVS_GET_TS_SUCCESS: Releases, out-of-epoch Writes
     else {
       check_state_with_allowed_flags(3, resp[i].type, KVS_GET_SUCCESS, KVS_GET_TS_SUCCESS);
       insert_read(p_ops, &ops[i], FROM_TRACE, t_id);
@@ -923,8 +923,7 @@ static inline void commit_reads(p_ops_t *p_ops,
     //CACHE: Reads that need to go to kvs
     if (write_local_kvs) {
       // if a read did not see a larger base_ts it should only change the epoch
-      if (read_info->opcode == KVS_OP_GET &&
-        (!read_info->seen_larger_ts)) {
+      if (read_info->opcode == KVS_OP_GET && !read_info->seen_larger_ts) {
         read_info->opcode = UPDATE_EPOCH_OP_GET;
       }
       //check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, UPDATE_EPOCH_OP_GET);
@@ -933,8 +932,10 @@ static inline void commit_reads(p_ops_t *p_ops,
           //assert(read_info->value_to_read != NULL);
           //assert(read_info->val_len == VALUE_SIZE);
         }
-        if (ENABLE_CLIENTS)
+        if (ENABLE_CLIENTS) {
           memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
+          check_value_is_tr_top(read_info->value_to_read, "read ooe-read");
+        }
       }
       p_ops->ptrs_to_mes_ops[writes_for_cache] = (void *) &p_ops->read_info[pull_ptr];
       writes_for_cache++;
@@ -953,6 +954,7 @@ static inline void commit_reads(p_ops_t *p_ops,
           memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
       }
       else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
+      if(read_info->is_read) assert(read_info->opcode == OP_ACQUIRE);
       insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
     }
 
@@ -1008,7 +1010,7 @@ static inline void commit_reads(p_ops_t *p_ops,
     p_ops->r_size--;
     p_ops->virt_r_size -= read_info->opcode == OP_ACQUIRE ? 2 : 1;
 
-    if (read_info->is_rmw) read_info->is_rmw = false;
+    if (read_info->is_read) read_info->is_read = false;
     if (ENABLE_ASSERTIONS) {
       assert(p_ops->virt_r_size < PENDING_READS);
       if (p_ops->r_size == 0) assert(p_ops->virt_r_size == 0);

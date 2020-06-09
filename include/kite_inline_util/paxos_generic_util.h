@@ -51,15 +51,11 @@ static inline void reinstate_loc_entry_after_helping(loc_entry_t *loc_entry, uin
 
 
 // Perform the operation of the RMW and store the result in the local entry, call on locally accepting
-static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
-                                                    mica_op_t *kv_ptr,
+static inline void perform_the_rmw_on_the_loc_entry(mica_op_t *kv_ptr,
+                                                    loc_entry_t *loc_entry,
                                                     uint16_t t_id)
 {
-  struct top *top =(struct top*) kv_ptr->value;
-  struct top *comp_top =(struct top*) loc_entry->compare_val;
-  struct top *new_top =(struct top*) loc_entry->value_to_write;
-  // if (top->push_counter == top->pop_counter) assert(top->key_id == 0);
-  //if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
+  if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
   loc_entry->rmw_is_successful = true;
   loc_entry->base_ts = kv_ptr->ts;
   loc_entry->accepted_log_no = kv_ptr->log_no;
@@ -80,24 +76,19 @@ static inline void perform_the_rmw_on_the_loc_entry(loc_entry_t *loc_entry,
       loc_entry->rmw_is_successful = memcmp(loc_entry->compare_val,
                                             kv_ptr->value,
                                             loc_entry->rmw_val_len) == 0;
-      if (loc_entry->rmw_is_successful) {
-        print_treiber_top(comp_top, "Comp top", green);
-        print_treiber_top(top, "Stored top", green);
-        print_treiber_top(new_top, "New top", green);
+      if (!loc_entry->rmw_is_successful) {
+        memcpy(loc_entry->value_to_read, kv_ptr->value, loc_entry->rmw_val_len);
       }
-      if (!loc_entry->rmw_is_successful)
-        memcpy(loc_entry->value_to_read, kv_ptr->value,
-               loc_entry->rmw_val_len);
       break;
     default:
       if (ENABLE_ASSERTIONS) assert(false);
   }
     // we need to remember the last accepted value
   if (loc_entry->rmw_is_successful) {
-    memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
+    write_kv_ptr_acc_val(kv_ptr, loc_entry->value_to_write, (size_t) RMW_VALUE_SIZE);
   }
   else {
-    memcpy(kv_ptr->last_accepted_value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
+    write_kv_ptr_acc_val(kv_ptr, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
   }
 
 }
@@ -152,6 +143,50 @@ static inline void register_committed_global_sess_id (uint64_t rmw_id, uint16_t 
   MY_ASSERT(rmw_id <= committed_glob_sess_rmw_id[glob_sess_id], "After registering: rmw_id/registered %u/%u glob sess_id %u \n",
             rmw_id, committed_glob_sess_rmw_id[glob_sess_id], glob_sess_id);
 }
+
+/* ---------------------------------------------------------------------------
+//------------------------------ACCEPTING------------------------------------------
+//---------------------------------------------------------------------------*/
+static inline void find_out_if_can_accept_help_locally(mica_op_t *kv_ptr,
+                                                       loc_entry_t *loc_entry,
+                                                       loc_entry_t* help_loc_entry,
+                                                       bool *kv_ptr_is_the_same,
+                                                       bool *kv_ptr_is_invalid_but_not_committed,
+                                                       bool *helping_stuck_accept,
+                                                       bool *propose_locally_accepted,
+                                                       uint16_t t_id)
+{
+
+  compare_t comp = compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts);
+  bool same_rmw_id_log = same_rmw_id_same_log(kv_ptr, help_loc_entry);
+  bool entry_still_mine = help_loc_entry->log_no == kv_ptr->log_no &&
+                          comp == EQUAL &&
+                          rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry->rmw_id);
+
+  *kv_ptr_is_the_same = kv_ptr->state == PROPOSED  && entry_still_mine;
+
+  *kv_ptr_is_invalid_but_not_committed = kv_ptr->state == INVALID_RMW &&
+                                         kv_ptr->last_committed_log_no < help_loc_entry->log_no;
+
+  *helping_stuck_accept = loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED &&
+                          same_rmw_id_log &&
+                          kv_ptr->state == ACCEPTED &&
+                          comp != GREATER;
+  // When retrying after accepts fail, i must first send proposes but if the local state is still accepted,
+  // i can't downgrade it to proposed, so if i am deemed to help another RMW, i may come back to find
+  // my original Accept still here
+  *propose_locally_accepted = kv_ptr->state == ACCEPTED  & entry_still_mine;
+  if (ENABLE_ASSERTIONS) {
+    if (*kv_ptr_is_the_same   || *kv_ptr_is_invalid_but_not_committed ||
+        *helping_stuck_accept || *propose_locally_accepted)
+    checks_and_prints_local_accept_help(loc_entry, help_loc_entry, kv_ptr, *kv_ptr_is_the_same,
+                                        *kv_ptr_is_invalid_but_not_committed,
+                                        *helping_stuck_accept, *propose_locally_accepted, t_id);
+  }
+}
+
+
+
 
 
 /*--------------------------------------------------------------------------

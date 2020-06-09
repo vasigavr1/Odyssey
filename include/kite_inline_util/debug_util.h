@@ -529,8 +529,8 @@ static inline void checks_when_committing_a_read(p_ops_t *p_ops, uint32_t pull_p
     check_state_with_allowed_flags(6, read_info->opcode, OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT,
                                    KVS_OP_GET, OP_RELEASE, KVS_OP_PUT);
     assert(!(signal_completion && signal_completion_after_kvs_write));
-    if (read_info->is_rmw) {
-      assert(read_info->opcode == OP_ACQUIRE);
+    if (read_info->is_read) {
+      assert(read_info->opcode == OP_ACQUIRE || read_info->opcode == KVS_OP_GET);
     }
     if (read_info->opcode == OP_ACQUIRE_FLIP_BIT) {
       //printf("%d, %d, %d, %d, %d, %d \n", acq_second_round_to_flip_bit, insert_write_flag, write_local_kvs, insert_commit_flag,
@@ -778,7 +778,7 @@ static inline void check_read_state_and_key(p_ops_t *p_ops, uint32_t r_ptr, uint
                                    OP_ACQUIRE, OP_ACQUIRE_FLIP_BIT);
     if (source == FROM_TRACE) {
       assert(keys_are_equal(&read->key, &r_info->key));
-      if (!r_info->is_rmw) assert(compare_netw_ts_with_ts(&read->ts, &r_info->ts_to_read) == EQUAL);
+      assert(compare_netw_ts_with_ts(&read->ts, &r_info->ts_to_read) == EQUAL);
     }
   }
 }
@@ -1246,41 +1246,7 @@ static inline void check_all_w_meta(p_ops_t* p_ops, uint16_t t_id, const char* m
   }
 }
 
-static inline void checks_and_prints_local_accept_help(loc_entry_t *loc_entry,
-                                                       loc_entry_t* help_loc_entry,
-                                                       mica_op_t *kv_ptr, bool kv_ptr_is_the_same,
-                                                       bool kv_ptr_is_invalid_but_not_committed,
-                                                       bool helping_stuck_accept,
-                                                       bool propose_locally_accepted,
-                                                       uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(compare_ts(&kv_ptr->prop_ts, &help_loc_entry->new_ts) != SMALLER);
-    assert(kv_ptr->last_committed_log_no == help_loc_entry->log_no - 1);
-    if (kv_ptr_is_invalid_but_not_committed) {
-      printf("last com/log/help-log/loc-log %u/%u/%u/%u \n",
-             kv_ptr->last_committed_log_no, kv_ptr->log_no,
-             help_loc_entry->log_no, loc_entry->log_no);
-      assert(false);
-    }
-    // if the TS are equal it better be that it is because it remembers the proposed request
-    if (kv_ptr->state != INVALID_RMW &&
-        compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL && !helping_stuck_accept &&
-        !helping_stuck_accept && !propose_locally_accepted) {
-      assert(kv_ptr->rmw_id.id == loc_entry->rmw_id.id);
-      if (kv_ptr->state != PROPOSED) {
-        my_printf(red, "Wrkr: %u, state %u \n", t_id, kv_ptr->state);
-        assert(false);
-      }
-    }
-    if (propose_locally_accepted)
-      assert(compare_ts(&help_loc_entry->new_ts, &kv_ptr->accepted_ts) == GREATER);
-  }
-  if (DEBUG_RMW)
-    my_printf(green, "Wrkr %u on attempting to locally accept to help "
-                "got rmw id %u, accepted locally \n",
-              t_id, help_loc_entry->rmw_id.id);
-}
+
 
 
 // called when sending read replies
@@ -1341,6 +1307,188 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
 }
 
 
+/*--------------------------------------------------------------------------
+ * --------------------ACCEPTING-------------------------------------
+ * --------------------------------------------------------------------------*/
 
+static inline void checks_preliminary_local_accept(mica_op_t *kv_ptr,
+                                                   loc_entry_t *loc_entry,
+                                                   uint16_t t_id)
+{
+  my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
+            "Attempt local accept: Local entry does not contain the same key as kv_ptr");
+
+  if (ENABLE_ASSERTIONS) assert(loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
+}
+
+static inline void checks_before_local_accept(mica_op_t *kv_ptr,
+                                              loc_entry_t *loc_entry,
+                                              uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    //assert(compare_ts(&loc_entry->new_ts, &kv_ptr->prop_ts) == EQUAL);
+    assert(kv_ptr->log_no == loc_entry->log_no);
+    assert(kv_ptr->last_committed_log_no == loc_entry->log_no - 1);
+  }
+
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u got rmw id %u, accepted locally \n",
+              t_id, loc_entry->rmw_id.id);
+}
+
+
+static inline void checks_after_local_accept(mica_op_t *kv_ptr,
+                                              loc_entry_t *loc_entry,
+                                              uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(loc_entry->accepted_log_no == loc_entry->log_no);
+    assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
+    assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
+    kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
+  }
+  if (ENABLE_DEBUG_RMW_KV_PTR) {
+    //kv_ptr->dbg->proposed_ts = loc_entry->new_ts;
+    //kv_ptr->dbg->proposed_log_no = loc_entry->log_no;
+    //kv_ptr->dbg->proposed_rmw_id = loc_entry->rmw_id;
+  }
+  check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and succeed", t_id);
+}
+
+
+static inline void checks_after_failure_to_locally_accept(mica_op_t *kv_ptr,
+                                                          loc_entry_t *loc_entry,
+                                                          uint16_t t_id)
+{
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u failed to get rmw id %u, accepted locally "
+                "kv_ptr rmw id %u, state %u \n",
+              t_id, loc_entry->rmw_id.id,
+              kv_ptr->rmw_id.id, kv_ptr->state);
+  // --CHECKS--
+  if (ENABLE_ASSERTIONS) {
+    if (kv_ptr->state == PROPOSED || kv_ptr->state == ACCEPTED) {
+      if(!(compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == GREATER ||
+           kv_ptr->log_no > loc_entry->log_no)) {
+        my_printf(red, "State: %s,  loc-entry-helping %d, Kv prop/base_ts %u/%u -- loc-entry base_ts %u/%u, "
+                    "kv-log/loc-log %u/%u kv-rmw_id/loc-rmw-id %u/%u\n",
+                  kv_ptr->state == ACCEPTED ? "ACCEPTED" : "PROPOSED",
+                  loc_entry->helping_flag,
+                  kv_ptr->prop_ts.version, kv_ptr->prop_ts.m_id,
+                  loc_entry->new_ts.version, loc_entry->new_ts.m_id,
+                  kv_ptr->log_no, loc_entry->log_no,
+                  kv_ptr->rmw_id.id, loc_entry->rmw_id.id);
+        assert(false);
+      }
+    }
+    else if (kv_ptr->state == INVALID_RMW) // some other rmw committed
+      // with cancelling it is possible for some other RMW to stole and then cancelled itself
+      if (!ENABLE_CAS_CANCELLING) assert(kv_ptr->last_committed_log_no >= loc_entry->log_no);
+  }
+
+
+  check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept and fail", t_id);
+}
+
+
+static inline void checks_acting_on_quorum_of_prop_ack(loc_entry_t *loc_entry, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED) {
+      assert(loc_entry->rmw_reps.tot_replies >= QUORUM_NUM);
+      assert(loc_entry->rmw_reps.already_accepted >= 0);
+      assert(loc_entry->rmw_reps.seen_higher_prop_acc == 0);
+      assert(glob_ses_id_to_t_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == t_id &&
+             glob_ses_id_to_m_id((uint32_t) (loc_entry->rmw_id.id % GLOBAL_SESSION_NUM)) == machine_id);
+
+    }
+  }
+}
+
+static inline void checks_preliminary_local_accept_help(mica_op_t *kv_ptr,
+                                                        loc_entry_t *loc_entry,
+                                                        loc_entry_t *help_loc_entry)
+{
+  if (ENABLE_ASSERTIONS) {
+    my_assert(keys_are_equal(&help_loc_entry->key, &kv_ptr->key),
+              "Attempt local accpet to help: Local entry does not contain the same key as kv_ptr");
+    my_assert(loc_entry->help_loc_entry->log_no == loc_entry->log_no,
+              " the help entry and the regular have not the same log nos");
+    assert(help_loc_entry->glob_sess_id < GLOBAL_SESSION_NUM);
+    assert(loc_entry->log_no == help_loc_entry->log_no);
+  }
+}
+
+static inline void checks_and_prints_local_accept_help(loc_entry_t *loc_entry,
+                                                       loc_entry_t* help_loc_entry,
+                                                       mica_op_t *kv_ptr, bool kv_ptr_is_the_same,
+                                                       bool kv_ptr_is_invalid_but_not_committed,
+                                                       bool helping_stuck_accept,
+                                                       bool propose_locally_accepted,
+                                                       uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(compare_ts(&kv_ptr->prop_ts, &help_loc_entry->new_ts) != SMALLER);
+    assert(kv_ptr->last_committed_log_no == help_loc_entry->log_no - 1);
+    if (kv_ptr_is_invalid_but_not_committed) {
+      printf("last com/log/help-log/loc-log %u/%u/%u/%u \n",
+             kv_ptr->last_committed_log_no, kv_ptr->log_no,
+             help_loc_entry->log_no, loc_entry->log_no);
+      assert(false);
+    }
+    // if the TS are equal it better be that it is because it remembers the proposed request
+    if (kv_ptr->state != INVALID_RMW &&
+        compare_ts(&kv_ptr->prop_ts, &loc_entry->new_ts) == EQUAL && !helping_stuck_accept &&
+        !helping_stuck_accept && !propose_locally_accepted) {
+      assert(kv_ptr->rmw_id.id == loc_entry->rmw_id.id);
+      if (kv_ptr->state != PROPOSED) {
+        my_printf(red, "Wrkr: %u, state %u \n", t_id, kv_ptr->state);
+        assert(false);
+      }
+    }
+    if (propose_locally_accepted)
+      assert(compare_ts(&help_loc_entry->new_ts, &kv_ptr->accepted_ts) == GREATER);
+  }
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u on attempting to locally accept to help "
+                "got rmw id %u, accepted locally \n",
+              t_id, help_loc_entry->rmw_id.id);
+}
+
+static inline void checks_after_local_accept_help(mica_op_t *kv_ptr,
+                                                  loc_entry_t *loc_entry,
+                                                  uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(compare_ts(&kv_ptr->prop_ts, &kv_ptr->accepted_ts) != SMALLER);
+    kv_ptr->accepted_rmw_id = kv_ptr->rmw_id;
+    check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and succeed", t_id);
+  }
+}
+
+
+static inline void checks_after_failure_to_locally_accept_help(mica_op_t *kv_ptr,
+                                                               loc_entry_t *loc_entry,
+                                                               uint16_t t_id)
+{
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u sess %u failed to get rmw id %u, accepted locally "
+                "kv_ptr rmw id %u, state %u \n",
+              t_id, loc_entry->sess_id, loc_entry->rmw_id.id,
+              kv_ptr->rmw_id.id, kv_ptr->state);
+
+
+  check_log_nos_of_kv_ptr(kv_ptr, "attempt_local_accept_to_help and fail", t_id);
+}
+
+static inline void checks_acting_on_already_accepted_rep(loc_entry_t *loc_entry, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    loc_entry_t* help_loc_entry = loc_entry->help_loc_entry;
+    assert(loc_entry->log_no == help_loc_entry->log_no);
+    assert(loc_entry->help_loc_entry->state == ACCEPTED);
+    assert(compare_ts(&help_loc_entry->new_ts, &loc_entry->new_ts) == SMALLER);
+  }
+}
 
 #endif //KITE_DEBUG_UTIL_H

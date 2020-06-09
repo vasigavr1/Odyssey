@@ -1056,10 +1056,6 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
       new_top->pop_counter = top->pop_counter + 1;
       new_top->push_counter = top->push_counter;
       new_top->key_id = first_node[0].next_key_id;
-      if (new_top->push_counter > new_top->pop_counter &&
-        new_top->key_id == 0) {
-        info->state = TR_INIT; break;
-      }
       if ((new_top->push_counter == new_top->pop_counter && new_top->key_id != 0) ||
            new_top->push_counter >  new_top->pop_counter && new_top->key_id == 0) {
         if (CLIENT_ASSERTIONS) {
@@ -1072,7 +1068,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
       if (CLIENT_ASSERTIONS) {
         if (info->pop_dbg >= DEBUG_MAX)
           my_printf(green, "Session %u unstuck \n", real_sess_i);
-        info->pop_dbg=0;
+        info->pop_dbg = 0;
       }
 
 
