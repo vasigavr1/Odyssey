@@ -94,7 +94,7 @@ enum {
 
 // QUORUM
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
-#define REMOTE_QUORUM (USE_QUORUM == 1 ? (QUORUM_NUM - 1 ): REM_MACH_NUM)
+#define REMOTE_QUORUM ((QUORUM_NUM) - 1)
 
 // RMWs
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
@@ -318,8 +318,8 @@ typedef struct rmw_local_entry {
   bool all_aboard;
 	bool avoid_val_in_com;
   bool base_ts_found;
-  uint8_t value_to_write[RMW_VALUE_SIZE];
-  uint8_t value_to_read[RMW_VALUE_SIZE];
+  uint8_t value_to_write[VALUE_SIZE];
+  uint8_t value_to_read[VALUE_SIZE];
   struct ts_tuple base_ts;
   uint8_t *compare_val; //for CAS- add value for FAA
   uint32_t rmw_val_len;
@@ -442,6 +442,17 @@ struct recv_info {
 	struct ibv_sge* recv_sgl;
 	void* buf;
 };
+
+typedef struct commit_info {
+  bool overwrite_kv;
+  bool no_value;
+  uint32_t log_no;
+  struct ts_tuple base_ts;
+  rmw_id_t rmw_id;
+  uint8_t *value;
+  const char* message;
+} commit_info_t;
+
 
 typedef struct trace_op {
   uint16_t session_id;

@@ -292,10 +292,10 @@ struct r_rep_message_ud_req {
 struct rmw_rep_last_committed {
   uint8_t opcode;
   uint64_t l_id; // the l_id of the rmw local_entry
-  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted base_ts for the rest
+  struct network_ts_tuple ts; // This is the base for RMW-already-committed or Log-to-low, it's proposed/accepted ts for the rest
   uint8_t value[RMW_VALUE_SIZE];
   uint64_t rmw_id; //accepted  OR last committed
-  uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted base_ts
+  uint32_t log_no_or_base_version; // log no for RMW-already-committed/Log-too-low, base_ts.version for proposed/accepted
   uint8_t base_m_id; // base_ts.m_id used for accepts only
 } __attribute__((__packed__));
 

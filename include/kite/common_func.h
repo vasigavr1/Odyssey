@@ -91,7 +91,6 @@
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
-#define USE_QUORUM 1
 #define MIN_SS_BATCH 127// The minimum SS batch
 #define ENABLE_STAT_COUNTING 1
 #define MAX_OP_BATCH_ 51
@@ -102,6 +101,7 @@
 #define ENABLE_RMWS_ 1
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
+
 #define ENABLE_CLIENTS 1
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
@@ -210,10 +210,10 @@ struct quorum_info {
 
 // unique RMW id-- each machine must remember how many
 // RMW each thread has committed, to avoid committing an RMW twice
-struct rmw_id {
+typedef struct rmw_id {
   //uint32_t glob_sess_id; // global session id
   uint64_t id; // the local rmw id of the source
-};
+} rmw_id_t;
 
 
 // flags that help to compare TS

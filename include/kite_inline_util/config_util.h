@@ -394,13 +394,13 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
 {
   if (!TURN_OFF_KITE) {
     // Check for acquires that detected a false positive
-    if (unlikely(r_rep->opcode > ACQ_CARTS_EQUAL)) {
+    if (unlikely(r_rep->opcode > CARTS_EQUAL)) {
       read_info->fp_detected = true;
       if (DEBUG_QUORUM)
         my_printf(yellow, "Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
       r_rep->opcode -= FALSE_POSITIVE_OFFSET;
       check_state_with_allowed_flags(7, r_rep->opcode, TS_TOO_HIGH, TS_EQUAL, TS_TOO_SMALL,
-                                     ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
+                                     CARTS_TOO_HIGH, CARTS_TOO_SMALL, CARTS_EQUAL);
       if (ENABLE_ASSERTIONS) {
         assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
         assert(read_info->opcode == OP_ACQUIRE);
@@ -411,7 +411,7 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
 
   if (ENABLE_ASSERTIONS) {
     if (r_rep->opcode > TS_TOO_SMALL) {
-      check_state_with_allowed_flags(4, r_rep->opcode, ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
+      check_state_with_allowed_flags(4, r_rep->opcode, CARTS_TOO_HIGH, CARTS_TOO_SMALL, CARTS_EQUAL);
       assert(read_info->is_read);
       check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, KVS_OP_GET);
     }

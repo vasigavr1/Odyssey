@@ -708,11 +708,6 @@ static inline void check_r_rep_l_id(uint64_t l_id, uint8_t r_rep_num, uint64_t p
 {
   if (ENABLE_ASSERTIONS) {
     assert(l_id + r_rep_num <= pull_lid + r_size);
-    if ((l_id + r_rep_num < pull_lid) && (!USE_QUORUM)) {
-      my_printf(red, "Wrkr :%u Error on the l_id of a received read reply: "
-        "l_id %u, r_rep_num %u, pull_lid %u, r_size %u \n", t_id, l_id, r_rep_num, pull_lid, r_size);
-      assert(false);
-    }
   }
 }
 
@@ -723,13 +718,13 @@ static inline void check_a_polled_r_rep(struct r_rep_big *r_rep,
                                         uint16_t t_id) {
   if (ENABLE_ASSERTIONS) {
     uint8_t opcode = r_rep->opcode;
-    if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+    if (opcode > CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
     //check_state_with_allowed_flags(8, opcode, TS_TOO_HIGH, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
     //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
 
-    if ((r_rep->opcode < TS_TOO_HIGH || r_rep->opcode > ACQ_CARTS_EQUAL) &&
+    if ((r_rep->opcode < TS_TOO_HIGH || r_rep->opcode > CARTS_EQUAL) &&
         (r_rep->opcode < TS_TOO_HIGH + FALSE_POSITIVE_OFFSET ||
-         r_rep->opcode > ACQ_CARTS_EQUAL + FALSE_POSITIVE_OFFSET)) {
+         r_rep->opcode > CARTS_EQUAL + FALSE_POSITIVE_OFFSET)) {
       my_printf(red, "Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, r_rep_i, r_rep_num);
       assert(false);
     }
@@ -806,10 +801,6 @@ static inline void check_ack_message_count_stats(p_ops_t* p_ops, struct ack_mess
     uint64_t l_id = ack->local_id;
     uint64_t pull_lid = p_ops->local_w_id;
     assert(l_id + ack_num <= pull_lid + p_ops->w_size);
-    if ((l_id + ack_num < pull_lid) && (!USE_QUORUM)) {
-      my_printf(red, "l_id %u, ack_num %u, pull_lid %u \n", l_id, ack_num, pull_lid);
-      assert(false);
-    }
     if (DEBUG_ACKS)
       my_printf(yellow,
                 "Wrkr %d  polled ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from machine %u \n",
@@ -907,17 +898,7 @@ static inline void check_sum_of_reps(loc_entry_t *loc_entry)
   }
 }
 
-// when a ptr is passed as an rmw rep, makes sure it's valid
-static inline void check_ptr_is_valid_rmw_rep(struct rmw_rep_last_committed* rmw_rep)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(rmw_rep->opcode == RMW_ID_COMMITTED || rmw_rep->opcode == LOG_TOO_SMALL);
-//    if ((rmw_rep->base_ts.version % 2  != 0) )
-//      my_printf(red, "Checking the ptr to rmw_rep, version %u \n", (rmw_rep->base_ts.version));
-//    assert(rmw_rep->base_ts.version % 2  == 0 );
-    // if (rmw_rep->opcode == RMW_ID_COMMITTED ) assert(rmw_rep->base_ts.version > 0 ); // this is the base base_ts and can be 0
-  }
-}
+
 
 static inline void check_loc_entry_metadata_is_reset(loc_entry_t* loc_entry,
                                                      const char *message, uint16_t t_id)
@@ -1268,14 +1249,14 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
       uint8_t opcode = r_rep->opcode;
       //if (byte_ptr > 505)
       //printf("%u/%u \n", byte_ptr, r_rep_fifo->message_sizes[pull_ptr]);
-      if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
-      if (opcode < TS_TOO_HIGH || opcode > ACQ_CARTS_EQUAL)
+      if (opcode > CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+      if (opcode < TS_TOO_HIGH || opcode > CARTS_EQUAL)
         printf("R_rep %u/%u, byte ptr %u/%u opcode %u/%u \n",
                i, r_rep_mes->coalesce_num, byte_ptr, r_rep_fifo->message_sizes[pull_ptr],
                opcode, r_rep_mes->opcode);
 
 
-      assert(opcode >= TS_TOO_HIGH && opcode <= ACQ_CARTS_EQUAL);
+      assert(opcode >= TS_TOO_HIGH && opcode <= CARTS_EQUAL);
       bool is_rmw = false, is_rmw_acquire = false;
       if (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP)
         is_rmw = true;
@@ -1291,7 +1272,7 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
       byte_ptr += get_size_from_opcode(r_rep->opcode);
 
     }
-    //if (r_rep->opcode > ACQ_CARTS_EQUAL) printf("big opcode comes \n");
+    //if (r_rep->opcode > CARTS_EQUAL) printf("big opcode comes \n");
     //check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
     if (DEBUG_READ_REPS)
       printf("Wrkr %d has %u read replies to send \n", t_id, r_rep_fifo->total_size);
@@ -1306,7 +1287,26 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
   }
 }
 
-
+static inline void checks_when_handling_prop_acc_rep(loc_entry_t *loc_entry,
+                                                     struct rmw_rep_last_committed *rep,
+                                                     bool is_accept, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    rmw_rep_info_t *rep_info = &loc_entry->rmw_reps;
+    assert(rep_info->tot_replies > 0);
+    if (is_accept) assert(loc_entry->state == ACCEPTED);
+    else {
+      assert(loc_entry->state == PROPOSED);
+      // this checks that the performance optimization of NO-op reps is valid
+      assert(rep->opcode != NO_OP_PROP_REP);
+      check_state_with_allowed_flags(4, loc_entry->helping_flag, NOT_HELPING,
+                                     PROPOSE_NOT_LOCALLY_ACKED, PROPOSE_LOCALLY_ACCEPTED);
+      if (loc_entry->helping_flag == PROPOSE_LOCALLY_ACCEPTED ||
+          loc_entry->helping_flag == PROPOSE_NOT_LOCALLY_ACKED)
+        assert(rep_info->already_accepted > 0);
+    }
+  }
+}
 /*--------------------------------------------------------------------------
  * --------------------ACCEPTING-------------------------------------
  * --------------------------------------------------------------------------*/
@@ -1491,4 +1491,109 @@ static inline void checks_acting_on_already_accepted_rep(loc_entry_t *loc_entry,
   }
 }
 
+/*--------------------------------------------------------------------------
+ * --------------------COMMITS-------------------------------------
+ * --------------------------------------------------------------------------*/
+
+static inline void prints_after_attempting_local_commit(mica_op_t *kv_ptr,
+                                                        loc_entry_t *loc_entry,
+                                                        loc_entry_t *loc_entry_to_commit,
+                                                        uint16_t t_id)
+{
+  if (DEBUG_RMW)
+    my_printf(green, "Wrkr %u will broadcast commits for rmw id %u, "
+                "kv_ptr rmw id %u, state %u \n",
+              t_id, loc_entry_to_commit->rmw_id.id,
+              kv_ptr->rmw_id.id,kv_ptr->state);
+
+  if (DEBUG_LOG)
+    my_printf(green, "Log %u: RMW_id %u, loc entry state %u, local commit\n",
+              loc_entry_to_commit->log_no, loc_entry_to_commit->rmw_id.id,
+              loc_entry->state);
+}
+
+
+static inline void checks_when_committing_fromn_local(mica_op_t *kv_ptr,
+                                                      loc_entry_t *loc_entry,
+                                                      loc_entry_t *loc_entry_to_commit, uint16_t t_id)
+{
+  if (DEBUG_RMW) {
+    if (kv_ptr->last_committed_log_no < loc_entry_to_commit->log_no)
+      my_printf(green, "Wrkr %u got rmw id %u, log %u committed locally,"
+                  "kv_ptr stats: state %u, rmw_id &u, , log no %u  \n",
+                t_id, loc_entry_to_commit->rmw_id.id, loc_entry_to_commit->log_no,
+                kv_ptr->state, kv_ptr->rmw_id.id, kv_ptr->log_no);
+  }
+
+  /*
+ if (ENABLE_DEBUG_RMW_KV_PTR) {
+     if (loc_entry->helping_flag == NOT_HELPING)
+       kv_ptr->dbg->last_committed_flag = LOCAL_RMW;
+     else kv_ptr->dbg->last_committed_flag = LOCAL_RMW_FROM_HELP;
+   kv_ptr->dbg->last_committed_ts = loc_entry_to_commit->new_ts;
+   kv_ptr->dbg->last_committed_log_no = loc_entry_to_commit->log_no;
+   kv_ptr->dbg->last_committed_rmw_id = loc_entry_to_commit->rmw_id;
+ }*/
+
+
+  if (ENABLE_ASSERTIONS) {
+    if (kv_ptr->log_no == loc_entry_to_commit->log_no) {
+      if (!rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->rmw_id)) {
+        my_printf(red, "Wrkr %u kv_ptr is on same log as what is about to be committed but on different rmw-id:"
+                    " committed rmw id %u, "
+                    "kv_ptr rmw id %u, state %u,"
+                    " committed version %u/%u m_id %u/%u \n",
+                  t_id, loc_entry_to_commit->rmw_id.id,
+                  kv_ptr->rmw_id.id, kv_ptr->state,
+                  loc_entry_to_commit->new_ts.version, kv_ptr->prop_ts.version,
+                  loc_entry_to_commit->new_ts.m_id, kv_ptr->prop_ts.m_id);// this is a hard error
+        assert(false);
+      }
+      if (kv_ptr->last_committed_log_no != kv_ptr->log_no) {
+        print_loc_entry(loc_entry, yellow, t_id);
+        print_kv_ptr(kv_ptr, green, t_id);
+        assert(false);
+      }
+      assert(rmw_ids_are_equal(&loc_entry_to_commit->rmw_id, &kv_ptr->last_committed_rmw_id));
+
+      if (kv_ptr->state != INVALID_RMW) {
+        if (kv_ptr->state != ACCEPTED) {
+          my_printf(red, "Wrkr %u, sess %u  Logs are equal, rmw-ids are equal "
+            "but state is not accepted %u \n", t_id, loc_entry->sess_id, kv_ptr->state);
+          assert(false);
+        }
+        assert(kv_ptr->state == ACCEPTED);
+      }
+    }
+    else {
+      // if the log has moved on then the RMW has been helped,
+      // it has been committed in the other machines so there is no need to change its state
+      check_log_nos_of_kv_ptr(kv_ptr, "commit_helped_or_local_from_loc_entry", t_id);
+      if (ENABLE_ASSERTIONS) {
+        if (kv_ptr->state != INVALID_RMW)
+          assert(!rmw_ids_are_equal(&kv_ptr->rmw_id, &loc_entry_to_commit->rmw_id));
+      }
+    }
+  }
+}
+
+
+
+
+
+
+// when a ptr is passed as an rmw rep, makes sure it's valid
+static inline void check_from_rep_local_commit(mica_op_t *kv_ptr,
+                                               loc_entry_t *loc_entry,
+                                               struct rmw_rep_last_committed *rmw_rep)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(kv_ptr != NULL && loc_entry != NULL && rmw_rep != NULL);
+    assert(rmw_rep->opcode == LOG_TOO_SMALL);
+    my_assert(keys_are_equal(&loc_entry->key, &kv_ptr->key),
+              "Attempt local commit from rep: Local entry does"
+                " not contain the same key as kv_ptr");
+
+  }
+}
 #endif //KITE_DEBUG_UTIL_H

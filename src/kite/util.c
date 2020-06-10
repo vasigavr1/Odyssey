@@ -159,7 +159,7 @@ void print_parameters_in_the_start()
   my_printf(cyan, "W CREDITS %d, W BUF SLOTS %d, W BUF SIZE %d\n",
               W_CREDITS, W_BUF_SLOTS, W_BUF_SIZE);
 
-  my_printf(yellow, "Using Quorom %d , Remote Quorum Machines %d \n", USE_QUORUM, REMOTE_QUORUM);
+  my_printf(yellow, "Remote Quorum Machines %d \n", REMOTE_QUORUM);
   my_printf(green, "SEND W DEPTH %d, MESSAGES_IN_BCAST_BATCH %d, W_BCAST_SS_BATCH %d \n",
                SEND_W_Q_DEPTH, MESSAGES_IN_BCAST_BATCH, W_BCAST_SS_BATCH);
 }

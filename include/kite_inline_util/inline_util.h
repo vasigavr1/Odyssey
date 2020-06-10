@@ -744,7 +744,6 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
     assert(credits[W_VC][ack->m_id] <= W_CREDITS);
     // if the pending write FIFO is empty it means the acks are for committed messages.
     if (p_ops->w_size == 0 ) {
-      if (ENABLE_ASSERTIONS) assert(USE_QUORUM);
       ack->opcode = INVALID_OPCODE;
       ack->ack_num = 0; continue;
     }
@@ -829,7 +828,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
     int read_i = -1; // count non-rmw read replies
     for (uint16_t i = 0; i < r_rep_num; i++) {
       struct r_rep_big *r_rep = (struct r_rep_big *)(((void *) r_rep_mes) + byte_ptr);
-      //if (r_rep->opcode > ACQ_CARTS_EQUAL) printf("big opcode comes \n");
+      //if (r_rep->opcode > CARTS_EQUAL) printf("big opcode comes \n");
       check_a_polled_r_rep(r_rep, r_rep_mes, i, r_rep_num, t_id);
       byte_ptr += get_size_from_opcode(r_rep->opcode);
       bool is_rmw_rep = opcode_is_rmw_rep(r_rep->opcode);
@@ -1021,7 +1020,7 @@ static inline void commit_reads(p_ops_t *p_ops,
   p_ops->r_pull_ptr = pull_ptr;
   if (writes_for_cache > 0)
     KVS_batch_op_first_read_round(writes_for_cache, t_id, (r_info_t **) p_ops->ptrs_to_mes_ops,
-                                  p_ops, 0, MAX_INCOMING_R, false);
+                                  p_ops, 0, MAX_INCOMING_R);
 }
 
 

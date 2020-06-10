@@ -96,10 +96,6 @@ static inline void my_assert(bool cond, const char *message)
   }
 }
 
-static inline void print_version(const uint32_t version)
-{
-  my_printf(yellow, "Version: %u\n", version);
-}
 
 
 // swap 2 pointerss
@@ -118,6 +114,88 @@ static inline void circulate_pointers(void** ptr_1, void** ptr_2, void** ptr_3)
   *ptr_2 = *ptr_3;
   *ptr_3 = tmp;
 }
+
+
+/*----------------------------------------------------------------
+ * ----------------FLAG TO STRING FUNCTIONS-----------------------
+ * ----------------------------------------------------------------
+ * */
+
+
+static inline const char * committing_flag_to_str(uint8_t state)
+{
+  switch (state)
+  {
+    case FROM_LOG_TOO_LOW_REP:
+      return "FROM_LOG_TOO_LOW_REP";
+    case FROM_ALREADY_COMM_REP:
+      return "FROM_ALREADY_COMM_REP";
+    case FROM_LOCAL:
+      return "FROM_LOCAL";
+    case FROM_ALREADY_COMM_REP_HELP:
+      return "FROM_ALREADY_COMM_REP_HELP";
+    case FROM_LOCAL_HELP:
+      return "FROM_LOCAL_HELP";
+    case FROM_REMOTE_COMMIT:
+      return "FROM_REMOTE_COMMIT";
+    case FROM_REMOTE_COMMIT_NO_VAL:
+      return "FROM_REMOTE_COMMIT_NO_VAL";
+    case FROM_LOCAL_ACQUIRE:
+      return "FROM_LOCAL_ACQUIRE";
+    case FROM_OOE_READ:
+      return "FROM_OOE_READ";
+    default: return "Unknown";
+  }
+}
+
+static inline const char* state_to_str(uint8_t state)
+{
+  switch (state)
+  {
+    case INVALID_RMW:
+      return "INVALID_RMW";
+    case PROPOSED:
+      return "PROPOSED";
+    case ACCEPTED:
+      return "ACCEPTED";
+    case NEEDS_KV_PTR:
+      return "NEEDS_KV_PTR";
+    case RETRY_WITH_BIGGER_TS:
+      return "RETRY_WITH_BIGGER_TS";
+    case MUST_BCAST_COMMITS:
+      return "MUST_BCAST_COMMITS";
+    case MUST_BCAST_COMMITS_FROM_HELP:
+      return "MUST_BCAST_COMMITS_FROM_HELP";
+    case COMMITTED:
+      return "COMMITTED";
+    case CAS_FAILED:
+      return "CAS_FAILED";
+    default: return "Unknown";
+  }
+}
+
+static inline const char* help_state_to_str(uint8_t state)
+{
+  switch (state)
+  {
+    case NOT_HELPING:
+      return "NOT_HELPING";
+    case PROPOSE_NOT_LOCALLY_ACKED:
+      return "PROPOSE_NOT_LOCALLY_ACKED";
+    case HELPING:
+      return "HELPING";
+    case PROPOSE_LOCALLY_ACCEPTED:
+      return "PROPOSE_LOCALLY_ACCEPTED";
+    case HELP_PREV_COMMITTED_LOG_TOO_HIGH:
+      return "HELP_PREV_COMMITTED_LOG_TOO_HIGH";
+    case HELPING_MYSELF:
+      return "HELPING_MYSELF";
+    case IS_HELPER:
+      return "IS_HELPER";
+    default: return "Unknown";
+  }
+}
+
 
 
 // Check whether 2 key hashes are equal
@@ -446,7 +524,7 @@ static inline bool opcode_is_rmw_rep(uint8_t opcode)
 // Give an opcode to get the size of the read rep messages
 static inline uint16_t get_size_from_opcode(uint8_t opcode)
 {
-  if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
+  if (opcode > CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
   switch(opcode) {
     // ----RMWS-----
     case LOG_TOO_SMALL:
@@ -465,10 +543,10 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
     case NO_OP_PROP_REP:
       return PROP_REP_SMALL_SIZE;
       //---- RMW ACQUIRES--------
-    case ACQ_CARTS_TOO_HIGH:
-    case ACQ_CARTS_EQUAL:
+    case CARTS_TOO_HIGH:
+    case CARTS_EQUAL:
       return R_REP_SMALL_SIZE;
-    case ACQ_CARTS_TOO_SMALL:
+    case CARTS_TOO_SMALL:
       return ACQ_REP_SIZE;
       // -----REGULAR READS/ACQUIRES----
     case TS_TOO_HIGH:
@@ -543,53 +621,7 @@ static inline void print_ts(struct ts_tuple ts, const char* mess, color_t color)
   my_printf(color, "%s: <%u, %u> \n", mess, ts.version, ts.m_id);
 }
 
-static inline const char* state_to_str(uint8_t state)
-{
-  switch (state)
-  {
-    case INVALID_RMW:
-      return "INVALID_RMW";
-    case PROPOSED:
-      return "PROPOSED";
-    case ACCEPTED:
-      return "ACCEPTED";
-    case NEEDS_KV_PTR:
-      return "NEEDS_KV_PTR";
-    case RETRY_WITH_BIGGER_TS:
-      return "RETRY_WITH_BIGGER_TS";
-    case MUST_BCAST_COMMITS:
-      return "MUST_BCAST_COMMITS";
-    case MUST_BCAST_COMMITS_FROM_HELP:
-      return "MUST_BCAST_COMMITS_FROM_HELP";
-    case COMMITTED:
-      return "COMMITTED";
-    case CAS_FAILED:
-      return "CAS_FAILED";
-    default: return "Unknown";
-  }
-}
 
-static inline const char* help_state_to_str(uint8_t state)
-{
-  switch (state)
-  {
-    case NOT_HELPING:
-      return "NOT_HELPING";
-    case PROPOSE_NOT_LOCALLY_ACKED:
-      return "PROPOSE_NOT_LOCALLY_ACKED";
-    case HELPING:
-      return "HELPING";
-    case PROPOSE_LOCALLY_ACCEPTED:
-      return "PROPOSE_LOCALLY_ACCEPTED";
-    case HELP_PREV_COMMITTED_LOG_TOO_HIGH:
-      return "HELP_PREV_COMMITTED_LOG_TOO_HIGH";
-    case HELPING_MYSELF:
-      return "HELPING_MYSELF";
-    case IS_HELPER:
-      return "IS_HELPER";
-    default: return "Unknown";
-  }
-}
 
 
 static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color, uint16_t t_id)
@@ -599,9 +631,8 @@ static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color, uint16
   my_printf(color, "Key : %u \n", loc_entry->key.bkt);
   my_printf(color, "Session %u/%u \n", loc_entry->sess_id, loc_entry->glob_sess_id);
   my_printf(color, "State %s \n", state_to_str(loc_entry->state));
-  my_printf(color, "*****Committed RMW***** \n");
   my_printf(color, "Log no %u\n", loc_entry->log_no);
-  my_printf(color, "Last committed rmw %u\n", loc_entry->rmw_id.id);
+  my_printf(color, "Rmw %u\n", loc_entry->rmw_id.id);
   print_ts(loc_entry->base_ts, "Base base_ts:", color);
   print_ts(loc_entry->new_ts, "Propose base_ts:", color);
   my_printf(color, "Helping state %s \n", help_state_to_str(loc_entry->helping_flag));

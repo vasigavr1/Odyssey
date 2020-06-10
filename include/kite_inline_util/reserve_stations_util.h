@@ -736,12 +736,12 @@ static inline void set_up_rmw_acq_rep_message_size(p_ops_t *p_ops,
 {
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
 
-  check_state_with_allowed_flags(7, opcode, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_TOO_HIGH, ACQ_CARTS_EQUAL,
-                                 ACQ_CARTS_TOO_SMALL + FALSE_POSITIVE_OFFSET,
-                                 ACQ_CARTS_TOO_HIGH + FALSE_POSITIVE_OFFSET,
-                                 ACQ_CARTS_EQUAL + FALSE_POSITIVE_OFFSET);
+  check_state_with_allowed_flags(7, opcode, CARTS_TOO_SMALL, CARTS_TOO_HIGH, CARTS_EQUAL,
+                                 CARTS_TOO_SMALL + FALSE_POSITIVE_OFFSET,
+                                 CARTS_TOO_HIGH + FALSE_POSITIVE_OFFSET,
+                                 CARTS_EQUAL + FALSE_POSITIVE_OFFSET);
 
-  if (opcode == ACQ_CARTS_TOO_SMALL) {
+  if (opcode == CARTS_TOO_SMALL) {
     r_rep_fifo->message_sizes[r_rep_fifo->push_ptr] += (ACQ_REP_SIZE - R_REP_SMALL_SIZE);
   }
 
@@ -1381,7 +1381,6 @@ static inline bool find_the_r_ptr_rep_refers_to(uint32_t *r_ptr, uint64_t l_id, 
                                                 uint8_t mes_opcode, uint8_t r_rep_num, uint16_t  t_id)
 {
   if (p_ops->r_size == 0 && mes_opcode == READ_REPLY) {
-    if (!USE_QUORUM) assert(false);
     return true;
   }
   if (mes_opcode == READ_REPLY)
@@ -1426,8 +1425,8 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep,
 {
 
   detect_false_positives_on_read_info_bookkeeping(r_rep, read_info, t_id);
-  if (r_rep->opcode == ACQ_CARTS_TOO_SMALL || r_rep->opcode == TS_TOO_SMALL) {
-    if (!read_info->seen_larger_ts) { // If this is the first "Greater" base_ts
+  if (r_rep->opcode == CARTS_TOO_SMALL || r_rep->opcode == TS_TOO_SMALL) {
+    if (!read_info->seen_larger_ts) {
       fill_read_info_from_read_rep(r_rep, read_info, t_id);
       read_info->times_seen_ts = 1;
       read_info->seen_larger_ts = true;
@@ -1444,11 +1443,11 @@ static inline void read_info_bookkeeping(struct r_rep_big *r_rep,
       // Nothing to do if the already stored base_ts is greater than the incoming
     }
   }
-  else if (r_rep->opcode == ACQ_CARTS_EQUAL || r_rep->opcode == TS_EQUAL) {
-    if (!read_info->seen_larger_ts)  // If it has not seen a "greater base_ts"
+  else if (r_rep->opcode == CARTS_EQUAL || r_rep->opcode == TS_EQUAL) {
+    if (!read_info->seen_larger_ts)
       read_info->times_seen_ts++;
   }
-  else if (r_rep->opcode == ACQ_CARTS_TOO_HIGH || r_rep->opcode == TS_TOO_HIGH) {
+  else if (r_rep->opcode == CARTS_TOO_HIGH || r_rep->opcode == TS_TOO_HIGH) {
     // Nothing to do if the already stored base_ts is greater than the incoming
   }
   read_info->rep_num++;

@@ -273,12 +273,11 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct write *op,
   if (compare_netw_ts_with_ts((struct network_ts_tuple*) &op, &kv_ptr->ts) == GREATER) {
     update_commit_logs(t_id, kv_ptr->key.bkt, op->version, kv_ptr->value,
                        op->value, "rem write", LOG_WS);
-    memcpy(kv_ptr->value, op->value, VALUE_SIZE);
+    write_kv_ptr_val(kv_ptr, op->value, (size_t) VALUE_SIZE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     kv_ptr->ts.m_id = op->m_id;
     kv_ptr->ts.version = op->version;
     unlock_seqlock(&kv_ptr->seqlock);
-
   } else {
     unlock_seqlock(&kv_ptr->seqlock);
     if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
@@ -368,7 +367,9 @@ static inline void KVS_updates_commits(struct commit *com, mica_op_t *kv_ptr,
               t_id, op_i, com->t_rmw_id, com->t_rmw_id % GLOBAL_SESSION_NUM, com->log_no, com->base_ts.version);
 
   uint64_t number_of_reqs;
-  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
+//  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) com, true, t_id);
+  commit_rmw(kv_ptr, (void*) com, NULL, FROM_REMOTE_COMMIT, t_id);
+
   if (PRINT_LOGS) {
     struct w_message *com_mes = (struct w_message *) p_ops->ptrs_to_mes_headers[op_i];
     uint8_t acc_m_id = com_mes->m_id;
@@ -405,7 +406,7 @@ static inline void KVS_reads_acquires_acquire_fp_and_reads(struct read *read, mi
       if (ENABLE_ASSERTIONS) {
         assert(read->ts.version <= kv_ptr->ts.version);
       }
-      acq_rep->opcode = ACQ_CARTS_TOO_SMALL;
+      acq_rep->opcode = CARTS_TOO_SMALL;
       acq_rep->rmw_id = kv_ptr->last_committed_rmw_id.id;
       acq_rep->log_no = kv_ptr->last_committed_log_no;
       memcpy(acq_rep->value, kv_ptr->value, (size_t) VALUE_SIZE);
@@ -413,11 +414,11 @@ static inline void KVS_reads_acquires_acquire_fp_and_reads(struct read *read, mi
       acq_rep->base_ts.m_id = kv_ptr->ts.m_id;
     }
     else if (carts_comp == EQUAL) {
-      acq_rep->opcode = ACQ_CARTS_EQUAL;
+      acq_rep->opcode = CARTS_EQUAL;
     }
     else {
       if (ENABLE_ASSERTIONS) assert(carts_comp == GREATER);
-      acq_rep->opcode = ACQ_CARTS_TOO_HIGH;
+      acq_rep->opcode = CARTS_TOO_HIGH;
     }
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
 
@@ -577,7 +578,9 @@ static inline void KVS_acquire_commits(r_info_t *r_info, mica_op_t *kv_ptr,
               t_id, op_i, r_info->rmw_id.id,
               r_info->log_no, r_info->ts_to_read.version);
   uint64_t number_of_reqs;
-  number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) r_info, false, t_id);
+  //number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) r_info, false, t_id);
+
+  commit_rmw(kv_ptr, (void *) r_info, NULL, r_info->opcode == OP_ACQUIRE? FROM_LOCAL_ACQUIRE : FROM_OOE_READ, t_id);
   if (PRINT_LOGS) {
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, "
               "version %u, m_id: %u \n",
@@ -800,7 +803,7 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
 // All out of epoch reads/writes must come in to update the epoch
 static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id, r_info_t **writes,
                                                  p_ops_t *p_ops,
-                                                 uint32_t pull_ptr, uint32_t max_op_size, bool zero_ops)
+                                                 uint32_t pull_ptr, uint32_t max_op_size)
 {
   uint16_t op_i;
   if (ENABLE_ASSERTIONS) assert(op_num <= MAX_INCOMING_R);
@@ -845,10 +848,6 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
     }
     else {  //Cache miss --> We get here if either tag or log key match failed
       if (ENABLE_ASSERTIONS) assert(false);
-    }
-    if (zero_ops) {
-      // printf("Zero out %d at address %lu \n", r_info->opcode, &r_info->opcode);
-      r_info->opcode = 5;
     }
 
     if (r_info->complete_flag) {

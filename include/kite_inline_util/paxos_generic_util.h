@@ -5,6 +5,7 @@
 #ifndef KITE_PAXOS_GENERIC_UTILITY_H
 #define KITE_PAXOS_GENERIC_UTILITY_H
 
+#include <common_func.h>
 #include "main.h"
 #include "debug_util.h"
 #include "client_if_util.h"
@@ -186,9 +187,77 @@ static inline void find_out_if_can_accept_help_locally(mica_op_t *kv_ptr,
 }
 
 
+/* ---------------------------------------------------------------------------
+//------------------------------COMMITTING------------------------------------
+//---------------------------------------------------------------------------*/
+static inline void process_commit_flags(void* rmw, loc_entry_t *loc_entry, uint8_t *flag)
+{
+  struct commit *com = (struct commit *) rmw;
+
+  switch (*flag) {
+    case FROM_ALREADY_COMM_REP:
+      if (loc_entry->helping_flag == HELPING) {
+        *flag = FROM_ALREADY_COMM_REP_HELP;
+      }
+      break;
+    case FROM_LOCAL:
+      if (loc_entry->helping_flag == HELPING)
+        *flag = FROM_LOCAL_HELP;
+      else if (ENABLE_ASSERTIONS)
+        assert(loc_entry->log_no == loc_entry->accepted_log_no);
+      break;
+    case FROM_REMOTE_COMMIT:
+      if (com->opcode == COMMIT_OP_NO_VAL)
+        *flag = FROM_REMOTE_COMMIT_NO_VAL;
+      break;
+    case FROM_LOCAL_ACQUIRE:
+    case FROM_LOG_TOO_LOW_REP:
+    break;
+    default:
+      if (ENABLE_ASSERTIONS) {printf("%u \n", *flag); assert(false);}
+  }
+}
+
+static inline void fill_commit_info(commit_info_t *com_info, uint8_t flag,
+                                    uint64_t rmw_id,
+                                    uint32_t log_no, struct ts_tuple base_ts,
+                                    uint8_t *value, bool overwrite_kv)
+{
+  com_info->rmw_id.id = rmw_id;
+  com_info->log_no = log_no;
+  com_info->base_ts = base_ts;
+  com_info->value = value;
+  com_info->overwrite_kv = overwrite_kv;
+  com_info->message = committing_flag_to_str(flag);
+  com_info->no_value = false;
+}
 
 
+static inline bool can_process_com_no_value(mica_op_t *kv_ptr,
+                                            commit_info_t *com_info,
+                                            uint16_t t_id)
+{
 
+  if (kv_ptr->last_committed_log_no < com_info->log_no) {
+    if (ENABLE_ASSERTIONS) {
+      assert(kv_ptr->state == ACCEPTED);
+      assert(kv_ptr->log_no == com_info->log_no);
+      assert(kv_ptr->accepted_rmw_id.id == com_info->rmw_id.id);
+      check_registered_against_kv_ptr_last_committed(kv_ptr, com_info->rmw_id.id,
+                                                    com_info->message, t_id);
+    }
+    com_info->base_ts = kv_ptr->base_acc_ts;
+    com_info->value = kv_ptr->last_accepted_value;
+    return true;
+  }
+  else if (kv_ptr->last_committed_log_no == com_info->log_no) {
+    check_that_the_rmw_ids_match(kv_ptr,  com_info->rmw_id.id, com_info->log_no,
+                                 kv_ptr->base_acc_ts.version,
+                                 kv_ptr->base_acc_ts.m_id,
+                                 com_info->message, t_id);
+  }
+  return false;
+}
 /*--------------------------------------------------------------------------
  * --------------------CAS EARLY FAILURE--------------------------
  * --------------------------------------------------------------------------*/

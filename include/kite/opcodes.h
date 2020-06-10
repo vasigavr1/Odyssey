@@ -86,9 +86,9 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 // for the same RMW-id and TS, that means the proposer will never see this opcode because
 // it has already gathered prop reps quorum and sent accepts
 #define NO_OP_PROP_REP 41
-#define ACQ_CARTS_TOO_SMALL 42
-#define ACQ_CARTS_TOO_HIGH 43
-#define ACQ_CARTS_EQUAL 44
+#define CARTS_TOO_SMALL 42
+#define CARTS_TOO_HIGH 43
+#define CARTS_EQUAL 44
 
 // this offset is added to the read reply opcode
 // to denote that the machine doing the acquire was
@@ -154,9 +154,18 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define FROM_ACQUIRE 5
 #define FROM_COMMIT 6
 
-// Possible flags when accepting locally
-#define ACCEPT_ACK 1
-#define ABORT_HELP 6
+// Committing flags
+enum {
+  FROM_LOG_TOO_LOW_REP,
+  FROM_ALREADY_COMM_REP,
+  FROM_ALREADY_COMM_REP_HELP,
+  FROM_LOCAL,
+  FROM_LOCAL_HELP,
+  FROM_REMOTE_COMMIT,
+  FROM_REMOTE_COMMIT_NO_VAL,
+  FROM_LOCAL_ACQUIRE,
+  FROM_OOE_READ
+};
 
 
 // Possible Helping flags
