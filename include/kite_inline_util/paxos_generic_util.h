@@ -66,7 +66,7 @@ static inline void perform_the_rmw_on_the_loc_entry(mica_op_t *kv_ptr,
     case FETCH_AND_ADD:
       memcpy(loc_entry->value_to_read, kv_ptr->value, loc_entry->rmw_val_len);
       *(uint64_t *)loc_entry->value_to_write = (*(uint64_t *)loc_entry->value_to_read) + (*(uint64_t *)loc_entry->compare_val);
-      if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && RMW_RATIO >= 1000 && RMW_ACQUIRE_RATIO == 0)
+      if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && RMW_RATIO >= 1000)
         assert((*(uint64_t *)loc_entry->compare_val == 1));
       //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
       break;

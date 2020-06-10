@@ -98,14 +98,13 @@
 
 // READ REPLIES -- Replies to reads/acquires/proposes accepts
 #define R_REP_MES_HEADER (11) //l_id 8 , coalesce_num 1, m_id 1, opcode 1 // and credits
-// Reads/acquires
-#define R_REP_SIZE (TS_TUPLE_SIZE + VALUE_SIZE + 1)
+// Read-TS (first round of releases and ooe-writes)
 #define R_REP_ONLY_TS_SIZE (TS_TUPLE_SIZE + 1)
 #define R_REP_SMALL_SIZE (1)
-#define READ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * R_REP_SIZE)) // Message size of replies to reads/acquires
-// RMW_ACQUIRE
-#define RMW_ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + 8 + LOG_NO_SIZE + 1)
-#define RMW_ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * RMW_ACQ_REP_SIZE)) //Message size of replies to rmw-acquires
+#define READ_TS_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * R_REP_ONLY_TS_SIZE)) // Message size of replies to readTS
+// ACQUIRES (& ooe reads)
+#define ACQ_REP_SIZE (TS_TUPLE_SIZE + RMW_VALUE_SIZE + 8 + LOG_NO_SIZE + 1)
+#define ACQ_REP_MES_SIZE (R_REP_MES_HEADER + (R_COALESCE * ACQ_REP_SIZE)) //Message size of replies to acquires & ooe-reads
 // PROPOSE REPLIES
 #define PROP_REP_LOG_TOO_LOW_SIZE (26 + RMW_VALUE_SIZE)  //l_id- 8, RMW_id- 10, ts 5, log_no - 4,  RMW value, opcode 1
 #define PROP_REP_SMALL_SIZE 9 // lid and opcode
@@ -122,7 +121,7 @@
 
 
 // COMBINE Reads, Acquires, RMW-acquires, Accepts , Propose
-#define MAX_R_REP_MES_SIZE MAX_OF_4(READ_REP_MES_SIZE, RMW_ACQ_REP_MES_SIZE, PROP_REP_MES_SIZE, ACC_REP_MES_SIZE)
+#define MAX_R_REP_MES_SIZE MAX_OF_4(READ_TS_REP_MES_SIZE, ACQ_REP_MES_SIZE, PROP_REP_MES_SIZE, ACC_REP_MES_SIZE)
 #define R_REP_SEND_SIZE MIN(MAX_R_REP_MES_SIZE, MTU)
 
 #define MAX_R_REP_COALESCE MAX_OF_3(R_COALESCE, PROP_COALESCE, ACC_COALESCE)
@@ -261,20 +260,16 @@ struct r_rep_small {
   uint8_t opcode;
 };
 
-// Sent when you have a bigger ts_tuple
+// Sent when you have a bigger carstamp
 struct r_rep_big {
   uint8_t opcode;
-  struct network_ts_tuple ts;
-  uint8_t value[VALUE_SIZE];
-}__attribute__((__packed__));
-
-struct rmw_acq_rep {
-  uint8_t opcode;
   struct network_ts_tuple base_ts;
-  uint8_t value[RMW_VALUE_SIZE];
+  uint8_t value[VALUE_SIZE];
   uint32_t log_no; // last committed only
   uint64_t rmw_id; // last committed
-} __attribute__((__packed__));
+}__attribute__((__packed__));
+
+
 
 //
 struct r_rep_message {

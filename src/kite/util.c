@@ -44,8 +44,8 @@ void static_assert_compile_parameters()
   // R_REPS
 //  static_assert(R_REP_SEND_SIZE >= PROP_REP_MES_SIZE &&
 //                R_REP_SEND_SIZE >= ACC_REP_MES_SIZE &&
-//                R_REP_SEND_SIZE >= READ_REP_MES_SIZE &&
-//                R_REP_SEND_SIZE >= RMW_ACQ_REP_MES_SIZE, "");
+//                R_REP_SEND_SIZE >= READ_TS_REP_MES_SIZE &&
+//                R_REP_SEND_SIZE >= ACQ_REP_MES_SIZE, "");
   static_assert(R_REP_SEND_SIZE <= MTU, "");
 
   // COALESCING
@@ -68,7 +68,7 @@ void static_assert_compile_parameters()
   static_assert(sizeof(struct rmw_rep_last_committed) == PROP_REP_ACCEPTED_SIZE, "");
   static_assert(sizeof(struct rmw_rep_message) == PROP_REP_MES_SIZE, "");
   static_assert(sizeof(struct accept) == ACCEPT_SIZE, "");
-  static_assert(sizeof(struct rmw_acq_rep) == RMW_ACQ_REP_SIZE, "");
+  static_assert(sizeof(struct r_rep_big) == ACQ_REP_SIZE, "");
   static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
   // UD- REQS
   static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
@@ -303,7 +303,7 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
 {
   uint8_t  opcode = 0;
   uint8_t cas_opcode = USE_WEAK_CAS ? COMPARE_AND_SWAP_WEAK : COMPARE_AND_SWAP_STRONG;
-  bool is_rmw = false, is_update = false, is_sc = false; bool is_rmw_acquire = false;
+  bool is_rmw = false, is_update = false, is_sc = false;
   if (ENABLE_RMWS) {
     if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
     else
@@ -315,23 +315,13 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
   }
 
   if (is_rmw) {
-    //if (!ALL_RMWS_SINGLE_KEY && !RMW_ONE_KEY_PER_THREAD)
-    //printf("Worker %u, command %u is an RMW \n", t_id, i);
-    is_rmw_acquire = (rand_r(seed) % 1000 < RMW_ACQUIRE_RATIO) &&
-                     ENABLE_RMW_ACQUIRES;
-    if (!is_rmw_acquire) {
-      opc_info->rmws++;
-      if (TRACE_ONLY_CAS) opcode = cas_opcode;
-      else if (TRACE_ONLY_FA) opcode = FETCH_AND_ADD;
-      else if (TRACE_MIXED_RMWS)
-        opcode = (uint8_t) ((rand_r(seed) % 1000 < TRACE_CAS_RATIO) ? cas_opcode : FETCH_AND_ADD);
+    opc_info->rmws++;
+    if (TRACE_ONLY_CAS) opcode = cas_opcode;
+    else if (TRACE_ONLY_FA) opcode = FETCH_AND_ADD;
+    else if (TRACE_MIXED_RMWS)
+      opcode = (uint8_t) ((rand_r(seed) % 1000 < TRACE_CAS_RATIO) ? cas_opcode : FETCH_AND_ADD);
     if (opcode == cas_opcode) opc_info->cas++;
     else opc_info->fa++;
-    }
-    else {
-      opcode = (uint8_t) OP_ACQUIRE;
-      opc_info->rmw_acquires++;
-    }
   }
   else if (is_update) {
     if (is_sc && ENABLE_RELEASES) {
@@ -357,7 +347,6 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
   opc_info->is_rmw = is_rmw;
   opc_info->is_update = is_update;
   opc_info->is_sc = is_sc;
-  opc_info->is_rmw_acquire = is_rmw_acquire;
   return opcode;
 }
 

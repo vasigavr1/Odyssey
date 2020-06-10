@@ -390,9 +390,8 @@ static inline void KVS_reads_acquires_acquire_fp_and_reads(struct read *read, mi
   uint32_t debug_cntr = 0;
   uint64_t l_id = p_ops->ptrs_to_mes_headers[op_i]->l_id;
   uint8_t rem_m_id = p_ops->ptrs_to_mes_headers[op_i]->m_id;
-  struct rmw_acq_rep *acq_rep =
-    (struct rmw_acq_rep *) get_r_rep_ptr(p_ops, l_id, rem_m_id, read->opcode,
-                                         p_ops->coalesce_r_rep[op_i], t_id);
+  struct r_rep_big *acq_rep =  get_r_rep_ptr(p_ops, l_id, rem_m_id, read->opcode,
+                                             p_ops->coalesce_r_rep[op_i], t_id);
 
   uint32_t acq_log_no = read->log_no;
 
@@ -441,8 +440,8 @@ static inline void KVS_reads_get_TS(struct read *read, mica_op_t *kv_ptr,
   uint64_t tmp_lock = read_seqlock_lock_free(&kv_ptr->seqlock);
   do {
     debug_stalling_on_lock(&debug_cntr, "reads: get-TS-read version", t_id);
-    r_rep->ts.m_id = kv_ptr->ts.m_id;
-    r_rep->ts.version = kv_ptr->ts.version;
+    r_rep->base_ts.m_id = kv_ptr->ts.m_id;
+    r_rep->base_ts.version = kv_ptr->ts.version;
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
   set_up_r_rep_message_size(p_ops, r_rep, &read->ts, true, t_id);
   finish_r_rep_bookkeeping(p_ops, r_rep, false, rem_m_id, t_id);

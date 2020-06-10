@@ -724,11 +724,11 @@ static inline void check_a_polled_r_rep(struct r_rep_big *r_rep,
   if (ENABLE_ASSERTIONS) {
     uint8_t opcode = r_rep->opcode;
     if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
-    //check_state_with_allowed_flags(8, opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
+    //check_state_with_allowed_flags(8, opcode, TS_TOO_HIGH, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
     //                              LOG_TOO_HIGH, LOG_TOO_SMALL, LOG_EQUAL);
 
-    if ((r_rep->opcode < TS_SMALLER || r_rep->opcode > ACQ_CARTS_EQUAL) &&
-        (r_rep->opcode < TS_SMALLER + FALSE_POSITIVE_OFFSET ||
+    if ((r_rep->opcode < TS_TOO_HIGH || r_rep->opcode > ACQ_CARTS_EQUAL) &&
+        (r_rep->opcode < TS_TOO_HIGH + FALSE_POSITIVE_OFFSET ||
          r_rep->opcode > ACQ_CARTS_EQUAL + FALSE_POSITIVE_OFFSET)) {
       my_printf(red, "Receiving r_rep: Opcode %u, i %u/%u \n", r_rep->opcode, r_rep_i, r_rep_num);
       assert(false);
@@ -1269,13 +1269,13 @@ static inline void print_check_count_stats_when_sending_r_rep(struct r_rep_fifo 
       //if (byte_ptr > 505)
       //printf("%u/%u \n", byte_ptr, r_rep_fifo->message_sizes[pull_ptr]);
       if (opcode > ACQ_CARTS_EQUAL) opcode -= FALSE_POSITIVE_OFFSET;
-      if (opcode < TS_SMALLER || opcode > ACQ_CARTS_EQUAL)
+      if (opcode < TS_TOO_HIGH || opcode > ACQ_CARTS_EQUAL)
         printf("R_rep %u/%u, byte ptr %u/%u opcode %u/%u \n",
                i, r_rep_mes->coalesce_num, byte_ptr, r_rep_fifo->message_sizes[pull_ptr],
                opcode, r_rep_mes->opcode);
 
 
-      assert(opcode >= TS_SMALLER && opcode <= ACQ_CARTS_EQUAL);
+      assert(opcode >= TS_TOO_HIGH && opcode <= ACQ_CARTS_EQUAL);
       bool is_rmw = false, is_rmw_acquire = false;
       if (opcode >= RMW_ACK && opcode <= NO_OP_PROP_REP)
         is_rmw = true;

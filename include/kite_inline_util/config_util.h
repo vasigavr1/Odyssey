@@ -392,29 +392,33 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
                                                                    r_info_t *read_info,
                                                                    uint16_t t_id)
 {
-  if (TURN_OFF_KITE) return;
-  // Check for acquires that detected a false positive
-  if (unlikely(r_rep->opcode > ACQ_CARTS_EQUAL)) {
-    read_info->fp_detected = true;
-    if (DEBUG_QUORUM)
-      my_printf(yellow, "Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
-    r_rep->opcode -= FALSE_POSITIVE_OFFSET;
-    check_state_with_allowed_flags(8, r_rep->opcode, TS_SMALLER, TS_EQUAL, TS_GREATER_TS_ONLY, TS_GREATER,
-                                   ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
-    if (ENABLE_ASSERTIONS) {
-      assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
-      assert(read_info->opcode == OP_ACQUIRE);
+  if (!TURN_OFF_KITE) {
+    // Check for acquires that detected a false positive
+    if (unlikely(r_rep->opcode > ACQ_CARTS_EQUAL)) {
+      read_info->fp_detected = true;
+      if (DEBUG_QUORUM)
+        my_printf(yellow, "Raising the fp flag after seeing read reply %u \n", r_rep->opcode);
+      r_rep->opcode -= FALSE_POSITIVE_OFFSET;
+      check_state_with_allowed_flags(7, r_rep->opcode, TS_TOO_HIGH, TS_EQUAL, TS_TOO_SMALL,
+                                     ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
+      if (ENABLE_ASSERTIONS) {
+        assert(read_info->opcode != OP_ACQUIRE_FLIP_BIT);
+        assert(read_info->opcode == OP_ACQUIRE);
+      }
     }
   }
+
+
   if (ENABLE_ASSERTIONS) {
-    if (r_rep->opcode > TS_GREATER) {
+    if (r_rep->opcode > TS_TOO_SMALL) {
       check_state_with_allowed_flags(4, r_rep->opcode, ACQ_CARTS_TOO_HIGH, ACQ_CARTS_TOO_SMALL, ACQ_CARTS_EQUAL);
-      //assert(read_info->is_read);
-      //assert(read_info->opcode == OP_ACQUIRE); // could also be ooe read!
+      assert(read_info->is_read);
+      check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, KVS_OP_GET);
     }
     else {
-      check_state_with_allowed_flags(5, r_rep->opcode, TS_SMALLER, TS_EQUAL,
-                                     TS_GREATER_TS_ONLY, TS_GREATER);
+      check_state_with_allowed_flags(4, read_info->opcode, OP_RELEASE, KVS_OP_PUT, OP_ACQUIRE_FLIP_BIT);
+      check_state_with_allowed_flags(4, r_rep->opcode, TS_TOO_HIGH, TS_EQUAL, TS_TOO_SMALL);
+      assert(!read_info->is_read);
     }
   }
 

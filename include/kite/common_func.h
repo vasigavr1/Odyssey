@@ -99,9 +99,7 @@
 #define ENABLE_RELEASES_ 1
 #define ENABLE_ACQUIRES_ 1
 #define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define RMW_ACQUIRE_RATIO 0000 // this is the ratio out of all RMWs and is out of 1000
 #define ENABLE_RMWS_ 1
-#define ENABLE_RMW_ACQUIRES_ 1
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 #define ENABLE_CLIENTS 1
@@ -110,12 +108,7 @@
 #define MEASURE_SLOW_PATH 0
 
 
-// TIMEOUTS
-#define WRITE_FIFO_TIMEOUT M_1
-#define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
-#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
-#define ALL_ABOARD_TIMEOUT_CNT K_16
-#define LOG_TOO_HIGH_TIME_OUT 10
+
 
 // Important Knobs
 #define ENABLE_ASSERTIONS 1
@@ -131,7 +124,12 @@
 #define TURN_OFF_KITE (EMULATE_ABD ? 1 : TURN_OFF_KITE_)
 #define ACCEPT_IS_RELEASE 1
 
-
+// TIMEOUTS
+#define WRITE_FIFO_TIMEOUT M_1
+#define RMW_BACK_OFF_TIMEOUT 1500 //K_32 //K_32// M_1
+#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+#define ALL_ABOARD_TIMEOUT_CNT K_16
+#define LOG_TOO_HIGH_TIME_OUT 10
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)

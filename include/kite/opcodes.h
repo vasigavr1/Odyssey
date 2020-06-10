@@ -68,10 +68,10 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define READ_REPLY 27 // Contains only read reps
 #define READ_PROP_REPLY 127 // Contains read and prop reps
 
-#define TS_SMALLER 28
+#define TS_TOO_HIGH 28
 #define TS_EQUAL 29
-#define TS_GREATER_TS_ONLY 30 // Response when reading the ts only (1st round of release)
-#define TS_GREATER 31
+#define TS_TOO_SMALL 30 // Response when reading the ts only (1st round of release)
+//#define TS_GREATER 31
 #define RMW_ACK 32 // 1 byte reply
 #define RMW_ACK_ACC_SAME_RMW 33 // only for proposes: Have accepted with lower TS the same RMW-id, it counts as an ack
 #define RMW_ACK_BASE_TS_STALE 33 // the propose is acked, but we let it know o f a recent ABD write

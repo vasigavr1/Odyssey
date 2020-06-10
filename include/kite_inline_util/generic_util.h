@@ -442,26 +442,6 @@ static inline bool opcode_is_rmw_rep(uint8_t opcode)
           opcode <= NO_OP_PROP_REP + FALSE_POSITIVE_OFFSET);
 }
 
-static inline bool r_rep_has_big_size(uint8_t opcode)
-{
-  return opcode == TS_GREATER || (opcode == TS_GREATER + FALSE_POSITIVE_OFFSET);
-}
-
-static inline bool r_rep_has_rmw_acq_size(uint8_t opcode)
-{
-  return opcode == ACQ_CARTS_TOO_SMALL || (opcode == ACQ_CARTS_TOO_SMALL + FALSE_POSITIVE_OFFSET);
-}
-
-static inline uint16_t r_rep_size_based_on_opcode(uint8_t opcode)
-{
-  if (r_rep_has_rmw_acq_size(opcode))
-    return RMW_ACQ_REP_SIZE;
-  else if (r_rep_has_big_size(opcode))
-    return R_REP_SIZE;
-  else if (opcode == TS_GREATER_TS_ONLY)
-    return R_REP_ONLY_TS_SIZE;
-  else return 1;
-}
 
 // Give an opcode to get the size of the read rep messages
 static inline uint16_t get_size_from_opcode(uint8_t opcode)
@@ -489,14 +469,12 @@ static inline uint16_t get_size_from_opcode(uint8_t opcode)
     case ACQ_CARTS_EQUAL:
       return R_REP_SMALL_SIZE;
     case ACQ_CARTS_TOO_SMALL:
-      return RMW_ACQ_REP_SIZE;
+      return ACQ_REP_SIZE;
       // -----REGULAR READS/ACQUIRES----
-    case TS_SMALLER:
+    case TS_TOO_HIGH:
     case TS_EQUAL:
       return R_REP_SMALL_SIZE;
-    case TS_GREATER:
-      return R_REP_SIZE;
-    case TS_GREATER_TS_ONLY:
+    case TS_TOO_SMALL:
       return R_REP_ONLY_TS_SIZE;
     default: if (ENABLE_ASSERTIONS) {
         my_printf(red, "Opcode %u \n", opcode);
@@ -624,8 +602,8 @@ static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color, uint16
   my_printf(color, "*****Committed RMW***** \n");
   my_printf(color, "Log no %u\n", loc_entry->log_no);
   my_printf(color, "Last committed rmw %u\n", loc_entry->rmw_id.id);
-  print_ts(loc_entry->base_ts, "Base ts:", color);
-  print_ts(loc_entry->new_ts, "Propose ts:", color);
+  print_ts(loc_entry->base_ts, "Base base_ts:", color);
+  print_ts(loc_entry->new_ts, "Propose base_ts:", color);
   my_printf(color, "Helping state %s \n", help_state_to_str(loc_entry->helping_flag));
 }
 
@@ -636,14 +614,14 @@ static inline void print_kv_ptr(mica_op_t *kv_ptr, color_t color, uint16_t t_id)
   my_printf(color, "*****Committed RMW***** \n");
   my_printf(color, "Last committed log %u\n", kv_ptr->last_committed_log_no);
   my_printf(color, "Last committed rmw %u\n", kv_ptr->last_committed_rmw_id.id);
-  print_ts(kv_ptr->base_acc_ts, "Base ts:", color);
+  print_ts(kv_ptr->base_acc_ts, "Base base_ts:", color);
 
   my_printf(color, "*****Active RMW*****\n");
   my_printf(color, "State %s \n", state_to_str(kv_ptr->state));
   my_printf(color, "Log %u\n", kv_ptr->log_no);
   my_printf(color, "RMW-id %u \n", kv_ptr->rmw_id.id);
-  print_ts(kv_ptr->prop_ts, "Proposed ts:", color);
-  print_ts(kv_ptr->accepted_ts, "Accepted ts:", color);
+  print_ts(kv_ptr->prop_ts, "Proposed base_ts:", color);
+  print_ts(kv_ptr->accepted_ts, "Accepted base_ts:", color);
 }
 
 
