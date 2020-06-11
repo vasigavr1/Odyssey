@@ -914,113 +914,41 @@ static inline void commit_reads(p_ops_t *p_ops,
                                   write_local_kvs, signal_completion, signal_completion_after_kvs_write, t_id);
 
     // Break condition: this read cannot be processed, and thus no subsequent read will be processed
-    if (((insert_write_flag) && ((p_ops->virt_w_size + 1) >= MAX_ALLOWED_W_SIZE)) ||
-        (write_local_kvs && (writes_for_cache >= MAX_INCOMING_R)))// ||
-       // (acq_second_round_to_flip_bit) && (p_ops->virt_r_size >= MAX_ALLOWED_R_SIZE))
+    if (is_there_buffer_space_to_commmit_the_read(p_ops, insert_write_flag,
+                                                  write_local_kvs, writes_for_cache))
       break;
 
     //CACHE: Reads that need to go to kvs
-    if (write_local_kvs) {
-      // if a read did not see a larger base_ts it should only change the epoch
-      if (read_info->opcode == KVS_OP_GET && !read_info->seen_larger_ts) {
-        read_info->opcode = UPDATE_EPOCH_OP_GET;
-      }
-      //check_state_with_allowed_flags(3, read_info->opcode, OP_ACQUIRE, UPDATE_EPOCH_OP_GET);
-      if (read_info->seen_larger_ts) {
-        if (ENABLE_ASSERTIONS) {
-          //assert(read_info->value_to_read != NULL);
-          //assert(read_info->val_len == VALUE_SIZE);
-        }
-        if (ENABLE_CLIENTS) {
-          memcpy(read_info->value_to_read, read_info->value, read_info->val_len);
-          check_value_is_tr_top(read_info->value_to_read, "read ooe-read");
-        }
-      }
-      p_ops->ptrs_to_mes_ops[writes_for_cache] = (void *) &p_ops->read_info[pull_ptr];
-      writes_for_cache++;
-      // An out-of-epoch write will get its TS set when inserting a write,
-      // so there is no need to do it here
-    }
+    if (write_local_kvs)
+      read_commit_bookkeeping_to_write_local_kvs(p_ops, read_info,
+                                                 pull_ptr, &writes_for_cache);
 
     //INSERT WRITE: Reads that need to be converted to writes: second round of read/acquire or
     // Writes whose first round is a read: out-of-epoch writes/releases
-    if (insert_write_flag) {
-      if (read_info->opcode == OP_RELEASE ||
-          read_info->opcode == KVS_OP_PUT) {
-        read_info->ts_to_read.m_id = (uint8_t) machine_id;
-        read_info->ts_to_read.version++;
-        if (read_info->opcode == OP_RELEASE)
-          memcpy(&p_ops->read_info[pull_ptr], &p_ops->r_session_id[pull_ptr], SESSION_BYTES);
-      }
-      else if (ENABLE_STAT_COUNTING) t_stats[t_id].read_to_write++;
-      if(read_info->is_read) assert(read_info->opcode == OP_ACQUIRE);
-      insert_write(p_ops, NULL, FROM_READ, pull_ptr, t_id);
-    }
-
+    if (insert_write_flag)
+      read_commit_bookkeeping_to_insert_write(p_ops, read_info,
+                                              pull_ptr, t_id);
 
     // FAULT_TOLERANCE: In the off chance that the acquire needs a second round for fault tolerance
-    if (unlikely(acq_second_round_to_flip_bit)) {
-      increment_epoch_id(read_info->epoch_id, t_id); // epoch_id should be incremented always even it has been incremented since the acquire fired
-      //printf("epoch_id is wrapping around %u ", epoch_id);
-      if (DEBUG_QUORUM) printf("Worker %u increases the epoch id to %lu \n", t_id, (uint64_t) epoch_id);
-
-      // The read must have the struct key overloaded with the original acquire l_id
-      if (DEBUG_BIT_VECS)
-        my_printf(cyan, "Wrkr, %u Opcode to be sent in the insert read %u, the local id to be sent %u, "
-                    "read_info pull_ptr %u, read_info push_ptr %u read fifo size %u, virtual size: %u  \n",
-                    t_id, read_info->opcode, p_ops->local_r_id, pull_ptr,
-                    p_ops->r_push_ptr, p_ops->r_size, p_ops->virt_r_size);
-      /* */
-      p_ops->read_info[p_ops->r_push_ptr].opcode = OP_ACQUIRE_FLIP_BIT;
-      insert_read(p_ops, NULL, FROM_ACQUIRE, t_id);
-      read_info->fp_detected = false;
-    }
+    if (unlikely(acq_second_round_to_flip_bit))
+      read_commit_spawn_flip_bit_message(p_ops, read_info,
+                                         pull_ptr, t_id);
 
     // SESSION: Acquires that wont have a second round and thus must free the session
-    if (!insert_write_flag && (read_info->opcode == OP_ACQUIRE)) {
-      if (ENABLE_ASSERTIONS) {
-        assert(p_ops->r_session_id[pull_ptr] < SESSIONS_PER_THREAD);
-        assert(p_ops->sess_info[p_ops->r_session_id[pull_ptr]].stalled);
-      }
-      p_ops->sess_info[p_ops->r_session_id[pull_ptr]].stalled = false;
-      p_ops->all_sessions_stalled = false;
-      if (MEASURE_LATENCY && t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE &&
-          latency_info->measured_req_flag == ACQUIRE &&
-          p_ops->r_session_id[pull_ptr] == latency_info->measured_sess_id)
-        report_latency(latency_info);
-    }
+    if (!insert_write_flag && (read_info->opcode == OP_ACQUIRE))
+      read_commit_acquires_free_sess(p_ops, pull_ptr, latency_info, t_id);
 
     // COMPLETION: Signal completion for reads/acquires that need not write the local KVS or
     // have a second write round (applicable only for acquires)
-    if (signal_completion || read_info->opcode == UPDATE_EPOCH_OP_GET) {
-      //printf("Completing opcode %u read_info val %u, copied over val %u \n",
-      //read_info->opcode, read_info->value[0], read_info->value_to_read[0]);
-      signal_completion_to_client(p_ops->r_session_id[pull_ptr],
-                                  p_ops->r_index_to_req_array[pull_ptr], t_id);
-    }
-    else if (signal_completion_after_kvs_write) {
-      if (ENABLE_ASSERTIONS) assert(!read_info->complete_flag);
-        read_info->complete_flag = true;
-    }
-    //my_printf(cyan, "%u ptr freed, size %u/%u \n", pull_ptr, p_ops->r_size, p_ops->virt_r_size);
-    // Clean-up code
-    memset(&p_ops->read_info[pull_ptr], 0, 3); // a lin write uses these bytes for the session id but it's still fine to clear them
-    p_ops->r_state[pull_ptr] = INVALID;
-    p_ops->r_size--;
-    p_ops->virt_r_size -= read_info->opcode == OP_ACQUIRE ? 2 : 1;
-
-    if (read_info->is_read) read_info->is_read = false;
-    if (ENABLE_ASSERTIONS) {
-      assert(p_ops->virt_r_size < PENDING_READS);
-      if (p_ops->r_size == 0) assert(p_ops->virt_r_size == 0);
-    }
+    read_commit_complete_and_empty_read_info(p_ops, read_info, signal_completion,
+                                             signal_completion_after_kvs_write,
+                                             pull_ptr, t_id);
     MOD_ADD(pull_ptr, PENDING_READS);
-    p_ops->local_r_id++;
   }
   p_ops->r_pull_ptr = pull_ptr;
   if (writes_for_cache > 0)
     KVS_batch_op_first_read_round(writes_for_cache, t_id, (r_info_t **) p_ops->ptrs_to_mes_ops,
-                                  p_ops, 0, MAX_INCOMING_R);
+                                  p_ops, 0, (uint32_t) MAX_INCOMING_R);
 }
 
 

@@ -113,7 +113,7 @@
 // Important Knobs
 #define ENABLE_ASSERTIONS 1
 #define ENABLE_LOCK_FREE_READING 1
-#define ENABLE_COMMITS_WITH_NO_VAL 1
+#define ENABLE_COMMITS_WITH_NO_VAL 0
 #define ENABLE_CAS_CANCELLING 1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define PUT_A_MACHINE_TO_SLEEP 1
@@ -246,7 +246,7 @@ typedef struct mica_ts {
 typedef atomic_uint_fast64_t seqlock_t;
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
-#define MICA_OP_SIZE_  (96 + (2 * (MICA_VALUE_SIZE)))
+#define MICA_OP_SIZE_  (100 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
@@ -280,12 +280,9 @@ typedef struct  {
   struct rmw_id rmw_id;
   //struct rmw_id last_registered_rmw_id; // i was using it to put in accepts, when accepts carried last-registered-rmw-id
   struct rmw_id last_committed_rmw_id;
-  struct rmw_id accepted_rmw_id; // not really needed, but good for debug
-
-
-
+  struct rmw_id accepted_rmw_id; // not really needed, but useful for debugging
   uint64_t epoch_id;
-
+  uint32_t key_id; // strictly for debug
 
   uint8_t padding[MICA_OP_PADDING_SIZE];
 

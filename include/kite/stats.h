@@ -85,12 +85,12 @@ struct client_stats {
 };
 
 
-struct latency_flags {
+typedef struct latency_flags {
   req_type measured_req_flag;
   uint32_t measured_sess_id;
   struct key* key_to_measure;
   struct timespec start;
-};
+} latency_info_t;
 
 
 struct latency_counters{
@@ -115,75 +115,10 @@ struct local_latency {
 
 extern struct latency_counters latency_count;
 
-// TREIBER STRUCTS
-struct top {
-  uint32_t fourth_key_id;
-  uint32_t third_key_id;
-  uint32_t sec_key_id;
-  uint32_t key_id;
-  uint32_t pop_counter;
-  uint32_t push_counter;
-};
-#define NODE_SIZE (VALUE_SIZE - 17)
-#define NODE_SIGNATURE 144
-struct node {
-  uint8_t value[NODE_SIZE];
-  bool pushed;
-  uint16_t stack_id;
-  uint16_t owner;
-  uint32_t push_counter;
-  uint32_t key_id;
-  uint32_t next_key_id;
-};
-
-#define NUMBER_OF_STACKS (GLOBAL_SESSION_NUM)
-#define TR_KEY_OFFSET NUMBER_OF_STACKS
-#define MAX_TR_NODE_KEY ((GLOBAL_SESSION_NUM * TREIBER_WRITES_NUM) + TR_KEY_OFFSET)
-#define DEBUG_MAX 100
-static inline bool check_top(struct top *top, const char *message,
-                             uint32_t stack_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    bool silent = strcmp(message, "Pop-new_top before CAS ") == 0;
-    //assert(top->push_counter >= top->pop_counter);
-
-    if (top->push_counter == top->pop_counter) {
-      if (top->key_id != 0) { // Stack must be empty
-        if (!silent) my_printf(red, "%s: Stack %u should be empty: pushed %u, popped %u pointer %u \n",
-                               message, stack_id, top->push_counter, top->pop_counter, top->key_id);
-        return false;
-        assert(false);
-      }
-    } else if (top->push_counter > top->pop_counter) {
-      if (top->key_id < TR_KEY_OFFSET) { // Stack cannot be empty
-        if (!silent)  my_printf(red, "%s: Stack %u cannot be empty: pushed %u, popped %u pointer %u \n",
-                                message, stack_id, top->push_counter, top->pop_counter, top->key_id);
-        return false;
-        assert(false);
-      }
-    }
-  }
-  return true;
-}
 
 
-static inline bool check_treiber_values(uint8_t *old_val, uint8_t *new_val)
-{
-  struct top *new_top = (struct top *) new_val;
-  struct top *old_top = (struct top *) old_val;
 
-  if (new_top->push_counter < old_top->push_counter) {
-    my_printf(red, "New-push/old-push %u/%u \n",
-              new_top->push_counter , old_top->push_counter);
-    return false;
-  }
-  if (new_top->pop_counter < old_top->pop_counter) {
-    my_printf(red, "New-pop/old-pop %u/%u \n",
-              new_top->pop_counter , old_top->pop_counter);
-    return false;
-  }
-  return true;
 
-}
+
 
 #endif //KITE_STATS_H

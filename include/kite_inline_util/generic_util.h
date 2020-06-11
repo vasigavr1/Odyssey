@@ -122,7 +122,7 @@ static inline void circulate_pointers(void** ptr_1, void** ptr_2, void** ptr_3)
  * */
 
 
-static inline const char * committing_flag_to_str(uint8_t state)
+static inline const char* committing_flag_to_str(uint8_t state)
 {
   switch (state)
   {
@@ -144,6 +144,16 @@ static inline const char * committing_flag_to_str(uint8_t state)
       return "FROM_LOCAL_ACQUIRE";
     case FROM_OOE_READ:
       return "FROM_OOE_READ";
+    case FROM_TRACE_WRITE:
+      return "FROM_TRACE_WRITE";
+    case FROM_BASE_TS_STALE:
+      return "FROM_BASE_TS_STALE";
+    case FROM_ISOLATED_OP:
+      return "FROM_ISOLATED_OP";
+    case FROM_REMOTE_WRITE_RELEASE:
+      return "FROM_REMOTE_WRITE_RELEASE";
+    case FROM_OOE_LOCAL_WRITE:
+      return "FROM_OOE_LOCAL_WRITE";
     default: return "Unknown";
   }
 }
@@ -583,6 +593,10 @@ static inline uint16_t get_write_size_from_opcode(uint8_t opcode) {
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+//------------------------------ TREIBER DEBUGGING-----------------------------
+//---------------------------------------------------------------------------
 static inline void print_treiber_top(struct top* top, const char *generic_message,
                                      const char *special_message, color_t color)
 {
@@ -614,15 +628,17 @@ static inline bool check_value_is_tr_top(uint8_t *val, const char *message)
   }
   return true;
 }
+*/
 
+
+/* ---------------------------------------------------------------------------
+//------------------------------ PRINTS---------------------------------------
+//---------------------------------------------------------------------------*/
 
 static inline void print_ts(struct ts_tuple ts, const char* mess, color_t color)
 {
   my_printf(color, "%s: <%u, %u> \n", mess, ts.version, ts.m_id);
 }
-
-
-
 
 static inline void print_loc_entry(loc_entry_t *loc_entry, color_t color, uint16_t t_id)
 {
@@ -656,18 +672,95 @@ static inline void print_kv_ptr(mica_op_t *kv_ptr, color_t color, uint16_t t_id)
 }
 
 
-static inline void write_kv_ptr_val(mica_op_t *kv_ptr, uint8_t *new_val, size_t val_size)
+static inline void print_commit_info(commit_info_t * com_info,
+                                     color_t color, uint16_t t_id)
 {
+  my_printf(color, "WORKER %u -------Commit info------------ \n", t_id);
+  my_printf(color, "State %s \n", committing_flag_to_str(com_info->flag));
+  my_printf(color, "Log no %u\n", com_info->log_no);
+  my_printf(color, "Rmw %u\n", com_info->rmw_id.id);
+  print_ts(com_info->base_ts, "Base base_ts:", color);
+  my_printf(color, "No-value : %u \n", com_info->no_value);
+  my_printf(color, "Overwrite-kv %u/%u \n", com_info->overwrite_kv);
+}
+
+/* ---------------------------------------------------------------------------
+//------------------------------ MSQ_DEBUGGING -------------------------------
+//---------------------------------------------------------------------------
+static inline void print_ms_ptr(struct ms_ptr *ptr)
+{
+  my_printf(yellow, "-----------MS_PTR-%u----------\n", ptr->my_key_id);
+  my_printf(yellow, "Queue id %u \n", ptr->queue_id);
+  my_printf(yellow, "Next key-id %u \n", ptr->next_key_id);
+  my_printf(yellow, "Counter %u \n", ptr->counter);
+  my_printf(yellow, "Pushed: %s \n", ptr->pushed ? "YES": "NO");
+}
+
+
+static inline void check_write_if_msq_active(mica_op_t *kv_ptr, uint8_t *new_val,
+                                             uint8_t flag)
+{
+  if (!ENABLE_MS_ASSERTIONS) return;
+  uint32_t key_id = kv_ptr->key_id;
+  const char* message = committing_flag_to_str(flag);
+  assert(key_id < LAST_MS_NODE_PTR ||
+           (key_id >= DUMMY_KEY_ID_OFFSET && key_id <=  MS_INIT_DONE_FLAG_KEY));
+  if (key_id == MS_INIT_DONE_FLAG_KEY)
+    my_printf(green, "Writting ms_init_done_flag, %s\n", message);
+  // MS_PTR
+  if (kv_ptr->key_id < LAST_MS_NODE_PTR) {
+    struct ms_ptr *kv_ms_ptr = (struct ms_ptr *) kv_ptr->value;
+    struct ms_ptr *new_ms_ptr = (struct ms_ptr *) new_val;
+    if (new_ms_ptr->my_key_id != key_id) {
+      print_ms_ptr(new_ms_ptr);
+    }
+
+  }
+
+
+}
+*/
+
+/* ---------------------------------------------------------------------------
+//------------------------------ KV-PTR writes---------------------------------------
+//---------------------------------------------------------------------------*/
+
+static inline void write_kv_ptr_val(mica_op_t *kv_ptr, uint8_t *new_val,
+                                    size_t val_size, uint8_t flag)
+{
+  //check_write_if_msq_active(kv_ptr, new_val, flag);
   memcpy(kv_ptr->value, new_val, val_size);
-  check_value_is_tr_top(kv_ptr->value, "Writing kv_ptr value");
+  //check_value_is_tr_top(kv_ptr->value, "Writing kv_ptr value");
+
 }
 
 static inline void write_kv_ptr_acc_val(mica_op_t *kv_ptr, uint8_t *new_val, size_t val_size)
 {
   memcpy(kv_ptr->last_accepted_value, new_val, val_size);
-  check_value_is_tr_top(kv_ptr->last_accepted_value, "Writing kv_ptr accepted value");
+  //check_value_is_tr_top(kv_ptr->last_accepted_value, "Writing kv_ptr accepted value");
 }
 
+static inline void write_kv_if_conditional_on_ts(mica_op_t *kv_ptr, uint8_t *new_val,
+                                                 size_t val_size,
+                                                 uint8_t flag, struct ts_tuple base_ts)
+{
+  lock_seqlock(&kv_ptr->seqlock);
+  if (compare_ts(&base_ts, &kv_ptr->ts) == GREATER) {
+    write_kv_ptr_val(kv_ptr, new_val, (size_t) VALUE_SIZE, flag);
+    kv_ptr->ts = base_ts;
+  }
+  unlock_seqlock(&kv_ptr->seqlock);
+}
+
+
+static inline void write_kv_if_conditional_on_netw_ts(mica_op_t *kv_ptr, uint8_t *new_val,
+                                                      size_t val_size, uint8_t flag,
+                                                      struct network_ts_tuple netw_base_ts)
+{
+  struct ts_tuple base_ts = {netw_base_ts.m_id, netw_base_ts.version};
+  write_kv_if_conditional_on_ts(kv_ptr, new_val, val_size, flag, base_ts);
+
+}
 
 static inline bool same_rmw_id_same_ts_and_invalid(mica_op_t *kv_ptr, loc_entry_t *loc_entry)
 {

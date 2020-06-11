@@ -154,7 +154,7 @@ enum {COMPARE_AND_SWAP_STRONG = 96,
 #define FROM_ACQUIRE 5
 #define FROM_COMMIT 6
 
-// Committing flags
+// Committing and writing the kv_ptr->value flags
 enum {
   FROM_LOG_TOO_LOW_REP,
   FROM_ALREADY_COMM_REP,
@@ -164,8 +164,16 @@ enum {
   FROM_REMOTE_COMMIT,
   FROM_REMOTE_COMMIT_NO_VAL,
   FROM_LOCAL_ACQUIRE,
-  FROM_OOE_READ
+  FROM_OOE_READ,
+  //-- used only for writing kv_ptr->value
+  FROM_TRACE_WRITE,
+  FROM_BASE_TS_STALE,
+  FROM_ISOLATED_OP,
+  FROM_REMOTE_WRITE_RELEASE,
+  FROM_OOE_LOCAL_WRITE
 };
+
+
 
 
 // Possible Helping flags

@@ -211,6 +211,7 @@ static inline void process_commit_flags(void* rmw, loc_entry_t *loc_entry, uint8
         *flag = FROM_REMOTE_COMMIT_NO_VAL;
       break;
     case FROM_LOCAL_ACQUIRE:
+    case FROM_OOE_READ:
     case FROM_LOG_TOO_LOW_REP:
     break;
     default:
@@ -230,6 +231,7 @@ static inline void fill_commit_info(commit_info_t *com_info, uint8_t flag,
   com_info->overwrite_kv = overwrite_kv;
   com_info->message = committing_flag_to_str(flag);
   com_info->no_value = false;
+  com_info->flag = flag;
 }
 
 
@@ -239,23 +241,11 @@ static inline bool can_process_com_no_value(mica_op_t *kv_ptr,
 {
 
   if (kv_ptr->last_committed_log_no < com_info->log_no) {
-    if (ENABLE_ASSERTIONS) {
-      assert(kv_ptr->state == ACCEPTED);
-      assert(kv_ptr->log_no == com_info->log_no);
-      assert(kv_ptr->accepted_rmw_id.id == com_info->rmw_id.id);
-      check_registered_against_kv_ptr_last_committed(kv_ptr, com_info->rmw_id.id,
-                                                    com_info->message, t_id);
-    }
     com_info->base_ts = kv_ptr->base_acc_ts;
     com_info->value = kv_ptr->last_accepted_value;
     return true;
   }
-  else if (kv_ptr->last_committed_log_no == com_info->log_no) {
-    check_that_the_rmw_ids_match(kv_ptr,  com_info->rmw_id.id, com_info->log_no,
-                                 kv_ptr->base_acc_ts.version,
-                                 kv_ptr->base_acc_ts.m_id,
-                                 com_info->message, t_id);
-  }
+
   return false;
 }
 /*--------------------------------------------------------------------------

@@ -38,8 +38,10 @@ enum {
 #define ENABLE_TR_ASSERTIONS_ 1
 #define ENABLE_TR_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == TREIBER_ASYNC ? ENABLE_TR_ASSERTIONS_ : 0)
 
-#define MS_WRITES_NUM 4
+#define MS_WRITES_NUM 1
 #define MS_NO_CONFLICT 0
+#define ENABLE_MS_ASSERTIONS_ 0
+#define ENABLE_MS_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == MSQ_ASYNC ? ENABLE_MS_ASSERTIONS_ : 0)
 #define CLIENT_LOGS 0
 
 #define HM_NO_CONFLICT 0
@@ -446,6 +448,7 @@ struct recv_info {
 typedef struct commit_info {
   bool overwrite_kv;
   bool no_value;
+  uint8_t flag;
   uint32_t log_no;
   struct ts_tuple base_ts;
   rmw_id_t rmw_id;

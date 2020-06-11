@@ -58,7 +58,6 @@ static inline bool KVS_from_trace_reads_value_forwarded(trace_op_t *op,
     uint8_t *val_ptr;
     if (search_out_of_epoch_writes(p_ops, &op->key, t_id, (void **) &val_ptr)) {
       memcpy(op->value_to_read, val_ptr, op->real_val_len);
-      check_value_is_tr_top(op->value_to_read, "read-forwarded");
       //my_printf(red, "Wrkr %u Forwarding a value \n", t_id);
       value_forwarded = true;
     }
@@ -90,7 +89,6 @@ static inline bool KVS_from_trace_reads(trace_op_t *op,
   } while (!(check_seqlock_lock_free(&kv_ptr->seqlock, &tmp_lock)));
 
   if (TURN_OFF_KITE) {
-    check_value_is_tr_top(op->value_to_read, "read-typical");
     return true;
   }
   else return kv_epoch >= epoch_id; //return success if the kv_epoch is not left behind the epoch-id
@@ -104,7 +102,6 @@ static inline void KVS_from_trace_writes(trace_op_t *op,
 {
   if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
 //  if (ENABLE_ASSERTIONS) assert(op->val_len == kv_ptr->val_len);
-  struct node * new_node = (struct node *) op->value_to_write;
   lock_seqlock(&kv_ptr->seqlock);
   // OUT_OF_EPOCH--first round will be a read TS
   if (kv_ptr->epoch_id < epoch_id) {
@@ -135,7 +132,7 @@ static inline void KVS_from_trace_writes(trace_op_t *op,
       update_commit_logs(t_id, kv_ptr->key.bkt, op->ts.version, kv_ptr->value,
                          op->value_to_write, "local write", LOG_WS);
     }
-    write_kv_ptr_val(kv_ptr, op->value_to_write, op->real_val_len);
+    write_kv_ptr_val(kv_ptr, op->value_to_write, op->real_val_len, FROM_TRACE_WRITE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     // This also writes the new version to op
     kv_ptr->ts.m_id = (uint8_t) machine_id;
@@ -273,7 +270,7 @@ static inline void KVS_updates_writes_or_releases_or_acquires(struct write *op,
   if (compare_netw_ts_with_ts((struct network_ts_tuple*) &op, &kv_ptr->ts) == GREATER) {
     update_commit_logs(t_id, kv_ptr->key.bkt, op->version, kv_ptr->value,
                        op->value, "rem write", LOG_WS);
-    write_kv_ptr_val(kv_ptr, op->value, (size_t) VALUE_SIZE);
+    write_kv_ptr_val(kv_ptr, op->value, (size_t) VALUE_SIZE, FROM_REMOTE_WRITE_RELEASE);
     //printf("Wrote val %u to key %u \n", kv_ptr->value[0], kv_ptr->key.bkt);
     kv_ptr->ts.m_id = op->m_id;
     kv_ptr->ts.version = op->version;
@@ -522,52 +519,27 @@ static inline void KVS_reads_proposes(struct read *read, mica_op_t *kv_ptr,
 
 
 /*-----------------------------READ-COMMITTING---------------------------------------------*/
-// On a read reply, we may want to write the KVS, if the TS has not been seen
-static inline void KVS_out_of_epoch_writes(r_info_t *op, mica_op_t *kv_ptr,
+// Perform the ooe-write after reading TSes
+static inline void KVS_out_of_epoch_writes(r_info_t *r_info, mica_op_t *kv_ptr,
                                            p_ops_t *p_ops, uint16_t t_id)
 {
   assert(!TURN_OFF_KITE);
-  uint32_t r_info_version =  op->ts_to_read.version;
   lock_seqlock(&kv_ptr->seqlock);
-  rectify_key_epoch_id(op->epoch_id, kv_ptr, t_id);
-  // find the the max base_ts and write it in the kvs
-  if (kv_ptr->ts.version > op->ts_to_read.version)
-    op->ts_to_read.version = kv_ptr->ts.version;
-  memcpy(kv_ptr->value, op->value, op->val_len);
-  kv_ptr->ts.m_id = op->ts_to_read.m_id;
-  kv_ptr->ts.version = op->ts_to_read.version;
-  unlock_seqlock(&kv_ptr->seqlock);
-  if (ENABLE_ASSERTIONS) {
-    assert(op->ts_to_read.m_id == machine_id);
-    assert(r_info_version <= op->ts_to_read.version);
+  rectify_key_epoch_id(r_info->epoch_id, kv_ptr, t_id);
+  // Do the write with the version that has been chosen and has been sent to the rest of the machines
+  // Do *not* attempt to use the present version and overwrite the local kvs, as this would not match with the write that we inserted
+  if (compare_ts(&r_info->ts_to_read, &kv_ptr->ts) == GREATER) {
+    write_kv_ptr_val(kv_ptr, r_info->value, r_info->val_len, FROM_OOE_LOCAL_WRITE);
+    kv_ptr->ts = r_info->ts_to_read;
   }
-  // rectifying is not needed!
-  //if (r_info_version < op->ts_to_read.version)
-  // rectify_version_of_w_mes(p_ops, op, r_info_version, t_id);
-  // remove the write from the pending out-of-epoch writes
+  unlock_seqlock(&kv_ptr->seqlock);
+  if (ENABLE_ASSERTIONS) assert(r_info->ts_to_read.m_id == machine_id);
+
   p_ops->p_ooe_writes->size--;
   MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
 }
 
-// Handle acquires/out-of-epoch-reads that have received a bigger version than locally stored, and need to apply the data
-static inline void KVS_out_of_epoch_reads(r_info_t *r_info, mica_op_t *kv_ptr,
-                                          uint16_t t_id)
-{
-  assert(!TURN_OFF_KITE);
-  lock_seqlock(&kv_ptr->seqlock);
-
-  if (compare_ts(&kv_ptr->ts, &r_info->ts_to_read) == SMALLER) {
-    rectify_key_epoch_id(r_info->epoch_id, kv_ptr, t_id);
-    memcpy(kv_ptr->value, r_info->value, r_info->val_len);
-    kv_ptr->ts.m_id =  r_info->ts_to_read.m_id;
-    kv_ptr->ts.version = r_info->ts_to_read.version;
-  }
-  else if (ENABLE_STAT_COUNTING) t_stats[t_id].failed_rem_writes++;
-  unlock_seqlock(&kv_ptr->seqlock);
-}
-
-
-// Handle committing an RMW/write from a response to an rmw acquire
+// Handle committing an RMW/write from a response to an acquire or ooe-read
 static inline void KVS_acquire_commits(r_info_t *r_info, mica_op_t *kv_ptr,
                                        uint16_t op_i, uint16_t t_id)
 {
@@ -577,9 +549,7 @@ static inline void KVS_acquire_commits(r_info_t *r_info, mica_op_t *kv_ptr,
                 "rmw_l_id %u,log_no %u, version %u  \n",
               t_id, op_i, r_info->rmw_id.id,
               r_info->log_no, r_info->ts_to_read.version);
-  uint64_t number_of_reqs;
-  //number_of_reqs = handle_remote_commit_message(kv_ptr, (void*) r_info, false, t_id);
-
+  uint64_t number_of_reqs = 0;
   commit_rmw(kv_ptr, (void *) r_info, NULL, r_info->opcode == OP_ACQUIRE? FROM_LOCAL_ACQUIRE : FROM_OOE_READ, t_id);
   if (PRINT_LOGS) {
     fprintf(rmw_verify_fp[t_id], "Key: %u, log %u: Req %lu, Acq-RMW: rmw_id %lu, "
@@ -698,6 +668,7 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
       if (likely(key_found)) { //Cache Hit
         if (write->opcode == KVS_OP_PUT || write->opcode == OP_RELEASE ||
             write->opcode == OP_ACQUIRE) {
+          assert(write->opcode != OP_ACQUIRE);
           KVS_updates_writes_or_releases_or_acquires(write, kv_ptr[op_i], t_id);
         }
         else if (ENABLE_RMWS) {
@@ -869,7 +840,6 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
 // Send an isolated write to the kvs-no batching
 static inline void KVS_isolated_op(int t_id, struct write *write)
 {
-  uint32_t op_num = 1;
   int j;	/* I is batch index */
 
   unsigned int bkt;
@@ -889,7 +859,6 @@ static inline void KVS_isolated_op(int t_id, struct write *write)
   //__builtin_prefetch(bkt_ptr, 0, 0);
   tag = write->key.tag;
 
-  key_in_store = 0;
   kv_ptr = NULL;
 
 
@@ -916,7 +885,6 @@ static inline void KVS_isolated_op(int t_id, struct write *write)
     /* We had a tag match earlier. Now compare log entry. */
     bool key_found = memcmp(&kv_ptr->key, &write->key, TRUE_KEY_SIZE) == 0;
     if(key_found) { //Cache Hit
-      key_in_store = 1;
       if (ENABLE_ASSERTIONS) {
         if (write->opcode != OP_RELEASE) {
           my_printf(red, "Wrkr %u: KVS_isolated_op: wrong opcode : %d, m_id %u, val_len %u, version %u , \n",
@@ -926,17 +894,13 @@ static inline void KVS_isolated_op(int t_id, struct write *write)
         }
       }
       //my_printf(red, "op val len %d in ptr %d, total ops %d \n", op->val_len, (pull_ptr + I) % max_op_size, op_num );
-      lock_seqlock(&kv_ptr->seqlock);
-      if (compare_netw_ts_with_ts( (struct network_ts_tuple *) &write->m_id,
-                                   &kv_ptr->ts) == GREATER) {
-        memcpy(kv_ptr->value, write->value, VALUE_SIZE);
-        kv_ptr->ts.m_id = write->m_id;
-        kv_ptr->ts.version = write->version;
-      }
-      unlock_seqlock(&kv_ptr->seqlock);
+      struct ts_tuple base_ts = {write->m_id, write->version};
+      write_kv_if_conditional_on_ts(kv_ptr, write->value,
+                                    (size_t) VALUE_SIZE, FROM_ISOLATED_OP,
+                                    base_ts);
     }
   }
-  if(key_in_store == 0) {  //Cache miss --> We get here if either tag or log key match failed
+  else {  //Cache miss --> We get here if either tag or log key match failed
     if (ENABLE_ASSERTIONS) assert(false);
   }
 

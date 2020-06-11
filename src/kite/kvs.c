@@ -256,6 +256,7 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
     struct key *tmp = (struct key *) &key_hash.second;
     (*op_key) = key_hash.second;
     assert(tmp->bkt == op->key.bkt);
+    op->key_id = key_id;
 
 
 //    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
