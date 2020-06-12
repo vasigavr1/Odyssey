@@ -476,11 +476,12 @@ static inline void commit_algorithm(mica_op_t *kv_ptr,
 
   check_state_before_commit_algorithm(kv_ptr, com_info, t_id);
 
-  // 0. Check if it's a commit without a value
+  // 0. Check if it's a commit without a value -- if it cannot be committed
+  // then do not attempt to overwrite the value and timestamp, because the commit's
+  // value and ts are stored in the kv_ptr->accepted_value/ts and may have been lost
   if (com_info->no_value) {
     if (!can_process_com_no_value(kv_ptr, com_info, t_id)) {
       com_info->overwrite_kv = false;
-      return;
     }
   }
 
