@@ -69,15 +69,15 @@ RDMA capable NICs and Infiniband switch
 3. echo 8192 | tee /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages > /dev/null
 4. echo 10000000001 | tee /proc/sys/kernel/shmmax /proc/sys/kernel/shmall > /dev/null
  * Make sure that the changes have been applied using cat on the above files
- * The following changes are temporary (i.e. need to be performed after a reboot)
+ * The above changes are temporary (i.e. need to be performed after a reboot)
  
 ## How to run Kite
-In kite/src/drf-sc there is a script "run-drf-sc.sh"
+In kite/src/kite there is a script "run-kite.sh"
 To run Kite:
 1. Modify the script to contain the ip-addresses of the machines that will run Kite
 2. Run the script in all machines. 
-    * The script must be run first in the machine that has its ip first in the list
-    * Then it can be run in whatever order in the rest of he machines
+
+The script bin/copy-kite-executables.sh  can be used to compile in one machine and then copy the executable in the rest of the machines. (The machines must be specified within the script).
 
 ## Tested on
 * Infiniband cluster of 5 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
