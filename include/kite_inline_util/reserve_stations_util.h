@@ -554,7 +554,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     write->key = op->key;
     write->opcode = op->opcode;
     write->val_len = op->val_len;
-    //memcpy(&write->version, (void *) &op->base_ts.version, 4 + TRUE_KEY_SIZE + 2);
+    //memcpy(&write->version, (void *) &op->base_ts.version, 4 + KEY_SIZE + 2);
     if (ENABLE_ASSERTIONS) assert(op->real_val_len <= VALUE_SIZE);
     memcpy(write->value, op->value_to_write, op->real_val_len);
     write->m_id = (uint8_t) machine_id;
@@ -569,7 +569,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     if (ENABLE_ASSERTIONS) assert (write->m_id == (uint8_t) machine_id);
     if (DEBUG_QUORUM) {
       printf("Thread %u: Second round release, from ptr: %u to ptr %u, key: ", t_id, incoming_pull_ptr, p_ops->w_push_ptr);
-      print_true_key(&write->key);
+      print_key(&write->key);
     }
   }
   else if (source == FROM_COMMIT || (source == FROM_READ && r_info->is_read)) {
@@ -769,7 +769,7 @@ static inline void insert_prop_to_read_fifo(p_ops_t *p_ops, loc_entry_t *loc_ent
 //  struct propose *prop = &p_mes->prop[inside_r_ptr];
   assign_ts_to_netw_ts(&prop->ts, &loc_entry->new_ts);
 
-  memcpy(&prop->key, (void *)&loc_entry->key, TRUE_KEY_SIZE);
+  memcpy(&prop->key, (void *)&loc_entry->key, KEY_SIZE);
   prop->opcode = PROPOSE_OP;
   prop->l_id = loc_entry->l_id;
   prop->t_rmw_id = loc_entry->rmw_id.id;
@@ -809,7 +809,7 @@ static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
   // this means that the purpose of the read is solely to flip remote bits
   if (source == FROM_ACQUIRE) {
     // overload the key with local_r_id
-    memcpy(&read->key, (void *) &p_ops->local_r_id, TRUE_KEY_SIZE);
+    memcpy(&read->key, (void *) &p_ops->local_r_id, KEY_SIZE);
     read->opcode = OP_ACQUIRE_FLIP_BIT;
     if (ENABLE_ASSERTIONS) assert(opcode == OP_ACQUIRE_FLIP_BIT);
     if (DEBUG_BIT_VECS)
@@ -882,7 +882,7 @@ static inline void insert_accept_in_writes_message_fifo(p_ops_t *p_ops,
   acc->t_rmw_id = loc_entry->rmw_id.id;
   assign_ts_to_netw_ts(&acc->base_ts, &loc_entry->base_ts);
   assign_ts_to_netw_ts(&acc->ts, &loc_entry->new_ts);
-  memcpy(&acc->key, &loc_entry->key, TRUE_KEY_SIZE);
+  memcpy(&acc->key, &loc_entry->key, KEY_SIZE);
   acc->opcode = ACCEPT_OP;
   if (!helping && !loc_entry->rmw_is_successful)
     memcpy(acc->value, loc_entry->value_to_read, (size_t) RMW_VALUE_SIZE);
@@ -1011,6 +1011,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
     real_val_len = (uint32_t) VALUE_SIZE;
   }
 
+
   op->opcode = opcode;
   uint16_t writes_num = *writes_num_, reads_num = *reads_num_;
   // Create some back pressure from the buffers, since the sessions may never be stalled
@@ -1033,7 +1034,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
       return true;
     } else if (ENABLE_ASSERTIONS) *sizes_dbg_cntr = 0;
   }
-  memcpy(&op->key, key, TRUE_KEY_SIZE);
+  memcpy(&op->key, key, KEY_SIZE);
   bool is_update = (opcode == (uint8_t) KVS_OP_PUT ||
                     opcode == (uint8_t) OP_RELEASE);
   bool is_rmw = opcode_is_rmw(opcode);

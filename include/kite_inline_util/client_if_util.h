@@ -40,7 +40,7 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
     //my_printf(cyan, "Wrkr %u/%u signals in progress for  poll ptr %u for req %u at state %u \n", t_id,
     //       sess_id, req_array_i,req_array->opcode, req_array->state);
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
-    if (ENABLE_ASSERTIONS) memset(&req_array->key, 0, TRUE_KEY_SIZE);
+    if (ENABLE_ASSERTIONS) memset(&req_array->key, 0, KEY_SIZE);
     check_state_with_allowed_flags(2, req_array->state, ACTIVE_REQ);
     atomic_store_explicit(&req_array->state, (uint8_t) IN_PROGRESS_REQ, memory_order_release);
   }

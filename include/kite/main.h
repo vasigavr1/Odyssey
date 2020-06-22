@@ -149,6 +149,7 @@ enum {
 typedef struct trace_command {
   uint8_t opcode;
   uint8_t key_hash[8];
+  uint32_t key_id;
 } trace_t;
 
 /* ah pointer and qpn are accessed together in the critical path
@@ -473,7 +474,7 @@ typedef struct trace_op {
 
 
 
-#define RAW_CLIENT_OP_SIZE (8 + TRUE_KEY_SIZE + VALUE_SIZE + 8 + 8)
+#define RAW_CLIENT_OP_SIZE (8 + KEY_SIZE + VALUE_SIZE + 8 + 8)
 #define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
 #define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
 typedef struct client_op {

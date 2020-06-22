@@ -210,7 +210,7 @@ static inline const char* help_state_to_str(uint8_t state)
 
 // Check whether 2 key hashes are equal
 static inline bool keys_are_equal(struct key *key1, struct key *key2) {
-  return memcmp(key1, key2, TRUE_KEY_SIZE) == 0;
+  return memcmp(key1, key2, KEY_SIZE) == 0;
 }
 
 // Compares two network timestamps, returns SMALLER if ts1 < ts2
@@ -491,7 +491,7 @@ static inline struct key create_key(uint32_t key_id)
 {
   uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
   struct key key;
-  memcpy(&key, &key_hash, TRUE_KEY_SIZE);
+  memcpy(&key, &key_hash, KEY_SIZE);
   return key;
 }
 

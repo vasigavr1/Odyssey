@@ -1,12 +1,7 @@
-#ifndef ABD_CACHE_H
-#define ABD_CACHE_H
+#ifndef KITE_KVS_H
+#define KITE_KVS_H
 
 
-// Optik Options
-#ifndef CORE_NUM
-#define DEFAULT
-#define CORE_NUM 8
-#endif
 #ifndef _GNU_SOURCE
 # define _GNU_SOURCE
 #endif
@@ -66,19 +61,9 @@ typedef struct  {
 extern mica_kv_t *KVS;
 
 
-char* code_to_str(uint8_t code);
-
 
 void custom_mica_init(int kvs_id);
 void custom_mica_populate_fixed_len(mica_kv_t *, int n, int val_len);
-
-
-
-uint128* mica_gen_keys(int n);
-
-
-void str_to_binary(uint8_t* value, char* str, int size);
-void print_cache_stats(struct timespec start, int id);
 
 
 /* ---------------------------------------------------------------------------
@@ -87,61 +72,19 @@ void print_cache_stats(struct timespec start, int id);
 
 
 // Locate the buckets for the requested keys
-static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key op_key,
+static inline void KVS_locate_one_bucket(uint16_t op_i, uint *bkt, struct key *op_key,
 																				 struct mica_bkt **bkt_ptr, uint *tag,
 																				 mica_op_t **kv_ptr, mica_kv_t *KVS)
 {
-	bkt[op_i] = op_key.bkt & KVS->bkt_mask;
-	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
-//  printf("bkt %u \n", bkt[op_i]);
-	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
-	tag[op_i] = op_key.tag;
-	kv_ptr[op_i] = NULL;
-}
-
-// Locate the buckets for the requested keys
-static inline void KVS_locate_one_bucket_with_key(uint16_t op_i, uint *bkt, struct key *op_key,
-																									struct mica_bkt **bkt_ptr, uint *tag,
-																									mica_op_t **kv_ptr, mica_kv_t *KVS)
-{
 	bkt[op_i] = op_key->bkt & KVS->bkt_mask;
 	bkt_ptr[op_i] = &KVS->ht_index[bkt[op_i]];
+//  printf("bkt %u \n", bkt[op_i]);
 	__builtin_prefetch(bkt_ptr[op_i], 0, 0);
 	tag[op_i] = op_key->tag;
 	kv_ptr[op_i] = NULL;
 }
 
-// After locating the buckets locate all kv pairs
-static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mica_bkt **bkt_ptr,
-																					 mica_op_t **kv_ptr, mica_kv_t *KVS)
-{
-	for(uint16_t op_i = 0; op_i < op_num; op_i++) {
-		for (uint8_t j = 0; j < 8; j++) {
-			if (bkt_ptr[op_i]->slots[j].in_use == 1 &&
-					bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
-				uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
-															KVS->log_mask;
-				/*
-                 * We can interpret the log entry as mica_op, even though it
-                 * may not contain the full MICA_MAX_VALUE value.
-                 */
-//        printf("kv_ptr[%u]: offset %lu : %p \n",
-//               op_i, log_offset, (void *)&KVS->ht_log[log_offset]);
-				kv_ptr[op_i] = (mica_op_t *) &KVS->ht_log[log_offset];
-
-				/* Small values (1--64 bytes) can span 2 kvs lines */
-				__builtin_prefetch(kv_ptr[op_i], 0, 0);
-				__builtin_prefetch((uint8_t *) kv_ptr[op_i] + 64, 0, 0);
-
-				/* Detect if the head has wrapped around for this index entry */
-				if (KVS->log_head - bkt_ptr[op_i]->slots[j].offset >= KVS->log_cap) {
-					kv_ptr[op_i] = NULL;  /* If so, we mark it "not found" */
-				}
-				break;
-			}
-		}
-	}
-}
+// Locate the buckets for the requested keys
 
 // Locate a kv_pair inside a bucket: used in a loop for all kv-pairs
 static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt **bkt_ptr,
@@ -149,7 +92,9 @@ static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt *
 {
 	for(uint8_t j = 0; j < 8; j++) {
 		if(bkt_ptr[op_i]->slots[j].in_use == 1 &&
-			 bkt_ptr[op_i]->slots[j].tag == tag[op_i]) {
+			 bkt_ptr[op_i]->slots[j].tag == tag[op_i] ) {
+
+
 			uint64_t log_offset = bkt_ptr[op_i]->slots[j].offset &
 														KVS->log_mask;
 			/*
@@ -171,6 +116,19 @@ static inline void KVS_locate_one_kv_pair(int op_i, uint *tag, struct mica_bkt *
 		}
 	}
 }
+
+
+
+// After locating the buckets locate all kv pairs
+static inline void KVS_locate_all_kv_pairs(uint16_t op_num, uint *tag, struct mica_bkt **bkt_ptr,
+																					 mica_op_t **kv_ptr, mica_kv_t *KVS)
+{
+	for(uint16_t op_i = 0; op_i < op_num; op_i++) {
+		KVS_locate_one_kv_pair(op_i, tag, bkt_ptr, kv_ptr, KVS);
+	}
+}
+
+
 
 
 #endif

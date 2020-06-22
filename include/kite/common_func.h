@@ -54,11 +54,10 @@
 #define VALUE_SIZE (VALUE_SIZE_ + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE_, 8)))
 
 
-#define KVS_NUM_KEYS (1 * 1000 * 1000)
+#define KVS_NUM_KEYS (1 * MILLION)
 
 /* Request sizes */
-#define KEY_SIZE 16
-#define TRUE_KEY_SIZE 8 // the key that is actually used by MICA
+#define KEY_SIZE 8 //
 #define GRH_SIZE 40 // Global Routing Header
 #define MTU 4096
 
@@ -111,7 +110,7 @@
 
 
 // Important Knobs
-#define ENABLE_ASSERTIONS 1
+#define ENABLE_ASSERTIONS 0
 #define ENABLE_LOCK_FREE_READING 1
 #define ENABLE_COMMITS_WITH_NO_VAL 1
 #define ENABLE_CAS_CANCELLING 1

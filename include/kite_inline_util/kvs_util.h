@@ -29,8 +29,8 @@ static inline bool search_out_of_epoch_writes(p_ops_t *p_ops,
     if (keys_are_equal(&p_ops->read_info[writes->r_info_ptrs[w_i]].key, read_key)) {
       *val_ptr = (void*) p_ops->read_info[writes->r_info_ptrs[w_i]].value;
       //my_printf(red, "Wrkr %u: Forwarding value from out-of-epoch write, read key: ", t_id);
-      //print_true_key(read_key);
-      //my_printf(red, "write key: "); print_true_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
+      //print_key(read_key);
+      //my_printf(red, "write key: "); print_key((struct key*)p_ops->read_info[writes->r_info_ptrs[w_i]].key);
       //my_printf(red, "size: %u, push_ptr %u, pull_ptr %u, r_info ptr %u \n",
       //          writes->size, writes->push_ptr, writes->pull_ptr, writes->r_info_ptrs[w_i]);
       return true;
@@ -582,7 +582,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
    * for both GETs and PUTs.
    */
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_locate_one_bucket(op_i, bkt, op[op_i].key, bkt_ptr, tag, kv_ptr, KVS);
+    KVS_locate_one_bucket(op_i, bkt, &op[op_i].key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
@@ -591,11 +591,11 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
   for(op_i = 0; op_i < op_num; op_i++) {
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) assert(false);
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr[op_i]->key, &op[op_i].key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr[op_i]->key, &op[op_i].key, KEY_SIZE) == 0;
     if(unlikely(!key_found)) {
-      my_printf(red, "Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u \n",
+      my_printf(red, "Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u key.id %u\n",
                 op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt, op[op_i].key.server,
-                kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag);
+                kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag, kv_ptr[op_i]->key_id);
       resp[op_i].type = KVS_MISS;
       return;
     }
@@ -654,7 +654,7 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
      */
   for(op_i = 0; op_i < op_num; op_i++) {
     struct write *op = writes[(pull_ptr + op_i) % max_op_size];
-    KVS_locate_one_bucket(op_i, bkt, op->key, bkt_ptr, tag, kv_ptr, KVS);
+    KVS_locate_one_bucket(op_i, bkt, &op->key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
@@ -664,7 +664,7 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
     if (unlikely (write->opcode == OP_RELEASE_BIT_VECTOR)) continue;
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) { assert(false);}
       /* We had a tag match earlier. Now compare log entry. */
-      bool key_found = memcmp(&kv_ptr[op_i]->key, &write->key, TRUE_KEY_SIZE) == 0;
+      bool key_found = memcmp(&kv_ptr[op_i]->key, &write->key, KEY_SIZE) == 0;
       if (likely(key_found)) { //Cache Hit
         if (write->opcode == KVS_OP_PUT || write->opcode == OP_RELEASE ||
             write->opcode == OP_ACQUIRE) {
@@ -714,7 +714,7 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
   for(op_i = 0; op_i < op_num; op_i++) {
     struct read *read = reads[(pull_ptr + op_i) % max_op_size];
     if (unlikely(read->opcode == OP_ACQUIRE_FLIP_BIT)) continue; // This message is only meant to flip a bit and is thus a NO-OP
-    KVS_locate_one_bucket(op_i, bkt, read->key , bkt_ptr, tag, kv_ptr, KVS);
+    KVS_locate_one_bucket(op_i, bkt, &read->key , bkt_ptr, tag, kv_ptr, KVS);
   }
   for(op_i = 0; op_i < op_num; op_i++) {
     struct read *read = reads[(pull_ptr + op_i) % max_op_size];
@@ -732,7 +732,7 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
     }
     if(ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) {assert(false);}
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr[op_i]->key, &read->key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr[op_i]->key, &read->key, KEY_SIZE) == 0;
     if(likely(key_found)) { //Cache Hit
       check_state_with_allowed_flags(6, read->opcode, KVS_OP_GET, OP_ACQUIRE, OP_ACQUIRE_FP,
                                      OP_GET_TS, PROPOSE_OP);
@@ -788,7 +788,7 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
      */
   for(op_i = 0; op_i < op_num; op_i++) {
     struct key *op_key = &writes[(pull_ptr + op_i) % max_op_size]->key;
-    KVS_locate_one_bucket_with_key(op_i, bkt, op_key, bkt_ptr, tag, kv_ptr, KVS);
+    KVS_locate_one_bucket(op_i, bkt, op_key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
@@ -798,7 +798,7 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
     r_info_t *r_info = writes[(pull_ptr + op_i) % max_op_size];
     if(ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) {assert(false);}
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr[op_i]->key, &r_info->key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr[op_i]->key, &r_info->key, KEY_SIZE) == 0;
     if(likely(key_found)) { //Cache Hit
       // The write must be performed with the max TS out of the one stored in the KV and read_info
       if (r_info->opcode == KVS_OP_PUT) {
@@ -845,22 +845,18 @@ static inline void KVS_isolated_op(int t_id, struct write *write)
   unsigned int bkt;
   struct mica_bkt *bkt_ptr;
   unsigned int tag;
-  int key_in_store;	/* Is this key in the datastore? */
   mica_op_t *kv_ptr;	/* Ptr to KV item in log */
   /*
    * We first lookup the key in the datastore. The first two @I loops work
    * for both GETs and PUTs.
    */
 //  trace_op_t *op = (trace_op_t*) (((void *) write) - 3);
-  //print_true_key((struct key *) write->key);
+  //print_key((struct key *) write->key);
   //printf("op bkt %u\n", op->key.bkt);
   bkt = write->key.bkt & KVS->bkt_mask;
   bkt_ptr = &KVS->ht_index[bkt];
-  //__builtin_prefetch(bkt_ptr, 0, 0);
   tag = write->key.tag;
-
   kv_ptr = NULL;
-
 
   for(j = 0; j < 8; j++) {
     if(bkt_ptr->slots[j].in_use == 1 &&
@@ -883,7 +879,7 @@ static inline void KVS_isolated_op(int t_id, struct write *write)
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   if(kv_ptr != NULL) {
     /* We had a tag match earlier. Now compare log entry. */
-    bool key_found = memcmp(&kv_ptr->key, &write->key, TRUE_KEY_SIZE) == 0;
+    bool key_found = memcmp(&kv_ptr->key, &write->key, KEY_SIZE) == 0;
     if(key_found) { //Cache Hit
       if (ENABLE_ASSERTIONS) {
         if (write->opcode != OP_RELEASE) {

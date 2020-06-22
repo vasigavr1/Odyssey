@@ -188,7 +188,7 @@ static inline void init_loc_entry(p_ops_t* p_ops,
   loc_entry->avoid_val_in_com = false;
   loc_entry->base_ts_found = false;
   loc_entry->all_aboard_time_out = 0;
-  memcpy(&loc_entry->key, &op->key, TRUE_KEY_SIZE);
+  memcpy(&loc_entry->key, &op->key, KEY_SIZE);
   memset(&loc_entry->rmw_reps, 0, sizeof(struct rmw_rep_info));
   loc_entry->index_to_req_array = op->index_to_req_array;
 

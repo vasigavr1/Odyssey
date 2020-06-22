@@ -384,7 +384,7 @@ static inline void print_verbouse_debug_info(p_ops_t *p_ops, uint16_t t_id, uint
 }
 
 
-static inline void print_true_key(struct key *key)
+static inline void print_key(struct key *key)
 {
   printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
 }
@@ -849,8 +849,8 @@ static inline void check_trace_op_key_vs_kv_ptr(trace_op_t* op, mica_op_t* kv_pt
     struct key *op_key = &op->key;
     struct key *kv_key = &kv_ptr->key;
     if (!keys_are_equal(kv_key, op_key)) {
-      print_true_key(kv_key);
-      print_true_key(op_key);
+      print_key(kv_key);
+      print_key(op_key);
       assert(false);
     }
   }
@@ -862,8 +862,8 @@ static inline void check_keys_with_one_trace_op(struct key *com_key, mica_op_t *
   if (ENABLE_ASSERTIONS) {
     struct key *kv_key = &kv_ptr->key;
     if (!keys_are_equal(kv_key, com_key)) {
-      print_true_key(kv_key);
-      print_true_key(com_key);
+      print_key(kv_key);
+      print_key(com_key);
       assert(false);
     }
   }

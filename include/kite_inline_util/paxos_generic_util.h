@@ -434,7 +434,7 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
                                                     uint8_t broadcast_state, uint16_t t_id)
 {
 
-  memcpy(&com->key, &loc_entry->key, TRUE_KEY_SIZE);
+  memcpy(&com->key, &loc_entry->key, KEY_SIZE);
   com->t_rmw_id = loc_entry->rmw_id.id;
   com->base_ts.m_id = loc_entry->base_ts.m_id;
   if (loc_entry->avoid_val_in_com) {
@@ -465,7 +465,7 @@ static inline void fill_commit_message_from_r_info(struct commit *com,
 {
   com->base_ts.m_id = r_info->ts_to_read.m_id;
   com->base_ts.version = r_info->ts_to_read.version;
-  memcpy(&com->key, &r_info->key, TRUE_KEY_SIZE);
+  memcpy(&com->key, &r_info->key, KEY_SIZE);
   assert(r_info->key.bkt != 0);
   assert(com->key.bkt != 0);
   com->opcode = RMW_ACQ_COMMIT_OP;

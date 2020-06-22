@@ -114,7 +114,7 @@ static inline void fill_client_op(client_op_t *cl_op, uint32_t key_id, uint8_t t
   }
   cl_op->val_len = val_len;
   uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
-  memcpy(&cl_op->key, &key_hash, TRUE_KEY_SIZE);
+  memcpy(&cl_op->key, &key_hash, KEY_SIZE);
 }
 
 // fill the replies // TODO Probably needs to be DEPRICATED

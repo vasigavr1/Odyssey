@@ -59,7 +59,7 @@ static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
             my_printf(yellow, "Client %u inserting req to worker %u for session %u, in slot %u from trace slot %u ptr %p\n",
                           t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
           interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
-          memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, TRUE_KEY_SIZE);
+          memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, KEY_SIZE);
           atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ,
                                 memory_order_release);
           MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
@@ -347,7 +347,7 @@ static inline void update_file(uint16_t t_id, uint32_t key_id, struct tr_sess_in
   if (CLIENT_LOGS) {
     uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
     struct key key;
-    memcpy(&key, &key_hash, TRUE_KEY_SIZE);
+    memcpy(&key, &key_hash, KEY_SIZE);
 
 //    fprintf(client_log[t_id],
 //            "%s: Stack: %u key: %u/%u, new_top key_id %u  push counter: %u pop counter: %u \n",
@@ -1407,7 +1407,7 @@ static inline void update_ms_file(uint16_t t_id, uint32_t key_id, struct ms_sess
   if (CLIENT_LOGS) {
     uint64_t key_hash = CityHash128((char *) &(key_id), 4).second;
     struct key key;
-    memcpy(&key, &key_hash, TRUE_KEY_SIZE);
+    memcpy(&key, &key_hash, KEY_SIZE);
 
 //    fprintf(client_log[t_id],
 //            "%s: Stack: %u key: %u/%u, new_top key_id %u  push counter: %u pop counter: %u \n",

@@ -2,36 +2,12 @@
 # define _GNU_SOURCE
 #endif
 
-// Optik Options
-//#define DEFAULT
-//#define CORE_NUM 4
 
-//#include <optik_mod.h>
 #include "../../include/kite_inline_util/inline_util.h"
 #include <common_func.h>
-//#include "optik_mod.h"
 #include "kvs.h"
 
 mica_kv_t *KVS;
-
-
-uint128* mica_gen_keys(int n)
-{
-  int i;
-  assert(n > 0 && n <= M_1024 / sizeof(uint128));
-  assert(sizeof(uint128) == 16);
-
-  // printf("mica: Generating %d keys\n", n);
-
-  uint128 *key_arr = malloc(n * sizeof(uint128));
-  assert(key_arr != NULL);
-
-  for(i = 0; i < n; i++) {
-    key_arr[i] = CityHash128((char *) &i, 4);
-  }
-
-  return key_arr;
-}
 
 
 int is_power_of_2(int x)
@@ -88,18 +64,11 @@ void mica_init(mica_kv_t *kvs, int instance_id,
   int i, j;
   /* Verify struct sizes */
   assert(sizeof(struct mica_slot) == 8);
-//  assert(sizeof(struct mica_key_t) == 8);
-//  printf("size %u \n", sizeof(mica_op_t) );
   assert(sizeof(mica_op_t) % 64 == 0);
-
   assert(kvs != NULL);
   assert(node_id == 0 || node_id == 1);
-
   /* 16 million buckets = a 1 GB index */
   assert(is_power_of_2(num_bkts) == 1 && num_bkts <= M_16);
-  //assert(log_cap > 0 && log_cap <= M_1024 &&
-  //	log_cap % M_2 == 0 && is_power_of_2(log_cap));
-
   assert(MICA_LOG_BITS >= 24);	/* Minimum log w_size = 16 MB */
 
   // my_printf(red, "mica: Initializing MICA instance %d.\n"
@@ -119,13 +88,6 @@ void mica_init(mica_kv_t *kvs, int instance_id,
   kvs->log_mask = log_cap - 1;	/* log_cap is a power of 2 */
   kvs->log_head = 0;
 
-//  kv->num_get_op = 0;
-//  kv->num_get_fail = 0;
-//  kv->num_put_fail = 0;
-//  kv->num_put_op = 0;
-//  kv->num_insert_op = 0;
-//  kv->num_index_evictions = 0;
-
   /* Alloc index and initialize all entries to invalid */
   // printf("mica: Allocting hash table index for instance %d\n", instance_id);
   int ht_index_key = MICA_INDEX_SHM_KEY + instance_id;
@@ -139,7 +101,6 @@ void mica_init(mica_kv_t *kvs, int instance_id,
       kvs->ht_index[i].slots[j].in_use = 0;
     }
   }
-
 
   /* Alloc log */
 //	printf("mica: Allocting hash table log for instance %d\n", instance_id);
@@ -158,10 +119,6 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   struct mica_bkt *bkt_ptr = &kvs->ht_index[bkt];
   unsigned int tag = op->key.tag;
 
-#if MICA_DEBUG == 2
-  mica_print_op(op);
-#endif
-
   kvs->num_insert_op++;
 
   /* Find a slot to use for this key. If there is a slot with the same
@@ -171,11 +128,18 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   for(i = 0; i < 8; i++) {
     if(bkt_ptr->slots[i].tag == tag || bkt_ptr->slots[i].in_use == 0) {
       slot_to_use = i;
+      if (bkt_ptr->slots[i].in_use == 1) {
+        mica_op_t *evic_op = (mica_op_t *)
+          &kvs->ht_log[bkt_ptr->slots[i].offset & kvs->log_mask];
+        my_printf(yellow, "Key %u overwrites %u \n", op->key_id, evic_op->key_id);
+        assert(false);
+      }
     }
   }
   bool evict_flag = false;
   /* If no slot found, choose one to evict */
   if(slot_to_use == -1) {
+    assert(false);
     slot_to_use = tag & 7;	/* tag is ~ randomly distributed */
     kvs->num_index_evictions++;
     evict_flag = true;
@@ -203,11 +167,8 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   }
   memcpy(log_ptr, op, len_to_copy);
 
-
-
   mica_op_t * kv_ptr = (mica_op_t *) log_ptr;
   assert(IS_ALIGNED(&kv_ptr->key, 64));
-//  assert(IS_ALIGNED(&kv_ptr->seqlock, 64));
   assert(IS_ALIGNED(&kv_ptr->value, 64));
 
   //check_mica_op_t_allignement(kv_ptr);
@@ -238,14 +199,10 @@ void custom_mica_init(int kvs_id) {
 }
 
 void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
-  //assert(cache != NULL);
   assert(n > 0);
-//  assert(val_len > 0 && val_len <= MICA_MAX_VALUE);
-
   /* This is needed for the eviction message below to make sense */
   assert(kvs->num_insert_op == 0 && kvs->num_index_evictions == 0);
 
-  int i;
   mica_op_t *op = (mica_op_t *) calloc(1, sizeof(mica_op_t));
   unsigned long *op_key = (unsigned long *) &op->key;
   op->state = INVALID_RMW;
@@ -257,18 +214,6 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
     (*op_key) = key_hash.second;
     assert(tmp->bkt == op->key.bkt);
     op->key_id = key_id;
-
-
-//    if (ENABLE_RMWS && key_id < NUM_OF_RMW_KEYS)
-//      op->opcode = KEY_HAS_NEVER_BEEN_RMWED;
-//    else op->opcode = KEY_IS_NOT_RMWABLE;
-    //printf("%u \n", sizeof(decltype(op_key[1])));
-    //printf("Key Metadata: Lock(%u), State(%u), Counter(%u:%u)\n", op.key.meta.lock, op.key.meta.state, op.key.meta.version, op.key.meta.cid);
-    //op.val_len = (uint8_t) (val_len >> SHIFT_BITS);
-    //uint8_t val = 0;//(uint8_t) (op_key[1] & 0xff);
-    //memset(op.value, val, (uint32_t) val_len);
-//    my_printf(green, "Inserting key %d: bkt %u, server %u, tag %u \n",
-//                 key_id, op->key.bkt, op->key.server, op->key.tag);
     mica_insert_one(kvs, op);
   }
 

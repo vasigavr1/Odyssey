@@ -1,7 +1,7 @@
 #include "util.h"
 #include "../../include/kite_inline_util/generic_util.h"
 #include <getopt.h>
-//#include "util.h"
+
 
 //struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
 all_qp_attr_t *all_qp_attr;
@@ -16,7 +16,7 @@ void static_assert_compile_parameters()
   static_assert(MICA_VALUE_SIZE >= VALUE_SIZE, "");
   static_assert(PAXOS_TS > ALL_ABOARD_TS, "Paxos TS must be bigger than ALL Aboard TS");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
-  static_assert(sizeof(struct key) == TRUE_KEY_SIZE, " ");
+  static_assert(sizeof(struct key) == KEY_SIZE, " ");
   static_assert(sizeof(struct network_ts_tuple) == TS_TUPLE_SIZE, "");
 //  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
 //  static_assert(sizeof(cache_meta) == 8, "");
@@ -343,7 +343,6 @@ uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
       opc_info->reads++;
     }
   }
-
   opc_info->is_rmw = is_rmw;
   opc_info->is_update = is_update;
   opc_info->is_sc = is_sc;
@@ -476,12 +475,12 @@ trace_t* manufacture_trace(int t_id)
       //printf("Wrkr %u key %u \n", t_id, key_id);
       key_hash = CityHash128((char *) &(key_id), 4);
     }
-    else
-    {
+    else {
       key_id = (uint32) rand() % KVS_NUM_KEYS;
       key_hash = CityHash128((char *) &(key_id), 4);
     }
     memcpy(trace[i].key_hash, &(key_hash.second), 8);
+    trace[i].key_id = key_id;
   }
 
   if (t_id == 0) {
