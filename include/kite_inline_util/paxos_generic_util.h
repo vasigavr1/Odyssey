@@ -56,7 +56,6 @@ static inline void perform_the_rmw_on_the_loc_entry(mica_op_t *kv_ptr,
                                                     loc_entry_t *loc_entry,
                                                     uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(loc_entry->log_no == kv_ptr->last_committed_log_no + 1);
   loc_entry->rmw_is_successful = true;
   loc_entry->base_ts = kv_ptr->ts;
   loc_entry->accepted_log_no = kv_ptr->log_no;

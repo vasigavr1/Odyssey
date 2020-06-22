@@ -102,7 +102,7 @@
 #define FEED_FROM_TRACE 0 // used to enable skew++
 #define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
 
-#define ENABLE_CLIENTS 1
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MEASURE_SLOW_PATH 0
@@ -118,9 +118,9 @@
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
-#define ENABLE_ALL_ABOARD 0
+#define ENABLE_ALL_ABOARD 1
 #define EMULATE_ABD 0
-#define TURN_OFF_KITE_ 0
+#define TURN_OFF_KITE_ 1
 #define TURN_OFF_KITE (EMULATE_ABD ? 1 : TURN_OFF_KITE_)
 #define ACCEPT_IS_RELEASE 1
 
