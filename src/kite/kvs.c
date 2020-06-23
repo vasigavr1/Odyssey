@@ -4,7 +4,6 @@
 
 
 #include "../../include/kite_inline_util/inline_util.h"
-#include <common_func.h>
 #include "kvs.h"
 
 mica_kv_t *KVS;

@@ -7,7 +7,7 @@
 
 
 #include <stdint.h>
-#include <common_func.h>
+#include <config.h>
 #include "main.h"
 
 static inline bool is_odd(uint64_t var) {

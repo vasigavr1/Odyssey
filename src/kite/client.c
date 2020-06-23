@@ -5,7 +5,7 @@
 #include "util.h"
 #include "../../include/kite_inline_util/inline_util.h"
 
-#include "interface.h"
+#include "../../include/general_util/interface.h"
 
 
 #define CLIENT_ASSERTIONS 1

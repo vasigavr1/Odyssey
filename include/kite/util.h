@@ -3,18 +3,8 @@
 
 #include "kvs.h"
 #include "hrd.h"
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <assert.h>
-//Multicast
-#include <rdma/rdma_cma.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <byteswap.h>
-#include <netinet/in.h>
-#include <netdb.h>
-//
+#include "main.h"
+
 
 
 

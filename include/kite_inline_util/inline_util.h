@@ -20,7 +20,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
-#include <common_func.h>
+#include <config.h>
 
 
 

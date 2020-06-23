@@ -1,5 +1,7 @@
 src/kite/kite
 src/kite/core
+src/zookeeper/core
+src/zookeeper/zookeeper
 CMakeLists.txt
 .idea/
 .idea/*

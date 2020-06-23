@@ -5,8 +5,8 @@
 #ifndef KITE_DEBUG_UTIL_H
 #define KITE_DEBUG_UTIL_H
 
-#include <common_func.h>
-#include "common_func.h"
+#include <config.h>
+#include "config.h"
 #include "main.h"
 #include "generic_util.h"
 

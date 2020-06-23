@@ -5,7 +5,7 @@
 #include <pthread.h>
 #include <stdint-gcc.h>
 #include "city.h"
-#include "common_func.h"
+#include "config.h"
 #include "messages.h"
 #include "buffer_sizes.h"
 #include "stats.h"
@@ -53,19 +53,7 @@ enum {
 #define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //(TREIBER_WRITES_NUM + 3) //   (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
 
-/*-------------------------------------------------
-	-----------------MULTICAST-------------------------
---------------------------------------------------*/
-// Multicast defines are not used, but are kept them for possible extension
-#define ENABLE_MULTICAST 0
-#define MULTICAST_TESTING_ 0
-#define MULTICAST_TESTING (ENABLE_MULTICAST == 1 ? MULTICAST_TESTING_ : 0)
-#define MCAST_QPS MACHINE_NUM
 
-#define MCAST_QP_NUM 2
-#define PREP_MCAST_QP 0
-#define COM_MCAST_QP 1 //
-#define MCAST_GROUPS_NUM 2
 
 
 // ABD EMULATION

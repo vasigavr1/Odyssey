@@ -6,7 +6,9 @@
 #ifndef HRD_H
 #define HRD_H
 
-#include "../kite/common_func.h"
+
+#include "../general_util/top.h"
+
 
 #define HRD_DEFAULT_PSN 3185	/* PSN for all queues */ // starting Packet Sequence Number
 #define HRD_DEFAULT_QKEY 0x11111111

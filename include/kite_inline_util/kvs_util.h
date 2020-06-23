@@ -5,7 +5,7 @@
 #ifndef KITE_KVS_UTILITY_H
 #define KITE_KVS_UTILITY_H
 
-#include <common_func.h>
+#include <config.h>
 #include "kvs.h"
 #include "generic_util.h"
 #include "debug_util.h"

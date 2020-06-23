@@ -5,7 +5,7 @@
 #ifndef KITE_CONFIG_UTIL_H
 #define KITE_CONFIG_UTIL_H
 
-#include "common_func.h"
+#include "config.h"
 #include "main.h"
 /* ---------------------------------------------------------------------------
 //------------------------------ CONF BITS HANDLERS---------------------------

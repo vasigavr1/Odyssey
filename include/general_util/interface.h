@@ -5,7 +5,7 @@
 #ifndef KITE_INTERFACE_H
 #define KITE_INTERFACE_H
 
-#include "main.h"
+#include "top.h"
 
 // API_OPCODE
 #define RLXD_READ_BLOCKING 1

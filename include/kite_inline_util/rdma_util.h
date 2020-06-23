@@ -10,7 +10,7 @@
 //------------------------------ RDMA GENERIC -----------------------------
 //---------------------------------------------------------------------------*/
 #include <stdint.h>
-#include "common_func.h"
+#include "config.h"
 
 // Post Receives
 static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t recv_num)

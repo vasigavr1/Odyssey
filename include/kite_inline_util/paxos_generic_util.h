@@ -5,7 +5,7 @@
 #ifndef KITE_PAXOS_GENERIC_UTILITY_H
 #define KITE_PAXOS_GENERIC_UTILITY_H
 
-#include <common_func.h>
+#include <config.h>
 #include "main.h"
 #include "debug_util.h"
 #include "client_if_util.h"

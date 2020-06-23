@@ -1,7 +1,8 @@
 LD      := gcc
 LDFLAGS := -O3 -std=gnu2x -flto -libverbs -lpthread -lnuma -lrdmacm
 CC  = gcc
-CFLAGS   = -O3 -std=gnu2x -Wno-address-of-packed-member -Wno-format-truncation -g  -march=native -I../../include/mica -I../../include/libhrd -I../../include/kite
+CFLAGS   = -O3 -std=gnu2x -Wno-address-of-packed-member -Wno-format-truncation -g  -march=native -DKITE \
+      -I../../include/mica -I../../include/libhrd -I../../include/kite -I../../include/kite_inline_util -I../../include/general_util
 APPS    := kite clean-o
 PROF    := -g -fno-omit-frame-pointer
 
