@@ -146,8 +146,8 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops
   if (ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_sgl[mes_i].length, &send_wr[mes_i], 1);
   else send_wr[mes_i].send_flags = R_REP_ENABLE_INLINING ? IBV_SEND_INLINE : 0;
-  send_wr[mes_i].wr.ud.ah = remote_qp[rm_id][t_id][R_REP_QP_ID].ah;
-  send_wr[mes_i].wr.ud.remote_qpn = (uint32) remote_qp[rm_id][t_id][R_REP_QP_ID].qpn;
+  send_wr[mes_i].wr.ud.ah = rem_qp[rm_id][t_id][R_REP_QP_ID].ah;
+  send_wr[mes_i].wr.ud.remote_qpn = (uint32) rem_qp[rm_id][t_id][R_REP_QP_ID].qpn;
   // Do a Signaled Send every R_SS_BATCH messages
   if ((*r_rep_tx) % R_REP_SS_BATCH == 0) send_wr[mes_i].send_flags |= IBV_SEND_SIGNALED;
   (*r_rep_tx)++;

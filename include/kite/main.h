@@ -8,51 +8,10 @@
 #include "config.h"
 #include "messages.h"
 #include "buffer_sizes.h"
-#include "stats.h"
+#include "../general_util/stats.h"
 
 // Threads
-void *client(void *arg);
 void *worker(void *arg);
-void *print_stats(void*);
-
-/*-------------------------------------------------
-	-----------------CLIENT---------------------------
---------------------------------------------------*/
-enum {
-  CLIENT_USE_TRACE,
-  CLIENT_UI,
-  BLOCKING_TEST_CASE,
-  ASYNC_TEST_CASE,
-  TREIBER_BLOCKING,
-  TREIBER_DEBUG,
-  TREIBER_ASYNC, // Treiber Stack
-  MSQ_ASYNC, // Michael & Scott Queue
-  HML_ASYNC, // Harris & Michael List
-  PRODUCER_CONSUMER
-};
-
-#define CLIENT_MODE MSQ_ASYNC
-
-#define TREIBER_WRITES_NUM 1
-#define TREIBER_NO_CONFLICTS 0
-#define ENABLE_TR_ASSERTIONS_ 1
-#define ENABLE_TR_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == TREIBER_ASYNC ? ENABLE_TR_ASSERTIONS_ : 0)
-
-#define MS_WRITES_NUM 1
-#define MS_NO_CONFLICT 0
-#define ENABLE_MS_ASSERTIONS_ 0
-#define ENABLE_MS_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == MSQ_ASYNC ? ENABLE_MS_ASSERTIONS_ : 0)
-#define CLIENT_LOGS 0
-
-#define HM_NO_CONFLICT 0
-#define HM_WRITES_NUM 4
-
-#define PC_WRITES_NUM 5
-#define PC_IDEAL 0
-
-#define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //(TREIBER_WRITES_NUM + 3) //   (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
-#define CLIENT_DEBUG 0
-
 
 
 
@@ -108,7 +67,7 @@ enum {
 -----------------DEBUGGING-------------------------
 --------------------------------------------------*/
 #define USE_A_SINGLE_KEY 0
-#define DEFAULT_SL 0 //default service level
+
 //It may be that ENABLE_ASSERTIONS  must be up for these to work
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
@@ -134,19 +93,7 @@ enum {
 #define TRACE_SIZE K_128
 #define NOP 0
 
-typedef struct trace_command {
-  uint8_t opcode;
-  uint8_t key_hash[8];
-  uint32_t key_id;
-} trace_t;
 
-/* ah pointer and qpn are accessed together in the critical path
-   so we are putting them in the same kvs line */
-struct remote_qp {
-	struct ibv_ah *ah;
-	int qpn;
-	// no padding needed- false sharing is not an issue, only fragmentation
-};
 
 
 typedef struct kv_resp {
@@ -445,6 +392,73 @@ typedef struct commit_info {
   const char* message;
 } commit_info_t;
 
+typedef struct thread_stats {
+  long long cache_hits_per_thread;
+
+  uint64_t reads_per_thread;
+  uint64_t writes_per_thread;
+  uint64_t acquires_per_thread;
+  uint64_t releases_per_thread;
+
+
+
+  long long reads_sent;
+  long long acks_sent;
+  long long r_reps_sent;
+  uint64_t writes_sent;
+  uint64_t writes_asked_by_clients;
+
+
+  long long reads_sent_mes_num;
+  long long acks_sent_mes_num;
+  long long r_reps_sent_mes_num;
+  long long writes_sent_mes_num;
+
+
+  long long received_reads;
+  long long received_acks;
+  long long received_r_reps;
+  long long received_writes;
+
+  long long received_r_reps_mes_num;
+  long long received_acks_mes_num;
+  long long received_reads_mes_num;
+  long long received_writes_mes_num;
+
+
+  uint64_t per_worker_acks_sent[MACHINE_NUM];
+  uint64_t per_worker_acks_mes_sent[MACHINE_NUM];
+  uint64_t per_worker_writes_received[MACHINE_NUM];
+  uint64_t per_worker_acks_received[MACHINE_NUM];
+  uint64_t per_worker_acks_mes_received[MACHINE_NUM];
+
+  uint64_t per_worker_reads_received[MACHINE_NUM];
+  uint64_t per_worker_r_reps_received[MACHINE_NUM];
+
+
+  uint64_t read_to_write;
+  uint64_t failed_rem_writes;
+  uint64_t total_writes;
+  uint64_t quorum_reads;
+  uint64_t rectified_keys;
+  uint64_t q_reads_with_low_epoch;
+
+  uint64_t proposes_sent; // number of broadcast
+  uint64_t accepts_sent; // number of broadcast
+  uint64_t commits_sent;
+  uint64_t rmws_completed;
+  uint64_t cancelled_rmws;
+  uint64_t all_aboard_rmws; // completed ones
+
+
+
+  uint64_t stalled_ack;
+  uint64_t stalled_r_rep;
+
+  //long long unused[3]; // padding to avoid false sharing
+} t_stats_t;
+
+
 
 typedef struct trace_op {
   uint16_t session_id;
@@ -540,31 +554,15 @@ struct multiple_owner_bit {
 // Remote acquires will read those failures and flip the bits after the have
 // increased their epoch id
 extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
-extern struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
-extern atomic_bool qps_are_set_up;
-extern struct thread_stats t_stats[WORKERS_PER_MACHINE];
-extern struct client_stats c_stats[CLIENTS_PER_MACHINE];
+
+
+extern t_stats_t t_stats[WORKERS_PER_MACHINE];
+extern c_stats_t c_stats[CLIENTS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast64_t epoch_id;
 extern const uint16_t machine_bit_id[16];
 
-extern atomic_bool print_for_debug;
+
 extern FILE* rmw_verify_fp[WORKERS_PER_MACHINE];
-extern FILE* client_log[CLIENTS_PER_MACHINE];
-extern uint64_t time_approx;
-
-
-
-struct thread_params {
-	int id;
-};
-
-
-
-
-
-
-
-
 
 #endif

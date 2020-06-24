@@ -12,7 +12,7 @@
 extern uint64_t seed;
 void static_assert_compile_parameters();
 void print_parameters_in_the_start();
-void init_globals();
+void kite_init_globals();
 void handle_program_inputs(int argc, char *argv[]);
 void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
                    cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,
@@ -56,83 +56,17 @@ int spawn_stats_thread();
 void print_latency_stats(void);
 
 
-/* info about a QP that msut be shared in intit phase */
-struct qp_attr {
-	// ROCE
-	uint64_t gid_global_interface_id;	// Needed for RoCE only
-	uint64_t gid_global_subnet_prefix; 	// Needed for RoCE only
-	//
-	int lid;
-	int qpn;
-	uint8_t sl;
-};
-
-typedef struct {
-  struct qp_attr wrkr_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
-} all_qp_attr_t;
-
-extern all_qp_attr_t *all_qp_attr;
-extern atomic_uint_fast32_t workers_with_filled_qp_attr;
-
-/* ---------------------------------------------------------------------------
-------------------------------MULTICAST --------------------------------------
----------------------------------------------------------------------------*/
 
 
-// This helps us set up the necessary rdma_cm_ids for the multicast groups
-struct cm_qps
-{
-	int receive_q_depth;
-	struct rdma_cm_id* cma_id;
-  bool accepted;
-  bool established;
-	struct ibv_pd* pd;
-	struct ibv_cq* cq;
-	struct ibv_mr* mr;
-	void *mem;
-};
 
-typedef struct  {
-  struct rdma_event_channel *channel;
-  struct sockaddr_storage dst_in[REM_MACH_NUM];
-  struct sockaddr *dst_addr[REM_MACH_NUM];
-  struct sockaddr_storage src_in;
-  struct sockaddr *src_addr;
-  struct cm_qps cm_qp[REM_MACH_NUM];
-  //Send-only stuff
-  struct rdma_ud_param mcast_ud_param[MACHINE_NUM];
-} connect_cm_info_t;
 
-// This helps us set up the multicasts
-struct mcast_info
-{
-	int	t_id;
-	struct rdma_event_channel *channel;
-	struct sockaddr_storage dst_in[MCAST_GROUPS_NUM];
-	struct sockaddr *dst_addr[MCAST_GROUPS_NUM];
-	struct sockaddr_storage src_in;
-	struct sockaddr *src_addr;
-	struct cm_qps cm_qp[MCAST_QPS];
-	//Send-only stuff
-	struct rdma_ud_param mcast_ud_param[MCAST_GROUPS_NUM];
 
-};
 
-// this contains all data we need to perform our mcasts
-struct mcast_essentials {
-	struct ibv_cq *recv_cq[MCAST_QP_NUM];
-	struct ibv_qp *recv_qp[MCAST_QP_NUM];
-	struct ibv_mr *recv_mr;
-	struct ibv_ah *send_ah[MCAST_QP_NUM];
-	uint32_t qpn[MCAST_QP_NUM];
-	uint32_t qkey[MCAST_QP_NUM];
-};
-
-int get_addr(char*, struct sockaddr*);
-void setup_multicast(struct mcast_info*, int*);
-void resolve_addresses(struct mcast_info*);
-void set_up_qp(struct cm_qps*, int*);
-void multicast_testing(struct mcast_essentials*, int , struct hrd_ctrl_blk*);
+//int get_addr(char*, struct sockaddr*);
+//void setup_multicast(struct mcast_info*, int*);
+//void resolve_addresses(struct mcast_info*);
+//void set_up_qp(struct cm_qps*, int*);
+//void multicast_testing(struct mcast_essentials*, int , struct hrd_ctrl_blk*);
 
 /* ---------------------------------------------------------------------------
 ------------------------------INITIALIZATION --------------------------------------
@@ -161,9 +95,9 @@ struct opcode_info {
 
 
 trace_t* trace_init(uint16_t t_id);
-void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
+//void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
 // Connect with Workers and Clients
-void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
+//void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
 /* ---------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 ---------------------------------------------------------------------------*/

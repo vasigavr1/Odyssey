@@ -39,6 +39,9 @@
 #include <stdbool.h>
 
 
+// Stats thread
+void *print_stats(void*);
+void *client(void *);
 
 #define USE_BIG_OBJECTS 0
 #define EXTRA_CACHE_LINES 0
@@ -92,6 +95,45 @@
 #define MTU 4096
 
 #define MAXIMUM_INLINE_SIZE 188
+#define DEFAULT_SL 0 //default service level
+
+/*-------------------------------------------------
+	-----------------CLIENT---------------------------
+--------------------------------------------------*/
+enum {
+  CLIENT_USE_TRACE,
+  CLIENT_UI,
+  BLOCKING_TEST_CASE,
+  ASYNC_TEST_CASE,
+  TREIBER_BLOCKING,
+  TREIBER_DEBUG,
+  TREIBER_ASYNC, // Treiber Stack
+  MSQ_ASYNC, // Michael & Scott Queue
+  HML_ASYNC, // Harris & Michael List
+  PRODUCER_CONSUMER
+};
+
+#define CLIENT_MODE MSQ_ASYNC
+
+#define TREIBER_WRITES_NUM 1
+#define TREIBER_NO_CONFLICTS 0
+#define ENABLE_TR_ASSERTIONS_ 1
+#define ENABLE_TR_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == TREIBER_ASYNC ? ENABLE_TR_ASSERTIONS_ : 0)
+
+#define MS_WRITES_NUM 1
+#define MS_NO_CONFLICT 0
+#define ENABLE_MS_ASSERTIONS_ 0
+#define ENABLE_MS_ASSERTIONS (ENABLE_CLIENTS && CLIENT_MODE == MSQ_ASYNC ? ENABLE_MS_ASSERTIONS_ : 0)
+#define CLIENT_LOGS 0
+
+#define HM_NO_CONFLICT 0
+#define HM_WRITES_NUM 4
+
+#define PC_WRITES_NUM 5
+#define PC_IDEAL 0
+
+#define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //(TREIBER_WRITES_NUM + 3) //   (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
+#define CLIENT_DEBUG 0
 
 
 
@@ -117,13 +159,103 @@
 #define COM_MCAST_QP 1 //
 #define MCAST_GROUPS_NUM 2
 
+// This helps us set up the necessary rdma_cm_ids for the multicast groups
+struct cm_qps
+{
+  int receive_q_depth;
+  struct rdma_cm_id* cma_id;
+  bool accepted;
+  bool established;
+  struct ibv_pd* pd;
+  struct ibv_cq* cq;
+  struct ibv_mr* mr;
+  void *mem;
+};
+
+typedef struct  {
+  struct rdma_event_channel *channel;
+  struct sockaddr_storage dst_in[REM_MACH_NUM];
+  struct sockaddr *dst_addr[REM_MACH_NUM];
+  struct sockaddr_storage src_in;
+  struct sockaddr *src_addr;
+  struct cm_qps cm_qp[REM_MACH_NUM];
+  //Send-only stuff
+  struct rdma_ud_param mcast_ud_param[MACHINE_NUM];
+} connect_cm_info_t;
+
+// This helps us set up the multicasts
+typedef struct mcast_info
+{
+  int	t_id;
+  struct rdma_event_channel *channel;
+  struct sockaddr_storage dst_in[MCAST_GROUPS_NUM];
+  struct sockaddr *dst_addr[MCAST_GROUPS_NUM];
+  struct sockaddr_storage src_in;
+  struct sockaddr *src_addr;
+  struct cm_qps cm_qp[MCAST_QPS];
+  //Send-only stuff
+  struct rdma_ud_param mcast_ud_param[MCAST_GROUPS_NUM];
+
+} mcast_info_t;
+
+// this contains all data we need to perform our mcasts
+typedef struct mcast_essentials {
+  struct ibv_cq *recv_cq[MCAST_QP_NUM];
+  struct ibv_qp *recv_qp[MCAST_QP_NUM];
+  struct ibv_mr *recv_mr;
+  struct ibv_ah *send_ah[MCAST_QP_NUM];
+  uint32_t qpn[MCAST_QP_NUM];
+  uint32_t qkey[MCAST_QP_NUM];
+} mcast_essentials_t;
+
 //////////////////////////////////////////////////////
 /////////////~~~~GLOBALS~~~~~~/////////////////////////
 //////////////////////////////////////////////////////
 
+/* info about a QP that msut be shared in intit phase */
+typedef struct qp_attr {
+  // ROCE
+  uint64_t gid_global_interface_id;	// Needed for RoCE only
+  uint64_t gid_global_subnet_prefix; 	// Needed for RoCE only
+  //
+  int lid;
+  int qpn;
+  uint8_t sl;
+} qp_attr_t;
+
+typedef struct {
+  size_t size;
+  void *buf;
+  qp_attr_t ***wrkr_qp; //wrkr_qp[MACHINE_NUM][WORKERS_PER_MACHINE][4]; //
+} all_qp_attr_t;
+
+/* ah pointer and qpn are accessed together in the critical path
+   so we are putting them in the same kvs line */
+typedef struct remote_qp {
+  struct ibv_ah *ah;
+  int qpn;
+  // no padding needed- false sharing is not an issue, only fragmentation
+} remote_qp_t;
+
+extern remote_qp_t ***rem_qp; //[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 extern int is_roce, machine_id, num_threads;
 extern char **remote_ips, *local_ip, *dev_name;
+extern all_qp_attr_t *all_qp_attr;
+extern atomic_uint_fast32_t workers_with_filled_qp_attr;
+extern atomic_bool print_for_debug;
+extern atomic_bool qps_are_set_up;
+extern FILE* client_log[CLIENTS_PER_MACHINE];
+extern uint64_t time_approx;
 
+typedef struct trace_command {
+  uint8_t opcode;
+  uint8_t key_hash[8];
+  uint32_t key_id;
+} trace_t;
+
+typedef struct thread_params {
+  int id;
+} thread_params_t;
 
 
 //////////////////////////////////////////////////////

@@ -1,6 +1,6 @@
 #include "util.h"
 #include "../../include/kite_inline_util/inline_util.h"
-
+#include "../../include/general_util/init_connect.h"
 void *worker(void *arg)
 {
 	struct thread_params params = *(struct thread_params *) arg;

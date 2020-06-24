@@ -1,5 +1,5 @@
-#include "zk_util.h"
-#include "inline_util.h"
+#include "../../include/zookeeper/zk_util.h"
+#include "../../zk_inline_util.h"
 
 void *follower(void *arg)
 {

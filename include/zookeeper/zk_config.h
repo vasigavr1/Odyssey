@@ -39,6 +39,6 @@
 
 #define CACHE_SOCKET (FOLLOWERS_PER_MACHINE < 39 ? 0 : 1 )// socket where the cache is bind
 
-#define FOLLOWER_QP_NUM 3 /* The number of QPs for the follower */
+
 
 #endif //KITE_CONFIG_H

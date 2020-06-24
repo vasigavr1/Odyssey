@@ -1,8 +1,7 @@
 #include "kvs.h"
 #include "main.h"
 #include "util.h"
-#include "generic_func.h"
-
+#include "../../include/general_util/generic_func.h"
 
 
 //Global Vars
@@ -10,7 +9,7 @@ int is_roce, machine_id, num_threads;
 struct latency_counters latency_count;
 struct thread_stats t_stats[WORKERS_PER_MACHINE];
 struct client_stats c_stats[CLIENTS_PER_MACHINE];
-struct remote_qp remote_qp[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
+remote_qp_t ***rem_qp; //[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 
 struct bit_vector send_bit_vector;
 //struct bit_vector conf_bit_vector;
@@ -30,30 +29,23 @@ struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 uint64_t time_approx;
+all_qp_attr_t *all_qp_attr;
+atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 //struct epoch_info epoch;
 
 
 int main(int argc, char *argv[])
 {
-	printf("MICA OP size %ld/%d added padding %d  \n",
-         sizeof(mica_op_t), MICA_OP_SIZE, MICA_OP_PADDING_SIZE);
 
-
-  printf("Rmw-local_entry %ld \n", sizeof(loc_entry_t));
-	printf("quorum-num %d \n", QUORUM_NUM);
 
 	uint16_t i = 0;
   print_parameters_in_the_start();
   static_assert_compile_parameters();
-	num_threads = -1;
-	is_roce = -1; machine_id = -1;
-	workers_with_filled_qp_attr = 0;
-  init_globals();
+  init_globals(QP_NUM);
+  kite_init_globals();
 	/* Handle Inputs */
   handle_program_inputs(argc, argv);
-	assert(machine_id < MACHINE_NUM && machine_id >=0);
-	assert(!(is_roce == 1 && ENABLE_MULTICAST));
 
   /* Launch  threads */
 	num_threads = TOTAL_THREADS;
@@ -78,15 +70,7 @@ int main(int argc, char *argv[])
 		}
     else {
 			assert(ENABLE_CLIENTS);
-      if (CLIENT_LOGS) {
-        uint16_t cl_id = (uint16_t) (machine_id * CLIENTS_PER_MACHINE +
-                                    (i - WORKERS_PER_MACHINE));
-        char fp_name[40];
-
-        sprintf(fp_name, "cLogs/client%u.out", cl_id);
-        cl_id =  (uint16_t)(i - WORKERS_PER_MACHINE);
-        client_log[cl_id] = fopen(fp_name, "w+");
-      }
+      fopen_client_logs(i);
 			spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
                     &attr, thread_arr, client, occupied_cores);
 		}

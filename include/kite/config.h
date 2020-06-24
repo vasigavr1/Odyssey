@@ -21,10 +21,7 @@
 
 
 // CORE CONFIGURATION
-//#define WORKERS_PER_MACHINE 20
-//#define MACHINE_NUM 5
 #define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-//#define SESSIONS_PER_THREAD 40
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -183,7 +180,6 @@ struct mica_op {
   uint32_t key_id; // strictly for debug
 
   uint8_t padding[MICA_OP_PADDING_SIZE];
-
 };
 
 

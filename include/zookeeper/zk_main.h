@@ -77,15 +77,10 @@
 #define MIN_SS_BATCH 127// The minimum SS batch
 
 
-
-
-
-//--------FOLOWER Flow Control
+//--------FOLLOWER Flow Control
 
 
 //--------LEADER Flow Control
-
-
 #define LDR_VC_NUM 2
 #define PREP_VC 0
 #define COMM_VC 1
@@ -200,7 +195,10 @@
 #define COM_CREDIT_SS_BATCH MAX(MIN_SS_BATCH, (FLR_MAX_CREDIT_WRS + 1))
 #define WRITE_SS_BATCH MAX(MIN_SS_BATCH, (FLR_MAX_W_WRS + 1))
 
+
+#define FOLLOWER_QP_NUM 3 /* The number of QPs for the follower */
 #define LEADER_QP_NUM 3 /* The number of QPs for the leader */
+#define QP_NUM 3
 #define PREP_ACK_QP_ID 0
 #define COMMIT_W_QP_ID 1
 #define FC_QP_ID 2
@@ -260,21 +258,6 @@
 #define WRITE_OP 1
 #define READ_OP 2
 
-
-struct trace_command {
-	uint8_t  opcode;
-	uint32_t key_id;
-	uint128 key_hash;
-};
-
-
-/* ah pointer and qpn are accessed together in the critical path
-   so we are putting them in the same cache line */
-struct remote_qp {
-	struct ibv_ah *ah;
-	int qpn;
-	// no padding needed- false sharing is not an issue, only fragmentation
-};
 
 /*
  *  SENT means we sent the prepare message // OR an ack has been sent
@@ -452,7 +435,7 @@ struct latency_flags {
 
 };
 
-struct thread_stats { // 2 cache lines
+typedef struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
 	long long remotes_per_client;
 	long long locals_per_client;
@@ -485,25 +468,16 @@ struct thread_stats { // 2 cache lines
 	uint64_t stalled_gid;
   uint64_t stalled_ack_prep;
   uint64_t stalled_com_credit;
-
-
-
-
-
 	//long long unused[3]; // padding to avoid false sharing
-};
+} thread_stats_t;
 
-extern struct remote_qp remote_follower_qp[FOLLOWER_MACHINE_NUM][FOLLOWERS_PER_MACHINE][FOLLOWER_QP_NUM];
-extern struct remote_qp remote_leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
-extern atomic_char qps_are_set_up;
-extern struct thread_stats t_stats[LEADERS_PER_MACHINE];
+extern remote_qp_t remote_follower_qp[FOLLOWER_MACHINE_NUM][FOLLOWERS_PER_MACHINE][FOLLOWER_QP_NUM];
+extern remote_qp_t remote_leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
+extern thread_stats_t t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast64_t global_w_id, committed_global_w_id;
 extern bool is_leader;
 
-struct thread_params {
-	int id;
-};
 
 struct latency_counters{
 	uint32_t* hot_reads;

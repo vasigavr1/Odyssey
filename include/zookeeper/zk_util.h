@@ -3,22 +3,14 @@
 
 #include "../mica/kvs.h"
 #include "zk_main.h"
-//#include <stdlib.h>
-//#include <string.h>
-//#include <unistd.h>
-//#include <assert.h>
-////Multicast
-//#include <rdma/rdma_cma.h>
-//#include <sys/socket.h>
-//#include <arpa/inet.h>
-//#include <byteswap.h>
-//#include <netinet/in.h>
-//#include <netdb.h>
-//
 
 
 
 extern uint64_t seed;
+
+void zk_print_parameters_in_the_start();
+void static_assert_compile_parameters();
+void zk_init_globals();
 
 /* ---------------------------------------------------------------------------
 ------------------------------STATS --------------------------------------

@@ -1,8 +1,63 @@
 #include "../../include/zookeeper/zk_util.h"
 
-void init_globals()
-{
 
+void zk_print_parameters_in_the_start()
+{
+  my_printf(green, "COMMIT: commit message %lu/%d, commit message ud req %llu/%d\n",
+               sizeof(struct com_message), LDR_COM_SEND_SIZE,
+               sizeof(struct com_message_ud_req), FLR_COM_RECV_SIZE);
+  my_printf(cyan, "ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
+              sizeof(struct ack_message), FLR_ACK_SEND_SIZE,
+              sizeof(struct ack_message_ud_req), LDR_ACK_RECV_SIZE);
+  my_printf(yellow, "PREPARE: prepare %lu/%d, prep message %lu/%d, prep message ud req %llu/%d\n",
+                sizeof(struct prepare), PREP_SIZE,
+                sizeof(struct prep_message), LDR_PREP_SEND_SIZE,
+                sizeof(struct prep_message_ud_req), FLR_PREP_RECV_SIZE);
+  my_printf(cyan, "Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
+              sizeof(struct write), W_SIZE,
+              sizeof(struct w_message), FLR_W_SEND_SIZE,
+              sizeof(struct w_message_ud_req), LDR_W_RECV_SIZE);
+
+  my_printf(green, "LEADER PREPARE INLINING %d, LEADER PENDING WRITES %d \n",
+               LEADER_PREPARE_ENABLE_INLINING, LEADER_PENDING_WRITES);
+  my_printf(green, "FOLLOWER WRITE INLINING %d, FOLLOWER WRITE FIFO SIZE %d \n",
+               FLR_W_ENABLE_INLINING, W_FIFO_SIZE);
+  my_printf(cyan, "PREPARE CREDITS %d, FLR PREPARE BUF SLOTS %d, FLR PREPARE BUF SIZE %d\n",
+              PREPARE_CREDITS, FLR_PREP_BUF_SLOTS, FLR_PREP_BUF_SIZE);
+
+  my_printf(yellow, "Using Quorom %d , Quorum Machines %d \n", USE_QUORUM, LDR_QUORUM_OF_ACKS);
+}
+
+void static_assert_compile_parameters()
+{if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
+  assert(LEADER_MACHINE < MACHINE_NUM);
+  assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
+  assert(sizeof(struct key) == KEY_SIZE);
+  assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
+  assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
+  assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect
+  assert(sizeof(struct ack_message_ud_req) == LDR_ACK_RECV_SIZE);
+  assert(sizeof(struct com_message_ud_req) == FLR_COM_RECV_SIZE);
+  assert(sizeof(struct prep_message_ud_req) == FLR_PREP_RECV_SIZE);
+  assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
+  assert(SESSIONS_PER_THREAD < M_16);
+  assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
+  if (WRITE_RATIO > 0) assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
+
+
+//
+//  yellow_printf("WRITE: size of write recv slot %d size of w_message %lu , "
+//           "value size %d, size of cache op %lu , sizeof udreq w message %lu \n",
+//         LDR_W_RECV_SIZE, sizeof(struct w_message), VALUE_SIZE,
+//         sizeof(struct cache_op), sizeof(struct w_message_ud_req));
+  assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
+  assert(sizeof(struct w_message) == FLR_W_SEND_SIZE);
+}
+
+void zk_init_globals()
+{
+  global_w_id = 1; // DO not start from 0, because when checking for acks there is a non-zero test
+  committed_global_w_id = 0;
 }
 
 // Leader calls this function to connect with its followers
@@ -323,7 +378,7 @@ int spawn_stats_thread() {
         core = 39;
         CPU_SET(core, &cpus_stats);
     }
-    yellow_printf("Creating stats thread at core %d\n", core);
+    my_printf(yellow, "Creating stats thread at core %d\n", core);
     pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus_stats);
     return pthread_create(&thread_arr[0], &attr, print_stats, NULL);
 }
