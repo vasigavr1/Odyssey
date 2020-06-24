@@ -1,6 +1,9 @@
 #include "util.h"
 #include "../../include/kite_inline_util/inline_util.h"
 #include "../../include/general_util/init_connect.h"
+#include "../../include/general_util/trace_util.h"
+#include "../../include/general_util/rdma_gen_util.h"
+
 void *worker(void *arg)
 {
 	struct thread_params params = *(struct thread_params *) arg;
@@ -79,21 +82,21 @@ void *worker(void *arg)
   uint64_t r_br_tx = 0, w_br_tx = 0, r_rep_tx = 0, ack_tx = 0;
 	uint32_t trace_iter = 0;
 
-  struct recv_info *r_recv_info, *r_rep_recv_info, *w_recv_info, *ack_recv_info ;
-  init_recv_info(cb, &r_recv_info, r_buf_push_ptr, R_BUF_SLOTS,
-                 (uint32_t) R_RECV_SIZE, 0, cb->dgram_qp[R_QP_ID], MAX_RECV_R_WRS,
-                 (void*) r_buffer);
-  init_recv_info(cb, &r_rep_recv_info, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
-                 (uint32_t) R_REP_RECV_SIZE, 0, cb->dgram_qp[R_REP_QP_ID], MAX_RECV_R_REP_WRS,
-                 (void*) r_rep_buffer);
+  recv_info_t *r_recv_info, *r_rep_recv_info, *w_recv_info, *ack_recv_info ;
+  r_recv_info = init_recv_info(cb, r_buf_push_ptr, R_BUF_SLOTS,
+    (uint32_t) R_RECV_SIZE, 0, cb->dgram_qp[R_QP_ID], MAX_RECV_R_WRS,
+    (void*) r_buffer);
+  r_rep_recv_info = init_recv_info(cb, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
+    (uint32_t) R_REP_RECV_SIZE, 0, cb->dgram_qp[R_REP_QP_ID], MAX_RECV_R_REP_WRS,
+    (void*) r_rep_buffer);
 
-  init_recv_info(cb, &w_recv_info, w_buf_push_ptr, W_BUF_SLOTS,
-                 (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS,  cb->dgram_qp[W_QP_ID],
-                 MAX_RECV_W_WRS, (void*) w_buffer);
+  w_recv_info = init_recv_info(cb, w_buf_push_ptr, W_BUF_SLOTS,
+    (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS,  cb->dgram_qp[W_QP_ID],
+    MAX_RECV_W_WRS, (void*) w_buffer);
 
-  init_recv_info(cb, &ack_recv_info, ack_buf_push_ptr, ACK_BUF_SLOTS,
-                 (uint32_t) ACK_RECV_SIZE, 0, cb->dgram_qp[ACK_QP_ID], MAX_RECV_ACK_WRS,
-                 (void*) ack_buffer);
+  ack_recv_info = init_recv_info(cb, ack_buf_push_ptr, ACK_BUF_SLOTS,
+    (uint32_t) ACK_RECV_SIZE, 0, cb->dgram_qp[ACK_QP_ID], MAX_RECV_ACK_WRS,
+    (void*) ack_buffer);
 
   struct ack_message acks[MACHINE_NUM] = {0};
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {

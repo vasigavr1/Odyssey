@@ -3,8 +3,11 @@
 #endif
 
 
-#include "../../include/kite_inline_util/inline_util.h"
+//#include "../../include/kite_inline_util/inline_util.h"
+#include <hrd.h>
 #include "kvs.h"
+#include <city.h>
+
 
 mica_kv_t *KVS;
 
@@ -24,37 +27,37 @@ int is_power_of_2(int x)
 
 inline void check_mica_op_t_allignement(mica_op_t *kv_ptr)
 {
-  if (kv_ptr->key.bkt == 2173420268 && kv_ptr->key.server == 36126 &&
-      kv_ptr->key.tag == 13372) {
-    uint64_t key_al = ((uint64_t) &kv_ptr->key) % MICA_OP_SIZE;
-    uint64_t opc_al = ((uint64_t) &kv_ptr->opcode) % MICA_OP_SIZE;
-    uint64_t state_al = ((uint64_t) &kv_ptr->state) % MICA_OP_SIZE;
-    uint64_t log_no = ((uint64_t) &kv_ptr->log_no) % MICA_OP_SIZE;
-    //uint64_t last_registered_log_no = ((uint64_t) &kv_ptr->last_registered_log_no) % MICA_OP_SIZE;
-    uint64_t accepted_log_no = ((uint64_t) &kv_ptr->accepted_log_no) % MICA_OP_SIZE;
-    uint64_t last_committed_log_no = ((uint64_t) &kv_ptr->last_committed_log_no) % MICA_OP_SIZE;
-
-    uint64_t seq_lock = ((uint64_t) &kv_ptr->seqlock) % MICA_OP_SIZE;
-    uint64_t ts = ((uint64_t) &kv_ptr->ts) % MICA_OP_SIZE;
-    uint64_t prop_ts = ((uint64_t) &kv_ptr->prop_ts) % MICA_OP_SIZE;
-    uint64_t accepted_ts = ((uint64_t) &kv_ptr->accepted_ts) % MICA_OP_SIZE;
-
-
-    uint64_t rmw_id = ((uint64_t) &kv_ptr->rmw_id) % MICA_OP_SIZE;
-   // uint64_t last_registered_rmw_id = ((uint64_t) &kv_ptr->last_registered_rmw_id) % MICA_OP_SIZE;
-    uint64_t last_committed_rmw_id = ((uint64_t) &kv_ptr->last_committed_rmw_id) % MICA_OP_SIZE;
-    uint64_t accepted_rmw_id = ((uint64_t) &kv_ptr->accepted_rmw_id) % MICA_OP_SIZE;
-
-
-    printf(" key: %lu \n opc %lu \n state %lu \n log %lu \n"
-             "accepted log %lu \n last committed log %lu \n"
-             "seq_lock %lu \n base_ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
-             "rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
-           key_al, opc_al, state_al, log_no, accepted_log_no, last_committed_log_no,
-           seq_lock, ts, prop_ts, accepted_ts,
-           rmw_id, last_committed_rmw_id, accepted_rmw_id);
-
-  }
+//  if (kv_ptr->key.bkt == 2173420268 && kv_ptr->key.server == 36126 &&
+//      kv_ptr->key.tag == 13372) {
+//    uint64_t key_al = ((uint64_t) &kv_ptr->key) % MICA_OP_SIZE;
+//    uint64_t opc_al = ((uint64_t) &kv_ptr->opcode) % MICA_OP_SIZE;
+//    uint64_t state_al = ((uint64_t) &kv_ptr->state) % MICA_OP_SIZE;
+//    uint64_t log_no = ((uint64_t) &kv_ptr->log_no) % MICA_OP_SIZE;
+//    //uint64_t last_registered_log_no = ((uint64_t) &kv_ptr->last_registered_log_no) % MICA_OP_SIZE;
+//    uint64_t accepted_log_no = ((uint64_t) &kv_ptr->accepted_log_no) % MICA_OP_SIZE;
+//    uint64_t last_committed_log_no = ((uint64_t) &kv_ptr->last_committed_log_no) % MICA_OP_SIZE;
+//
+//    uint64_t seq_lock = ((uint64_t) &kv_ptr->seqlock) % MICA_OP_SIZE;
+//    uint64_t ts = ((uint64_t) &kv_ptr->ts) % MICA_OP_SIZE;
+//    uint64_t prop_ts = ((uint64_t) &kv_ptr->prop_ts) % MICA_OP_SIZE;
+//    uint64_t accepted_ts = ((uint64_t) &kv_ptr->accepted_ts) % MICA_OP_SIZE;
+//
+//
+//    uint64_t rmw_id = ((uint64_t) &kv_ptr->rmw_id) % MICA_OP_SIZE;
+//   // uint64_t last_registered_rmw_id = ((uint64_t) &kv_ptr->last_registered_rmw_id) % MICA_OP_SIZE;
+//    uint64_t last_committed_rmw_id = ((uint64_t) &kv_ptr->last_committed_rmw_id) % MICA_OP_SIZE;
+//    uint64_t accepted_rmw_id = ((uint64_t) &kv_ptr->accepted_rmw_id) % MICA_OP_SIZE;
+//
+//
+//    printf(" key: %lu \n opc %lu \n state %lu \n log %lu \n"
+//             "accepted log %lu \n last committed log %lu \n"
+//             "seq_lock %lu \n base_ts log %lu \n prop_ts %lu \n accepted_ts %lu \n"
+//             "rmw_id %lu \nlast_committed_rmw_id %lu \naccepted_rmw_id%lu \n",
+//           key_al, opc_al, state_al, log_no, accepted_log_no, last_committed_log_no,
+//           seq_lock, ts, prop_ts, accepted_ts,
+//           rmw_id, last_committed_rmw_id, accepted_rmw_id);
+//
+//  }
 }
 
 void mica_init(mica_kv_t *kvs, int instance_id,
@@ -204,7 +207,6 @@ void custom_mica_populate_fixed_len(mica_kv_t * kvs, int n, int val_len) {
 
   mica_op_t *op = (mica_op_t *) calloc(1, sizeof(mica_op_t));
   unsigned long *op_key = (unsigned long *) &op->key;
-  op->state = INVALID_RMW;
 
 
   for(uint32_t key_id = 0; key_id < KVS_NUM_KEYS; key_id++) {

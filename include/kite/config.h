@@ -21,27 +21,11 @@
 
 
 // CORE CONFIGURATION
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
-#define MEASURE_LATENCY 0
-#define LATENCY_MACHINE 0
-#define LATENCY_THREAD 15
-#define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define R_CREDITS 3 //
 #define W_CREDITS 8
 #define MAX_READ_SIZE 300 //300 in terms of bytes for Reads/Acquires/RMW-Acquires/Proposes
 #define MAX_WRITE_SIZE 800 // only writes 400 -- only rmws 1200 in terms of bytes for Writes/Releases/Accepts/Commits
 #define MIN_SS_BATCH 127// The minimum SS batch
-#define ENABLE_STAT_COUNTING 1
-#define MAX_OP_BATCH_ 51
-#define SC_RATIO_ 500// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES_ 1
-#define ENABLE_ACQUIRES_ 1
-#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RMWS_ 1
-#define FEED_FROM_TRACE 0 // used to enable skew++
-#define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
-
-
 #define MEASURE_SLOW_PATH 0
 
 
@@ -49,7 +33,6 @@
 
 // Important Knobs
 
-#define ENABLE_LOCK_FREE_READING 1
 #define ENABLE_COMMITS_WITH_NO_VAL 1
 #define ENABLE_CAS_CANCELLING 1
 #define ENABLE_ADAPTIVE_INLINING 0 // This did not help
@@ -70,13 +53,6 @@
 
 
 
-
-// Where to BIND the KVS
-#define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
-
-// PRINTS -- STATS
-#define EXIT_ON_PRINT 0
-#define PRINT_NUM 4
 #define VERIFY_PAXOS 0
 #define PRINT_LOGS 0
 #define COMMIT_LOGS 0
@@ -138,14 +114,14 @@ struct ts_tuple {
 };
 
 
-typedef atomic_uint_fast64_t seqlock_t;
+
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
 #define MICA_OP_SIZE_  (100 + (2 * (MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
-struct mica_op {
+typedef struct mica_op {
   // Cache-line -1
   uint8_t value[MICA_VALUE_SIZE];
   uint8_t last_accepted_value[MICA_VALUE_SIZE];
@@ -180,7 +156,7 @@ struct mica_op {
   uint32_t key_id; // strictly for debug
 
   uint8_t padding[MICA_OP_PADDING_SIZE];
-};
+} mica_op_t;
 
 
 

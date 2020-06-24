@@ -7,6 +7,11 @@
 
 
 //LATENCY Measurements
+#include <stdint.h>
+#include <time.h>
+#include "generic_opcodes.h"
+
+
 #define MAX_LATENCY 400 //in us
 #define LATENCY_BUCKETS 200 //latency accuracy
 
@@ -49,7 +54,8 @@ struct local_latency {
 };
 
 
-extern struct latency_counters latency_count;
+
+
 
 
 #endif //KITE_STATS_H

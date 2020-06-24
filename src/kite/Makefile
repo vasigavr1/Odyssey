@@ -8,7 +8,7 @@ PROF    := -g -fno-omit-frame-pointer
 
 all: ${APPS}
 
-kite: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o  ../mica/city.o main.o client.o worker.o kvs.o util.o stats.o
+kite: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o  ../mica/city.o ../mica/kvs.o main.o client.o worker.o  util.o stats.o
 	${LD} -o $@ $^ ${LDFLAGS}
 
 

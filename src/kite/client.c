@@ -4,8 +4,8 @@
 
 #include "util.h"
 #include "../../include/kite_inline_util/inline_util.h"
-
 #include "../../include/general_util/interface.h"
+#include "../../include/general_util/trace_util.h"
 
 
 #define CLIENT_ASSERTIONS 1

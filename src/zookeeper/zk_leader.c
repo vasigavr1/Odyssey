@@ -1,5 +1,7 @@
-#include "zk_util.h"
-#include "inline_util.h"
+#include "../../include/zookeeper/zk_util.h"
+#include "../../include/zookeeper/zk_inline_util.h"
+#include "../../include/general_util/init_connect.h"
+#include "../../include/general_util/rdma_gen_util.h"
 
 // 1059 lines before refactoring
 void *leader(void *arg)
@@ -33,7 +35,7 @@ void *leader(void *arg)
 	struct mcast_info *mcast_data;
 	struct mcast_essentials *mcast;
 	// need to init mcast before sync, such that we can post recvs
-	if (ENABLE_MULTICAST == 1) {
+	if (ENABLE_MULTICAST) {
 		init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
 		assert(mcast != NULL);
 	}
@@ -48,7 +50,7 @@ void *leader(void *arg)
 	--------------CONNECT WITH FOLLOWERS-----------------------
 	---------------------------------------------------------*/
 	setup_connections_and_spawn_stats_thread(t_id, cb);
-	if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb);
+	if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb, COMMIT_W_QP_ID);
 
 	/* -----------------------------------------------------
 	--------------DECLARATIONS------------------------------
@@ -75,18 +77,18 @@ void *leader(void *arg)
   long prep_br_tx = 0, commit_br_tx = 0;
 
   struct recv_info *w_recv_info, *ack_recv_info;
-  init_recv_info(&w_recv_info, w_buf_push_ptr, LEADER_W_BUF_SLOTS,
-                 (uint32_t)LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS, w_recv_wr, cb->dgram_qp[COMMIT_W_QP_ID],
-                 w_recv_sgl, (void*) w_buffer);
+  w_recv_info =  init_recv_info(cb, w_buf_push_ptr, LEADER_W_BUF_SLOTS,
+                                (uint32_t) LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS, cb->dgram_qp[COMMIT_W_QP_ID],
+                                LDR_MAX_RECV_W_WRS, (void*) w_buffer);
 
-  init_recv_info(&ack_recv_info, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
-                 (uint32_t)LDR_ACK_RECV_SIZE, 0, ack_recv_wr, cb->dgram_qp[PREP_ACK_QP_ID], ack_recv_sgl,
-                 (void*) ack_buffer);
+  ack_recv_info = init_recv_info(cb, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
+                                 (uint32_t)LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID], LDR_MAX_RECV_ACK_WRS,
+                                 (void*) ack_buffer);
 
 
 	struct latency_flags latency_info = {
 			.measured_req_flag = NO_REQ,
-			.last_measured_sess_id = 0,
+			.measured_sess_id = 0,
 	};
 
 	struct cache_op *ops;

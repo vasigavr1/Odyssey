@@ -40,5 +40,20 @@
 #define CACHE_SOCKET (FOLLOWERS_PER_MACHINE < 39 ? 0 : 1 )// socket where the cache is bind
 
 
+#define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
+#define MICA_OP_SIZE_  (20 + ((MICA_VALUE_SIZE)))
+#define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
+
+#define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
+struct mica_op {
+  // Cache-line -1
+  uint8_t value[MICA_VALUE_SIZE];
+  // Cache-line -2
+  struct key key;
+  seqlock_t seqlock;
+  uint32_t key_id; // strictly for debug
+  uint8_t padding[MICA_OP_PADDING_SIZE];
+};
+
 
 #endif //KITE_CONFIG_H

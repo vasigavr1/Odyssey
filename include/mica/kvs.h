@@ -7,18 +7,20 @@
 #endif
 
 #include "../general_util/top.h"
-//#ifdef KITE_CONFIG_H
-//  #include "../kite/config.h"
-//#else
-//  #include "../zookeeper/zk_main.h"
-//#endif
 
 #ifdef KITE
   #include "../kite/config.h"
 #endif
 
+
 #ifdef ZOOKEEPER
   #include "../zookeeper/zk_config.h"
+#endif
+
+#ifndef KITE
+  #ifndef ZOOKEEPER
+    #include "../zookeeper/zk_config.h"
+  #endif
 #endif
 
 #define KVS_NUM_BKTS (8 * 1024 * 1024)

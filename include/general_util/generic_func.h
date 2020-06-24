@@ -8,6 +8,35 @@
 #include "top.h"
 #include "stats.h"
 #include <getopt.h>
+#include "../mica/kvs.h"
+
+void static_assert_compile_parameters()
+{
+  assert(MICA_OP_SIZE == sizeof(mica_op_t));
+  static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
+  static_assert(IS_ALIGNED(2 * MICA_VALUE_SIZE, 64), "2 * VALUE_SIZE must be aligned with 64 bytes");
+  static_assert(MICA_VALUE_SIZE >= VALUE_SIZE, "");
+  static_assert(SESSIONS_PER_THREAD < K_64, "");
+  static_assert(SESSIONS_PER_THREAD > 0, "");
+  static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS,
+    "Big objects are enabled but the value size is not a multiple of 8");
+
+  static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
+  static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
+  static_assert(sizeof(client_op_t) % 64 == 0, "");
+  static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
+  static_assert(sizeof(struct wrk_clt_if) == INTERFACE_SIZE, "");
+  for (uint16_t i = 0; i < WORKERS_PER_MACHINE; i++) {
+    bool is_interface_aligned = (uint64_t) &interface % 64 == 0;
+    bool same_cl =  ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] / 64) ==
+                    ((uint64_t)&interface[i].wrkr_pull_ptr[0] / 64);
+    //long ptr_dif = &interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] -
+    //                   &interface[i].wrkr_pull_ptr[0];
+    //printf("%d %lu %lu\n", same_cl, ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1]/ 64), ((uint64_t)&interface[i].wrkr_pull_ptr[0]/64));
+    assert(!same_cl);
+    assert(is_interface_aligned);
+  }
+}
 
 void handle_program_inputs(int argc, char *argv[])
 {
@@ -126,6 +155,59 @@ void init_globals(int qp_num)
 	latency_count.acquires = (uint32_t*) malloc(sizeof(uint32_t) * (LATENCY_BUCKETS + 1)); // the last latency bucket is to capture possible outliers (> than LATENCY_MAX)
   memset(latency_count.acquires, 0, sizeof(uint32_t) * (LATENCY_BUCKETS + 1));
 #endif
+}
+
+// pin threads starting from core 0
+int pin_thread(int t_id) {
+  int core;
+  core = PHYSICAL_CORE_DISTANCE * t_id;
+  if(core >= LOGICAL_CORES_PER_SOCKET) { //if you run out of cores in numa node 0
+    if (WORKER_HYPERTHREADING) { //use hyperthreading rather than go to the other socket
+      core = LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET);
+      if (core >= TOTAL_CORES_) { // now go to the other socket
+        core = PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET) + 1 ;
+        if (core >= LOGICAL_CORES_PER_SOCKET) { // again do hyperthreading on the second socket
+          core = LOGICAL_CORES_PER_SOCKET + 1 +
+                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
+        }
+      }
+    }
+    else { //spawn clients to numa node 1
+      core = PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET) + 1;
+      if (core >= LOGICAL_CORES_PER_SOCKET) { // start hyperthreading
+        core = LOGICAL_CORES_PER_SOCKET + (PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET));
+        if (core >= TOTAL_CORES_) {
+          core = LOGICAL_CORES_PER_SOCKET + 1 +
+                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
+        }
+      }
+    }
+
+  }
+  assert(core >= 0 && core < TOTAL_CORES);
+  return core;
+}
+
+// pin a thread avoid collisions with pin_thread()
+int pin_threads_avoiding_collisions(int c_id) {
+  int c_core;
+  if (!WORKER_HYPERTHREADING || WORKERS_PER_MACHINE < PHYSICAL_CORES_PER_SOCKET) {
+    if (c_id < WORKERS_PER_MACHINE) c_core = PHYSICAL_CORE_DISTANCE * c_id + 2;
+    else c_core = (WORKERS_PER_MACHINE * 2) + (c_id * 2);
+
+    //if (DISABLE_CACHE == 1) c_core = 4 * i + 2; // when bypassing the kvs
+    //if (DISABLE_HYPERTHREADING == 1) c_core = (FOLLOWERS_PER_MACHINE * 4) + (c_id * 4);
+    if (c_core > TOTAL_CORES_) { //spawn clients to numa node 1 if you run out of cores in 0
+      c_core -= TOTAL_CORES_;
+    }
+  }
+  else { //we are keeping workers on the same socket
+    c_core = (WORKERS_PER_MACHINE - PHYSICAL_CORES_PER_SOCKET) * 4 + 2 + (4 * c_id);
+    if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ + 2);
+    if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ - 1);
+  }
+  assert(c_core >= 0 && c_core < TOTAL_CORES);
+  return c_core;
 }
 
 void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,

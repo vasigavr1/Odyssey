@@ -7,7 +7,7 @@
 //Global Vars
 int is_roce, machine_id, num_threads;
 struct latency_counters latency_count;
-struct thread_stats t_stats[WORKERS_PER_MACHINE];
+t_stats_t t_stats[WORKERS_PER_MACHINE];
 struct client_stats c_stats[CLIENTS_PER_MACHINE];
 remote_qp_t ***rem_qp; //[MACHINE_NUM][WORKERS_PER_MACHINE][QP_NUM];
 
@@ -37,11 +37,10 @@ atomic_uint_fast32_t workers_with_filled_qp_attr;
 
 int main(int argc, char *argv[])
 {
-
-
 	uint16_t i = 0;
   print_parameters_in_the_start();
   static_assert_compile_parameters();
+  kite_static_assert_compile_parameters();
   init_globals(QP_NUM);
   kite_init_globals();
 	/* Handle Inputs */

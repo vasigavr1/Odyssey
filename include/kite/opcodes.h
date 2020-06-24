@@ -6,37 +6,6 @@
 #define KITE_OPCODES_H
 
 
-enum {COMPARE_AND_SWAP_STRONG = 96,
-  COMPARE_AND_SWAP_WEAK,
-  FETCH_AND_ADD,
-  RMW_PLAIN_WRITE // writes to rmwable keys get translated to this op
-};
-
-
-// when inserting the commit use this OP and change it to COMMIT_OP
-// before broadcasting. The purpose is for the state of the commit message to be tagged as SENT_RMW_ACQ
-// such that whens acks are gathered, it will be recognized that local entry need not get freed
-#define COMMIT_OP_NO_VAL 100
-#define RMW_ACQ_COMMIT_OP 101
-#define COMMIT_OP 102
-#define ACCEPT_OP 103
-#define ACCEPT_OP_BIT_VECTOR 203
-#define ACCEPT_OP_NO_CREDITS 13 // used only when creating an r_rep
-#define PROPOSE_OP 104
-#define OP_RELEASE_BIT_VECTOR 105// first round of a release that carries a bit vector
-#define OP_RELEASE_SECOND_ROUND 106 // second round is the actual release
-// The sender sends this opcode to flip a bit it owns after an acquire detected a failure
-#define OP_ACQUIRE_FLIP_BIT 107 //the reply to this is always TS_EQUAL (not needed just for ease)
-#define NO_OP_RELEASE 9 // on a coalesced Release which detected failure, but is behind an OP_RELEASE_BIT_VECTOR
-#define OP_RELEASE 109
-#define OP_ACQUIRE 110
-// The receiver renames the opcode of an OP_ACQUIRE  to this to recognize
-// that the acquire detected a failure and add the offset to the reply opcode
-#define OP_ACQUIRE_FP 10
-#define KVS_OP_GET 111
-#define KVS_OP_PUT 112
-
-
 #define OP_ACK 115
 #define ACK_NOT_YET_SENT 117
 #define OP_GET_TS 118 // first round of release, or out-of-epoch write
@@ -194,11 +163,7 @@ enum {
 #define DO_NOT_CHECK_BASE_TS B_4_
 
 
-// CLIENT REQUESTS STATE
-#define INVALID_REQ 0 // entry not being used
-#define ACTIVE_REQ 1 // client has issued a reqs
-#define IN_PROGRESS_REQ 2 // worker has picked up the req
-#define COMPLETED_REQ 3 // worker has completed the req
+
 
 // CONF BITS STATES
 #define UP_STABLE 0
@@ -244,13 +209,7 @@ enum {
 #define POLL_CQ_ACK 3
 
 
-typedef enum {
-  NO_REQ,
-  RELEASE,
-  ACQUIRE,
-  WRITE_REQ,
-  READ_REQ,
-} req_type;
+
 
 
 enum {NO_REASON = 0, STALLED_BECAUSE_ACC_RELEASE = 1, STALLED_BECAUSE_NOT_ENOUGH_REPS};

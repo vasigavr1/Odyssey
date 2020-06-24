@@ -3,16 +3,10 @@
 
 
 
-//struct hrd_qp_attr all_qp_attr[WORKERS_PER_MACHINE][QP_NUM];
 
-
-void static_assert_compile_parameters()
+void kite_static_assert_compile_parameters()
 {
   static_assert(RMW_ACK_BASE_TS_STALE > RMW_ACK, "assumption used to check if replies are acks");
-  assert(MICA_OP_SIZE == sizeof(mica_op_t));
-  static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
-  static_assert(IS_ALIGNED(2 * MICA_VALUE_SIZE, 64), "2 * VALUE_SIZE must be aligned with 64 bytes");
-  static_assert(MICA_VALUE_SIZE >= VALUE_SIZE, "");
   static_assert(PAXOS_TS > ALL_ABOARD_TS, "Paxos TS must be bigger than ALL Aboard TS");
   static_assert(!(COMMIT_LOGS && (PRINT_LOGS || VERIFY_PAXOS)), " ");
   static_assert(sizeof(struct key) == KEY_SIZE, " ");
@@ -20,14 +14,13 @@ void static_assert_compile_parameters()
 //  static_assert(sizeof(struct cache_key) ==  KEY_SIZE, "");
 //  static_assert(sizeof(cache_meta) == 8, "");
 
-  static_assert(SESSIONS_PER_THREAD < K_64, "");
-  static_assert(SESSIONS_PER_THREAD > 0, "");
+ static_assert(INVALID_RMW == 0, "the initial state of a mica_op must be invalid");
   static_assert(MACHINE_NUM < 16, "the bit_vec vector is 16 bits-- can be extended");
-  static_assert(VALUE_SIZE % 8 == 0 || !USE_BIG_OBJECTS, "Big objects are enabled but the value size is not a multiple of 8");
+
   static_assert(VALUE_SIZE >= 2, "first round of release can overload the first 2 bytes of value");
   //static_assert(VALUE_SIZE > RMW_BYTE_OFFSET, "");
   static_assert(VALUE_SIZE == (RMW_VALUE_SIZE), "RMW requires the value to be at least this many bytes");
-  static_assert(MACHINE_NUM <= 255, ""); // kvs meta has 1 B for machine id
+  static_assert(MACHINE_NUM <= 255, ""); // for deprecated reasons
 
   // WRITES
   static_assert(W_SEND_SIZE >= W_MES_SIZE &&
@@ -100,27 +93,12 @@ void static_assert_compile_parameters()
 
 //  printf("Client op  %u  %u \n", sizeof(client_op_t), PADDING_BYTES_CLIENT_OP);
 //  printf("Interface \n \n %u  \n \n", sizeof(struct wrk_clt_if));
-  static_assert(!(ENABLE_CLIENTS && !CLIENTS_PER_MACHINE), "");
+
   static_assert(!(ENABLE_CLIENTS && !ACCEPT_IS_RELEASE && CLIENT_MODE > CLIENT_UI),
                 "If we are using the lock-free data structures rmws must act as releases");
 
   static_assert(!(ENABLE_CLIENTS && CLIENT_MODE > CLIENT_UI && ENABLE_ALL_ABOARD),
                 "All-aboard does not work with the RC semantics");
-  static_assert(sizeof(client_op_t) == CLIENT_OP_SIZE, "");
-  static_assert(sizeof(client_op_t) % 64 == 0, "");
-  static_assert(sizeof(struct wrk_clt_if) % 64 == 0, "");
-  static_assert(sizeof(struct wrk_clt_if) == INTERFACE_SIZE, "");
-  for (uint16_t i = 0; i < WORKERS_PER_MACHINE; i++) {
-    bool is_interface_aligned = (uint64_t) &interface % 64 == 0;
-    bool same_cl =  ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] / 64) ==
-                    ((uint64_t)&interface[i].wrkr_pull_ptr[0] / 64);
-    //long ptr_dif = &interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1] -
-    //                   &interface[i].wrkr_pull_ptr[0];
-    //printf("%d %lu %lu\n", same_cl, ((uint64_t)&interface[i].clt_pull_ptr[SESSIONS_PER_THREAD - 1]/ 64), ((uint64_t)&interface[i].wrkr_pull_ptr[0]/64));
-    assert(!same_cl);
-    assert(is_interface_aligned);
-  }
-
 }
 
 void print_parameters_in_the_start()
@@ -191,238 +169,7 @@ void kite_init_globals()
 
 
 
-//When manufacturing the trace
-uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
-{
-  uint8_t  opcode = 0;
-  uint8_t cas_opcode = USE_WEAK_CAS ? COMPARE_AND_SWAP_WEAK : COMPARE_AND_SWAP_STRONG;
-  bool is_rmw = false, is_update = false, is_sc = false;
-  if (ENABLE_RMWS) {
-    if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
-    else
-      is_rmw = rand_r(seed) % 1000 < RMW_RATIO;
-  }
-  if (!is_rmw) {
-    is_update = rand() % 1000 < WRITE_RATIO; //rand_r(seed) % 1000 < WRITE_RATIO;
-    is_sc = rand() % 1000 < SC_RATIO; //rand_r(seed) % 1000 < SC_RATIO;
-  }
 
-  if (is_rmw) {
-    opc_info->rmws++;
-    if (TRACE_ONLY_CAS) opcode = cas_opcode;
-    else if (TRACE_ONLY_FA) opcode = FETCH_AND_ADD;
-    else if (TRACE_MIXED_RMWS)
-      opcode = (uint8_t) ((rand_r(seed) % 1000 < TRACE_CAS_RATIO) ? cas_opcode : FETCH_AND_ADD);
-    if (opcode == cas_opcode) opc_info->cas++;
-    else opc_info->fa++;
-  }
-  else if (is_update) {
-    if (is_sc && ENABLE_RELEASES) {
-      opcode = OP_RELEASE;
-      opc_info->sc_writes++;
-    }
-    else {
-      opcode = KVS_OP_PUT;
-      opc_info->writes++;
-    }
-  }
-  else  {
-    if (is_sc && ENABLE_ACQUIRES) {
-      opcode = OP_ACQUIRE;
-      opc_info->sc_reads++;
-    }
-    else {
-      opcode = KVS_OP_GET;
-      opc_info->reads++;
-    }
-  }
-  opc_info->is_rmw = is_rmw;
-  opc_info->is_update = is_update;
-  opc_info->is_sc = is_sc;
-  return opcode;
-}
-
-
-// Parse a trace, use this for skewed workloads as uniform trace can be manufactured easily
-trace_t* parse_trace(char* path, int t_id){
-    trace_t *trace;
-    FILE * fp;
-    ssize_t read;
-    size_t len = 0;
-    char* ptr, *word, *saveptr, *line = NULL;
-    uint32_t i = 0, hottest_key_counter = 0, cmd_count = 0, word_count = 0;
-    struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
-
-    fp = fopen(path, "r");
-    if (fp == NULL){
-        printf ("ERROR: Cannot open file: %s\n", path);
-        exit(EXIT_FAILURE);
-    }
-
-    while ((getline(&line, &len, fp)) != -1) cmd_count++;
-    fclose(fp);
-    if (line) free(line);
-    len = 0;
-    line = NULL;
-
-    fp = fopen(path, "r");
-    if (fp == NULL){
-        printf ("ERROR: Cannot open file: %s\n", path);
-        exit(EXIT_FAILURE);
-    }
-    // printf("File %s has %d lines \n", path, cmd_count);
-    trace = (trace_t *)malloc((cmd_count + 1) * sizeof(trace_t));
-    struct timespec time;
-    clock_gettime(CLOCK_MONOTONIC, &time);
-    uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)trace);
-    srand (seed);
-    int debug_cnt = 0;
-    //parse file line by line and insert trace to cmd.
-    for (i = 0; i < cmd_count; i++) {
-        if ((read = getline(&line, &len, fp)) == -1)
-          my_printf(red, "ERROR: Problem while reading the trace\n");
-        word_count = 0;
-        word = strtok_r (line, " ", &saveptr);
-        trace[i].opcode = 0;
-
-        //Before reading the request deside if it's gone be r_rep or write
-       //bool is_read = false, is_update = false, is_sc = false;
-      trace[i].opcode = compute_opcode(opc_info, &seed);
-
-      while (word != NULL) {
-        if (word[strlen(word) - 1] == '\n')
-          word[strlen(word) - 1] = 0;
-
-        if (word_count == 0){
-          uint32_t key_id = (uint32_t) strtoul(word, &ptr, 10);
-          if (USE_A_SINGLE_KEY)
-            key_id =  0;
-          if (key_id == 0)
-            hottest_key_counter++;
-          uint128 key_hash = CityHash128((char *) &(key_id), 4);
-          debug_cnt++;
-          memcpy(trace[i].key_hash, &(key_hash.second), 8);
-        }
-        word_count++;
-        word = strtok_r(NULL, " ", &saveptr);
-        if (word == NULL && word_count < 1) {
-          printf("Thread %d Error: Reached word %d in line %d : %s \n", t_id, word_count, i, line);
-          assert(false);
-        }
-      }
-
-    }
-    if (t_id  == 0){
-        my_printf(cyan, "Skewed TRACE: Exponent %d, Hottest key accessed: %.2f%%  \n", SKEW_EXPONENT_A,
-                    (100 * hottest_key_counter / (double) cmd_count));
-        printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%\n"
-                 "Trace w_size %d \n",
-               (double) (opc_info->writes * 100) / cmd_count,
-               (double) (opc_info->sc_writes * 100) / cmd_count,
-               (double) (opc_info->reads * 100) / cmd_count,
-               (double) (opc_info->sc_reads * 100) / cmd_count,
-               (double) (opc_info->rmws * 100) / cmd_count, cmd_count);
-    }
-    trace[cmd_count].opcode = NOP;
-    // printf("Thread %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
-    //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
-    assert(cmd_count == debug_cnt);
-    fclose(fp);
-    if (line)
-        free(line);
-    return trace;
-}
-
-
-// Manufactures a trace with a uniform distrbution without a backing file
-trace_t* manufacture_trace(int t_id)
-{
-  trace_t *trace = (trace_t *) calloc ((TRACE_SIZE + 1), sizeof(trace_t));
-  struct timespec time;
-  //struct random_data *buf;
-  clock_gettime(CLOCK_MONOTONIC, &time);
-  uint seed = (uint)(time.tv_nsec + ((machine_id * WORKERS_PER_MACHINE) + t_id) + (uint64_t)trace);
-  srand (seed);
-  struct opcode_info *opc_info = calloc(1, sizeof(struct opcode_info));
-  uint32_t i;
-  //parse file line by line and insert trace to cmd.
-  for (i = 0; i < TRACE_SIZE; i++) {
-    trace[i].opcode = 0;
-
-    //Before reading the request decide if it's gone be r_rep or write
-    trace[i].opcode = compute_opcode(opc_info, &seed);
-
-    //--- KEY ID----------
-    uint32 key_id;
-    if(USE_A_SINGLE_KEY == 1) key_id =  0;
-    uint128 key_hash;// = CityHash128((char *) &(key_id), 4);
-    if (opc_info->is_rmw) {
-      if (ALL_RMWS_SINGLE_KEY || ENABLE_ALL_CONFLICT_RMW)
-        key_id = 0;
-      else if (RMW_ONE_KEY_PER_THREAD)
-        key_id = (uint32_t) t_id;
-      else if (ENABLE_NO_CONFLICT_RMW)
-        key_id = (uint32_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
-      else key_id = (uint32_t) (rand_r(&seed) % KVS_NUM_KEYS);
-
-      //printf("Wrkr %u key %u \n", t_id, key_id);
-      key_hash = CityHash128((char *) &(key_id), 4);
-    }
-    else {
-      key_id = (uint32) rand() % KVS_NUM_KEYS;
-      key_hash = CityHash128((char *) &(key_id), 4);
-    }
-    memcpy(trace[i].key_hash, &(key_hash.second), 8);
-    trace[i].key_id = key_id;
-  }
-
-  if (t_id == 0) {
-    my_printf(cyan, "UNIFORM TRACE \n");
-    printf("Writes: %.2f%%, SC Writes: %.2f%%, Reads: %.2f%% SC Reads: %.2f%% RMWs: %.2f%%, "
-             "CAS: %.2f%%, F&A: %.2f%%, RMW-Acquires: %.2f%%\n Trace w_size %u/%d, Write ratio %d \n",
-           (double) (opc_info->writes * 100) / TRACE_SIZE,
-           (double) (opc_info->sc_writes * 100) / TRACE_SIZE,
-           (double) (opc_info->reads * 100) / TRACE_SIZE,
-           (double) (opc_info->sc_reads * 100) / TRACE_SIZE,
-           (double) (opc_info->rmws * 100) / TRACE_SIZE,
-           (double) (opc_info->cas * 100) / TRACE_SIZE,
-           (double) (opc_info->fa * 100) / TRACE_SIZE,
-           (double) (opc_info->rmw_acquires * 100) / TRACE_SIZE,
-           opc_info->writes + opc_info->sc_writes + opc_info->reads + opc_info->sc_reads + opc_info->rmws +
-           opc_info->rmw_acquires,
-           TRACE_SIZE, WRITE_RATIO);
-  }
-  trace[TRACE_SIZE].opcode = NOP;
-  return trace;
-  // printf("CLient %d Trace w_size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
-  //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
-}
-
-// Initiialize the trace
-trace_t* trace_init(uint16_t t_id) {
-  trace_t *trace;
-    //create the trace path path
-    if (FEED_FROM_TRACE == 1) {
-      char path[2048];
-      char cwd[1024];
-      char *was_successful = getcwd(cwd, sizeof(cwd));
-      if (!was_successful) {
-        printf("ERROR: getcwd failed!\n");
-        exit(EXIT_FAILURE);
-      }
-      snprintf(path, sizeof(path), "%s%s%04d%s%d%s", cwd,
-               "/../../../traces/current-splited-traces/t_",
-               GET_GLOBAL_T_ID(machine_id, t_id), "_a_0.", SKEW_EXPONENT_A, ".txt");
-
-      //initialize the command array from the trace file
-      trace = parse_trace(path, t_id);
-    }
-    else {
-      trace = manufacture_trace(t_id);
-    }
-  assert(trace != NULL);
-  return trace;
-}
 
 void dump_stats_2_file(struct stats* st){
     uint8_t typeNo = 0;
@@ -458,61 +205,6 @@ void dump_stats_2_file(struct stats* st){
     }
 
     fclose(fp);
-}
-
-
-
-// pin threads starting from core 0
-int pin_thread(int t_id) {
-  int core;
-  core = PHYSICAL_CORE_DISTANCE * t_id;
-  if(core >= LOGICAL_CORES_PER_SOCKET) { //if you run out of cores in numa node 0
-    if (WORKER_HYPERTHREADING) { //use hyperthreading rather than go to the other socket
-      core = LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET);
-      if (core >= TOTAL_CORES_) { // now go to the other socket
-        core = PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET) + 1 ;
-        if (core >= LOGICAL_CORES_PER_SOCKET) { // again do hyperthreading on the second socket
-          core = LOGICAL_CORES_PER_SOCKET + 1 +
-                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
-        }
-      }
-    }
-    else { //spawn clients to numa node 1
-      core = PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET) + 1;
-      if (core >= LOGICAL_CORES_PER_SOCKET) { // start hyperthreading
-        core = LOGICAL_CORES_PER_SOCKET + (PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET));
-        if (core >= TOTAL_CORES_) {
-          core = LOGICAL_CORES_PER_SOCKET + 1 +
-                 PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
-        }
-      }
-    }
-
-  }
-  assert(core >= 0 && core < TOTAL_CORES);
-  return core;
-}
-
-// pin a thread avoid collisions with pin_thread()
-int pin_threads_avoiding_collisions(int c_id) {
-    int c_core;
-    if (!WORKER_HYPERTHREADING || WORKERS_PER_MACHINE < PHYSICAL_CORES_PER_SOCKET) {
-        if (c_id < WORKERS_PER_MACHINE) c_core = PHYSICAL_CORE_DISTANCE * c_id + 2;
-        else c_core = (WORKERS_PER_MACHINE * 2) + (c_id * 2);
-
-        //if (DISABLE_CACHE == 1) c_core = 4 * i + 2; // when bypassing the kvs
-        //if (DISABLE_HYPERTHREADING == 1) c_core = (FOLLOWERS_PER_MACHINE * 4) + (c_id * 4);
-        if (c_core > TOTAL_CORES_) { //spawn clients to numa node 1 if you run out of cores in 0
-            c_core -= TOTAL_CORES_;
-        }
-    }
-    else { //we are keeping workers on the same socket
-        c_core = (WORKERS_PER_MACHINE - PHYSICAL_CORES_PER_SOCKET) * 4 + 2 + (4 * c_id);
-        if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ + 2);
-        if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ - 1);
-    }
-    assert(c_core >= 0 && c_core < TOTAL_CORES);
-    return c_core;
 }
 
 
@@ -766,31 +458,6 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack
   }
 }
 
-
-// Set up the receive info
-void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
-                    uint32_t push_ptr, uint32_t buf_slots,
-                    uint32_t slot_size, uint32_t posted_recvs,
-                    struct ibv_qp *recv_qp, int max_recv_wrs, void* buf)
-{
-  (*recv) = malloc(sizeof(struct recv_info));
-  (*recv)->push_ptr = push_ptr;
-  (*recv)->buf_slots = buf_slots;
-  (*recv)->slot_size = slot_size;
-  (*recv)->posted_recvs = posted_recvs;
-  (*recv)->recv_qp = recv_qp;
-  (*recv)->buf = buf;
-  (*recv)->recv_wr = (struct ibv_recv_wr *)malloc(max_recv_wrs * sizeof(struct ibv_recv_wr));
-  (*recv)->recv_sgl = (struct ibv_sge *)malloc(max_recv_wrs * sizeof(struct ibv_sge));
-
-  for (int i = 0; i < max_recv_wrs; i++) {
-    (*recv)->recv_sgl[i].length = slot_size;
-    (*recv)->recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    (*recv)->recv_wr[i].sg_list = &((*recv)->recv_sgl[i]);
-    (*recv)->recv_wr[i].num_sge = 1;
-  }
-
-}
 
 
 // Prepost Receives on the Leader Side

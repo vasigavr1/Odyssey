@@ -1,5 +1,8 @@
 #include "../../include/zookeeper/zk_util.h"
-#include "../../zk_inline_util.h"
+#include "../../include/zookeeper/zk_inline_util.h"
+#include "../../include/general_util/init_connect.h"
+#include "../../include/general_util/trace_util.h"
+#include "../../include/general_util/rdma_gen_util.h"
 
 void *follower(void *arg)
 {
@@ -54,10 +57,10 @@ void *follower(void *arg)
                    FLR_COM_BUF_SLOTS, FLR_MAX_RECV_COM_WRS, COMMIT_W_QP_ID, (uint32_t)FLR_COM_RECV_SIZE);
   }
   /* -----------------------------------------------------
-  --------------CONNECT WITH FOLLOWERS-----------------------
+  --------------CONNECT WITH LEADER-----------------------
   ---------------------------------------------------------*/
   setup_connections_and_spawn_stats_thread(global_id, cb);
-  if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb);
+  if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb, COMMIT_W_QP_ID);
 
   /* -----------------------------------------------------
   --------------DECLARATIONS------------------------------
@@ -84,7 +87,7 @@ void *follower(void *arg)
 
   struct latency_flags latency_info = {
     .measured_req_flag = NO_REQ,
-    .last_measured_sess_id = 0,
+    .measured_sess_id = 0,
   };
 
 
@@ -95,12 +98,11 @@ void *follower(void *arg)
   ops = (struct cache_op *)memalign(4096, CACHE_BATCH_SIZE *  sizeof(struct cache_op));
   resp = (struct mica_resp *)malloc(CACHE_BATCH_SIZE * sizeof(struct mica_resp));
   struct recv_info *prep_recv_info, *com_recv_info;
-  init_recv_info(&prep_recv_info, prep_push_ptr, FLR_PREP_BUF_SLOTS,
-                 (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_wr,
-                 prep_recv_qp, prep_recv_sgl, (void*) prep_buffer);
-  init_recv_info(&com_recv_info, com_push_ptr, FLR_COM_BUF_SLOTS,
-                 (uint32_t) FLR_COM_RECV_SIZE, FLR_MAX_RECV_COM_WRS, com_recv_wr,
-                 com_recv_qp, com_recv_sgl, (void*) com_buffer);
+  prep_recv_info = init_recv_info(cb, prep_push_ptr, FLR_PREP_BUF_SLOTS,
+                                  (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_qp, FLR_MAX_RECV_PREP_WRS, (void*) prep_buffer );
+  com_recv_info = init_recv_info(cb, com_push_ptr, FLR_COM_BUF_SLOTS,
+                                 (uint32_t) FLR_COM_RECV_SIZE, FLR_MAX_RECV_COM_WRS,
+                                 com_recv_qp, FLR_MAX_RECV_COM_WRS, (void*) com_buffer);
 
   struct pending_writes *p_writes;
   struct pending_acks *p_acks = (struct pending_acks *) malloc(sizeof(struct pending_acks));

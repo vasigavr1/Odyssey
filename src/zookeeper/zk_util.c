@@ -28,7 +28,7 @@ void zk_print_parameters_in_the_start()
   my_printf(yellow, "Using Quorom %d , Quorum Machines %d \n", USE_QUORUM, LDR_QUORUM_OF_ACKS);
 }
 
-void static_assert_compile_parameters()
+void zk_static_assert_compile_parameters()
 {if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
   assert(LEADER_MACHINE < MACHINE_NUM);
   assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
@@ -60,117 +60,119 @@ void zk_init_globals()
   committed_global_w_id = 0;
 }
 
+/*
 // Leader calls this function to connect with its followers
-void get_qps_from_all_other_machines(uint16_t g_id, struct hrd_ctrl_blk *cb)
-{
-    int i, qp_i;
-    int ib_port_index = 0;
-    struct ibv_ah *follower_ah[FOLLOWER_NUM][FOLLOWER_QP_NUM];
-    struct hrd_qp_attr *follower_qp[FOLLOWER_NUM][FOLLOWER_QP_NUM];
-
-    // -- CONNECT WITH FOLLOWERS
-    for(i = 0; i < FOLLOWER_NUM; i++) {
-        for (qp_i = 0; qp_i < FOLLOWER_QP_NUM; qp_i++) {
-            /* Compute the control block and physical port index for client @i */
-            // int cb_i = i % num_server_ports;
-            int local_port_i = ib_port_index;// + cb_i;
-
-            char follower_name[QP_NAME_SIZE];
-            sprintf(follower_name, "follower-dgram-%d-%d", i, qp_i);
-
-            /* Get the UD queue pair for the ith machine */
-            follower_qp[i][qp_i] = NULL;
-//            printf("Leader %d is Looking for follower %s \n", l_id, follower_name);
-            while(follower_qp[i][qp_i] == NULL) {
-                follower_qp[i][qp_i] = hrd_get_published_qp(follower_name);
-                if(follower_qp[i][qp_i] == NULL)
-                    usleep(200000);
-            }
-            // printf("main:Leader %d found clt %d. Client LID: %d\n",
-            //        l_id, i, follower_qp[i][qp_i]->lid);
-            struct ibv_ah_attr ah_attr = {
-                //-----INFINIBAND----------
-                .is_global = 0,
-                .dlid = (uint16_t) follower_qp[i][qp_i]->lid,
-                .sl = (uint8_t) follower_qp[i][qp_i]->sl,
-                .src_path_bits = 0,
-                /* port_num (> 1): device-local port for responses to this worker */
-                .port_num = (uint8_t) (local_port_i + 1),
-            };
-
-            // ---ROCE----------
-            if (is_roce == 1) {
-                ah_attr.is_global = 1;
-                ah_attr.dlid = 0;
-                ah_attr.grh.dgid.global.interface_id =  follower_qp[i][qp_i]->gid_global_interface_id;
-                ah_attr.grh.dgid.global.subnet_prefix = follower_qp[i][qp_i]->gid_global_subnet_prefix;
-                ah_attr.grh.sgid_index = 0;
-                ah_attr.grh.hop_limit = 1;
-            }
-            //
-            follower_ah[i][qp_i]= ibv_create_ah(cb->pd, &ah_attr);
-            assert(follower_ah[i][qp_i] != NULL);
-            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].ah =
-                follower_ah[i][qp_i];
-            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].qpn =
-                follower_qp[i][qp_i]->qpn;
-        }
-    }
-}
+//void get_qps_from_all_other_machines(uint16_t g_id, struct hrd_ctrl_blk *cb)
+//{
+//    int i, qp_i;
+//    int ib_port_index = 0;
+//    struct ibv_ah *follower_ah[FOLLOWER_NUM][FOLLOWER_QP_NUM];
+//    struct hrd_qp_attr *follower_qp[FOLLOWER_NUM][FOLLOWER_QP_NUM];
+//
+//    // -- CONNECT WITH FOLLOWERS
+//    for(i = 0; i < FOLLOWER_NUM; i++) {
+//        for (qp_i = 0; qp_i < FOLLOWER_QP_NUM; qp_i++) {
+//            // Compute the control block and physical port index for client @i
+//            // int cb_i = i % num_server_ports;
+//            int local_port_i = ib_port_index;// + cb_i;
+//
+//            char follower_name[QP_NAME_SIZE];
+//            sprintf(follower_name, "follower-dgram-%d-%d", i, qp_i);
+//
+//            // Get the UD queue pair for the ith machine
+//            follower_qp[i][qp_i] = NULL;
+////            printf("Leader %d is Looking for follower %s \n", l_id, follower_name);
+//            while(follower_qp[i][qp_i] == NULL) {
+//                follower_qp[i][qp_i] = hrd_get_published_qp(follower_name);
+//                if(follower_qp[i][qp_i] == NULL)
+//                    usleep(200000);
+//            }
+//            // printf("main:Leader %d found clt %d. Client LID: %d\n",
+//            //        l_id, i, follower_qp[i][qp_i]->lid);
+//            struct ibv_ah_attr ah_attr = {
+//                //-----INFINIBAND----------
+//                .is_global = 0,
+//                .dlid = (uint16_t) follower_qp[i][qp_i]->lid,
+//                .sl = (uint8_t) follower_qp[i][qp_i]->sl,
+//                .src_path_bits = 0,
+//                // port_num (> 1): device-local port for responses to this worker
+//                .port_num = (uint8_t) (local_port_i + 1),
+//            };
+//
+//            // ---ROCE----------
+//            if (is_roce == 1) {
+//                ah_attr.is_global = 1;
+//                ah_attr.dlid = 0;
+//                ah_attr.grh.dgid.global.interface_id =  follower_qp[i][qp_i]->gid_global_interface_id;
+//                ah_attr.grh.dgid.global.subnet_prefix = follower_qp[i][qp_i]->gid_global_subnet_prefix;
+//                ah_attr.grh.sgid_index = 0;
+//                ah_attr.grh.hop_limit = 1;
+//            }
+//            //
+//            follower_ah[i][qp_i]= ibv_create_ah(cb->pd, &ah_attr);
+//            assert(follower_ah[i][qp_i] != NULL);
+//            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].ah =
+//                follower_ah[i][qp_i];
+//            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].qpn =
+//                follower_qp[i][qp_i]->qpn;
+//        }
+//    }
+//}
 
 // Follower calls this function to connect with the leader
-void get_qps_from_one_machine(uint16_t g_id, struct hrd_ctrl_blk *cb) {
-    int i, qp_i;
-    struct ibv_ah *leader_ah[LEADERS_PER_MACHINE][LEADER_QP_NUM];
-    struct hrd_qp_attr *leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
-
-    for(i = 0; i < LEADERS_PER_MACHINE; i++) {
-        for (qp_i = 0; qp_i < LEADER_QP_NUM; qp_i++) {
-            /* Compute the control block and physical port index for leader thread @i */
-            int local_port_i = 0;
-
-            char ldr_name[QP_NAME_SIZE];
-            sprintf(ldr_name, "leader-dgram-%d-%d", i, qp_i);
-            /* Get the UD queue pair for the ith leader thread */
-            leader_qp[i][qp_i] = NULL;
-//          printf("Follower %d is Looking for leader %s\n", l_id, ldr_name);
-          while (leader_qp[i][qp_i] == NULL) {
-                leader_qp[i][qp_i] = hrd_get_published_qp(ldr_name);
-                //printf("Follower %d is expecting leader %s\n" , l_id, ldr_name);
-                if (leader_qp[i][qp_i] == NULL) {
-                    usleep(200000);
-                }
-            }
-            //  printf("main: Follower %d found Leader %d. Leader LID: %d\n",
-            //  	l_id, i, leader_qp[i][qp_i]->lid);
-
-            struct ibv_ah_attr ah_attr = {
-              //-----INFINIBAND----------
-              .is_global = 0,
-              .dlid = (uint16_t) leader_qp[i][qp_i]->lid,
-              .sl = leader_qp[i][qp_i]->sl,
-              .src_path_bits = 0,
-              /* port_num (> 1): device-local port for responses to this leader thread */
-              .port_num = (uint8) (local_port_i + 1),
-            };
-
-            //  ---ROCE----------
-            if (is_roce == 1) {
-                ah_attr.is_global = 1;
-                ah_attr.dlid = 0;
-                ah_attr.grh.dgid.global.interface_id = leader_qp[i][qp_i]->gid_global_interface_id;
-                ah_attr.grh.dgid.global.subnet_prefix = leader_qp[i][qp_i]->gid_global_subnet_prefix;
-                ah_attr.grh.sgid_index = 0;
-                ah_attr.grh.hop_limit = 1;
-            }
-            leader_ah[i][qp_i] = ibv_create_ah(cb->pd, &ah_attr);
-            assert(leader_ah[i][qp_i] != NULL);
-            remote_leader_qp[i][qp_i].ah = leader_ah[i][qp_i];
-            remote_leader_qp[i][qp_i].qpn = leader_qp[i][qp_i]->qpn;
-        }
-    }
-}
-
+//void get_qps_from_one_machine(uint16_t g_id, struct hrd_ctrl_blk *cb) {
+//    int i, qp_i;
+//    struct ibv_ah *leader_ah[LEADERS_PER_MACHINE][LEADER_QP_NUM];
+//    struct hrd_qp_attr *leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
+//
+//    for(i = 0; i < LEADERS_PER_MACHINE; i++) {
+//        for (qp_i = 0; qp_i < LEADER_QP_NUM; qp_i++) {
+//            //Compute the control block and physical port index for leader thread @i
+//            int local_port_i = 0;
+//
+//            char ldr_name[QP_NAME_SIZE];
+//            sprintf(ldr_name, "leader-dgram-%d-%d", i, qp_i);
+//            // Get the UD queue pair for the ith leader thread
+//            leader_qp[i][qp_i] = NULL;
+////          printf("Follower %d is Looking for leader %s\n", l_id, ldr_name);
+//          while (leader_qp[i][qp_i] == NULL) {
+//                leader_qp[i][qp_i] = hrd_get_published_qp(ldr_name);
+//                //printf("Follower %d is expecting leader %s\n" , l_id, ldr_name);
+//                if (leader_qp[i][qp_i] == NULL) {
+//                    usleep(200000);
+//                }
+//            }
+//            //  printf("main: Follower %d found Leader %d. Leader LID: %d\n",
+//            //  	l_id, i, leader_qp[i][qp_i]->lid);
+//
+//            struct ibv_ah_attr ah_attr = {
+//              //-----INFINIBAND----------
+//              .is_global = 0,
+//              .dlid = (uint16_t) leader_qp[i][qp_i]->lid,
+//              .sl = leader_qp[i][qp_i]->sl,
+//              .src_path_bits = 0,
+//              // port_num (> 1): device-local port for responses to this leader thread
+//              .port_num = (uint8) (local_port_i + 1),
+//            };
+//
+//            //  ---ROCE----------
+//            if (is_roce == 1) {
+//                ah_attr.is_global = 1;
+//                ah_attr.dlid = 0;
+//                ah_attr.grh.dgid.global.interface_id = leader_qp[i][qp_i]->gid_global_interface_id;
+//                ah_attr.grh.dgid.global.subnet_prefix = leader_qp[i][qp_i]->gid_global_subnet_prefix;
+//                ah_attr.grh.sgid_index = 0;
+//                ah_attr.grh.hop_limit = 1;
+//            }
+//            leader_ah[i][qp_i] = ibv_create_ah(cb->pd, &ah_attr);
+//            assert(leader_ah[i][qp_i] != NULL);
+//            remote_leader_qp[i][qp_i].ah = leader_ah[i][qp_i];
+//            remote_leader_qp[i][qp_i].qpn = leader_qp[i][qp_i]->qpn;
+//        }
+//    }
+//}
+*/
+/*
 // Parse a trace, use this for skewed workloads as uniform trace can be manufactured easily
 int parse_trace(char* path, struct trace_command **cmds, int t_id){
     FILE * fp;
@@ -323,7 +325,7 @@ void trace_init(struct trace_command **cmds, int t_id) {
     }
 
 }
-
+*/
 void dump_stats_2_file(struct stats* st){
     uint8_t typeNo = LEADER;
     assert(typeNo >=0 && typeNo <=3);
@@ -347,7 +349,7 @@ void dump_stats_2_file(struct stats* st){
     fprintf(fp, "comment: thread ID, total MIOPS,"
             "preps sent, coms sent, acks sent, "
             "received preps, received coms, received acks\n");
-    for(i = 0; i < THREADS_PER_MACHINE; ++i){
+    for(i = 0; i < WORKERS_PER_MACHINE; ++i){
         total_MIOPS = st->cache_hits_per_thread[i];
         fprintf(fp, "client: %d, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f\n",
                 i, total_MIOPS, st->cache_hits_per_thread[i], st->preps_sent[i],
@@ -358,7 +360,7 @@ void dump_stats_2_file(struct stats* st){
 
     fclose(fp);
 }
-
+/*
 int spawn_stats_thread() {
     pthread_t *thread_arr = malloc(sizeof(pthread_t));
     pthread_attr_t attr;
@@ -435,8 +437,8 @@ int pin_threads_avoiding_collisions(int c_id) {
     assert(c_core >= 0 && c_core < TOTAL_CORES);
     return c_core;
 }
-
-
+*/
+/*
 // Used by all kinds of threads to publish their QPs
 void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb)
 {
@@ -479,7 +481,7 @@ void setup_connections_and_spawn_stats_thread(int global_id, struct hrd_ctrl_blk
 //    printf("Thread %d has all the needed ahs\n", global_id );
 }
 
-
+*/
 
 /* ---------------------------------------------------------------------------
 ------------------------------LEADER --------------------------------------
@@ -487,28 +489,12 @@ void setup_connections_and_spawn_stats_thread(int global_id, struct hrd_ctrl_blk
 // construct a prep_message-- max_size must be in bytes
 void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
 {
-  (*fifo) = (struct fifo *)malloc(fifos_num * sizeof(struct fifo));
+  (*fifo) = (struct fifo *) malloc(fifos_num * sizeof(struct fifo));
   memset((*fifo), 0, fifos_num *  sizeof(struct fifo));
   for (int i = 0; i < fifos_num; ++i) {
     (*fifo)[i].fifo = malloc(max_size);
     memset((*fifo)[i].fifo, 0, max_size);
   }
-}
-
-// Set up the receive info
-void init_recv_info(struct recv_info **recv, uint32_t push_ptr, uint32_t buf_slots,
-                    uint32_t slot_size, uint32_t posted_recvs, struct ibv_recv_wr *recv_wr,
-                    struct ibv_qp * recv_qp, struct ibv_sge* recv_sgl, void* buf)
-{
-  (*recv) = malloc(sizeof(struct recv_info));
-  (*recv)->push_ptr = push_ptr;
-  (*recv)->buf_slots = buf_slots;
-  (*recv)->slot_size = slot_size;
-  (*recv)->posted_recvs = posted_recvs;
-  (*recv)->recv_wr = recv_wr;
-  (*recv)->recv_qp = recv_qp;
-  (*recv)->recv_sgl = recv_sgl;
-  (*recv)->buf = buf;
 }
 
 
@@ -748,7 +734,7 @@ void set_up_follower_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_se
                          struct hrd_ctrl_blk *cb, struct ibv_mr *w_mr,
                          struct mcast_essentials *mcast)
 {
-  uint16_t i, j;
+  uint16_t i;
     // ACKS
     ack_send_wr->wr.ud.ah = remote_leader_qp[remote_thread][PREP_ACK_QP_ID].ah;
     ack_send_wr->wr.ud.remote_qpn = (uint32) remote_leader_qp[remote_thread][PREP_ACK_QP_ID].qpn;
@@ -829,7 +815,7 @@ void check_protocol(int protocol)
 /* ---------------------------------------------------------------------------
 ------------------------------MULTICAST --------------------------------------
 ---------------------------------------------------------------------------*/
-
+/*
 // Initialize the mcast_essentials structure that is necessary
 void init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,
                     int t_id, struct hrd_ctrl_blk *cb, int protocol)
@@ -1032,3 +1018,4 @@ void multicast_testing(struct mcast_essentials *mcast, int clt_gid, struct hrd_c
 
     exit(0);
 }
+*/

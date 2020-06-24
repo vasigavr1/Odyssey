@@ -7,6 +7,8 @@
 
 #include "sizes.h"
 #include "generic_macros.h"
+#include "generic_opcodes.h"
+#include "stats.h"
 
 
 #include <pthread.h>
@@ -24,7 +26,6 @@
 #include <sys/shm.h>
 #include <numaif.h>
 #include <malloc.h>
-#include <time.h>
 #include <infiniband/verbs.h>
 #include <stdatomic.h>
 
@@ -43,6 +44,9 @@
 void *print_stats(void*);
 void *client(void *);
 
+//Forward declaring
+typedef struct key mica_key_t;
+
 #define USE_BIG_OBJECTS 0
 #define EXTRA_CACHE_LINES 0
 #define BASE_VALUE_SIZE 32
@@ -50,9 +54,6 @@ void *client(void *);
 #define VALUE_SIZE_ (USE_BIG_OBJECTS ? ((EXTRA_CACHE_LINES * 64) + BASE_VALUE_SIZE) : BASE_VALUE_SIZE) //(169 + 64)// 46 + 64 + 64//32 //(46 + 64)
 #define VALUE_SIZE (VALUE_SIZE_ + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE_, 8)))
 #define KVS_NUM_KEYS (1 * MILLION)
-
-
-
 
 
 //-------------------------------------------
@@ -66,6 +67,8 @@ void *client(void *);
 #define PHYSICAL_CORE_DISTANCE 2 // distance between two physical cores of the same socket
 #define WORKER_HYPERTHREADING 0 // schedule two threads on the same core
 #define MAX_SERVER_PORTS 1 //
+// Where to BIND the KVS
+#define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 10
@@ -74,6 +77,52 @@ void *client(void *);
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
+#define MAX_OP_BATCH 51
+#define ENABLE_LOCK_FREE_READING 1
+
+#define MEASURE_LATENCY 0
+#define LATENCY_MACHINE 0
+#define LATENCY_THREAD 15
+#define MEASURE_READ_LATENCY 2 // 2 means mixed
+#define ENABLE_STAT_COUNTING 1
+
+// PRINTS -- STATS
+#define EXIT_ON_PRINT 0
+#define PRINT_NUM 4
+#define ENABLE_MS_MEASUREMENTS 0 // finer granularity measurements
+#define SHOW_STATS_LATENCY_STYLE 1
+
+
+// QUORUM
+#define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
+#define REMOTE_QUORUM ((QUORUM_NUM) - 1)
+
+//-------------------------------------------
+/* ----------TRACE------------------------ */
+//-------------------------------------------
+#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define SC_RATIO 500// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RELEASES 1
+#define ENABLE_ACQUIRES 1
+#define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
+#define ENABLE_RMWS 1
+#define FEED_FROM_TRACE 0 // used to enable skew++
+// RMW TRACE
+#define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
+#define ENABLE_ALL_CONFLICT_RMW 0 // all threads do rmws to one key (0)
+#define ENABLE_SINGLE_KEY_RMW 0
+#define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
+#define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
+//#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
+#define TRACE_ONLY_CAS 0
+#define TRACE_ONLY_FA 1
+#define TRACE_MIXED_RMWS 0
+#define TRACE_CAS_RATIO 500 // out of a 1000
+#define RMW_CAS_CANCEL_RATIO 400 // out of 1000
+#define USE_WEAK_CAS 1
+#define USE_A_SINGLE_KEY 0
+#define TRACE_SIZE K_128
+#define NOP 0
 
 // HELPING CONSTANTS DERIVED FROM CORE CONFIGURATION
 #define TOTAL_THREADS (WORKERS_PER_MACHINE + CLIENTS_PER_MACHINE)
@@ -134,6 +183,9 @@ enum {
 
 #define PER_SESSION_REQ_NUM (MS_WRITES_NUM + 4) //(HM_WRITES_NUM + 15) //(TREIBER_WRITES_NUM + 3) //   (HM_WRITES_NUM + 15) //   ((2 * PC_WRITES_NUM) + 5)
 #define CLIENT_DEBUG 0
+
+
+
 
 
 
@@ -246,6 +298,8 @@ extern atomic_bool print_for_debug;
 extern atomic_bool qps_are_set_up;
 extern FILE* client_log[CLIENTS_PER_MACHINE];
 extern uint64_t time_approx;
+extern struct latency_counters latency_count;
+extern c_stats_t c_stats[CLIENTS_PER_MACHINE];
 
 typedef struct trace_command {
   uint8_t opcode;
@@ -257,6 +311,66 @@ typedef struct thread_params {
   int id;
 } thread_params_t;
 
+
+
+typedef struct key {
+  unsigned int bkt			:32;
+  unsigned int server			:16;
+  unsigned int tag			:16;
+} mica_key_t;
+
+typedef atomic_uint_fast64_t seqlock_t;
+typedef struct mica_op mica_op_t;
+
+typedef struct recv_info {
+  uint32_t push_ptr;
+  uint32_t buf_slots;
+  uint32_t slot_size;
+  uint32_t posted_recvs;
+  struct ibv_recv_wr *recv_wr;
+  struct ibv_qp * recv_qp;
+  struct ibv_sge* recv_sgl;
+  void* buf;
+} recv_info_t;
+
+//////////////////////////////////////////////////////
+/////////////~~~~CLIENT STRUCTS~~~~~~/////////////////////////
+//////////////////////////////////////////////////////
+#define RAW_CLIENT_OP_SIZE (8 + KEY_SIZE + VALUE_SIZE + 8 + 8)
+#define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
+#define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
+typedef struct client_op {
+  atomic_uint_fast8_t state;
+  uint8_t opcode;
+  uint32_t val_len;
+  bool* rmw_is_successful;
+  mica_key_t key;
+  uint8_t *value_to_read;//[VALUE_SIZE]; // expected val for CAS
+  uint8_t value_to_write[VALUE_SIZE]; // desired Val for CAS
+  uint8_t padding[PADDING_BYTES_CLIENT_OP];
+} client_op_t;
+
+#define IF_CLT_PTRS_SIZE (4 * SESSIONS_PER_THREAD) //  4* because client needs 2 ptrs (pull/push) that are 2 bytes each
+#define IF_WRKR_PTRS_SIZE (2 * SESSIONS_PER_THREAD) // 2* because client needs 1 ptr (pull) that is 2 bytes
+#define PADDING_IF_CLT_PTRS (FIND_PADDING(IF_CLT_PTRS_SIZE))
+#define PADDING_IF_WRKR_PTRS (FIND_PADDING(IF_WRKR_PTRS_SIZE))
+#define IF_PTRS_SIZE (IF_CLT_PTRS_SIZE + IF_WRKR_PTRS_SIZE + PADDING_IF_CLT_PTRS + PADDING_IF_WRKR_PTRS))
+#define INTERFACE_SIZE ((SESSIONS_PER_THREAD * PER_SESSION_REQ_NUM * CLIENT_OP_SIZE) + (IF_PTRS_SIZE)
+
+// wrkr-client interface
+struct wrk_clt_if {
+  client_op_t req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
+  uint16_t clt_push_ptr[SESSIONS_PER_THREAD];
+  uint16_t clt_pull_ptr[SESSIONS_PER_THREAD];
+  uint8_t clt_ptr_padding[PADDING_IF_CLT_PTRS];
+  uint16_t wrkr_pull_ptr[SESSIONS_PER_THREAD];
+  uint8_t wrkr_ptr_padding[PADDING_IF_WRKR_PTRS];
+}__attribute__ ((aligned (64)));
+
+extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
+
+extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
+extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
 //////////////////////////////////////////////////////
 /////////////~~~~FUNCTIONS~~~~~~/////////////////////////
@@ -378,13 +492,5 @@ static inline void check_state_with_disallowed_flags(int num_of_flags, ...)
     va_end(valist);
   }
 }
-
-typedef struct key {
-  unsigned int bkt			:32;
-  unsigned int server			:16;
-  unsigned int tag			:16;
-} mica_key_t;
-
-typedef struct mica_op mica_op_t;
 
 #endif //KITE_TOP_H

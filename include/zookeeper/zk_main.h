@@ -242,9 +242,6 @@
 
 
 
-//LATENCY Measurment
-#define MAX_LATENCY 500 //in us
-#define LATENCY_BUCKETS 250 //latency accuracy
 
 /* SHM key for the 1st request region created by master. ++ for other RRs.*/
 #define MASTER_SHM_KEY 24
@@ -418,23 +415,6 @@ struct recv_info {
 
 };
 
-typedef enum {
-	NO_REQ,
-	HOT_WRITE_REQ_BEFORE_CACHE,
-	HOT_WRITE_REQ,
-	HOT_READ_REQ,
-	LOCAL_REQ,
-	REMOTE_REQ
-} req_type;
-
-
-struct latency_flags {
-	req_type measured_req_flag;
-	uint64_t last_measured_sess_id;
-	struct timespec start;
-
-};
-
 typedef struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;
 	long long remotes_per_client;
@@ -479,27 +459,8 @@ extern atomic_uint_fast64_t global_w_id, committed_global_w_id;
 extern bool is_leader;
 
 
-struct latency_counters{
-	uint32_t* hot_reads;
-	uint32_t* hot_writes;
-	uint32_t max_read_lat;
-	uint32_t max_write_lat;
-	long long total_measurements;
-};
-
-
-struct local_latency {
-	int measured_local_region;
-	uint8_t local_latency_start_polling;
-	char* flag_to_poll;
-};
-
-
-extern struct latency_counters latency_count;
-
 void *follower(void *arg);
 void *leader(void *arg);
-void *print_stats(void*);
 void print_latency_stats(void);
 
 

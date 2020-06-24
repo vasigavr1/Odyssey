@@ -16,34 +16,14 @@ void *worker(void *arg);
 
 
 // ABD EMULATION
-#define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
-#define SC_RATIO (EMULATE_ABD == 1 ? 1000 : (SC_RATIO_))
-#define ENABLE_RELEASES (EMULATE_ABD == 1 ? 1 : (ENABLE_RELEASES_))
-#define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
-#define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
+//#define MAX_OP_BATCH (EMULATE_ABD == 1 ? (SESSIONS_PER_THREAD + 1) : (MAX_OP_BATCH_))
+//#define SC_RATIO (EMULATE_ABD == 1 ? 1000 : (SC_RATIO_))
+//#define ENABLE_RELEASES (EMULATE_ABD == 1 ? 1 : (ENABLE_RELEASES_))
+//#define ENABLE_ACQUIRES (EMULATE_ABD == 1 ? 1 : (ENABLE_ACQUIRES_))
+//#define ENABLE_RMWS (EMULATE_ABD == 1 ? 0 : (ENABLE_RMWS_))
 
 
-// RMW TRACE
-#define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
-#define ENABLE_ALL_CONFLICT_RMW 0 // all threads do rmws to one key (0)
-#define ENABLE_SINGLE_KEY_RMW 0
-#define ALL_RMWS_SINGLE_KEY 0 //  all threads do only rmws to one key (0)
-#define RMW_ONE_KEY_PER_THREAD 0 // thread t_id rmws key t_id
-//#define RMW_ONE_KEY_PER_SESSION 1 // session id rmws key t_id
-#define SHOW_STATS_LATENCY_STYLE 1
 
-#define TRACE_ONLY_CAS 0
-#define TRACE_ONLY_FA 1
-#define TRACE_MIXED_RMWS 0
-#define TRACE_CAS_RATIO 500 // out of a 1000
-
-#define RMW_CAS_CANCEL_RATIO 400 // out of 1000
-#define USE_WEAK_CAS 1
-
-
-// QUORUM
-#define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
-#define REMOTE_QUORUM ((QUORUM_NUM) - 1)
 
 // RMWs
 #define LOCAL_PROP_NUM_ (SESSIONS_PER_THREAD)
@@ -66,8 +46,6 @@ void *worker(void *arg);
 /*-------------------------------------------------
 -----------------DEBUGGING-------------------------
 --------------------------------------------------*/
-#define USE_A_SINGLE_KEY 0
-
 //It may be that ENABLE_ASSERTIONS  must be up for these to work
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
@@ -87,12 +65,6 @@ void *worker(void *arg);
 #define DEBUG_LOG 0
 #define ENABLE_INFO_DUMP_ON_STALL 0
 #define ENABLE_DEBUG_RMW_KV_PTR 0
-
-
-//Defines for parsing the trace
-#define TRACE_SIZE K_128
-#define NOP 0
-
 
 
 
@@ -370,16 +342,7 @@ struct session_dbg {
 // Registering data structure
 extern atomic_uint_fast64_t committed_glob_sess_rmw_id[GLOBAL_SESSION_NUM];
 
-struct recv_info {
-	uint32_t push_ptr;
-	uint32_t buf_slots;
-	uint32_t slot_size;
-	uint32_t posted_recvs;
-	struct ibv_recv_wr *recv_wr;
-	struct ibv_qp * recv_qp;
-	struct ibv_sge* recv_sgl;
-	void* buf;
-};
+
 
 typedef struct commit_info {
   bool overwrite_kv;
@@ -476,41 +439,7 @@ typedef struct trace_op {
 
 
 
-#define RAW_CLIENT_OP_SIZE (8 + KEY_SIZE + VALUE_SIZE + 8 + 8)
-#define PADDING_BYTES_CLIENT_OP (FIND_PADDING(RAW_CLIENT_OP_SIZE))
-#define CLIENT_OP_SIZE (PADDING_BYTES_CLIENT_OP + RAW_CLIENT_OP_SIZE)
-typedef struct client_op {
-  atomic_uint_fast8_t state;
-  uint8_t opcode;
-  uint32_t val_len;
-  bool* rmw_is_successful;
-  struct key key;
-  uint8_t *value_to_read;//[VALUE_SIZE]; // expected val for CAS
-  uint8_t value_to_write[VALUE_SIZE]; // desired Val for CAS
-  uint8_t padding[PADDING_BYTES_CLIENT_OP];
-} client_op_t;
 
-#define IF_CLT_PTRS_SIZE (4 * SESSIONS_PER_THREAD) //  4* because client needs 2 ptrs (pull/push) that are 2 bytes each
-#define IF_WRKR_PTRS_SIZE (2 * SESSIONS_PER_THREAD) // 2* because client needs 1 ptr (pull) that is 2 bytes
-#define PADDING_IF_CLT_PTRS (FIND_PADDING(IF_CLT_PTRS_SIZE))
-#define PADDING_IF_WRKR_PTRS (FIND_PADDING(IF_WRKR_PTRS_SIZE))
-#define IF_PTRS_SIZE (IF_CLT_PTRS_SIZE + IF_WRKR_PTRS_SIZE + PADDING_IF_CLT_PTRS + PADDING_IF_WRKR_PTRS))
-#define INTERFACE_SIZE ((SESSIONS_PER_THREAD * PER_SESSION_REQ_NUM * CLIENT_OP_SIZE) + (IF_PTRS_SIZE)
-
-// wrkr-client interface
-struct wrk_clt_if {
-  client_op_t req_array[SESSIONS_PER_THREAD][PER_SESSION_REQ_NUM];
-  uint16_t clt_push_ptr[SESSIONS_PER_THREAD];
-  uint16_t clt_pull_ptr[SESSIONS_PER_THREAD];
-  uint8_t clt_ptr_padding[PADDING_IF_CLT_PTRS];
-  uint16_t wrkr_pull_ptr[SESSIONS_PER_THREAD];
-  uint8_t wrkr_ptr_padding[PADDING_IF_WRKR_PTRS];
-}__attribute__ ((aligned (64)));
-
-extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
-
-extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
-extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 
 
 
@@ -557,7 +486,6 @@ extern struct multiple_owner_bit conf_bit_vec[MACHINE_NUM];
 
 
 extern t_stats_t t_stats[WORKERS_PER_MACHINE];
-extern c_stats_t c_stats[CLIENTS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast64_t epoch_id;
 extern const uint16_t machine_bit_id[16];

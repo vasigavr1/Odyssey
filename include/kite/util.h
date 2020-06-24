@@ -10,7 +10,7 @@
 
 
 extern uint64_t seed;
-void static_assert_compile_parameters();
+void kite_static_assert_compile_parameters();
 void print_parameters_in_the_start();
 void kite_init_globals();
 void handle_program_inputs(int argc, char *argv[]);
@@ -56,36 +56,11 @@ int spawn_stats_thread();
 void print_latency_stats(void);
 
 
-
-
-
-
-
-
-//int get_addr(char*, struct sockaddr*);
-//void setup_multicast(struct mcast_info*, int*);
-//void resolve_addresses(struct mcast_info*);
-//void set_up_qp(struct cm_qps*, int*);
-//void multicast_testing(struct mcast_essentials*, int , struct hrd_ctrl_blk*);
-
 /* ---------------------------------------------------------------------------
 ------------------------------INITIALIZATION --------------------------------------
 ---------------------------------------------------------------------------*/
 
-struct opcode_info {
-	bool is_rmw;
-	bool is_update;
-	bool is_sc;
-	bool is_rmw_acquire;
-	uint32_t writes;
-	uint32_t reads;
-	uint32_t sc_reads;
-	uint32_t sc_writes;
-	uint32_t rmws;
-	uint32_t rmw_acquires;
-  uint32_t cas; // number of compare and swaps
-  uint32_t fa; // number of Fetch and adds
-};
+
 
 // Worker calls this function to connect with all workers
 //void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
@@ -94,7 +69,7 @@ struct opcode_info {
 
 
 
-trace_t* trace_init(uint16_t t_id);
+
 //void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
 // Connect with Workers and Clients
 //void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
@@ -125,10 +100,6 @@ void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*,
                             struct ack_message*, uint16_t);
 
 
-// Set up the receive info
-void init_recv_info(struct hrd_ctrl_blk *cb, struct recv_info **recv,
-                    uint32_t push_ptr, uint32_t buf_slots,
-                    uint32_t slot_size, uint32_t, struct ibv_qp * recv_qp, int, void* buf);
 
 
 // Post receives for the coherence traffic in the init phase
