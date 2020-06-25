@@ -17,7 +17,7 @@ inline void cache_batch_op_trace(int op_num, int thread_id, struct cache_op **op
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
 	assert(op != NULL);
-	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
+	assert(op_num > 0 && op_num <= MAX_OP_BATCH);
 	assert(resp != NULL);
 #endif
 
@@ -26,11 +26,11 @@ inline void cache_batch_op_trace(int op_num, int thread_id, struct cache_op **op
 		mica_print_op(&(*op)[I]);
 #endif
 
-  unsigned int bkt[CACHE_BATCH_SIZE];
-  struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-  unsigned int tag[CACHE_BATCH_SIZE];
-  int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-  struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  unsigned int bkt[MAX_OP_BATCH];
+  struct mica_bkt *bkt_ptr[MAX_OP_BATCH];
+  unsigned int tag[MAX_OP_BATCH];
+  int key_in_store[MAX_OP_BATCH];	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr[MAX_OP_BATCH];	/* Ptr to KV item in log */
   /*
    * We first lookup the key in the datastore. The first two @I loops work
    * for both GETs and PUTs.
@@ -130,7 +130,7 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct prepar
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
 	assert(op != NULL);
-	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
+	assert(op_num > 0 && op_num <= MAX_OP_BATCH);
 	assert(resp != NULL);
 #endif
 
@@ -139,11 +139,11 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct prepar
 		mica_print_op(&(*op)[I]);
 #endif
 
-  unsigned int bkt[CACHE_BATCH_SIZE];
-  struct mica_bkt *bkt_ptr[CACHE_BATCH_SIZE];
-  unsigned int tag[CACHE_BATCH_SIZE];
-  int key_in_store[CACHE_BATCH_SIZE];	/* Is this key in the datastore? */
-  struct cache_op *kv_ptr[CACHE_BATCH_SIZE];	/* Ptr to KV item in log */
+  unsigned int bkt[MAX_OP_BATCH];
+  struct mica_bkt *bkt_ptr[MAX_OP_BATCH];
+  unsigned int tag[MAX_OP_BATCH];
+  int key_in_store[MAX_OP_BATCH];	/* Is this key in the datastore? */
+  struct cache_op *kv_ptr[MAX_OP_BATCH];	/* Ptr to KV item in log */
   /*
      * We first lookup the key in the datastore. The first two @I loops work
      * for both GETs and PUTs.

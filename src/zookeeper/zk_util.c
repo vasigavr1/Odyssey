@@ -42,11 +42,11 @@ void zk_static_assert_compile_parameters()
   assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
   assert(SESSIONS_PER_THREAD < M_16);
   assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
-  if (WRITE_RATIO > 0) assert(CACHE_BATCH_SIZE > LEADER_PENDING_WRITES);
+  if (WRITE_RATIO > 0) assert(MAX_OP_BATCH > LEADER_PENDING_WRITES);
 
 
 //
-//  yellow_printf("WRITE: size of write recv slot %d size of w_message %lu , "
+//  my_printf(yellow, "WRITE: size of write recv slot %d size of w_message %lu , "
 //           "value size %d, size of cache op %lu , sizeof udreq w message %lu \n",
 //         LDR_W_RECV_SIZE, sizeof(struct w_message), VALUE_SIZE,
 //         sizeof(struct cache_op), sizeof(struct w_message_ud_req));
@@ -452,7 +452,7 @@ void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struc
 }
 
 // Followers and leaders both use this to establish connections
-void setup_connections_and_spawn_stats_thread(int global_id, struct hrd_ctrl_blk *cb)
+void setup_connections(int global_id, struct hrd_ctrl_blk *cb)
 {
     int qp_i;
     int t_id = -1;
@@ -471,7 +471,7 @@ void setup_connections_and_spawn_stats_thread(int global_id, struct hrd_ctrl_blk
       assert(qps_are_set_up == 0);
       // Spawn a thread that prints the stats
       if (spawn_stats_thread() != 0)
-          red_printf("Stats thread was not successfully spawned \n");
+          my_printf(red, "Stats thread was not successfully spawned \n");
       atomic_store_explicit(&qps_are_set_up, 1, memory_order_release);
     }
     else {
@@ -499,38 +499,30 @@ void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
 
 
 // Set up a struct that stores pending writes
-void set_up_pending_writes(struct pending_writes **p_writes, uint32_t size, int protocol) {
+p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
+{
   int i;
-  (*p_writes) = (struct pending_writes *) malloc(sizeof(struct pending_writes));
-  memset((*p_writes), 0, sizeof(struct pending_writes));
-  //(*p_writes)->write_ops = (struct write_op*) malloc(size * sizeof(struct write_op));
-  (*p_writes)->g_id = (uint64_t *) malloc(size * sizeof(uint64_t));
-  (*p_writes)->w_state = (enum write_state *) malloc(size * sizeof(enum write_state));
-  (*p_writes)->session_id = (uint32_t *) malloc(size * sizeof(uint32_t));
-  memset((*p_writes)->session_id, 0, size * sizeof(uint32_t));
-  (*p_writes)->acks_seen = (uint8_t *) malloc(size * sizeof(uint8_t));
-  (*p_writes)->flr_id = (uint8_t *) malloc(size * sizeof(uint8_t));
-  (*p_writes)->is_local = (bool *) malloc(size * sizeof(bool));
-  (*p_writes)->session_has_pending_write = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
-  (*p_writes)->ptrs_to_ops = (struct prepare **) malloc(size * sizeof(struct prepare *));
-  if (protocol == FOLLOWER) init_fifo(&((*p_writes)->w_fifo), W_FIFO_SIZE * sizeof(struct w_message), 1);
-  memset((*p_writes)->g_id, 0, size * sizeof(uint64_t));
-  (*p_writes)->prep_fifo = (struct prep_fifo *) malloc(sizeof(struct prep_fifo));
-  memset((*p_writes)->prep_fifo, 0, sizeof(struct prep_fifo));
-  (*p_writes)->prep_fifo->prep_message =
-    (struct prep_message *) malloc(PREP_FIFO_SIZE * sizeof(struct prep_message));
-  memset((*p_writes)->prep_fifo->prep_message, 0, PREP_FIFO_SIZE * sizeof(struct prep_message));
-  //init_fifo(&(*p_writes)->prep_fifo, PREP_FIFO_SIZE * sizeof(struct prep_message));
-  assert((*p_writes)->prep_fifo != NULL);
-  //  memset((*p_writes)->write_ops, 0, size * sizeof(struct write_op));
-  //  memset((*p_writes)->unordered_writes, 0, size * sizeof(uint32_t));
-  memset((*p_writes)->acks_seen, 0, size * sizeof(uint8_t));
-  for (i = 0; i < SESSIONS_PER_THREAD; i++) (*p_writes)->session_has_pending_write[i] = false;
+  p_writes_t* p_writes = (p_writes_t*) calloc(1,sizeof(p_writes_t));
+  p_writes->g_id = (uint64_t *) malloc(size * sizeof(uint64_t));
+  p_writes->w_state = (enum write_state *) malloc(size * sizeof(enum write_state));
+  p_writes->session_id = (uint32_t *) calloc(size, sizeof(uint32_t));
+  p_writes->acks_seen = (uint8_t *) calloc(size, sizeof(uint8_t));
+  p_writes->flr_id = (uint8_t *) malloc(size * sizeof(uint8_t));
+  p_writes->is_local = (bool *) malloc(size * sizeof(bool));
+  p_writes->session_has_pending_write = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
+  p_writes->ptrs_to_ops = (struct prepare **) malloc(size * sizeof(struct prepare *));
+  if (protocol == FOLLOWER) init_fifo(&(p_writes->w_fifo), W_FIFO_SIZE * sizeof(struct w_message), 1);
+  memset(p_writes->g_id, 0, size * sizeof(uint64_t));
+  p_writes->prep_fifo = (struct prep_fifo *) calloc(1, sizeof(struct prep_fifo));
+    p_writes->prep_fifo->prep_message =
+    (struct prep_message *) calloc(PREP_FIFO_SIZE, sizeof(struct prep_message));
+  assert(p_writes->prep_fifo != NULL);
+  for (i = 0; i < SESSIONS_PER_THREAD; i++) p_writes->session_has_pending_write[i] = false;
   for (i = 0; i < size; i++) {
-    (*p_writes)->w_state[i] = INVALID;
+    p_writes->w_state[i] = INVALID;
   }
   if (protocol == LEADER) {
-    struct prep_message *preps = (*p_writes)->prep_fifo->prep_message;
+    struct prep_message *preps = p_writes->prep_fifo->prep_message;
     for (i = 0; i < PREP_FIFO_SIZE; i++) {
       preps[i].opcode = CACHE_OP_PUT;
       for (uint16_t j = 0; j < MAX_PREP_COALESCE; j++) {
@@ -538,8 +530,8 @@ void set_up_pending_writes(struct pending_writes **p_writes, uint32_t size, int 
         preps[i].prepare[j].val_len = VALUE_SIZE >> SHIFT_BITS;
       }
     }
-  } else { // PROTOCOL = FOLLOWER
-    struct w_message *writes = (struct w_message *) (*p_writes)->w_fifo->fifo;
+  } else { // PROTOCOL == FOLLOWER
+    struct w_message *writes = (struct w_message *) p_writes->w_fifo->fifo;
     for (i = 0; i < W_FIFO_SIZE; i++) {
       for (uint16_t j = 0; j < MAX_W_COALESCE; j++) {
         writes[i].write[j].opcode = CACHE_OP_PUT;
@@ -547,6 +539,7 @@ void set_up_pending_writes(struct pending_writes **p_writes, uint32_t size, int 
       }
     }
   }
+  return p_writes;
 }
 
 
@@ -602,25 +595,19 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
 
 
 // set up some basic leader buffers
-void set_up_ldr_ops(struct cache_op **ops, struct mica_resp **resp,
+void set_up_ldr_ops(zk_resp_t *resp,
                     struct commit_fifo **com_fifo, uint16_t t_id)
 {
   int i;
-  uint16_t cache_op_size = sizeof(struct cache_op);
-  uint16_t mica_resp_size = sizeof(struct mica_resp);
-
-  *ops = memalign(4096, (size_t)CACHE_BATCH_SIZE *  cache_op_size);
-  *com_fifo =  malloc(sizeof(struct commit_fifo));
-  memset((*com_fifo), 0, sizeof(struct commit_fifo));
-  (*com_fifo)->commits = (struct com_message *) malloc(COMMIT_FIFO_SIZE * sizeof(struct com_message));
-  *resp = memalign(4096, (size_t)CACHE_BATCH_SIZE * mica_resp_size);
-  memset((*com_fifo)->commits, 0, COMMIT_FIFO_SIZE * sizeof(struct com_message));
-
-  for(i = 0; i <  CACHE_BATCH_SIZE; i++) (*resp)[i].type = EMPTY;
+  assert(resp != NULL);
+  *com_fifo =  calloc(1, sizeof(struct commit_fifo));
+  (*com_fifo)->commits = (struct com_message *)
+    calloc(COMMIT_FIFO_SIZE, sizeof(struct com_message));
+  for(i = 0; i <  MAX_OP_BATCH; i++) resp[i].type = EMPTY;
   for(i = 0; i <  COMMIT_FIFO_SIZE; i++) {
       (*com_fifo)->commits[i].opcode = CACHE_OP_PUT;
   }
-  assert(*ops != NULL && *resp != NULL);
+
 }
 
 // Set up the memory registrations required in the leader if there is no Inlining
@@ -637,13 +624,10 @@ void set_up_ldr_mrs(struct ibv_mr **prep_mr, void *prep_buf,
 
 // Set up all leader WRs
 void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_sgl,
-                    struct ibv_recv_wr *ack_recv_wr, struct ibv_sge *ack_recv_sgl,
                     struct ibv_send_wr *com_send_wr, struct ibv_sge *com_send_sgl,
-                    struct ibv_recv_wr *w_recv_wr, struct ibv_sge *w_recv_sgl,
                     uint16_t t_id, uint16_t remote_thread,
-                    struct hrd_ctrl_blk *cb, struct ibv_mr *prep_mr, struct ibv_mr *com_mr,
-                    struct mcast_essentials *mcast)
-{
+                    struct ibv_mr *prep_mr, struct ibv_mr *com_mr,
+                    struct mcast_essentials *mcast) {
   uint16_t i, j;
   //BROADCAST WRs and credit Receives
   for (j = 0; j < MAX_BCAST_BATCH; j++) { // Number of Broadcasts
@@ -662,8 +646,7 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
         com_send_wr[index].wr.ud.ah = mcast->send_ah[COM_MCAST_QP];
         com_send_wr[index].wr.ud.remote_qpn = mcast->qpn[COM_MCAST_QP];
         com_send_wr[index].wr.ud.remote_qkey = mcast->qkey[COM_MCAST_QP];
-      }
-      else {
+      } else {
         prep_send_wr[index].wr.ud.ah = remote_follower_qp[rm_id][remote_thread][PREP_ACK_QP_ID].ah;
         prep_send_wr[index].wr.ud.remote_qpn = (uint32) remote_follower_qp[rm_id][remote_thread][PREP_ACK_QP_ID].qpn;
         prep_send_wr[index].wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
@@ -684,22 +667,7 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
       com_send_wr[index].next = (i == MESSAGES_IN_BCAST - 1) ? NULL : &com_send_wr[index + 1];
     }
   }
-
-  // ACK Receives
-  for (i = 0; i < LDR_MAX_RECV_ACK_WRS; i++) {
-    ack_recv_sgl[i].length = LDR_ACK_RECV_SIZE;
-    ack_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    ack_recv_wr[i].sg_list = &ack_recv_sgl[i];
-    ack_recv_wr[i].num_sge = 1;
-  }
-  for (i = 0; i < LDR_MAX_RECV_W_WRS; i++) {
-    w_recv_sgl[i].length = (uint32_t)LDR_W_RECV_SIZE;
-    w_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    w_recv_wr[i].sg_list = &w_recv_sgl[i];
-    w_recv_wr[i].num_sge = 1;
-  }
 }
-
 // The Leader sends credits to the followers when it receives their writes
 // The follower sends credits to the leader when it receives commit messages
 void ldr_set_up_credits_and_WRs(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
@@ -761,21 +729,15 @@ void set_up_follower_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_se
     }
     // PREP RECVs
     for (i = 0; i < FLR_MAX_RECV_PREP_WRS; i++) {
-        prep_recv_sgl[i].length = (uint32_t)FLR_PREP_RECV_SIZE;
-        if (ENABLE_MULTICAST == 1)
-            prep_recv_sgl[i].lkey = mcast->recv_mr->lkey;
-        else  prep_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-        prep_recv_wr[i].sg_list = &prep_recv_sgl[i];
-        prep_recv_wr[i].num_sge = 1;
+      if (ENABLE_MULTICAST)
+        prep_recv_sgl[i].lkey = mcast->recv_mr->lkey;
+
     }
     // COM RECVs
     for (i = 0; i < FLR_MAX_RECV_COM_WRS; i++) {
-        com_recv_sgl[i].length = (uint32_t)FLR_COM_RECV_SIZE;
-        if (ENABLE_MULTICAST == 1)
-            com_recv_sgl[i].lkey = mcast->recv_mr->lkey;
-        else  com_recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-        com_recv_wr[i].sg_list = &com_recv_sgl[i];
-        com_recv_wr[i].num_sge = 1;
+      if (ENABLE_MULTICAST)
+          com_recv_sgl[i].lkey = mcast->recv_mr->lkey;
+
     }
 
 }
@@ -807,7 +769,7 @@ void flr_set_up_credit_WRs(struct ibv_send_wr* credit_send_wr, struct ibv_sge* c
 void check_protocol(int protocol)
 {
     if (protocol != FOLLOWER && protocol != LEADER) {
-        red_printf("Wrong protocol specified when setting up the queue depths %d \n", protocol);
+        my_printf(red, "Wrong protocol specified when setting up the queue depths %d \n", protocol);
         assert(false);
     }
 }
@@ -815,6 +777,18 @@ void check_protocol(int protocol)
 /* ---------------------------------------------------------------------------
 ------------------------------MULTICAST --------------------------------------
 ---------------------------------------------------------------------------*/
+
+
+void zk_init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,
+                       int t_id, struct hrd_ctrl_blk *cb, int protocol)
+{
+  check_protocol(protocol);
+  int *recv_q_depth = (int *) malloc(MCAST_QP_NUM * sizeof(int));
+  recv_q_depth[0] = protocol == FOLLOWER ? FLR_RECV_PREP_Q_DEPTH : 1;
+  recv_q_depth[1] = protocol == FOLLOWER ? FLR_RECV_COM_Q_DEPTH : 1;
+
+  init_multicast(mcast_data, mcast, t_id, cb, (size_t) FLR_BUF_SIZE, recv_q_depth);
+}
 /*
 // Initialize the mcast_essentials structure that is necessary
 void init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,

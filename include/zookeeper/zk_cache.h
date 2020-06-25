@@ -15,7 +15,7 @@
 #define CACHE_NUM_BKTS (8 * 1024 * 1024) //64K buckets seems to be enough to store most of 250K keys
 #define CACHE_NUM_KEYS (1000 * 1000)
 
-#define CACHE_BATCH_SIZE 1000
+#define MAX_OP_BATCH 1000
 
 //Cache States
 #define VALID_STATE 1

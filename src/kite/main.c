@@ -1,7 +1,7 @@
 #include "kvs.h"
 #include "main.h"
 #include "util.h"
-#include "../../include/general_util/generic_func.h"
+#include "../../include/general_util/init_func.h"
 
 
 //Global Vars

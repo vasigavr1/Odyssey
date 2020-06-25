@@ -13,10 +13,7 @@ extern uint64_t seed;
 void kite_static_assert_compile_parameters();
 void print_parameters_in_the_start();
 void kite_init_globals();
-void handle_program_inputs(int argc, char *argv[]);
-void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
-                   cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,
-                   void *(*__start_routine) (void *), bool *occupied_cores);
+
 
 /* ---------------------------------------------------------------------------
 ------------------------------STATS --------------------------------------
@@ -52,27 +49,9 @@ struct stats {
   //double zookeeper_writes[WORKERS_PER_MACHINE];
 };
 void dump_stats_2_file(struct stats* st);
-int spawn_stats_thread();
 void print_latency_stats(void);
 
 
-/* ---------------------------------------------------------------------------
-------------------------------INITIALIZATION --------------------------------------
----------------------------------------------------------------------------*/
-
-
-
-// Worker calls this function to connect with all workers
-//void get_qps_from_all_other_machines(uint32_t g_id, struct hrd_ctrl_blk *cb);
-// Used by all kinds of threads to publish their QPs
-//void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
-
-
-
-
-//void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
-// Connect with Workers and Clients
-//void setup_connections_and_spawn_stats_thread(uint32_t, struct hrd_ctrl_blk *);
 /* ---------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 ---------------------------------------------------------------------------*/
@@ -115,12 +94,6 @@ void randomize_op_values(trace_op_t *ops, uint16_t t_id);
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
 ---------------------------------------------------------------------------*/
-
-// pin threads starting from core 0
-int pin_thread(int t_id);
-// pin a thread avoid collisions with pin_thread()
-int pin_threads_avoiding_collisions(int c_id);
-
 void print_latency_stats(void);
 
 

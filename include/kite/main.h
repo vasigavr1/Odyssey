@@ -43,28 +43,7 @@ void *worker(void *arg);
 #define R_FIFO_SIZE (PENDING_READS + LOCAL_PROP_NUM) // Proposes use the read fifo
 #define MAX_ALLOWED_R_SIZE (PENDING_READS - 1)
 
-/*-------------------------------------------------
------------------DEBUGGING-------------------------
---------------------------------------------------*/
-//It may be that ENABLE_ASSERTIONS  must be up for these to work
-#define DEBUG_WRITES 0
-#define DEBUG_ACKS 0
-#define DEBUG_READS 0
-#define DEBUG_READ_REPS 0
-#define DEBUG_TS 0
-#define CHECK_DBG_COUNTERS 0
-#define VERBOSE_DBG_COUNTER 0
-#define DEBUG_SS_BATCH 0
-#define R_TO_W_DEBUG 0
-#define DEBUG_QUORUM 0
-#define DEBUG_BIT_VECS 0
-#define DEBUG_RMW 0
-#define DEBUG_RECEIVES 0
-#define DEBUG_SESSIONS 0
-#define DEBUG_SESS_COUNTER M_16
-#define DEBUG_LOG 0
-#define ENABLE_INFO_DUMP_ON_STALL 0
-#define ENABLE_DEBUG_RMW_KV_PTR 0
+
 
 
 
@@ -427,7 +406,7 @@ typedef struct trace_op {
   uint16_t session_id;
   bool attempt_all_aboard;
   struct ts_tuple ts;
-  struct key key;	/* This must be the 1st field and 16B aligned */
+  struct key key;
   uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
   uint8_t val_len; // this represents the maximum value len
   uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry

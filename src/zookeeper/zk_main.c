@@ -1,7 +1,7 @@
 #include "../../include/mica/kvs.h"
 #include "../../include/zookeeper/zk_util.h"
 #include "../../include/zookeeper/zk_main.h"
-#include "../../include/general_util/generic_func.h"
+#include "../../include/general_util/init_func.h"
 
 
 //Global Vars

@@ -120,7 +120,7 @@
 
 //---WRITES---
 
-#define WRITE_HEADER (KEY_SIZE + 2) // opcode + val_len
+#define WRITE_HEADER (KEY_SIZE + 2 + 8) // opcode + val_len
 #define W_SIZE (VALUE_SIZE + WRITE_HEADER)
 #define FLR_W_SEND_SIZE (MAX_W_COALESCE * W_SIZE)
 #define LDR_W_RECV_SIZE (GRH_SIZE + FLR_W_SEND_SIZE)
@@ -129,7 +129,7 @@
 //--PREPARES
 
 #define PREP_MES_HEADER 6 // opcode(1), coalesce_num(1) l_id (4)
-#define PREP_SIZE (KEY_SIZE + 2 + VALUE_SIZE) // Size of a write
+#define PREP_SIZE (KEY_SIZE + 2 + VALUE_SIZE + 8) // Size of a write
 #define LDR_PREP_SEND_SIZE (PREP_MES_HEADER + (MAX_PREP_COALESCE * PREP_SIZE))
 #define FLR_PREP_RECV_SIZE (GRH_SIZE + LDR_PREP_SEND_SIZE)
 
@@ -236,8 +236,6 @@
 
 // DEBUG
 #define DEBUG_PREPARES 0
-#define DEBUG_ACKS 0
-#define DEBUG_WRITES 0
 #define FLR_CHECK_DBG_COUNTERS 0
 
 
@@ -300,6 +298,7 @@ struct com_message_ud_req {
 struct prepare {
 	uint8_t flr_id;
 	uint8_t session_id[3];
+  uint16_t sess_id;
 	uint8_t g_id[4]; //send the bottom half of the gid
 	uint8_t key[8];
 	uint8_t opcode; //override opcode
@@ -325,16 +324,16 @@ struct write {
   uint8_t w_num; // the first write holds the coalesce number for the entire message
   uint8_t flr_id;
   uint8_t unused[2];
-  uint8_t session_id[4];
+  uint32_t sess_id;
   uint8_t key[KEY_SIZE];	/* 8B */
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
 };
 
-struct w_message {
+typedef  struct w_message {
   struct write write[MAX_W_COALESCE];
-};
+} zk_w_mes_t;
 
 
 struct w_message_ud_req {
@@ -369,12 +368,11 @@ struct prep_fifo {
 	uint32_t bcast_size; // number of prepares not messages!
 	uint32_t size;
 	uint32_t backward_ptrs[PREP_FIFO_SIZE];
-
 };
 
 
 // A data structute that keeps track of the outstanding writes
-struct pending_writes {
+typedef struct pending_writes {
 	uint64_t *g_id;
 	struct prep_fifo *prep_fifo;
   struct fifo *w_fifo;
@@ -393,7 +391,7 @@ struct pending_writes {
 	bool *is_local;
 	bool *session_has_pending_write;
 	bool all_sessions_stalled;
-};
+} p_writes_t;
 
 
 // struct for the follower to keep track of the acks it has sent
@@ -403,17 +401,22 @@ struct pending_acks {
 
 };
 
-struct recv_info {
-	uint32_t push_ptr;
-	uint32_t buf_slots;
-	uint32_t slot_size;
-	uint32_t posted_recvs;
-	struct ibv_recv_wr *recv_wr;
-	struct ibv_qp * recv_qp;
-	struct ibv_sge* recv_sgl;
-	void* buf;
 
-};
+typedef struct zk_trace_op {
+	uint16_t session_id;
+	struct key key;
+	uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
+	uint8_t val_len; // this represents the maximum value len
+	uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry
+	uint8_t *value_to_write;
+	uint8_t *value_to_read; //compare value for CAS/  addition argument for F&A
+	uint32_t index_to_req_array;
+	uint32_t real_val_len; // this is the value length the client is interested in
+} zk_trace_op_t;
+
+typedef struct zk_resp {
+	uint8_t type;
+} zk_resp_t;
 
 typedef struct thread_stats { // 2 cache lines
 	long long cache_hits_per_thread;

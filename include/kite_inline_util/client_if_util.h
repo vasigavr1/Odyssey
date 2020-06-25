@@ -35,7 +35,6 @@ static inline void signal_in_progress_to_client(uint32_t sess_id,
                                                 uint32_t req_array_i, uint16_t t_id)
 {
   if (ENABLE_CLIENTS) {
-
     client_op_t *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     //my_printf(cyan, "Wrkr %u/%u signals in progress for  poll ptr %u for req %u at state %u \n", t_id,
     //       sess_id, req_array_i,req_array->opcode, req_array->state);

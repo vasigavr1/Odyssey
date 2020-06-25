@@ -169,11 +169,13 @@ void mica_insert_one(mica_kv_t *kvs, mica_op_t *op)
   }
   memcpy(log_ptr, op, len_to_copy);
 
+#ifdef KITE
   mica_op_t * kv_ptr = (mica_op_t *) log_ptr;
   assert(IS_ALIGNED(&kv_ptr->key, 64));
   assert(IS_ALIGNED(&kv_ptr->value, 64));
 
   //check_mica_op_t_allignement(kv_ptr);
+#endif
 
   kvs->log_head += len_to_copy;
 

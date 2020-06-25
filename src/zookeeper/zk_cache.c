@@ -55,7 +55,7 @@ inline void cache_batch_op_trace(int op_num, int thread_id, struct cache_op **op
 #if CACHE_DEBUG == 1
 	//assert(cache.hash_table != NULL);
 	assert(op != NULL);
-	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
+	assert(op_num > 0 && op_num <= MAX_OP_BATCH);
 	assert(resp != NULL);
 #endif
 
@@ -168,7 +168,7 @@ inline void cache_batch_op_updates(uint32_t op_num, int thread_id, struct prepar
 #if CACHE_DEBUG == 1
   //assert(cache.hash_table != NULL);
 	assert(op != NULL);
-	assert(op_num > 0 && op_num <= CACHE_BATCH_SIZE);
+	assert(op_num > 0 && op_num <= MAX_OP_BATCH);
 	assert(resp != NULL);
 #endif
 

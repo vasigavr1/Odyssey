@@ -71,13 +71,13 @@ typedef struct key mica_key_t;
 #define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 10
+#define WORKERS_PER_MACHINE 20
 #define MACHINE_NUM 5
-#define SESSIONS_PER_THREAD 22
+#define SESSIONS_PER_THREAD 40
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
-#define MAX_OP_BATCH 51
+#define MAX_OP_BATCH 351
 #define ENABLE_LOCK_FREE_READING 1
 
 #define MEASURE_LATENCY 0
@@ -135,7 +135,31 @@ typedef struct key mica_key_t;
 #define WORKER_NUM (WORKERS_PER_MACHINE * MACHINE_NUM)
 
 
-#define ENABLE_ASSERTIONS 0
+#define ENABLE_ASSERTIONS 1
+#define ENABLE_ADAPTIVE_INLINING 0 // This did not help
+/*-------------------------------------------------
+-----------------DEBUGGING-------------------------
+--------------------------------------------------*/
+//It may be that ENABLE_ASSERTIONS  must be up for these to work
+#define DEBUG_WRITES 1
+#define DEBUG_ACKS 1
+#define DEBUG_READS 0
+#define DEBUG_READ_REPS 0
+#define DEBUG_TS 0
+#define CHECK_DBG_COUNTERS 0
+#define VERBOSE_DBG_COUNTER 0
+#define DEBUG_SS_BATCH 0
+#define R_TO_W_DEBUG 0
+#define DEBUG_QUORUM 0
+#define DEBUG_BIT_VECS 0
+#define DEBUG_RMW 0
+#define DEBUG_RECEIVES 0
+#define DEBUG_SESSIONS 0
+#define DEBUG_SESS_COUNTER M_16
+#define DEBUG_LOG 0
+#define ENABLE_INFO_DUMP_ON_STALL 0
+#define ENABLE_DEBUG_RMW_KV_PTR 0
+#define DEBUG_SEQLOCKS 0
 
 
 /* Request sizes */
@@ -145,6 +169,8 @@ typedef struct key mica_key_t;
 
 #define MAXIMUM_INLINE_SIZE 188
 #define DEFAULT_SL 0 //default service level
+
+
 
 /*-------------------------------------------------
 	-----------------CLIENT---------------------------
@@ -311,7 +337,21 @@ typedef struct thread_params {
   int id;
 } thread_params_t;
 
+//////////////////////////////////////////////////////
+// flags that help to compare TS
+#define REGULAR_TS 0
+#define NETW_TS 1
+#define META_TS 2
+// format of a Timestamp tuple (Lamport clock)
+struct network_ts_tuple {
+  uint8_t m_id;
+  uint32_t version;
+} __attribute__((__packed__));
 
+struct ts_tuple {
+  uint8_t m_id;
+  uint32_t version;
+};
 
 typedef struct key {
   unsigned int bkt			:32;
@@ -332,6 +372,18 @@ typedef struct recv_info {
   struct ibv_sge* recv_sgl;
   void* buf;
 } recv_info_t;
+
+struct quorum_info {
+  uint8_t missing_num;
+  uint8_t missing_ids[REM_MACH_NUM];
+  uint8_t active_num;
+  uint8_t active_ids[REM_MACH_NUM];
+  bool send_vector[REM_MACH_NUM];
+  // These are not a machine_ids, they ranges= from 0 to REM_MACH_NUM -1
+  // to facilitate usage with the ib_send_wrs
+  uint8_t first_active_rm_id;
+  uint8_t last_active_rm_id;
+};
 
 //////////////////////////////////////////////////////
 /////////////~~~~CLIENT STRUCTS~~~~~~/////////////////////////
@@ -371,6 +423,9 @@ extern struct wrk_clt_if interface[WORKERS_PER_MACHINE];
 
 extern uint64_t last_pulled_req[SESSIONS_PER_MACHINE];
 extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
+
+
+
 
 //////////////////////////////////////////////////////
 /////////////~~~~FUNCTIONS~~~~~~/////////////////////////

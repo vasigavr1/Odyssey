@@ -8,7 +8,7 @@ void *worker(void *arg)
 {
 	struct thread_params params = *(struct thread_params *) arg;
 	uint16_t t_id = (uint16_t)params.id;
-  uint16_t gid = (uint16_t) ((machine_id * WORKERS_PER_MACHINE) + t_id);
+  uint32_t g_id = get_gid((uint8_t) machine_id, t_id);
 
 	if (ENABLE_MULTICAST == 1 && t_id == 0) {
 		my_printf(cyan, "MULTICAST IS ENABLED. PLEASE DISABLE IT AS IT IS NOT WORKING\n");
@@ -52,7 +52,7 @@ void *worker(void *arg)
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/
-	setup_connections_and_spawn_stats_thread(gid, cb);
+  setup_connections_and_spawn_stats_thread(g_id, cb, t_id);
 
 	/* -----------------------------------------------------
 	--------------DECLARATIONS------------------------------
@@ -61,42 +61,55 @@ void *worker(void *arg)
   struct ibv_send_wr r_send_wr[MAX_R_WRS];
   struct ibv_sge r_send_sgl[MAX_BCAST_BATCH];
   struct ibv_wc r_recv_wc[MAX_RECV_R_WRS];
+  struct ibv_recv_wr r_recv_wr[MAX_RECV_R_WRS];
+  struct ibv_sge r_recv_sgl[MAX_RECV_R_WRS];
 
   // R_REP_QP_ID 1: send Read Replies  -- receive Read Replies
   struct ibv_send_wr r_rep_send_wr[MAX_R_REP_WRS];
   struct ibv_sge r_rep_send_sgl[MAX_R_REP_WRS];
   struct ibv_wc r_rep_recv_wc[MAX_RECV_R_REP_WRS];
+  struct ibv_recv_wr r_rep_recv_wr[MAX_RECV_R_REP_WRS];
+  struct ibv_sge r_rep_recv_sgl[MAX_RECV_R_REP_WRS];
 
   // W_QP_ID 2: Send Writes receive Writes
   struct ibv_send_wr w_send_wr[MAX_W_WRS];
   struct ibv_sge w_send_sgl[MAX_BCAST_BATCH];
   struct ibv_wc w_recv_wc[MAX_RECV_W_WRS];
+  struct ibv_recv_wr w_recv_wr[MAX_RECV_W_WRS];
+  struct ibv_sge w_recv_sgl[MAX_RECV_W_WRS];
 
   // ACK_QP_ID 3: send ACKs -- receive ACKs
   struct ibv_send_wr ack_send_wr[MAX_ACK_WRS];
   struct ibv_sge ack_send_sgl[MAX_ACK_WRS];
   struct ibv_wc ack_recv_wc[MAX_RECV_ACK_WRS];
+  struct ibv_recv_wr ack_recv_wr[MAX_RECV_ACK_WRS];
+  struct ibv_sge ack_recv_sgl[MAX_RECV_ACK_WRS];
 
 
  	uint16_t credits[VC_NUM][MACHINE_NUM];
   uint64_t r_br_tx = 0, w_br_tx = 0, r_rep_tx = 0, ack_tx = 0;
 	uint32_t trace_iter = 0;
 
-  recv_info_t *r_recv_info, *r_rep_recv_info, *w_recv_info, *ack_recv_info ;
+  recv_info_t *r_recv_info, *r_rep_recv_info, *w_recv_info, *ack_recv_info;
   r_recv_info = init_recv_info(cb, r_buf_push_ptr, R_BUF_SLOTS,
-    (uint32_t) R_RECV_SIZE, 0, cb->dgram_qp[R_QP_ID], MAX_RECV_R_WRS,
-    (void*) r_buffer);
+                               (uint32_t) R_RECV_SIZE, 0, cb->dgram_qp[R_QP_ID],
+                               MAX_RECV_R_WRS, r_recv_wr, r_recv_sgl,
+                               (void*) r_buffer);
+
   r_rep_recv_info = init_recv_info(cb, r_rep_buf_push_ptr, R_REP_BUF_SLOTS,
-    (uint32_t) R_REP_RECV_SIZE, 0, cb->dgram_qp[R_REP_QP_ID], MAX_RECV_R_REP_WRS,
-    (void*) r_rep_buffer);
+                                   (uint32_t) R_REP_RECV_SIZE, 0, cb->dgram_qp[R_REP_QP_ID],
+                                   MAX_RECV_R_REP_WRS, r_rep_recv_wr, r_rep_recv_sgl,
+                                   (void*) r_rep_buffer);
 
   w_recv_info = init_recv_info(cb, w_buf_push_ptr, W_BUF_SLOTS,
-    (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS,  cb->dgram_qp[W_QP_ID],
-    MAX_RECV_W_WRS, (void*) w_buffer);
+                               (uint32_t) W_RECV_SIZE, MAX_RECV_W_WRS,  cb->dgram_qp[W_QP_ID],
+                               MAX_RECV_W_WRS, w_recv_wr, w_recv_sgl,
+                               (void*) w_buffer);
 
   ack_recv_info = init_recv_info(cb, ack_buf_push_ptr, ACK_BUF_SLOTS,
-    (uint32_t) ACK_RECV_SIZE, 0, cb->dgram_qp[ACK_QP_ID], MAX_RECV_ACK_WRS,
-    (void*) ack_buffer);
+                                 (uint32_t) ACK_RECV_SIZE, 0, cb->dgram_qp[ACK_QP_ID],
+                                 MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
+                                 (void*) ack_buffer);
 
   struct ack_message acks[MACHINE_NUM] = {0};
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {

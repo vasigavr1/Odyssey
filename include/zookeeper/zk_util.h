@@ -3,6 +3,7 @@
 
 #include "../mica/kvs.h"
 #include "zk_main.h"
+#include "../general_util/init_connect.h"
 
 
 
@@ -40,7 +41,6 @@ struct stats {
 	double write_ratio_per_client[WORKERS_PER_MACHINE];
 };
 void dump_stats_2_file(struct stats* st);
-int spawn_stats_thread();
 void print_latency_stats(void);
 
 
@@ -62,7 +62,7 @@ void print_latency_stats(void);
 //void trace_init(struct trace_command **cmds, int t_id);
 //void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
 // Connect with Workers and Clients
-//void setup_connections_and_spawn_stats_thread(int, struct hrd_ctrl_blk *);
+//void setup_connections(int, struct hrd_ctrl_blk *);
 
 
 /* ---------------------------------------------------------------------------
@@ -72,12 +72,12 @@ void print_latency_stats(void);
 void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t);
 
 // Set up a struct that stores pending writes
-void set_up_pending_writes(struct pending_writes **p_writes, uint32_t size, int);
+p_writes_t* set_up_pending_writes(uint32_t size, int);
 
 // Set up all leader WRs
-void set_up_ldr_WRs(struct ibv_send_wr*, struct ibv_sge*, struct ibv_recv_wr*, struct ibv_sge*,
-                    struct ibv_send_wr*, struct ibv_sge*, struct ibv_recv_wr*, struct ibv_sge*,
-                    uint16_t, uint16_t, struct hrd_ctrl_blk*, struct ibv_mr*,
+void set_up_ldr_WRs(struct ibv_send_wr*, struct ibv_sge*,
+                    struct ibv_send_wr*, struct ibv_sge*,
+                    uint16_t, uint16_t, struct ibv_mr*,
                     struct ibv_mr*, struct mcast_essentials*);
 // Set up all Follower WRs
 void set_up_follower_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_send_sgl,
@@ -96,8 +96,7 @@ void flr_set_up_credit_WRs(struct ibv_send_wr* credit_send_wr, struct ibv_sge* c
 void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
                     uint32_t, uint32_t, uint16_t, uint32_t);
 // set up some basic leader buffers
-void set_up_ldr_ops(struct cache_op**, struct mica_resp**,
-                    struct commit_fifo**, uint16_t);
+void set_up_ldr_ops(zk_resp_t*, struct commit_fifo**, uint16_t);
 // Set up the memory registrations required in the leader if there is no Inlining
 void set_up_ldr_mrs(struct ibv_mr**, void*, struct ibv_mr**, void*,
                     struct hrd_ctrl_blk*);
@@ -105,8 +104,6 @@ void set_up_ldr_mrs(struct ibv_mr**, void*, struct ibv_mr**, void*,
 void ldr_set_up_credits_and_WRs(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
                                 struct ibv_sge *credit_recv_sgl, struct hrd_ctrl_blk *cb,
                                 uint32_t max_credit_recvs);
-// Manufactures a trace without a file
-void manufacture_trace(struct trace_command **cmds, int g_id);
 
 //Set up the depths of all QPs
 void set_up_queue_depths_ldr_flr(int**, int**, int);
@@ -116,13 +113,13 @@ void set_up_queue_depths_ldr_flr(int**, int**, int);
 ---------------------------------------------------------------------------*/
 // check if the given protocol is invalid
 void check_protocol(int);
-// pin threads starting from core 0
-int pin_thread(int t_id);
-// pin a thread avoid collisions with pin_thread()
-int pin_threads_avoiding_collisions(int c_id);
+
 
 void print_latency_stats(void);
 
+
+void zk_init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,
+											 int t_id, struct hrd_ctrl_blk *cb, int protocol);
 
 
 #endif /* ZK_UTILS_H */

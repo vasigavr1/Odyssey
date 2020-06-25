@@ -6,10 +6,10 @@
 #define KITE_COMMUNICATION_UTILITY_H
 
 #include "main.h"
-#include "latency_util.h"
+#include "../general_util/latency_util.h"
 #include "debug_util.h"
 #include "config_util.h"
-#include "rdma_util.h"
+#include "../general_util/rdma_gen_util.h"
 #include "reserve_stations_util.h"
 
 

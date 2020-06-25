@@ -6,14 +6,13 @@
 
 
 #include "generic_util.h"
-#include "rdma_util.h"
 #include "kvs_util.h"
 #include "debug_util.h"
 #include "config_util.h"
 #include "client_if_util.h"
 #include "paxos_util.h"
 #include "reserve_stations_util.h"
-#include "latency_util.h"
+#include "../general_util/latency_util.h"
 #include "communication_utility.h"
 
 #include <stdlib.h>

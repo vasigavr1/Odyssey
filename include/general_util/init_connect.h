@@ -8,7 +8,7 @@
 #include "top.h"
 #include "hrd.h"
 
-int spawn_stats_thread() {
+static int spawn_stats_thread() {
   pthread_t *thread_arr = (pthread_t *) malloc(sizeof(pthread_t));
   pthread_attr_t attr;
   cpu_set_t cpus_stats;
@@ -33,7 +33,7 @@ int spawn_stats_thread() {
 ------------------------------MULTICAST --------------------------------------
 ---------------------------------------------------------------------------*/
 // wrapper around getaddrinfo socket function
-int get_addr(char *dst, struct sockaddr *addr)
+static int get_addr(char *dst, struct sockaddr *addr)
 {
   struct addrinfo *res;
   int ret;
@@ -48,7 +48,7 @@ int get_addr(char *dst, struct sockaddr *addr)
 }
 
 //Handle the addresses
-void resolve_addresses(struct mcast_info *mcast_data)
+static void resolve_addresses(struct mcast_info *mcast_data)
 {
   int ret, i, t_id = mcast_data->t_id;
   char mcast_addr[40];
@@ -72,7 +72,7 @@ void resolve_addresses(struct mcast_info *mcast_data)
 }
 
 // Set up the Send and Receive Qps for the multicast
-void set_up_qp(struct cm_qps* qps, int *max_recv_q_depth)
+static void set_up_qp(struct cm_qps* qps, int *max_recv_q_depth)
 {
   int ret, i, recv_q_depth;
   // qps[0].pd = ibv_alloc_pd(qps[0].cma_id->verbs); //new
@@ -98,7 +98,7 @@ void set_up_qp(struct cm_qps* qps, int *max_recv_q_depth)
 }
 
 // Initial function to call to setup multicast, this calls the rest of the relevant functions
-void setup_multicast(struct mcast_info *mcast_data, int *recv_q_depth)
+static void setup_multicast(struct mcast_info *mcast_data, int *recv_q_depth)
 {
   int ret, i, clt_id = mcast_data->t_id;
   static enum rdma_port_space port_space = RDMA_PS_UDP;
@@ -154,7 +154,7 @@ void setup_multicast(struct mcast_info *mcast_data, int *recv_q_depth)
 
 
 // call to test the multicast
-void multicast_testing(mcast_essentials_t *mcast, int clt_gid, struct hrd_ctrl_blk *cb, uint8_t qp_id) // W_QP_ID
+static void multicast_testing(mcast_essentials_t *mcast, int clt_gid, struct hrd_ctrl_blk *cb, uint8_t qp_id) // W_QP_ID
 {
 
   struct ibv_wc mcast_wc;
@@ -202,13 +202,9 @@ void multicast_testing(mcast_essentials_t *mcast, int clt_gid, struct hrd_ctrl_b
 }
 
 // Initialize the mcast_essentials structure that is necessary
-void init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,
-                    int t_id, struct hrd_ctrl_blk *cb, size_t total_buf_size)
+static void init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mcast,
+                    int t_id, struct hrd_ctrl_blk *cb, size_t total_buf_size, int *recv_q_depth)//, size_t recv_q_depth)
 {
-
-  int *recv_q_depth = (int *) malloc(MCAST_QP_NUM * sizeof(int));
-  //recv_q_depth[0] = protocol == FOLLOWER ? FLR_RECV_PREP_Q_DEPTH : 1;
-  //recv_q_depth[1] = protocol == FOLLOWER ? FLR_RECV_COM_Q_DEPTH : 1;
   *mcast_data =  (mcast_info_t *) malloc(sizeof(mcast_info_t));
   (*mcast_data)->t_id = t_id;
   setup_multicast(*mcast_data, recv_q_depth);
@@ -240,7 +236,7 @@ void init_multicast(struct mcast_info **mcast_data, struct mcast_essentials **mc
 
 
 // Worker calls this function to connect with all workers
-void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
+static void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
 {
   int g_i, qp_i, w_i, m_i;
   int ib_port_index = 0;
@@ -291,7 +287,7 @@ void get_qps_from_all_other_machines(struct hrd_ctrl_blk *cb)
 
 // Machines with id higher than 0 connect with machine-id 0.
 // First they sent it their qps-attrs and then receive everyone's
-void set_up_qp_attr_client(uint8_t qp_num)
+static void set_up_qp_attr_client(int qp_num)
 {
   int sock = 0, valread;
   struct sockaddr_in serv_addr;
@@ -328,7 +324,7 @@ void set_up_qp_attr_client(uint8_t qp_num)
 
 // Machine 0 acts as a "server"; it receives all qp attributes,
 // and broadcasts them to everyone
-void set_up_qp_attr_server(uint8_t qp_num)
+static void set_up_qp_attr_server(int qp_num)
 {
   int server_fd[REM_MACH_NUM], new_socket[REM_MACH_NUM], valread;
   struct sockaddr_in address;
@@ -384,7 +380,7 @@ void set_up_qp_attr_server(uint8_t qp_num)
 
 
 // Used by all kinds of threads to publish their QPs
-void fill_qps(int t_id, struct hrd_ctrl_blk *cb)
+static void fill_qps(int t_id, struct hrd_ctrl_blk *cb)
 {
   uint32_t qp_i;
   for (qp_i = 0; qp_i < cb->num_dgram_qps; qp_i++) {
@@ -405,10 +401,10 @@ void fill_qps(int t_id, struct hrd_ctrl_blk *cb)
 }
 
 // All workers both use this to establish connections
-void setup_connections_and_spawn_stats_thread(uint32_t global_id,
-                                              struct hrd_ctrl_blk *cb)
+static void setup_connections(uint32_t g_id,
+                              struct hrd_ctrl_blk *cb)
 {
-  int t_id = global_id % WORKERS_PER_MACHINE;
+  int t_id = g_id % WORKERS_PER_MACHINE;
   fill_qps(t_id, cb);
 
   if (t_id == 0) {
@@ -416,19 +412,45 @@ void setup_connections_and_spawn_stats_thread(uint32_t global_id,
     if (machine_id == 0) set_up_qp_attr_server(cb->num_dgram_qps);
     else set_up_qp_attr_client(cb->num_dgram_qps);
     get_qps_from_all_other_machines(cb);
-    assert(!qps_are_set_up);
+//    assert(!qps_are_set_up);
     // Spawn a thread that prints the stats
+
+//    atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
+  }
+//  else {
+//    while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
+//  }
+//  assert(qps_are_set_up);
+//    printf("Thread %d has all the needed ahs\n", g_id );
+}
+
+static void thread_zero_spawns_stat_thread(uint16_t t_id)
+{
+  if (t_id == 0) {
     if (CLIENT_MODE != CLIENT_UI) {
       if (spawn_stats_thread() != 0)
         my_printf(red, "Stats thread was not successfully spawned \n");
     }
-    atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
   }
+}
+
+static void wait_for_thread_zero()
+{
+
+}
+
+
+static void setup_connections_and_spawn_stats_thread(uint32_t g_id,
+                                                     struct hrd_ctrl_blk *cb,
+                                                     uint16_t t_id)
+{
+  setup_connections(g_id, cb);
+  // thread_zero_spawns_stat_thread(t_id);
+
+  if (t_id == 0) atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
   else {
     while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
   }
-  assert(qps_are_set_up);
-//    printf("Thread %d has all the needed ahs\n", global_id );
 }
 
 #endif //KITE_INIT_CONNECT_H

@@ -384,10 +384,7 @@ static inline void print_verbouse_debug_info(p_ops_t *p_ops, uint16_t t_id, uint
 }
 
 
-static inline void print_key(struct key *key)
-{
-  printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
-}
+
 
 
 //The purpose of this is to save some space in function that polls read replies

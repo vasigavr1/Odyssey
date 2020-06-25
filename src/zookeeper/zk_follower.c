@@ -7,11 +7,11 @@
 void *follower(void *arg)
 {
   struct thread_params params = *(struct thread_params *) arg;
-  int global_id = machine_id > LEADER_MACHINE ? ((machine_id - 1) * FOLLOWERS_PER_MACHINE) + params.id :
-                  (machine_id * FOLLOWERS_PER_MACHINE) + params.id;
-  uint8_t flr_id = machine_id > LEADER_MACHINE ? (machine_id - 1) : machine_id;
-  uint16_t t_id = params.id;
-  if (t_id == 0) yellow_printf("FOLLOWER-id %d \n", flr_id);
+  uint32_t g_id = (uint32_t)( machine_id > LEADER_MACHINE ? ((machine_id - 1) * FOLLOWERS_PER_MACHINE) + params.id :
+                  (machine_id * FOLLOWERS_PER_MACHINE) + params.id);
+  uint8_t flr_id = (uint8_t) (machine_id > LEADER_MACHINE ? (machine_id - 1) : machine_id);
+  uint16_t t_id = (uint16_t) params.id;
+  if (t_id == 0) my_printf(yellow, "FOLLOWER-id %d \n", flr_id);
   uint16_t remote_ldr_thread = t_id;
 
   int protocol = FOLLOWER;
@@ -40,7 +40,7 @@ void *follower(void *arg)
   struct mcast_essentials *mcast = NULL;
   // need to init mcast before sync, such that we can post recvs
   if (ENABLE_MULTICAST == 1) {
-      init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
+      zk_init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
       assert(mcast != NULL);
   }
 
@@ -59,7 +59,7 @@ void *follower(void *arg)
   /* -----------------------------------------------------
   --------------CONNECT WITH LEADER-----------------------
   ---------------------------------------------------------*/
-  setup_connections_and_spawn_stats_thread(global_id, cb);
+  setup_connections_and_spawn_stats_thread(g_id, cb, t_id);
   if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb, COMMIT_W_QP_ID);
 
   /* -----------------------------------------------------
@@ -91,24 +91,25 @@ void *follower(void *arg)
   };
 
 
-  struct mica_resp *resp;
+  zk_resp_t *resp = (zk_resp_t *)malloc(MAX_OP_BATCH * sizeof(zk_resp_t));
   struct ibv_mr *w_mr;
-  struct cache_op *ops;
-
-  ops = (struct cache_op *)memalign(4096, CACHE_BATCH_SIZE *  sizeof(struct cache_op));
-  resp = (struct mica_resp *)malloc(CACHE_BATCH_SIZE * sizeof(struct mica_resp));
+  zk_trace_op_t *ops = (zk_trace_op_t *) memalign(4096, MAX_OP_BATCH *  sizeof(zk_trace_op_t));
   struct recv_info *prep_recv_info, *com_recv_info;
   prep_recv_info = init_recv_info(cb, prep_push_ptr, FLR_PREP_BUF_SLOTS,
-                                  (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_qp, FLR_MAX_RECV_PREP_WRS, (void*) prep_buffer );
+                                  (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_qp,
+                                  FLR_MAX_RECV_PREP_WRS,
+                                  prep_recv_wr, prep_recv_sgl,
+                                  (void*) prep_buffer);
   com_recv_info = init_recv_info(cb, com_push_ptr, FLR_COM_BUF_SLOTS,
                                  (uint32_t) FLR_COM_RECV_SIZE, FLR_MAX_RECV_COM_WRS,
-                                 com_recv_qp, FLR_MAX_RECV_COM_WRS, (void*) com_buffer);
+                                 com_recv_qp, FLR_MAX_RECV_COM_WRS,
+                                 com_recv_wr, com_recv_sgl,
+                                 (void*) com_buffer);
 
-  struct pending_writes *p_writes;
+  struct pending_writes *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, protocol);
   struct pending_acks *p_acks = (struct pending_acks *) malloc(sizeof(struct pending_acks));
-  struct ack_message *ack = (struct ack_message *)malloc(sizeof(struct ack_message));
-  memset(p_acks, 0, sizeof(struct pending_acks));
-  set_up_pending_writes(&p_writes, FLR_PENDING_WRITES, protocol);
+  struct ack_message *ack = (struct ack_message *) calloc(1, sizeof(struct ack_message));
+    
   if (!FLR_W_ENABLE_INLINING)
     w_mr = register_buffer(cb->pd, p_writes->w_fifo->fifo, W_FIFO_SIZE * sizeof(struct w_message));
 
@@ -118,15 +119,16 @@ void *follower(void *arg)
   init_fifo(&prep_buf_mirror, FLR_PREP_BUF_SLOTS * sizeof(uint16_t), 1);
 
   /* ---------------------------------------------------------------------------
-  ------------------------------INITIALIZE STATIC STRUCTUREs--------------------
+  ------------------------------INITIALIZE STATIC STRUCTURES--------------------
     ---------------------------------------------------------------------------*/
   // SEND AND RECEIVE WRs
   set_up_follower_WRs(ack_send_wr, ack_send_sgl, prep_recv_wr, prep_recv_sgl, w_send_wr, w_send_sgl,
                       com_recv_wr, com_recv_sgl, remote_ldr_thread, cb, w_mr, mcast);
   flr_set_up_credit_WRs(credit_send_wr, &credit_send_sgl, cb, flr_id, FLR_MAX_CREDIT_WRS, t_id);
   // TRACE
-  struct trace_command *trace;
-  trace_init(&trace, t_id);
+  trace_t *trace;
+  if (!ENABLE_CLIENTS)
+    trace = trace_init(t_id);
 
   /* ---------------------------------------------------------------------------
   ------------------------------LATENCY AND DEBUG-----------------------------------
@@ -135,7 +137,7 @@ void *follower(void *arg)
     wait_for_prepares_dbg_counter = 0, wait_for_coms_dbg_counter = 0;
   struct timespec start, end;
   uint16_t debug_ptr = 0;
-  if (t_id == 0) green_printf("Follower %d  reached the loop \n", t_id);
+  if (t_id == 0) my_printf(green, "Follower %d  reached the loop \n", t_id);
   /* ---------------------------------------------------------------------------
   ------------------------------START LOOP--------------------------------
   ---------------------------------------------------------------------------*/
@@ -191,10 +193,6 @@ void *follower(void *arg)
   if (WRITE_RATIO > 0)
     send_writes_to_the_ldr(p_writes, &credits, cb, w_send_sgl, w_send_wr, &w_tx, remote_w_buf,
     t_id, &outstanding_writes);
-
-
-
-
   }
   return NULL;
 }

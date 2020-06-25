@@ -5,6 +5,9 @@
 #ifndef KITE_GENERIC_OPCODES_H
 #define KITE_GENERIC_OPCODES_H
 
+
+typedef enum compare_t{SMALLER, EQUAL, GREATER, ERROR} compare_t;
+
 // For latency measurements
 typedef enum {
   NO_REQ,
@@ -12,6 +15,7 @@ typedef enum {
   ACQUIRE,
   WRITE_REQ,
   READ_REQ,
+  WRITE_REQ_BEFORE_CACHE
 } req_type;
 
 

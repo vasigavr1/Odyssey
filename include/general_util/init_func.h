@@ -10,7 +10,7 @@
 #include <getopt.h>
 #include "../mica/kvs.h"
 
-void static_assert_compile_parameters()
+static void static_assert_compile_parameters()
 {
   assert(MICA_OP_SIZE == sizeof(mica_op_t));
   static_assert(IS_ALIGNED(MICA_VALUE_SIZE, 32), "VALUE_SIZE must be aligned with 32 bytes ");
@@ -38,7 +38,7 @@ void static_assert_compile_parameters()
   }
 }
 
-void handle_program_inputs(int argc, char *argv[])
+static void handle_program_inputs(int argc, char *argv[])
 {
   num_threads = -1;
   is_roce = -1; machine_id = -1;
@@ -103,7 +103,7 @@ void handle_program_inputs(int argc, char *argv[])
   }
 }
 
-void init_globals(int qp_num)
+static void init_globals(int qp_num)
 {
   time_approx = 0;
   workers_with_filled_qp_attr = 0;
@@ -158,7 +158,7 @@ void init_globals(int qp_num)
 }
 
 // pin threads starting from core 0
-int pin_thread(int t_id) {
+static int pin_thread(int t_id) {
   int core;
   core = PHYSICAL_CORE_DISTANCE * t_id;
   if(core >= LOGICAL_CORES_PER_SOCKET) { //if you run out of cores in numa node 0
@@ -189,7 +189,7 @@ int pin_thread(int t_id) {
 }
 
 // pin a thread avoid collisions with pin_thread()
-int pin_threads_avoiding_collisions(int c_id) {
+static int pin_threads_avoiding_collisions(int c_id) {
   int c_core;
   if (!WORKER_HYPERTHREADING || WORKERS_PER_MACHINE < PHYSICAL_CORES_PER_SOCKET) {
     if (c_id < WORKERS_PER_MACHINE) c_core = PHYSICAL_CORE_DISTANCE * c_id + 2;
@@ -210,7 +210,7 @@ int pin_threads_avoiding_collisions(int c_id) {
   return c_core;
 }
 
-void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
+static void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_purpose,
                    cpu_set_t *pinned_hw_threads, pthread_attr_t *attr, pthread_t *thread_arr,
                    void *(*__start_routine) (void *), bool *occupied_cores)
 {
@@ -224,7 +224,7 @@ void spawn_threads(struct thread_params *param_arr, uint16_t t_id, char* node_pu
   occupied_cores[core] = 1;
 }
 
-void fopen_client_logs(uint16_t i)
+static void fopen_client_logs(uint16_t i)
 {
   if (CLIENT_LOGS) {
     uint16_t cl_id = (uint16_t) (machine_id * CLIENTS_PER_MACHINE +

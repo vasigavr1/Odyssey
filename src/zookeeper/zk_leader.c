@@ -2,16 +2,18 @@
 #include "../../include/zookeeper/zk_inline_util.h"
 #include "../../include/general_util/init_connect.h"
 #include "../../include/general_util/rdma_gen_util.h"
+#include "../../include/general_util/trace_util.h"
 
-// 1059 lines before refactoring
+
 void *leader(void *arg)
 {
 	struct thread_params params = *(struct thread_params *) arg;
-	uint16_t t_id = params.id;
+	uint16_t t_id = (uint16_t) params.id;
+  uint32_t g_id = get_gid((uint8_t) machine_id, t_id);
   uint16_t follower_id = t_id;
 
 	if (ENABLE_MULTICAST == 1 && t_id == 0)
-		cyan_printf("MULTICAST IS ENABLED\n");
+		my_printf(cyan, "MULTICAST IS ENABLED\n");
 	int protocol = LEADER;
 
 	int *recv_q_depths, *send_q_depths;
@@ -36,7 +38,7 @@ void *leader(void *arg)
 	struct mcast_essentials *mcast;
 	// need to init mcast before sync, such that we can post recvs
 	if (ENABLE_MULTICAST) {
-		init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
+		zk_init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
 		assert(mcast != NULL);
 	}
 	/* Fill the RECV queue that receives the Broadcasts, we need to do this early */
@@ -49,7 +51,7 @@ void *leader(void *arg)
 	/* -----------------------------------------------------
 	--------------CONNECT WITH FOLLOWERS-----------------------
 	---------------------------------------------------------*/
-	setup_connections_and_spawn_stats_thread(t_id, cb);
+  setup_connections_and_spawn_stats_thread(g_id, cb, t_id);
 	if (MULTICAST_TESTING == 1) multicast_testing(mcast, t_id, cb, COMMIT_W_QP_ID);
 
 	/* -----------------------------------------------------
@@ -61,7 +63,7 @@ void *leader(void *arg)
 	struct ibv_wc ack_recv_wc[LDR_MAX_RECV_ACK_WRS];
 	struct ibv_recv_wr ack_recv_wr[LDR_MAX_RECV_ACK_WRS];
 
-  // PREP_ACK_QP_ID 1: send Commits  -- receive Writes
+  // W_QP_ID 1: send Commits  -- receive Writes
   struct ibv_send_wr com_send_wr[LDR_MAX_COM_WRS];
   struct ibv_sge com_send_sgl[MAX_BCAST_BATCH], w_recv_sgl[LDR_MAX_RECV_W_WRS];
   struct ibv_wc w_recv_wc[LDR_MAX_RECV_W_WRS];
@@ -78,11 +80,16 @@ void *leader(void *arg)
 
   struct recv_info *w_recv_info, *ack_recv_info;
   w_recv_info =  init_recv_info(cb, w_buf_push_ptr, LEADER_W_BUF_SLOTS,
-                                (uint32_t) LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS, cb->dgram_qp[COMMIT_W_QP_ID],
-                                LDR_MAX_RECV_W_WRS, (void*) w_buffer);
+                                (uint32_t) LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS,
+                                cb->dgram_qp[COMMIT_W_QP_ID],
+                                LDR_MAX_RECV_W_WRS,
+                                w_recv_wr, w_recv_sgl,
+                                (void*) w_buffer);
 
   ack_recv_info = init_recv_info(cb, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
-                                 (uint32_t)LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID], LDR_MAX_RECV_ACK_WRS,
+                                 (uint32_t) LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID],
+                                 LDR_MAX_RECV_ACK_WRS,
+                                 ack_recv_wr, ack_recv_sgl,
                                  (void*) ack_buffer);
 
 
@@ -91,16 +98,15 @@ void *leader(void *arg)
 			.measured_sess_id = 0,
 	};
 
-	struct cache_op *ops;
+	zk_trace_op_t *ops = (zk_trace_op_t *) calloc((size_t) MAX_OP_BATCH, sizeof(zk_trace_op_t));
+  zk_resp_t *resp = (zk_resp_t*) calloc((size_t) MAX_OP_BATCH, sizeof(zk_resp_t));
   struct commit_fifo *com_fifo;
 	struct ibv_mr *prep_mr, *com_mr;
-  struct mica_resp *resp;
-	set_up_ldr_ops(&ops, &resp, &com_fifo, t_id);
+	set_up_ldr_ops(resp, &com_fifo, t_id);
 
 
-  struct pending_writes *p_writes;
-  set_up_pending_writes(&p_writes, LEADER_PENDING_WRITES, protocol);
-  void * prep_buf = (void *) p_writes->prep_fifo->prep_message;
+  p_writes_t *p_writes = set_up_pending_writes(LEADER_PENDING_WRITES, protocol);
+  void *prep_buf = (void *) p_writes->prep_fifo->prep_message;
   set_up_ldr_mrs(&prep_mr, prep_buf, &com_mr, (void *)com_fifo->commits, cb);
 
   // There are no explicit credits and therefore we need to represent the remote prepare buffer somehow,
@@ -117,13 +123,14 @@ void *leader(void *arg)
 	if (WRITE_RATIO > 0) {
     ldr_set_up_credits_and_WRs(credits, credit_recv_wr,
                                &credit_recv_sgl, cb, LDR_MAX_CREDIT_RECV);
-		set_up_ldr_WRs(prep_send_wr, prep_send_sgl, ack_recv_wr, ack_recv_sgl,
-                   com_send_wr, com_send_sgl, w_recv_wr, w_recv_sgl,
-                   t_id, follower_id, cb, prep_mr, com_mr, mcast);
+		set_up_ldr_WRs(prep_send_wr, prep_send_sgl,
+                   com_send_wr, com_send_sgl,
+                   t_id, follower_id,  prep_mr, com_mr, mcast);
 	}
 	// TRACE
-	struct trace_command *trace;
-	trace_init(&trace, t_id);
+	trace_t *trace;
+  if (!ENABLE_CLIENTS)
+    trace = trace_init(t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
@@ -132,7 +139,7 @@ void *leader(void *arg)
   uint32_t credit_debug_cnt[LDR_VC_NUM] = {0};
   uint32_t outstanding_prepares = 0;
 	struct timespec start, end;
-  if (t_id == 0) green_printf("Leader %d  reached the loop \n", t_id);
+  if (t_id == 0) my_printf(green, "Leader %d  reached the loop \n", t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------START LOOP--------------------------------

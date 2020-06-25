@@ -5,7 +5,7 @@
 #ifndef KITE_LATENCY_UTIL_H
 #define KITE_LATENCY_UTIL_H
 
-#include "main.h"
+#include "top.h"
 /* ---------------------------------------------------------------------------
 //------------------------------ LATENCY MEASUREMENTS-------------------------
 //---------------------------------------------------------------------------*/
@@ -48,7 +48,7 @@ static inline void bookkeep_latency(int useconds, req_type rt){
 }
 
 //
-static inline void report_latency(struct latency_flags* latency_info)
+static inline void report_latency(latency_info_t* latency_info)
 {
   struct timespec end;
   clock_gettime(CLOCK_MONOTONIC, &end);
@@ -65,8 +65,8 @@ static inline void report_latency(struct latency_flags* latency_info)
 }
 
 // Necessary bookkeeping to initiate the latency measurement
-static inline void start_measurement(struct latency_flags* latency_info, uint32_t sess_id, uint16_t t_id,
-                                     uint8_t opcode) {
+static inline void start_measurement(latency_info_t* latency_info, uint32_t sess_id,
+                                     uint16_t t_id, uint8_t opcode) {
   uint8_t compare_op = MEASURE_READ_LATENCY ? OP_ACQUIRE : OP_RELEASE ;
   if ((latency_info->measured_req_flag) == NO_REQ) {
     if (t_stats[t_id].cache_hits_per_thread > M_1 &&

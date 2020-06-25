@@ -35,7 +35,6 @@
 
 #define ENABLE_COMMITS_WITH_NO_VAL 1
 #define ENABLE_CAS_CANCELLING 1
-#define ENABLE_ADAPTIVE_INLINING 0 // This did not help
 #define PUT_A_MACHINE_TO_SLEEP 0
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_ALL_ABOARD 1
@@ -59,8 +58,6 @@
 #define DUMP_STATS_2_FILE 0
 
 
-// DEBUG
-#define DEBUG_SEQLOCKS 0
 
 
 
@@ -73,47 +70,12 @@
 
 
 
-
-//enum op_state {INVALID_, VALID_, SENT_, READY_, SEND_COMMITTS};
-typedef enum compare_t{SMALLER, EQUAL, GREATER, ERROR} compare_t;
-
-struct quorum_info {
-  uint8_t missing_num;
-  uint8_t missing_ids[REM_MACH_NUM];
-  uint8_t active_num;
-  uint8_t active_ids[REM_MACH_NUM];
-  bool send_vector[REM_MACH_NUM];
-  // These are not a machine_ids, they ranges= from 0 to REM_MACH_NUM -1
-  // to facilitate usage with the ib_send_wrs
-  uint8_t first_active_rm_id;
-  uint8_t last_active_rm_id;
-};
-
 // unique RMW id-- each machine must remember how many
 // RMW each thread has committed, to avoid committing an RMW twice
 typedef struct rmw_id {
   //uint32_t glob_sess_id; // global session id
   uint64_t id; // the local rmw id of the source
 } rmw_id_t;
-
-
-// flags that help to compare TS
-#define REGULAR_TS 0
-#define NETW_TS 1
-#define META_TS 2
-
-// format of a Timestamp tuple (Lamport clock)
-struct network_ts_tuple {
-  uint8_t m_id;
-  uint32_t version;
-} __attribute__((__packed__));
-
-struct ts_tuple {
-  uint8_t m_id;
-  uint32_t version;
-};
-
-
 
 
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))

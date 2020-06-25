@@ -7,7 +7,7 @@
 
 
 #include "main.h"
-#include "latency_util.h"
+#include "../general_util/latency_util.h"
 #include "debug_util.h"
 #include "config_util.h"
 #include "client_if_util.h"
