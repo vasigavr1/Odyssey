@@ -7,7 +7,7 @@
 
 #include <config.h>
 #include "main.h"
-#include "debug_util.h"
+#include "kite_debug_util.h"
 #include "client_if_util.h"
 #include "config_util.h"
 #include "reserve_stations_util.h"

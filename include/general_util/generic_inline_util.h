@@ -127,6 +127,12 @@ static inline void print_key(struct key *key)
   printf("bkt: %u, server: %u, tag : %u, \n", key->bkt,key->server, key->tag);
 }
 
+static inline void cust_print_key(const char* mes, struct key *key)
+{
+  printf("%s: bkt: %u, server: %u, tag : %u, \n", mes, key->bkt,key->server, key->tag);
+}
+
+
 // Check whether 2 key hashes are equal
 static inline bool keys_are_equal(struct key *key1, struct key *key2) {
   return memcmp(key1, key2, KEY_SIZE) == 0;

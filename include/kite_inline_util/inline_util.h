@@ -7,7 +7,7 @@
 
 #include "generic_util.h"
 #include "kvs_util.h"
-#include "debug_util.h"
+#include "kite_debug_util.h"
 #include "config_util.h"
 #include "client_if_util.h"
 #include "paxos_util.h"

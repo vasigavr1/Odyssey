@@ -8,7 +8,7 @@
 #include <config.h>
 #include "kvs.h"
 #include "generic_util.h"
-#include "debug_util.h"
+#include "kite_debug_util.h"
 #include "config_util.h"
 #include "client_if_util.h"
 #include "paxos_util.h"
@@ -592,10 +592,10 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) assert(false);
     /* We had a tag match earlier. Now compare log entry. */
     bool key_found = memcmp(&kv_ptr[op_i]->key, &op[op_i].key, KEY_SIZE) == 0;
-    if(unlikely(!key_found)) {
-      my_printf(red, "Cache_miss %u : bkt %u/%u, server %u/%u, tag %u/%u key.id %u\n",
-                op_i, op[op_i].key.bkt, kv_ptr[op_i]->key.bkt, op[op_i].key.server,
-                kv_ptr[op_i]->key.server, op[op_i].key.tag, kv_ptr[op_i]->key.tag, kv_ptr[op_i]->key_id);
+    if(unlikely(ENABLE_ASSERTIONS && !key_found)) {
+      my_printf(red, "Kvs miss %u\n", op_i);
+      cust_print_key("Op", &op[op_i].key);
+      cust_print_key("KV_ptr", &kv_ptr[op_i]->key);
       resp[op_i].type = KVS_MISS;
       return;
     }
@@ -762,7 +762,7 @@ static inline void KVS_batch_op_reads(uint32_t op_num, uint16_t t_id, p_ops_t *p
       else if (ENABLE_ASSERTIONS) assert(false);
     }
     else {  //Cache miss --> We get here if either tag or log key match failed
-      my_printf(red, "Opcode %u Cache_miss: bkt %u, server %u, tag %u \n",
+      my_printf(red, "Opcode %u Kvs miss: bkt %u, server %u, tag %u \n",
                 read->opcode, read->key.bkt, read->key.server, read->key.tag);
       assert(false); // cant have a miss since, it hit in the source's kvs
     }

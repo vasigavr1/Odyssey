@@ -39,6 +39,24 @@
 #include <netdb.h>
 #include <stdbool.h>
 
+enum {error_sys, kite_sys, zookeeper_sys};
+
+#ifdef KITE
+#define COMPILED_SYSTEM kite_sys
+#endif
+
+
+#ifdef ZOOKEEPER
+#define COMPILED_SYSTEM zookeeper_sys
+#endif
+
+#ifndef KITE
+#ifndef ZOOKEEPER
+#define COMPILED_SYSTEM kite_sys
+#endif
+#endif
+
+
 
 // Stats thread
 void *print_stats(void*);
@@ -71,9 +89,9 @@ typedef struct key mica_key_t;
 #define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 1
 #define MACHINE_NUM 5
-#define SESSIONS_PER_THREAD 40
+#define SESSIONS_PER_THREAD 22
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
@@ -100,12 +118,12 @@ typedef struct key mica_key_t;
 //-------------------------------------------
 /* ----------TRACE------------------------ */
 //-------------------------------------------
-#define WRITE_RATIO 500 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
+#define WRITE_RATIO 1000 //Warning write ratio is given out of a 1000, e.g 10 means 10/1000 i.e. 1%
 #define SC_RATIO 500// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RELEASES 1
-#define ENABLE_ACQUIRES 1
+#define ENABLE_RELEASES (1 && COMPILED_SYSTEM == kite_sys)
+#define ENABLE_ACQUIRES (1 && COMPILED_SYSTEM == kite_sys)
 #define RMW_RATIO 1000// this is out of 1000, e.g. 10 means 1%
-#define ENABLE_RMWS 1
+#define ENABLE_RMWS (1 && COMPILED_SYSTEM == kite_sys)
 #define FEED_FROM_TRACE 0 // used to enable skew++
 // RMW TRACE
 #define ENABLE_NO_CONFLICT_RMW 0 // each thread rmws a different key
@@ -141,8 +159,9 @@ typedef struct key mica_key_t;
 -----------------DEBUGGING-------------------------
 --------------------------------------------------*/
 //It may be that ENABLE_ASSERTIONS  must be up for these to work
-#define DEBUG_WRITES 1
-#define DEBUG_ACKS 1
+#define DEBUG_PREPARES 0 // zookeeper only
+#define DEBUG_WRITES 0
+#define DEBUG_ACKS 0
 #define DEBUG_READS 0
 #define DEBUG_READ_REPS 0
 #define DEBUG_TS 0

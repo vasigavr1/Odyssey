@@ -9,6 +9,7 @@
 #include "config.h"
 #include "main.h"
 #include "generic_util.h"
+#include "../general_util/debug_util.h"
 
 
 /* ---------------------------------------------------------------------------
@@ -1146,17 +1147,7 @@ static inline void check_read_opcode_when_polling_for_reads(struct read *read, u
   }
 }
 
-// called when failing see an even version -- I.E. called by reads
-static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *message, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    (*debug_cntr)++;
-    if ((*debug_cntr) == M_4) {
-      printf("Worker %u stuck on %s \n", t_id, message);
-      (*debug_cntr) = 0;
-    }
-  }
-}
+
 
 
 static inline void debug_fail_help(loc_entry_t *loc_entry, const char *message, uint16_t t_id)

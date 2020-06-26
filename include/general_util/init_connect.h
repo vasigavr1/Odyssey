@@ -445,7 +445,7 @@ static void setup_connections_and_spawn_stats_thread(uint32_t g_id,
                                                      uint16_t t_id)
 {
   setup_connections(g_id, cb);
-  // thread_zero_spawns_stat_thread(t_id);
+  thread_zero_spawns_stat_thread(t_id);
 
   if (t_id == 0) atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
   else {

@@ -10,7 +10,7 @@ PROF    := -g -fno-omit-frame-pointer
 all: ${APPS}
 
 zookeeper: ../libhrd/hrd_conn.o ../libhrd/hrd_util.o  ../mica/city.o  ../mica/kvs.o \
-           zk_main.o zk_util.o zk_leader.o zk_follower.o #zk_cache.o  zk_stats.o
+           zk_main.o zk_util.o zk_leader.o zk_follower.o zk_stats.o#zk_cache.o
 	${LD} -o $@ $^ ${LDFLAGS}
 
 

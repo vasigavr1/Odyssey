@@ -8,9 +8,9 @@
 
 #include <optik_mod.h>
 #include "optik_mod.h"
-#include "cache.h"
+#include "../../include/mica/kvs.h"
 
-struct cache cache;
+//struct cache cache;
 
 //local file functions
 char* code_to_str(uint8_t code);
@@ -48,7 +48,7 @@ void cache_init(int cache_id, int num_threads) {
 
 /* The leader and follower send their local requests to this, reads get served
  * But writes do not get served, writes are only propagated here to see whether their keys exist */
-inline void cache_batch_op_trace(int op_num, int thread_id, struct cache_op **op, struct mica_resp *resp)
+inline void zk_KVS_batch_op_trace(int op_num, int thread_id, struct cache_op **op, struct mica_resp *resp)
 {
 	int I, j;	/* I is batch index */
 	long long stalled_brces = 0;
@@ -463,15 +463,15 @@ char* code_to_str(uint8_t code){
 		case CACHE_GET_FAIL:
 			return "CACHE_GET_FAIL";
 		case CACHE_OP_GET:
-			return "CACHE_OP_GET";
+			return "KVS_OP_GET";
 		case CACHE_OP_PUT:
-			return "CACHE_OP_PUT";
+			return "KVS_OP_PUT";
 		case CACHE_OP_UPD:
 			return "CACHE_OP_UPD";
 		case CACHE_OP_INV:
 			return "CACHE_OP_INV";
 		case CACHE_OP_ACK:
-			return "CACHE_OP_ACK";
+			return "KVS_OP_ACK";
 		case CACHE_OP_BRC:
 			return "CACHE_OP_BRC";
 		case UNSERVED_CACHE_MISS:

@@ -524,9 +524,9 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
   if (protocol == LEADER) {
     struct prep_message *preps = p_writes->prep_fifo->prep_message;
     for (i = 0; i < PREP_FIFO_SIZE; i++) {
-      preps[i].opcode = CACHE_OP_PUT;
+      preps[i].opcode = KVS_OP_PUT;
       for (uint16_t j = 0; j < MAX_PREP_COALESCE; j++) {
-        preps[i].prepare[j].opcode = CACHE_OP_PUT;
+        preps[i].prepare[j].opcode = KVS_OP_PUT;
         preps[i].prepare[j].val_len = VALUE_SIZE >> SHIFT_BITS;
       }
     }
@@ -534,7 +534,7 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
     struct w_message *writes = (struct w_message *) p_writes->w_fifo->fifo;
     for (i = 0; i < W_FIFO_SIZE; i++) {
       for (uint16_t j = 0; j < MAX_W_COALESCE; j++) {
-        writes[i].write[j].opcode = CACHE_OP_PUT;
+        writes[i].write[j].opcode = KVS_OP_PUT;
         writes[i].write[j].val_len = VALUE_SIZE >> SHIFT_BITS;
       }
     }
@@ -605,7 +605,7 @@ void set_up_ldr_ops(zk_resp_t *resp,
     calloc(COMMIT_FIFO_SIZE, sizeof(struct com_message));
   for(i = 0; i <  MAX_OP_BATCH; i++) resp[i].type = EMPTY;
   for(i = 0; i <  COMMIT_FIFO_SIZE; i++) {
-      (*com_fifo)->commits[i].opcode = CACHE_OP_PUT;
+      (*com_fifo)->commits[i].opcode = KVS_OP_PUT;
   }
 
 }
@@ -636,7 +636,8 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
     if (!COM_ENABLE_INLINING) com_send_sgl[j].lkey = com_mr->lkey;
 
     for (i = 0; i < MESSAGES_IN_BCAST; i++) {
-      uint16_t rm_id = i;
+//      uint16_t rm_id = i;
+      uint16_t m_id = (uint16_t) (i < LEADER_MACHINE ? i : i + 1);
       uint16_t index = (j * MESSAGES_IN_BCAST) + i;
       assert (index < MESSAGES_IN_BCAST_BATCH);
       if (ENABLE_MULTICAST == 1) {
@@ -647,11 +648,11 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
         com_send_wr[index].wr.ud.remote_qpn = mcast->qpn[COM_MCAST_QP];
         com_send_wr[index].wr.ud.remote_qkey = mcast->qkey[COM_MCAST_QP];
       } else {
-        prep_send_wr[index].wr.ud.ah = remote_follower_qp[rm_id][remote_thread][PREP_ACK_QP_ID].ah;
-        prep_send_wr[index].wr.ud.remote_qpn = (uint32) remote_follower_qp[rm_id][remote_thread][PREP_ACK_QP_ID].qpn;
+        prep_send_wr[index].wr.ud.ah = rem_qp[m_id][remote_thread][PREP_ACK_QP_ID].ah;
+        prep_send_wr[index].wr.ud.remote_qpn = (uint32) rem_qp[m_id][remote_thread][PREP_ACK_QP_ID].qpn;
         prep_send_wr[index].wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
-        com_send_wr[index].wr.ud.ah = remote_follower_qp[rm_id][remote_thread][COMMIT_W_QP_ID].ah;
-        com_send_wr[index].wr.ud.remote_qpn = (uint32) remote_follower_qp[rm_id][remote_thread][COMMIT_W_QP_ID].qpn;
+        com_send_wr[index].wr.ud.ah = rem_qp[m_id][remote_thread][COMMIT_W_QP_ID].ah;
+        com_send_wr[index].wr.ud.remote_qpn = (uint32) rem_qp[m_id][remote_thread][COMMIT_W_QP_ID].qpn;
         com_send_wr[index].wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
       }
       prep_send_wr[index].opcode = IBV_WR_SEND;
@@ -704,8 +705,8 @@ void set_up_follower_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_se
 {
   uint16_t i;
     // ACKS
-    ack_send_wr->wr.ud.ah = remote_leader_qp[remote_thread][PREP_ACK_QP_ID].ah;
-    ack_send_wr->wr.ud.remote_qpn = (uint32) remote_leader_qp[remote_thread][PREP_ACK_QP_ID].qpn;
+    ack_send_wr->wr.ud.ah = rem_qp[LEADER_MACHINE][remote_thread][PREP_ACK_QP_ID].ah;
+    ack_send_wr->wr.ud.remote_qpn = (uint32) rem_qp[LEADER_MACHINE][remote_thread][PREP_ACK_QP_ID].qpn;
     ack_send_wr->wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
     ack_send_wr->opcode = IBV_WR_SEND;
     ack_send_wr->send_flags = IBV_SEND_INLINE;
@@ -715,8 +716,8 @@ void set_up_follower_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_se
     ack_send_wr->next = NULL;
     // WRITES
     for (i = 0; i < FLR_MAX_W_WRS; ++i) {
-        w_send_wr[i].wr.ud.ah = remote_leader_qp[remote_thread][COMMIT_W_QP_ID].ah;
-        w_send_wr[i].wr.ud.remote_qpn = (uint32) remote_leader_qp[remote_thread][COMMIT_W_QP_ID].qpn;
+        w_send_wr[i].wr.ud.ah = rem_qp[LEADER_MACHINE][remote_thread][COMMIT_W_QP_ID].ah;
+        w_send_wr[i].wr.ud.remote_qpn = (uint32) rem_qp[LEADER_MACHINE][remote_thread][COMMIT_W_QP_ID].qpn;
         if (FLR_W_ENABLE_INLINING) w_send_wr[i].send_flags = IBV_SEND_INLINE;
         else {
             w_send_sgl[i].lkey = w_mr->lkey;
@@ -756,8 +757,8 @@ void flr_set_up_credit_WRs(struct ibv_send_wr* credit_send_wr, struct ibv_sge* c
     credit_send_wr[i].wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
     credit_send_wr[i].next = NULL;
     credit_send_wr[i].send_flags = IBV_SEND_INLINE;
-    credit_send_wr[i].wr.ud.ah = remote_leader_qp[t_id][FC_QP_ID].ah;
-    credit_send_wr[i].wr.ud.remote_qpn = (uint32_t) remote_leader_qp[t_id][FC_QP_ID].qpn;
+    credit_send_wr[i].wr.ud.ah = rem_qp[LEADER_MACHINE][t_id][FC_QP_ID].ah;
+    credit_send_wr[i].wr.ud.remote_qpn = (uint32_t) rem_qp[LEADER_MACHINE][t_id][FC_QP_ID].qpn;
   }
 }
 

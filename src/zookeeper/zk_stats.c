@@ -1,5 +1,5 @@
-#include "zk_util.h"
-#include "inline_util.h"
+#include "../../include/zookeeper/zk_util.h"
+#include "../../include/zookeeper/zk_inline_util.h"
 
 //void print_latency_stats(void);
 
@@ -76,22 +76,22 @@ void *print_stats(void* no_arg) {
       total_throughput = (all_clients_cache_hits) / seconds;
 
       printf("---------------PRINT %d time elapsed %.2f---------------\n", print_count, seconds / MILLION);
-      green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+      my_printf(green, "SYSTEM MIOPS: %.2f \n", total_throughput);
       for (i = 0; i < num_threads; i++) {
-        cyan_printf("T%d: ", i);
-        yellow_printf("%.2f MIOPS, STALL: GID: %.2f/s, ACK/PREP %.2f/s, COM/CREDIT %.2f/s", i,
+        my_printf(cyan, "T%d: ", i);
+        my_printf(yellow, "%.2f MIOPS, STALL: GID: %.2f/s, ACK/PREP %.2f/s, COM/CREDIT %.2f/s", i,
                       all_stats.cache_hits_per_thread[i],
                       all_stats.stalled_gid[i],
                       all_stats.stalled_ack_prep[i],
                       all_stats.stalled_com_credit[i]);
         if (machine_id == LEADER_MACHINE) {
-          yellow_printf(", BATCHES: GID %.2f, Coms %.2f, Preps %.2f ",
+          my_printf(yellow, ", BATCHES: GID %.2f, Coms %.2f, Preps %.2f ",
                         all_stats.batch_size_per_thread[i],
                         all_stats.com_batch_size[i],
                         all_stats.prep_batch_size[i]);
         }
         else {
-          yellow_printf(", BATCHES: Acks %.2f, Ws %.2f ",
+          my_printf(yellow, ", BATCHES: Acks %.2f, Ws %.2f ",
                         all_stats.ack_batch_size[i],
                         all_stats.write_batch_size[i]);
         }
@@ -101,11 +101,11 @@ void *print_stats(void* no_arg) {
       printf("\n");
       printf("---------------------------------------\n");
       if (ENABLE_CACHE_STATS == 1)
-        print_cache_stats(start, machine_id);
+        //print_cache_stats(start, machine_id);
       // // Write to a file all_clients_throughput, per_worker_remote_throughput[], per_worker_local_throughput[]
       if (DUMP_STATS_2_FILE == 1)
         dump_stats_2_file(&all_stats);
-      green_printf("SYSTEM MIOPS: %.2f \n", total_throughput);
+      my_printf(green, "SYSTEM MIOPS: %.2f \n", total_throughput);
   }
 
 }

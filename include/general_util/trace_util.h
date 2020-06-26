@@ -31,7 +31,7 @@ static uint8_t compute_opcode(struct opcode_info *opc_info, uint *seed)
   uint8_t  opcode = 0;
   uint8_t cas_opcode = USE_WEAK_CAS ? COMPARE_AND_SWAP_WEAK : COMPARE_AND_SWAP_STRONG;
   bool is_rmw = false, is_update = false, is_sc = false;
-  if (ENABLE_RMWS) {
+  if (ENABLE_RMWS ) {
     if (ALL_RMWS_SINGLE_KEY) is_rmw = true;
     else
       is_rmw = rand_r(seed) % 1000 < RMW_RATIO;

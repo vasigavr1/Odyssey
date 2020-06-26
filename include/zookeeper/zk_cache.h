@@ -25,11 +25,11 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
-#define CACHE_OP_GET 111
-#define CACHE_OP_PUT 112
+#define KVS_OP_GET 111
+#define KVS_OP_PUT 112
 #define CACHE_OP_UPD 113
 #define CACHE_OP_INV 114
-#define CACHE_OP_ACK 115
+#define KVS_OP_ACK 115
 #define CACHE_OP_BRC 116       //Warning although this is cache opcode it's returned by cache to either Broadcast upd or inv
 
 //Cache Response
@@ -138,7 +138,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 
 ///* The leader and follower send their local requests to this, reads get served
 // * But writes do not get served, writes are only propagated here to see whether their keys exist */
-//void cache_batch_op_trace(int op_num, int thread_id, struct cache_op **op, struct mica_resp *resp);
+//void zk_KVS_batch_op_trace(int op_num, int thread_id, struct cache_op **op, struct mica_resp *resp);
 ///* The leader sends the writes to be committed with this function*/
 //void cache_batch_op_updates(uint32_t , int , struct prepare**, struct mica_resp *,uint32_t,  uint32_t, bool);
 

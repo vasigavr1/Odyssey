@@ -14,22 +14,22 @@
 #define WRITE_REPLAY_STATE 5
 
 //Cache Opcode
-#define CACHE_OP_GET 111
-#define CACHE_OP_PUT 112
+//#define KVS_OP_GET 111
+//#define KVS_OP_PUT 112
 #define CACHE_OP_UPD 113
 #define CACHE_OP_INV 114
-#define CACHE_OP_ACK 115
+#define KVS_OP_ACK 115
 #define CACHE_OP_BRC 116       //Warning although this is cache opcode it's returned by cache to either Broadcast upd or inv
 
 //Cache Response
-#define EMPTY 120
-#define CACHE_GET_SUCCESS 121
-#define CACHE_PUT_SUCCESS 122
-#define CACHE_UPD_SUCCESS 123
-#define CACHE_INV_SUCCESS 124
-#define CACHE_ACK_SUCCESS 125
-#define CACHE_LAST_ACK_SUCCESS 126
-#define RETRY 127
+//#define EMPTY 120
+//#define CACHE_GET_SUCCESS 121
+//#define CACHE_PUT_SUCCESS 122
+//#define CACHE_UPD_SUCCESS 123
+//#define CACHE_INV_SUCCESS 124
+//#define CACHE_ACK_SUCCESS 125
+//#define CACHE_LAST_ACK_SUCCESS 126
+//#define RETRY 127
 
 #define KEY_HIT 220
 

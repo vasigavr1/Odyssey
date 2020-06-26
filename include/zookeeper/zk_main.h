@@ -3,6 +3,7 @@
 
 #include "../general_util/top.h"
 
+
 #include "city.h"
 #include "hrd.h"
 #include "zk_config.h"
@@ -11,7 +12,7 @@
 
 
 #define ENABLE_MULTIPLE_SESSIONS 1
-
+#define ZK_TRACE_BTACH SESSIONS_PER_THREAD
 
 #define DISABLE_GID_ORDERING 0
 #define DISABLE_UPDATING_KVS 0
@@ -46,20 +47,6 @@
 #define FOLLOWER_DOES_ONLY_READS 0
 
 
-/*-------------------------------------------------
-	-----------------MULTICAST-------------------------
---------------------------------------------------*/
-
-#define ENABLE_MULTICAST 0
-#define MULTICAST_TESTING_ 0
-#define MULTICAST_TESTING (ENABLE_MULTICAST == 1 ? MULTICAST_TESTING_ : 0)
-#define MCAST_QPS MACHINE_NUM
-
-
-#define MCAST_QP_NUM 2
-#define PREP_MCAST_QP 0
-#define COM_MCAST_QP 1
-#define MCAST_GROUPS_NUM 2
 
 // ------COMMON-------------------
 #define MAX_BCAST_BATCH (ENABLE_MULTICAST == 1 ? 4 : 4) //how many broadcasts can fit in a batch
@@ -235,7 +222,7 @@
 
 
 // DEBUG
-#define DEBUG_PREPARES 0
+
 #define FLR_CHECK_DBG_COUNTERS 0
 
 
@@ -250,8 +237,7 @@
 #define MAX_TRACE_SIZE _200_K
 #define TRACE_SIZE K_128 // used only when manufacturing a trace
 #define NOP 0
-#define WRITE_OP 1
-#define READ_OP 2
+
 
 
 /*
@@ -297,14 +283,14 @@ struct com_message_ud_req {
 
 struct prepare {
 	uint8_t flr_id;
-	uint8_t session_id[3];
+  uint8_t unused;
   uint16_t sess_id;
 	uint8_t g_id[4]; //send the bottom half of the gid
 	uint8_t key[8];
 	uint8_t opcode; //override opcode
 	uint8_t val_len;
 	uint8_t value[VALUE_SIZE];
-};
+} __attribute__((__packed__));
 
 // prepare message
 struct prep_message {
@@ -329,7 +315,7 @@ struct write {
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
-};
+} __attribute__((__packed__));
 
 typedef  struct w_message {
   struct write write[MAX_W_COALESCE];
@@ -395,11 +381,11 @@ typedef struct pending_writes {
 
 
 // struct for the follower to keep track of the acks it has sent
-struct pending_acks {
+typedef struct pending_acks {
 	uint32_t slots_ahead;
 	uint32_t acks_to_send;
 
-};
+} p_acks_t;
 
 
 typedef struct zk_trace_op {
@@ -454,8 +440,8 @@ typedef struct thread_stats { // 2 cache lines
 	//long long unused[3]; // padding to avoid false sharing
 } thread_stats_t;
 
-extern remote_qp_t remote_follower_qp[FOLLOWER_MACHINE_NUM][FOLLOWERS_PER_MACHINE][FOLLOWER_QP_NUM];
-extern remote_qp_t remote_leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
+//extern remote_qp_t remote_follower_qp[FOLLOWER_MACHINE_NUM][FOLLOWERS_PER_MACHINE][FOLLOWER_QP_NUM];
+//extern remote_qp_t remote_leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
 extern thread_stats_t t_stats[WORKERS_PER_MACHINE];
 struct mica_op;
 extern atomic_uint_fast64_t global_w_id, committed_global_w_id;

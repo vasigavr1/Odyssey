@@ -29,7 +29,8 @@ void *leader(void *arg)
   uint32_t ack_buf_push_ptr = 0, ack_buf_pull_ptr = 0;
   uint32_t w_buf_push_ptr = 0, w_buf_pull_ptr = 0;
   struct ack_message_ud_req *ack_buffer = (struct ack_message_ud_req *)(cb->dgram_buf);
-  volatile struct  w_message_ud_req *w_buffer = (volatile struct w_message_ud_req *)(cb->dgram_buf + LEADER_ACK_BUF_SIZE);
+  volatile struct  w_message_ud_req *w_buffer =
+    (volatile struct w_message_ud_req *)(cb->dgram_buf + LEADER_ACK_BUF_SIZE);
 	/* ---------------------------------------------------------------------------
 	------------------------------MULTICAST SET UP-------------------------------
 	---------------------------------------------------------------------------*/

@@ -13,19 +13,13 @@
 
 
 
-//Cache Response
+//KVS Response
 //#define RETRY_RMW_NO_ENTRIES 0
 #define RETRY_RMW 1
 #define RMW_FAILURE 2 // when a CAS has to be cut short
 #define RMW_SUCCESS 118
 
 
-#define EMPTY 120
-#define KVS_GET_TS_SUCCESS 21
-#define KVS_GET_SUCCESS 121
-#define KVS_PUT_SUCCESS 122
-#define KVS_LOCAL_GET_SUCCESS 123
-#define KVS_MISS 130
 
 
 // READ_REPLIES

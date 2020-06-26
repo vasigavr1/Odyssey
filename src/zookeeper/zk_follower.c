@@ -106,8 +106,8 @@ void *follower(void *arg)
                                  com_recv_wr, com_recv_sgl,
                                  (void*) com_buffer);
 
-  struct pending_writes *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, protocol);
-  struct pending_acks *p_acks = (struct pending_acks *) malloc(sizeof(struct pending_acks));
+  p_writes_t *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, protocol);
+  p_acks_t *p_acks = (struct pending_acks *) calloc(1, sizeof(p_acks_t));
   struct ack_message *ack = (struct ack_message *) calloc(1, sizeof(struct ack_message));
     
   if (!FLR_W_ENABLE_INLINING)
@@ -137,7 +137,7 @@ void *follower(void *arg)
     wait_for_prepares_dbg_counter = 0, wait_for_coms_dbg_counter = 0;
   struct timespec start, end;
   uint16_t debug_ptr = 0;
-  if (t_id == 0) my_printf(green, "Follower %d  reached the loop \n", t_id);
+  if (t_id == 0) my_printf(green, "Follower %d  reached the loop %u \n", t_id, p_acks->acks_to_send);
   /* ---------------------------------------------------------------------------
   ------------------------------START LOOP--------------------------------
   ---------------------------------------------------------------------------*/

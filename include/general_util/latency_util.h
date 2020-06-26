@@ -73,8 +73,8 @@ static inline void start_measurement(latency_info_t* latency_info, uint32_t sess
         (MEASURE_READ_LATENCY == 2 || opcode == compare_op) &&
         t_id == LATENCY_THREAD && machine_id == LATENCY_MACHINE) {
       //printf("tag a key for latency measurement \n");
-      //if (opcode == CACHE_OP_GET) latency_info->measured_req_flag = HOT_READ_REQ;
-      // else if (opcode == CACHE_OP_PUT) {
+      //if (opcode == KVS_OP_GET) latency_info->measured_req_flag = HOT_READ_REQ;
+      // else if (opcode == KVS_OP_PUT) {
       //  latency_info->measured_req_flag = HOT_WRITE_REQ;
       //}
       //else
