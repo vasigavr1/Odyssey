@@ -216,6 +216,7 @@ static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
     memcpy(prep->value, op->value, (size_t) VALUE_SIZE);
     prep->flr_id = FOLLOWER_MACHINE_NUM; // means it's a leader message
     if (!local) prep->sess_id = (uint16_t) session_id;
+
   }
   else {
     struct write *rem_write = (struct write *) source;
@@ -226,7 +227,7 @@ static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
     prep->flr_id = rem_write->flr_id;
     prep->sess_id = (uint16_t) rem_write->sess_id;
   }
-  p_writes->ptrs_to_ops[w_ptr] = &preps[prep_ptr].prepare[inside_prep_ptr];
+  p_writes->ptrs_to_ops[w_ptr] = prep;
 
   if (inside_prep_ptr == 0) {
     p_writes->prep_fifo->backward_ptrs[prep_ptr] = w_ptr;
@@ -585,8 +586,8 @@ static inline void propagate_updates(p_writes_t *p_writes, struct commit_fifo *c
     if (ENABLE_ASSERTIONS) assert(p_writes->size >= update_op_i);
     p_writes->size -= update_op_i;
     if (!DISABLE_UPDATING_KVS)
-      ;//TODO uncomment
-      //cache_batch_op_updates((uint32_t) update_op_i, 0, p_writes->ptrs_to_ops, resp, pull_ptr, LEADER_PENDING_WRITES, false);
+      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, resp, pull_ptr,
+                              LEADER_PENDING_WRITES, false, t_id);
 		atomic_store_explicit(&committed_global_w_id, committed_g_id, memory_order_relaxed);
     if (MEASURE_LATENCY && latency_info->measured_req_flag == WRITE_REQ &&
         machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&
@@ -1003,11 +1004,11 @@ static inline bool wait_for_the_entire_prepare(volatile struct prep_message *pre
 
 
 // Poll for prepare messages
-static inline void poll_for_prepares(volatile struct prep_message_ud_req *incoming_preps, uint32_t *pull_ptr,
-																		 p_writes_t *p_writes, struct pending_acks *p_acks,
-																		 struct ibv_cq *prep_recv_cq, struct ibv_wc *prep_recv_wc,
-																		 struct recv_info *prep_recv_info, struct fifo *prep_buf_mirror,
-                                     uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
+static inline void flr_poll_for_prepares(volatile struct prep_message_ud_req *incoming_preps, uint32_t *pull_ptr,
+                                         p_writes_t *p_writes, struct pending_acks *p_acks,
+                                         struct ibv_cq *prep_recv_cq, struct ibv_wc *prep_recv_wc,
+                                         struct recv_info *prep_recv_info, struct fifo *prep_buf_mirror,
+                                         uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
 {
 	uint16_t polled_messages = 0;
 	if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) return;
@@ -1381,7 +1382,7 @@ static inline void poll_for_coms(struct com_message_ud_req *incoming_coms, uint3
 }
 
 
-// Follower propagate sUpdates that have seen all acks to the KVS
+// Follower propagates Updates that have seen all acks to the KVS
 static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_acks *p_acks,
                                          zk_resp_t *resp, struct fifo *prep_buf_mirror,
                                          struct latency_flags *latency_info,
@@ -1431,8 +1432,8 @@ static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_ac
 		p_acks->slots_ahead -= update_op_i;
 		p_writes->size -= update_op_i;
 		if (!DISABLE_UPDATING_KVS)
-      ;//TODO uncomment
-      //cache_batch_op_updates((uint32_t) update_op_i, 0, p_writes->ptrs_to_ops, resp, pull_ptr, FLR_PENDING_WRITES, true);
+      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, resp, pull_ptr, FLR_PENDING_WRITES,
+                              true, t_id);
     else
       for (uint16_t i = 0; i < update_op_i; i++) p_writes->ptrs_to_ops[(pull_ptr + i) % FLR_PENDING_WRITES]->opcode = 5;
 

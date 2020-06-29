@@ -42,7 +42,8 @@ void zk_static_assert_compile_parameters()
   assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
   assert(SESSIONS_PER_THREAD < M_16);
   assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
-  if (WRITE_RATIO > 0) assert(MAX_OP_BATCH > LEADER_PENDING_WRITES);
+  if (WRITE_RATIO > 0) assert(ZK_UPDATE_BATCH >= LEADER_PENDING_WRITES);
+  static_assert(FLR_PENDING_WRITES <= LEADER_PENDING_WRITES, "");
 
 
 //

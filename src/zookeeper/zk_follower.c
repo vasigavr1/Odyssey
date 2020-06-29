@@ -151,8 +151,8 @@ void *follower(void *arg)
   ------------------------------ POLL FOR PREPARES--------------------------
   ---------------------------------------------------------------------------*/
     if (WRITE_RATIO > 0)
-      poll_for_prepares(prep_buffer, &prep_pull_ptr, p_writes, p_acks, prep_recv_cq,
-                        prep_recv_wc, prep_recv_info, prep_buf_mirror, t_id, flr_id, &wait_for_prepares_dbg_counter);
+      flr_poll_for_prepares(prep_buffer, &prep_pull_ptr, p_writes, p_acks, prep_recv_cq,
+                            prep_recv_wc, prep_recv_info, prep_buf_mirror, t_id, flr_id, &wait_for_prepares_dbg_counter);
 
 
   /* ---------------------------------------------------------------------------

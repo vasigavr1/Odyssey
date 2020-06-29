@@ -12,7 +12,8 @@
 
 
 #define ENABLE_MULTIPLE_SESSIONS 1
-#define ZK_TRACE_BTACH SESSIONS_PER_THREAD
+
+
 
 #define DISABLE_GID_ORDERING 0
 #define DISABLE_UPDATING_KVS 0
@@ -175,6 +176,11 @@
 #define FLR_DISALLOW_OUT_OF_ORDER_PREPARES 1
 
 #define MAX_LIDS_IN_A_COMMIT MIN(FLR_PENDING_WRITES, LEADER_PENDING_WRITES)
+
+
+
+#define ZK_TRACE_BATCH SESSIONS_PER_THREAD
+#define ZK_UPDATE_BATCH  LEADER_PENDING_WRITES
 /*-------------------------------------------------
 -----------------QUEUE DEPTHS-------------------------
 --------------------------------------------------*/
