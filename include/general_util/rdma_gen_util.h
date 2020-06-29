@@ -58,14 +58,14 @@ static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t re
   }
 }
 
-/* Fill @wc with @num_comps comps from this @cq. Exit on error. */
-static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, uint8_t caller_flag)
+// polling completion queue --blocking
+static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *wc, const char* caller_flag)
 {
   int comps = 0;
   uint32_t debug_cnt = 0;
   while(comps < num_comps) {
     if (ENABLE_ASSERTIONS && debug_cnt > M_256) {
-      printf("Someone is stuck waiting for a completion %d / %d , type %u  \n", comps, num_comps, caller_flag );
+      printf("Someone is stuck waiting for a completion %d / %d , type %s  \n", comps, num_comps, caller_flag );
       debug_cnt = 0;
     }
     int new_comps = ibv_poll_cq(cq, num_comps - comps, &wc[comps]);
@@ -73,8 +73,8 @@ static inline uint32_t poll_cq(struct ibv_cq *cq, int num_comps, struct ibv_wc *
 //			 printf("I see completions %d\n", new_comps);
       /* Ideally, we should check from comps -> new_comps - 1 */
       if(ENABLE_ASSERTIONS && wc[comps].status != 0) {
-        fprintf(stderr, "Bad wc status %d\n", wc[comps].status);
-        exit(0);
+        fprintf(stderr, "Bad wc status %d: %s\n", wc[comps].status, caller_flag);
+        assert(false);
       }
       comps += new_comps;
     }
@@ -110,6 +110,26 @@ static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, 
   if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
   if (!ENABLE_ADAPTIVE_INLINING)
     send_wr[q_info->first_active_rm_id].send_flags = enable_inlining == 1 ? IBV_SEND_INLINE : 0;
+}
+
+
+static inline int find_how_many_messages_can_be_polled(struct ibv_cq *recv_cq, struct ibv_wc *recv_wc,
+                                                       uint32_t *completed_but_not_polled,
+                                                       uint32_t buf_slots,
+                                                       uint16_t t_id)
+{
+  int completed_messages = ibv_poll_cq(recv_cq, buf_slots, recv_wc);
+  if (ENABLE_ASSERTIONS) assert(completed_messages >= 0);
+
+  // There is a chance that you wont be able to poll all completed messages,
+  // because of downstream back-pressure, in which case you
+  // pass the number of completed (i.e. from the completion queue) but not polled messages to the next round
+  if (unlikely(*completed_but_not_polled > 0)) {
+    completed_messages += (*completed_but_not_polled);
+    (*completed_but_not_polled) = 0;
+  }
+
+  return completed_messages;
 }
 
 

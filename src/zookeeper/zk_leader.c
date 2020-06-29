@@ -89,8 +89,7 @@ void *leader(void *arg)
 
   ack_recv_info = init_recv_info(cb, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
                                  (uint32_t) LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID],
-                                 LDR_MAX_RECV_ACK_WRS,
-                                 ack_recv_wr, ack_recv_sgl,
+                                 LDR_MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
                                  (void*) ack_buffer);
 
 
@@ -101,9 +100,9 @@ void *leader(void *arg)
 
 	zk_trace_op_t *ops = (zk_trace_op_t *) calloc((size_t) MAX_OP_BATCH, sizeof(zk_trace_op_t));
   zk_resp_t *resp = (zk_resp_t*) calloc((size_t) MAX_OP_BATCH, sizeof(zk_resp_t));
-  struct commit_fifo *com_fifo;
+  com_fifo_t *com_fifo = set_up_ldr_ops(resp, t_id);
 	struct ibv_mr *prep_mr, *com_mr;
-	set_up_ldr_ops(resp, &com_fifo, t_id);
+
 
 
   p_writes_t *p_writes = set_up_pending_writes(LEADER_PENDING_WRITES, protocol);
@@ -126,7 +125,7 @@ void *leader(void *arg)
                                &credit_recv_sgl, cb, LDR_MAX_CREDIT_RECV);
 		set_up_ldr_WRs(prep_send_wr, prep_send_sgl,
                    com_send_wr, com_send_sgl,
-                   t_id, follower_id,  prep_mr, com_mr, mcast);
+                   t_id, follower_id, prep_mr, com_mr, mcast);
 	}
 	// TRACE
 	trace_t *trace;
@@ -138,7 +137,7 @@ void *leader(void *arg)
 	---------------------------------------------------------------------------*/
   uint32_t wait_for_gid_dbg_counter = 0, wait_for_acks_dbg_counter = 0;
   uint32_t credit_debug_cnt[LDR_VC_NUM] = {0};
-  uint32_t outstanding_prepares = 0;
+  uint32_t outstanding_prepares = 0, completed_but_not_polled_writes = 0;
 	struct timespec start, end;
   if (t_id == 0) my_printf(green, "Leader %d  reached the loop \n", t_id);
 
@@ -160,7 +159,6 @@ void *leader(void *arg)
                     remote_prep_buf,
                     t_id, &wait_for_acks_dbg_counter, &outstanding_prepares);
 
-
 /* ---------------------------------------------------------------------------
 		------------------------------ PROPAGATE UPDATES--------------------------
 		---------------------------------------------------------------------------*/
@@ -172,7 +170,6 @@ void *leader(void *arg)
       propagate_updates(p_writes, com_fifo, resp, &latency_info, t_id, &wait_for_gid_dbg_counter);
 
 
-
     /* ---------------------------------------------------------------------------
 		------------------------------ BROADCAST COMMITS--------------------------
 		---------------------------------------------------------------------------*/
@@ -181,7 +178,6 @@ void *leader(void *arg)
                         &commit_br_tx, credit_debug_cnt, credit_wc,
                         com_send_sgl, com_send_wr, credit_recv_wr,
                         w_recv_info, t_id);
-
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------
     ---------------------------------------------------------------------------*/
@@ -190,9 +186,8 @@ void *leader(void *arg)
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate prepare messages
 		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
-                                           (uint8_t)FOLLOWER_MACHINE_NUM, p_writes, resp,
+                                           (uint8_t) FOLLOWER_MACHINE_NUM, p_writes, resp,
                                            &latency_info, protocol);
-
 
     /* ---------------------------------------------------------------------------
 		------------------------------POLL FOR REMOTE WRITES--------------------------
@@ -200,8 +195,7 @@ void *leader(void *arg)
     // get local and remote writes back to back to increase the write batch
     if (WRITE_RATIO > 0)
       poll_for_writes(w_buffer, &w_buf_pull_ptr, p_writes, cb->dgram_recv_cq[COMMIT_W_QP_ID],
-                      w_recv_wc, w_recv_info, t_id);
-
+                      w_recv_wc, w_recv_info, &completed_but_not_polled_writes, t_id);
 
     /* ---------------------------------------------------------------------------
 		------------------------------GET GLOBAL WRITE IDS--------------------------
@@ -210,7 +204,6 @@ void *leader(void *arg)
     if (WRITE_RATIO > 0) get_wids(p_writes, t_id);
 
     if (ENABLE_ASSERTIONS) check_ldr_p_states(p_writes, t_id);
-
 		/* ---------------------------------------------------------------------------
 		------------------------------BROADCASTS--------------------------------------
 		---------------------------------------------------------------------------*/

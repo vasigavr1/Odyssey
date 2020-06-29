@@ -5,7 +5,12 @@
 #include "../general_util/rdma_gen_util.h"
 #include "zk_kvs_util.h"
 
-
+static inline void check_over(const char* message, struct commit_fifo *com_fifo)
+{
+  if (com_fifo->size > COMMIT_FIFO_SIZE)
+    printf("%s com fifo size %u/%d \n", message,  com_fifo->size, COMMIT_FIFO_SIZE);
+  assert(com_fifo->size <= COMMIT_FIFO_SIZE);
+}
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
 ---------------------------------------------------------------------------*/
@@ -134,7 +139,7 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
                                          uint32_t pull_ptr, p_writes_t *p_writes, uint16_t t_id)
 {
 
-  if (unlikely((*wait_for_preps_dbg_counter) > M_256)) {
+  if (unlikely((*wait_for_preps_dbg_counter) > M_16)) {
     my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
     struct prepare *prep = (struct prepare *)&prep_buf[pull_ptr].prepare.prepare;
     uint32_t l_id = *(uint32_t *)prep_buf[pull_ptr].prepare.l_id;
@@ -161,17 +166,17 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
     (*wait_for_preps_dbg_counter) = 0;
 //    exit(0);
   }
-  if (unlikely((*wait_for_gid_dbg_counter) > M_128)) {
+  if (unlikely((*wait_for_gid_dbg_counter) > M_16)) {
     my_printf(red, "Follower %d waits for the g_id, committed g_id %lu \n", t_id, committed_global_w_id);
     print_flr_stats(t_id);
     (*wait_for_gid_dbg_counter) = 0;
   }
-  if (unlikely((*wait_for_coms_dbg_counter) > M_128)) {
+  if (unlikely((*wait_for_coms_dbg_counter) > M_16)) {
     my_printf(red, "Follower %d waits for coms, committed g_id %lu \n", t_id, committed_global_w_id);
     print_flr_stats(t_id);
     (*wait_for_coms_dbg_counter) = 0;
   }
-  if (unlikely((*credit_debug_cnt) > M_128)) {
+  if (unlikely((*credit_debug_cnt) > M_16)) {
     my_printf(red, "Follower %d lacks write credits, committed g_id %lu \n", t_id, committed_global_w_id);
     print_flr_stats(t_id);
     (*credit_debug_cnt) = 0;
@@ -457,8 +462,7 @@ static inline void poll_for_acks(struct ack_message_ud_req *incoming_acks, uint3
       remove_from_the_mirrored_buffer(remote_prep_buf, ack->ack_num, t_id, ack->follower_id, FLR_PREP_BUF_SLOTS);
     // if the pending write FIFO is empty it means the acks are for committed messages.
     if (p_writes->size == 0 ) {
-      if (!USE_QUORUM) assert(false);
-      memset((void*)ack, 0, FLR_ACK_SEND_SIZE); continue;
+      memset((void*) ack, 0, FLR_ACK_SEND_SIZE); continue;
     }
 
 		if (ENABLE_ASSERTIONS) {
@@ -496,9 +500,9 @@ static inline void poll_for_acks(struct ack_message_ud_req *incoming_acks, uint3
 			MOD_ADD(ack_ptr, LEADER_PENDING_WRITES);
 		}
 		if (ENABLE_ASSERTIONS) assert(credits[PREP_VC][ack->follower_id] <= PREPARE_CREDITS);
-		memset((void*)ack, 0, FLR_ACK_SEND_SIZE); // need to delete all the g_ids
+		memset((void*) ack, 0, FLR_ACK_SEND_SIZE); // need to delete all the g_ids
 	} // while
-
+  assert(polled_messages == completed_messages);
 	*pull_ptr = index;
 	// Poll for the completion of the receives
   if (polled_messages > 0) {
@@ -517,12 +521,13 @@ static inline void poll_for_acks(struct ack_message_ud_req *incoming_acks, uint3
 // Add the acked gid to the appropriate commit message
 static inline void forge_commit_message(struct commit_fifo *com_fifo, uint64_t l_id, uint16_t update_op_i)
 {
-	//l_id refers the oldest write to commit (werites go from l_id to l_id + update_op_i)
+	//l_id refers the oldest write to commit (writes go from l_id to l_id + update_op_i)
 	uint16_t com_mes_i = com_fifo->push_ptr;
+  assert(com_mes_i < COMMIT_FIFO_SIZE);
 	uint16_t last_com_mes_i;
 	struct com_message *commit_messages = com_fifo->commits;
-	if (unlikely(update_op_i ))
-
+	//if (unlikely(update_op_i ))
+  assert(com_fifo->size <= COMMIT_FIFO_SIZE);
 	// see if the new batch can fit with the previous one -- no reason why it should not
 	if (com_fifo->size > 0) {
 		last_com_mes_i = (COMMIT_FIFO_SIZE + com_mes_i - 1) % COMMIT_FIFO_SIZE;
@@ -579,14 +584,16 @@ static inline void propagate_updates(p_writes_t *p_writes, struct commit_fifo *c
 		update_op_i++;
 		committed_g_id++;
 	}
+
 	if (update_op_i > 0) {
     if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
 		forge_commit_message(com_fifo, p_writes->local_w_id, update_op_i);
 		p_writes->local_w_id += update_op_i; // advance the local_w_id
+
     if (ENABLE_ASSERTIONS) assert(p_writes->size >= update_op_i);
     p_writes->size -= update_op_i;
     if (!DISABLE_UPDATING_KVS)
-      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, resp, pull_ptr,
+      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, pull_ptr,
                               LEADER_PENDING_WRITES, false, t_id);
 		atomic_store_explicit(&committed_global_w_id, committed_g_id, memory_order_relaxed);
     if (MEASURE_LATENCY && latency_info->measured_req_flag == WRITE_REQ &&
@@ -602,6 +609,7 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
                                                uint16_t t_id, uint32_t index)
 {
   uint32_t debug_cntr = 0;
+  assert(w_mes->write[w_mes->write[0].w_num - 1].opcode == KVS_OP_PUT);
   while (w_mes->write[w_mes->write[0].w_num - 1].opcode != KVS_OP_PUT) {
     if (ENABLE_ASSERTIONS) {
       debug_cntr++;
@@ -619,20 +627,32 @@ static inline void wait_for_the_entire_write(volatile struct w_message *w_mes,
 static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws, uint32_t *pull_ptr,
 																	 p_writes_t *p_writes,
 																	 struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                   struct recv_info *w_recv_info, uint16_t t_id)
+                                   struct recv_info *w_recv_info,
+                                   uint32_t *completed_but_not_polled_writes,
+                                   uint16_t t_id)
 {
+  int completed_messages =
+    find_how_many_messages_can_be_polled(w_recv_cq, w_recv_wc,
+                                         completed_but_not_polled_writes,
+                                         LEADER_W_BUF_SLOTS, t_id);
+  if (completed_messages <= 0) return;
+
 	if (p_writes->size == LEADER_PENDING_WRITES) return;
 	if (ENABLE_ASSERTIONS) assert(p_writes->size < LEADER_PENDING_WRITES);
 	uint32_t index = *pull_ptr;
 	uint32_t polled_messages = 0;
 	// Start polling
-	while (incoming_ws[index].w_mes.write[0].w_num > 0) {
+  while (polled_messages < completed_messages) {
+	//while (incoming_ws[index].w_mes.write[0].w_num > 0) {
     wait_for_the_entire_write(&incoming_ws[index].w_mes, t_id, index);
 		 if (DEBUG_WRITES) printf("Leader sees a write Opcode %d at offset %d  \n",
                               incoming_ws[index].w_mes.write[0].opcode, index);
-		struct w_message *w_mes = (struct w_message*) &incoming_ws[index].w_mes;
+		struct w_message *w_mes = (struct w_message *) &incoming_ws[index].w_mes;
 		uint8_t w_num = w_mes->write[0].w_num;
-    if (p_writes->size + w_num > LEADER_PENDING_WRITES) break;
+    if (p_writes->size + w_num > LEADER_PENDING_WRITES) {
+      (*completed_but_not_polled_writes) = completed_messages - polled_messages;
+      break;
+    }
 		for (uint16_t i = 0; i < w_num; i++) {
       struct write *write = &w_mes->write[i];
       if (ENABLE_ASSERTIONS) if(write->opcode != KVS_OP_PUT)
@@ -652,9 +672,9 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     polled_messages++;
 	}
   (*pull_ptr) = index;
-	// Poll for the completion of the receives
+
 	if (polled_messages > 0) {
-    hrd_poll_cq(w_recv_cq, polled_messages, w_recv_wc);
+    //poll_cq(w_recv_cq, polled_messages, w_recv_wc, "polling for writes");
     post_recvs_with_recv_info(w_recv_info, polled_messages);
   }
 }
@@ -672,9 +692,9 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
   int credits_found = 0;
   credits_found = ibv_poll_cq(credit_recv_cq, LDR_MAX_CREDIT_RECV, credit_wc);
   if(credits_found > 0) {
-    if(unlikely(credit_wc[credits_found -1].status != 0)) {
+    if(unlikely(credit_wc[credits_found - 1].status != 0)) {
       fprintf(stderr, "Bad wc status when polling for credits to send a broadcast %d\n", credit_wc[credits_found -1].status);
-      exit(0);
+      assert(false);
     }
     for (uint32_t j = 0; j < credits_found; j++) {
       credits[COMMIT_W_QP_ID][credit_wc[j].imm_data]+= FLR_CREDITS_IN_MESSAGE;
@@ -686,8 +706,9 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
   }
 }
 
-//Checks if there are enough credits to perform a broadcast -- protocol independent
-static inline bool check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct hrd_ctrl_blk* cb, struct ibv_wc* credit_wc,
+//Checks if there are enough credits to perform a broadcast
+static inline bool check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], hrd_ctrl_blk_t* cb,
+                                       struct ibv_wc* credit_wc,
                                        uint32_t* credit_debug_cnt, uint8_t vc)
 {
   bool poll_for_credits = false;
@@ -774,10 +795,14 @@ static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_
   // Batch the broadcasts to the NIC
   if (br_i > 0) {
     send_wr[(br_i * MESSAGES_IN_BCAST) - 1].next = NULL;
+
     ret = ibv_post_send(cb->dgram_qp[qp_id], &send_wr[0], &bad_send_wr);
     CPE(ret, "Broadcast ibv_post_send error", ret);
   }
 }
+
+
+
 
 // Leader broadcasts commits
 static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct hrd_ctrl_blk *cb,
@@ -787,7 +812,9 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
                                      struct ibv_recv_wr *credit_recv_wr,
 																		 struct recv_info *w_recv_info, uint16_t t_id)
 {
-//  printf("Ldr %d bcasting commits \n", t_id);
+
+  if (com_fifo->size == 0) return;
+  //printf("Ldr %d bcasting commits \n", t_id);
   uint8_t vc = COMM_VC;
   uint16_t  br_i = 0, credit_recv_counter = 0;
   while (com_fifo->size > 0) {
@@ -809,6 +836,9 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
     br_i++;
 		if (ENABLE_ASSERTIONS) {
 			assert(br_i <= COMMIT_CREDITS);
+      assert(com_fifo != NULL);
+      if (com_fifo->size > COMMIT_FIFO_SIZE)
+        printf("com fifo size %u/%d \n", com_fifo->size, COMMIT_FIFO_SIZE);
 			assert(com_fifo->size <= COMMIT_FIFO_SIZE);
 			assert(com_mes->com_num > 0 && com_mes->com_num <= MAX_LIDS_IN_A_COMMIT);
 		}
@@ -821,16 +851,26 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
       uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
       post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
       w_recv_info->posted_recvs += recvs_to_post_num;
-
+      //printf("Broadcasting %u commits \n", br_i);
       post_recvs_and_batch_bcasts_to_NIC(br_i, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
 			com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
       br_i = 0;
     }
   }
 	if (br_i > 0) {
+    //printf("Broadcasting %u commits \n", br_i);
     uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
     post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
     w_recv_info->posted_recvs += recvs_to_post_num;
+    for (int com_i = 0; com_i < MESSAGES_IN_BCAST; ++com_i) {
+      if (com_i < MESSAGES_IN_BCAST - 1)
+        assert(com_send_wr[com_i].next == &com_send_wr[com_i + 1]);
+      else assert(com_send_wr[com_i].next == NULL);
+      assert(com_send_wr[com_i].num_sge == 1);
+      assert(com_send_wr[com_i].sg_list == com_send_sgl);
+      assert(com_send_wr[com_i].opcode == IBV_WR_SEND);
+    }
+
 		post_recvs_and_batch_bcasts_to_NIC(br_i, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
 		com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
 	}
@@ -873,7 +913,7 @@ static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
 	(*prep_br_tx)++;
 	if ((*prep_br_tx) % PREP_BCAST_SS_BATCH == PREP_BCAST_SS_BATCH - 1) {
 //    printf("Leader %u POLLING for a send completion in prepares \n", t_id);
-		hrd_poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc);
+		poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc, "sneding prepares");
 	}
 	// Have the last message of each broadcast pointing to the first message of the next bcast
 	if (br_i > 0)
@@ -1008,15 +1048,26 @@ static inline void flr_poll_for_prepares(volatile struct prep_message_ud_req *in
                                          p_writes_t *p_writes, struct pending_acks *p_acks,
                                          struct ibv_cq *prep_recv_cq, struct ibv_wc *prep_recv_wc,
                                          struct recv_info *prep_recv_info, struct fifo *prep_buf_mirror,
+                                         uint32_t *completed_but_not_polled_preps,
                                          uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
 {
 	uint16_t polled_messages = 0;
-	if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) return;
+	if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) {
+    //printf("this is stopping me \n");
+    return;
+  }
 	uint32_t index = *pull_ptr;
-	while((incoming_preps[index].prepare.opcode == KVS_OP_PUT) &&
-    (prep_buf_mirror->size < MAX_PREP_BUF_SLOTS_TO_BE_POLLED)) {
+  int completed_messages =
+    find_how_many_messages_can_be_polled(prep_recv_cq, prep_recv_wc,
+                                         completed_but_not_polled_preps,
+                                         FLR_PREP_BUF_SLOTS, t_id);
+  if (completed_messages <= 0) return;
+  while (polled_messages < completed_messages) {
+	//while((incoming_preps[index].prepare.opcode == KVS_OP_PUT) &&
+   // (prep_buf_mirror->size < MAX_PREP_BUF_SLOTS_TO_BE_POLLED)) {
+    if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) break;
     // wait for the entire message
-    if (!wait_for_the_entire_prepare(&incoming_preps[index].prepare, t_id, index, p_writes)) break;
+    //if (!wait_for_the_entire_prepare(&incoming_preps[index].prepare, t_id, index, p_writes)) break;
     struct prep_message *prep_mes = (struct prep_message *) &incoming_preps[index].prepare;
     uint8_t coalesce_num = prep_mes->coalesce_num;
 		struct prepare *prepare = prep_mes->prepare;
@@ -1024,8 +1075,8 @@ static inline void flr_poll_for_prepares(volatile struct prep_message_ud_req *in
 		uint32_t incoming_l_id = *(uint32_t *)prep_mes->l_id;
 		uint64_t expected_l_id = p_writes->local_w_id + p_writes->size;
     if (DEBUG_PREPARES)
-      printf("Flr %d sees a prep message with %d prepares at index %u l_id %u, expected lid %lu \n",
-             t_id, coalesce_num, index, incoming_l_id, expected_l_id);
+      my_printf(green, "Flr %d sees a prep message with %d prepares at index %u l_id %u, expected lid %lu \n",
+                t_id, coalesce_num, index, incoming_l_id, expected_l_id);
 		if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES) {
       if (expected_l_id != (uint64_t) incoming_l_id) {
        my_printf(red, "flr %u expected l_id  %lu and received %u \n",
@@ -1091,9 +1142,9 @@ static inline void flr_poll_for_prepares(volatile struct prep_message_ud_req *in
 		MOD_ADD(index, FLR_PREP_BUF_SLOTS);
 		polled_messages++;
 	}
+  (*completed_but_not_polled_preps) = completed_messages - polled_messages;
   *pull_ptr = index;
 	if (polled_messages > 0) {
-    hrd_poll_cq(prep_recv_cq, polled_messages, prep_recv_wc);
     if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
   }
   else if (ENABLE_ASSERTIONS && p_acks->acks_to_send == 0 && p_writes->size == 0) (*dbg_counter)++;
@@ -1149,7 +1200,7 @@ static inline void send_acks_to_ldr(p_writes_t *p_writes, struct ibv_send_wr *ac
 	else ack_send_wr->send_flags = IBV_SEND_INLINE;
 	if((*sent_ack_tx) % ACK_SEND_SS_BATCH == ACK_SEND_SS_BATCH - 1) {
 		// if (local_client_id == 0) my_printf(green, "Polling for ack  %llu \n", *sent_ack_tx);
-		hrd_poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc);
+		poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc, "sending acks");
 	}
 
 	(*sent_ack_tx)++; // Selective signaling
@@ -1193,7 +1244,7 @@ static inline void send_credits_for_commits(struct recv_info *com_recv_info, str
      credit_wr->send_flags |= IBV_SEND_SIGNALED;
     } else credit_wr->send_flags = IBV_SEND_INLINE;
     if (((*credit_tx) % COM_CREDIT_SS_BATCH) == COM_CREDIT_SS_BATCH - 1) {
-     hrd_poll_cq(cb->dgram_send_cq[FC_QP_ID], 1, &signal_send_wc);
+     poll_cq(cb->dgram_send_cq[FC_QP_ID], 1, &signal_send_wc, "sending credits");
     }
   }
   (*credit_tx)++;
@@ -1242,7 +1293,7 @@ static inline void forge_w_wr(p_writes_t *p_writes,
   (*credits)--;
   if ((*w_tx) % WRITE_SS_BATCH == WRITE_SS_BATCH - 1) {
     // printf("Leader %u POLLING for a send completion in writes \n", t_id);
-    hrd_poll_cq(cb->dgram_send_cq[COMMIT_W_QP_ID], 1, &signal_send_wc);
+    poll_cq(cb->dgram_send_cq[COMMIT_W_QP_ID], 1, &signal_send_wc, "sending writes");
   }
   // Have the last message point to the current message
   if (w_i > 0)
@@ -1309,12 +1360,18 @@ static inline void poll_for_coms(struct com_message_ud_req *incoming_coms, uint3
                                  struct recv_info *com_recv_info, struct hrd_ctrl_blk *cb,
                                  struct ibv_send_wr *credit_wr, long *credit_tx,
                                  struct fifo *remote_w_buf,
+                                 uint32_t *completed_but_not_polled_coms,
                                  uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
 {
   uint32_t index = *pull_ptr;
   uint32_t polled_messages = 0;
-  while (incoming_coms[index].com.opcode == KVS_OP_PUT) {
-    // No need to wait for the entire message because the opcode is the last field
+
+  int completed_messages =
+    find_how_many_messages_can_be_polled(com_recv_cq, com_recv_wc,
+                                         completed_but_not_polled_coms,
+                                         FLR_COM_BUF_SLOTS, t_id);
+  if (completed_messages <= 0) return;
+  while (polled_messages < completed_messages) {
     struct com_message *com = &incoming_coms[index].com;
     uint16_t com_num = com->com_num;
     uint64_t l_id = *(uint64_t *) (com->l_id);
@@ -1340,15 +1397,12 @@ static inline void poll_for_coms(struct com_message_ud_req *incoming_coms, uint3
 //               t_id, com_i, com_num,  com_ptr, p_writes->g_id[com_ptr]);
       // it may be that a commit refers to a subset of writes that we have seen,
       // but we need to commit that subset to avoid a deadlock
-      if (USE_QUORUM) {
-        if (p_writes->w_state[com_ptr] != SENT) {
-          com->com_num -= com_i;
-          l_id += com_i;
-          memcpy(com->l_id, &l_id, sizeof(uint64_t));
-          goto END_WHILE;
-        }
+      if (p_writes->w_state[com_ptr] != SENT) {
+        com->com_num -= com_i;
+        l_id += com_i;
+        memcpy(com->l_id, &l_id, sizeof(uint64_t));
+        goto END_WHILE;
       }
-      else if (ENABLE_ASSERTIONS) assert(p_writes->w_state[com_ptr] == SENT);
 			p_writes->w_state[com_ptr] = READY;
 			if (p_writes->flr_id[com_ptr] == flr_id) {
         (*credits) += remove_from_the_mirrored_buffer(remote_w_buf, 1, t_id, 0, LEADER_W_BUF_SLOTS);
@@ -1368,10 +1422,10 @@ static inline void poll_for_coms(struct com_message_ud_req *incoming_coms, uint3
       send_credits_for_commits(com_recv_info, cb, credit_wr, credit_tx, 1, t_id);
 		polled_messages++;
   } // while
+  (*completed_but_not_polled_coms) = completed_messages - polled_messages;
   END_WHILE: *pull_ptr = index;
   // Poll for the completion of the receives
   if (polled_messages > 0) {
-    hrd_poll_cq(com_recv_cq, polled_messages, com_recv_wc);
     if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
   }
   else {
@@ -1432,8 +1486,8 @@ static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_ac
 		p_acks->slots_ahead -= update_op_i;
 		p_writes->size -= update_op_i;
 		if (!DISABLE_UPDATING_KVS)
-      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, resp, pull_ptr, FLR_PENDING_WRITES,
-                              true, t_id);
+      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops,  pull_ptr,
+                              FLR_PENDING_WRITES, true, t_id);
     else
       for (uint16_t i = 0; i < update_op_i; i++) p_writes->ptrs_to_ops[(pull_ptr + i) % FLR_PENDING_WRITES]->opcode = 5;
 

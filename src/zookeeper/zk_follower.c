@@ -133,7 +133,8 @@ void *follower(void *arg)
   /* ---------------------------------------------------------------------------
   ------------------------------LATENCY AND DEBUG-----------------------------------
   ---------------------------------------------------------------------------*/
-  uint32_t wait_for_gid_dbg_counter = 0,
+  uint32_t wait_for_gid_dbg_counter = 0, completed_but_not_polled_coms = 0,
+    completed_but_not_polled_preps = 0,
     wait_for_prepares_dbg_counter = 0, wait_for_coms_dbg_counter = 0;
   struct timespec start, end;
   uint16_t debug_ptr = 0;
@@ -152,7 +153,8 @@ void *follower(void *arg)
   ---------------------------------------------------------------------------*/
     if (WRITE_RATIO > 0)
       flr_poll_for_prepares(prep_buffer, &prep_pull_ptr, p_writes, p_acks, prep_recv_cq,
-                            prep_recv_wc, prep_recv_info, prep_buf_mirror, t_id, flr_id, &wait_for_prepares_dbg_counter);
+                            prep_recv_wc, prep_recv_info, prep_buf_mirror, &completed_but_not_polled_preps,
+                            t_id, flr_id, &wait_for_prepares_dbg_counter);
 
 
   /* ---------------------------------------------------------------------------
@@ -168,7 +170,8 @@ void *follower(void *arg)
     if (WRITE_RATIO > 0)
       poll_for_coms(com_buffer, &com_pull_ptr, p_writes, &credits, com_recv_cq,
                     com_recv_wc, com_recv_info, cb, credit_send_wr, &credit_tx,
-                    remote_w_buf, t_id, flr_id, &wait_for_coms_dbg_counter);
+                    remote_w_buf, &completed_but_not_polled_coms,
+                    t_id, flr_id, &wait_for_coms_dbg_counter);
 
     /* ---------------------------------------------------------------------------
     ------------------------------PROPAGATE UPDATES---------------------------------

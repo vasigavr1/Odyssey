@@ -97,21 +97,23 @@ static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_re
                                                              uint32_t *completed_but_not_polled_writes,
                                                              uint16_t t_id)
 {
-  int completed_messages = ibv_poll_cq(w_recv_cq, W_BUF_SLOTS, w_recv_wc);
-  if (DEBUG_RECEIVES) {
-    w_recv_info->posted_recvs -= completed_messages;
-    if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
-      my_printf(red, "Wrkr %u some remote machine has created credits out of thin air \n", t_id);
-  }
+
   // There is a chance that you wont be able to poll all completed writes,
   // because you wont be able to create acks for them, in which case you
   // pass the number of completed (i.e. from the completion queue) but not polled messages to the next round
+  int completed_messages = find_how_many_messages_can_be_polled(w_recv_cq, w_recv_wc, completed_but_not_polled_writes,
+                                                                W_BUF_SLOTS, t_id);
+
+  int newly_completed_messages = completed_messages - (*completed_but_not_polled_writes);
+  if (DEBUG_RECEIVES) {
+    w_recv_info->posted_recvs -= newly_completed_messages;
+    if (w_recv_info->posted_recvs < RECV_WR_SAFETY_MARGIN)
+      my_printf(red, "Wrkr %u some remote machine has created credits out of thin air \n", t_id);
+  }
   if (unlikely(*completed_but_not_polled_writes > 0)) {
     if (DEBUG_QUORUM)
       my_printf(yellow, "Wrkr %u adds %u messages to the %u completed messages \n",
-                t_id, *completed_but_not_polled_writes, completed_messages);
-    completed_messages += (*completed_but_not_polled_writes);
-    (*completed_but_not_polled_writes) = 0;
+                t_id, *completed_but_not_polled_writes, newly_completed_messages);
   }
   if (ENABLE_ASSERTIONS && completed_messages > 0) {
     for (int i = 0; i < MACHINE_NUM; i++)
@@ -153,7 +155,7 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops
   (*r_rep_tx)++;
   if ((*r_rep_tx) % R_REP_SS_BATCH == R_REP_SS_BATCH - 1) {
     //printf("Wrkr %u POLLING for a send completion in read replies \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_REP_QP_ID], 1, &signal_send_wc, POLL_CQ_R_REP);
+    poll_cq(cb->dgram_send_cq[R_REP_QP_ID], 1, &signal_send_wc, "POLL_CQ_R_REP");
   }
   if (mes_i > 0) send_wr[mes_i - 1].next = &send_wr[mes_i];
 
@@ -217,7 +219,7 @@ static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
   (*r_br_tx)++;
   if ((*r_br_tx) % R_BCAST_SS_BATCH == R_BCAST_SS_BATCH - 1) {
     //printf("Wrkr %u POLLING for a send completion in reads \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_QP_ID], 1, &signal_send_wc, POLL_CQ_R);
+    poll_cq(cb->dgram_send_cq[R_QP_ID], 1, &signal_send_wc, "POLL_CQ_R");
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0)
@@ -276,7 +278,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
   if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
     if (DEBUG_SS_BATCH)
       printf("Wrkr %u POLLING for a send completion in writes, total %lu \n", t_id, *w_br_tx);
-    poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc, POLL_CQ_W);
+    poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc, "POLL_CQ_W");
   }
   // Have the last message of each broadcast pointing to the first message of the next bcast
   if (br_i > 0) {

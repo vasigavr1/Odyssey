@@ -2,8 +2,8 @@
 // Created by vasilis on 26/06/20.
 //
 
-#ifndef KITE_DEBUG_UTIL_H
-#define KITE_DEBUG_UTIL_H
+#ifndef DEBUG_UTIL_H
+#define DEBUG_UTIL_H
 
 #include "top.h"
 
@@ -19,4 +19,4 @@ static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *mess
   }
 }
 
-#endif //KITE_DEBUG_UTIL_H
+#endif //DEBUG_UTIL_H

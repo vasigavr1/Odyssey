@@ -71,6 +71,7 @@ memcached -l 0.0.0.0 1>/dev/null 2>/dev/null &
 sleep 1
 
 blue "Running client and worker threads"
+#gdb zookeeper
 sudo LD_LIBRARY_PATH=/usr/local/lib/ -E \
 	./zookeeper \
 	--all-ips ${remoteIPs[@]} \

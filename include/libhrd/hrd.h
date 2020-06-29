@@ -19,7 +19,7 @@
 #define USE_HUGE_PAGES 1
 
 
-struct hrd_ctrl_blk {
+typedef struct hrd_ctrl_blk {
 
 	int local_hid;	/* Local ID on the machine this process runs on */
 
@@ -54,7 +54,7 @@ struct hrd_ctrl_blk {
 	struct ibv_mr *dgram_buf_mr;
 
 	//struct ibv_wc *wc;	/* Array of work completions */
-};
+} hrd_ctrl_blk_t;
 
 /* Major initialization functions */
 struct hrd_ctrl_blk* hrd_ctrl_blk_init(int local_hid,

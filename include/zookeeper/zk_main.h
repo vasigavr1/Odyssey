@@ -180,7 +180,7 @@
 
 
 #define ZK_TRACE_BATCH SESSIONS_PER_THREAD
-#define ZK_UPDATE_BATCH  LEADER_PENDING_WRITES
+#define ZK_UPDATE_BATCH  MAX (FLR_PENDING_WRITES, LEADER_PENDING_WRITES)
 /*-------------------------------------------------
 -----------------QUEUE DEPTHS-------------------------
 --------------------------------------------------*/
@@ -229,7 +229,7 @@
 
 // DEBUG
 
-#define FLR_CHECK_DBG_COUNTERS 0
+#define FLR_CHECK_DBG_COUNTERS 1
 
 
 
@@ -336,12 +336,12 @@ struct w_message_ud_req {
 
 
 // The entires in the commit prep_message are distinct batches of commits
-struct commit_fifo {
+typedef struct commit_fifo {
   struct com_message *commits;
   uint16_t push_ptr;
   uint16_t pull_ptr;
   uint32_t size; // number of commits rather than  messages
-};
+} com_fifo_t;
 
 struct fifo {
 	void *fifo;

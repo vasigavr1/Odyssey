@@ -70,34 +70,28 @@ static inline void zk_KVS_batch_op_trace(uint16_t op_num, zk_trace_op_t *op, zk_
   }
 }
 
-///* The leader and follower sends the writes to be committed with this function*/
+///* The leader and follower send the writes to be committed with this function*/
 static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **preps,
-                                           zk_resp_t *resp, uint32_t pull_ptr, uint32_t max_op_size,
+                                           uint32_t pull_ptr, uint32_t max_op_size,
                                            bool zero_ops, uint16_t t_id)
 {
   uint16_t op_i;  /* op_i is batch index */
   if (ENABLE_ASSERTIONS) {
     assert(preps != NULL);
     assert(op_num > 0 && op_num <= ZK_UPDATE_BATCH);
-    assert(resp != NULL);
   }
 
   unsigned int bkt[ZK_UPDATE_BATCH];
   struct mica_bkt *bkt_ptr[ZK_UPDATE_BATCH];
   unsigned int tag[ZK_UPDATE_BATCH];
   mica_op_t *kv_ptr[ZK_UPDATE_BATCH];	/* Ptr to KV item in log */
-  /*
-     * We first lookup the key in the datastore. The first two @op_i loops work
-     * for both GETs and PUTs.
-     */
+
   for(op_i = 0; op_i < op_num; op_i++) {
     struct prepare *op = preps[(pull_ptr + op_i) % max_op_size];
     KVS_locate_one_bucket(op_i, bkt, (mica_key_t *) &op->key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
-
-  // the following variables used to validate atomicity between a lock-free read of an object
   for(op_i = 0; op_i < op_num; op_i++) {
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) assert(false);
     struct prepare *op = preps[(pull_ptr + op_i) % max_op_size];
@@ -106,14 +100,12 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **pre
       my_printf(red, "Kvs update miss %u\n", op_i);
       cust_print_key("Op", (mica_key_t *) &op->key);
       cust_print_key("KV_ptr", &kv_ptr[op_i]->key);
-      resp[op_i].type = KVS_MISS;
       assert(false);
     }
     if (op->opcode == KVS_OP_PUT) {
       lock_seqlock(&kv_ptr[op_i]->seqlock);
       memcpy(kv_ptr[op_i]->value, op->value, (size_t) VALUE_SIZE);
       unlock_seqlock(&kv_ptr[op_i]->seqlock);
-      resp[op_i].type = KVS_PUT_SUCCESS;
     }
     else {
       my_printf(red, "wrong Opcode to an update in kvs: %d, req %d, flr_id %u, val_len %u, g_id %u , \n",
@@ -121,7 +113,7 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **pre
       assert(0);
     }
     if (zero_ops) {
-//      printf("Zero out %d at address %lu \n", op->opcode, &op->opcode);
+      //printf("Zero out %d at address %p \n", op->opcode, (void *)&op->opcode);
       op->opcode = 5;
     }
   }

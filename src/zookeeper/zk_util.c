@@ -43,7 +43,6 @@ void zk_static_assert_compile_parameters()
   assert(SESSIONS_PER_THREAD < M_16);
   assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
   if (WRITE_RATIO > 0) assert(ZK_UPDATE_BATCH >= LEADER_PENDING_WRITES);
-  static_assert(FLR_PENDING_WRITES <= LEADER_PENDING_WRITES, "");
 
 
 //
@@ -596,19 +595,19 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
 
 
 // set up some basic leader buffers
-void set_up_ldr_ops(zk_resp_t *resp,
-                    struct commit_fifo **com_fifo, uint16_t t_id)
+com_fifo_t *set_up_ldr_ops(zk_resp_t *resp,  uint16_t t_id)
 {
   int i;
   assert(resp != NULL);
-  *com_fifo =  calloc(1, sizeof(struct commit_fifo));
-  (*com_fifo)->commits = (struct com_message *)
+  com_fifo_t *com_fifo = calloc(1, sizeof(com_fifo_t));
+  com_fifo->commits = (struct com_message *)
     calloc(COMMIT_FIFO_SIZE, sizeof(struct com_message));
   for(i = 0; i <  MAX_OP_BATCH; i++) resp[i].type = EMPTY;
   for(i = 0; i <  COMMIT_FIFO_SIZE; i++) {
-      (*com_fifo)->commits[i].opcode = KVS_OP_PUT;
+      com_fifo->commits[i].opcode = KVS_OP_PUT;
   }
-
+  assert(com_fifo->push_ptr == 0 && com_fifo->pull_ptr == 0 && com_fifo->size == 0);
+ return com_fifo;
 }
 
 // Set up the memory registrations required in the leader if there is no Inlining
@@ -637,10 +636,13 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
     if (!COM_ENABLE_INLINING) com_send_sgl[j].lkey = com_mr->lkey;
 
     for (i = 0; i < MESSAGES_IN_BCAST; i++) {
-//      uint16_t rm_id = i;
       uint16_t m_id = (uint16_t) (i < LEADER_MACHINE ? i : i + 1);
-      uint16_t index = (j * MESSAGES_IN_BCAST) + i;
+      assert(m_id != LEADER_MACHINE);
+      assert(m_id < MACHINE_NUM);
+      uint16_t index = (uint16_t) ((j * MESSAGES_IN_BCAST) + i);
       assert (index < MESSAGES_IN_BCAST_BATCH);
+      assert(index < LDR_MAX_PREP_WRS);
+      assert(index < LDR_MAX_COM_WRS);
       if (ENABLE_MULTICAST == 1) {
         prep_send_wr[index].wr.ud.ah = mcast->send_ah[PREP_MCAST_QP];
         prep_send_wr[index].wr.ud.remote_qpn = mcast->qpn[PREP_MCAST_QP];
@@ -655,6 +657,8 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
         com_send_wr[index].wr.ud.ah = rem_qp[m_id][remote_thread][COMMIT_W_QP_ID].ah;
         com_send_wr[index].wr.ud.remote_qpn = (uint32) rem_qp[m_id][remote_thread][COMMIT_W_QP_ID].qpn;
         com_send_wr[index].wr.ud.remote_qkey = HRD_DEFAULT_QKEY;
+        assert(com_send_wr[index].wr.ud.ah != NULL);
+        assert(prep_send_wr[index].wr.ud.ah != NULL);
       }
       prep_send_wr[index].opcode = IBV_WR_SEND;
       prep_send_wr[index].num_sge = 1;

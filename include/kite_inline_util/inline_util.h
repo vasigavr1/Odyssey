@@ -436,7 +436,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     } else ack_send_wr[i].send_flags = IBV_SEND_INLINE;
     if ((*sent_ack_tx) % ACK_SS_BATCH == ACK_SS_BATCH - 1) {
       // if (g_id == 0) my_printf(green, "Polling for ack  %llu \n", *sent_ack_tx);
-      poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, POLL_CQ_ACK);
+      poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, "POLL_CQ_ACK");
     }
     if (ack_i > 0) {
       if (DEBUG_ACKS) my_printf(yellow, "Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, i);
@@ -852,7 +852,6 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
   if (polled_messages > 0) {
     if (ENABLE_ASSERTIONS) assert(r_rep_recv_info->posted_recvs >= polled_messages);
     r_rep_recv_info->posted_recvs -= polled_messages;
-    //poll_cq(r_rep_recv_cq, polled_messages, r_rep_recv_wc);
     if (ENABLE_ASSERTIONS) debug_cntr[R_REP_QP_ID] = 0;
   }
   else {

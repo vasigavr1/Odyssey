@@ -96,7 +96,7 @@ void flr_set_up_credit_WRs(struct ibv_send_wr* credit_send_wr, struct ibv_sge* c
 void pre_post_recvs(uint32_t*, struct ibv_qp *, uint32_t lkey, void*,
                     uint32_t, uint32_t, uint16_t, uint32_t);
 // set up some basic leader buffers
-void set_up_ldr_ops(zk_resp_t*, struct commit_fifo**, uint16_t);
+com_fifo_t* set_up_ldr_ops(zk_resp_t*, uint16_t);
 // Set up the memory registrations required in the leader if there is no Inlining
 void set_up_ldr_mrs(struct ibv_mr**, void*, struct ibv_mr**, void*,
                     struct hrd_ctrl_blk*);
