@@ -313,9 +313,10 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
                                                  zk_trace_op_t *ops, uint8_t flr_id,
                                                  p_writes_t *p_writes, zk_resp_t *resp,
                                                  struct latency_flags *latency_info,
+                                                 struct session_dbg *ses_dbg, uint16_t *last_session_,
                                                  int protocol)
 {
-  uint16_t i = 0, op_i = 0;
+  uint16_t i = 0, op_i = 0, last_session = *last_session_;
   uint8_t is_update = 0;
   int working_session = -1;
   if (p_writes->all_sessions_stalled) return trace_iter;
@@ -338,8 +339,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     ops[op_i].val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
     if (MEASURE_LATENCY) start_measurement(latency_info, (uint32_t) working_session, t_id, ops[op_i].opcode);
     if (is_update) {
-      if (protocol == LEADER) ldr_insert_write(p_writes, (void *) &ops[op_i], (uint32_t)working_session, true, t_id);
-      else if (protocol == FOLLOWER) flr_insert_write(p_writes, &ops[op_i], (uint32_t)working_session, flr_id, t_id);
+      if (protocol == LEADER) ldr_insert_write(p_writes, (void *) &ops[op_i], (uint32_t) working_session, true, t_id);
+      else if (protocol == FOLLOWER) flr_insert_write(p_writes, &ops[op_i], (uint32_t )working_session, flr_id, t_id);
       else if (ENABLE_ASSERTIONS) assert(false);
       while (p_writes->session_has_pending_write[working_session]) {
         working_session++;
@@ -360,6 +361,8 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
     if (trace[trace_iter].opcode == NOP) trace_iter = 0;
     op_i++;
   }
+
+  *last_session_ = (uint16_t) working_session;
   t_stats[t_id].cache_hits_per_thread += op_i;
   zk_KVS_batch_op_trace(op_i, ops, resp, t_id);
   if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&

@@ -133,9 +133,15 @@ void *follower(void *arg)
   /* ---------------------------------------------------------------------------
   ------------------------------LATENCY AND DEBUG-----------------------------------
   ---------------------------------------------------------------------------*/
+  struct session_dbg *ses_dbg = NULL;
+  if (DEBUG_SESSIONS) {
+    ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
+    memset(ses_dbg, 0, sizeof(struct session_dbg));
+  }
   uint32_t wait_for_gid_dbg_counter = 0, completed_but_not_polled_coms = 0,
     completed_but_not_polled_preps = 0,
     wait_for_prepares_dbg_counter = 0, wait_for_coms_dbg_counter = 0;
+  uint16_t last_session = 0;
   struct timespec start, end;
   uint16_t debug_ptr = 0;
   if (t_id == 0) my_printf(green, "Follower %d  reached the loop %u \n", t_id, p_acks->acks_to_send);
@@ -186,7 +192,8 @@ void *follower(void *arg)
 
   // Propagate the updates before probing the cache
     trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops, flr_id,
-                                           p_writes, resp, &latency_info, protocol);
+                                           p_writes, resp, &latency_info, ses_dbg,
+                                           &last_session, protocol);
 
 
 

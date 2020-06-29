@@ -135,6 +135,12 @@ void *leader(void *arg)
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
 	---------------------------------------------------------------------------*/
+  struct session_dbg *ses_dbg = NULL;
+  if (DEBUG_SESSIONS) {
+    ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
+    memset(ses_dbg, 0, sizeof(struct session_dbg));
+  }
+  uint16_t last_session = 0;
   uint32_t wait_for_gid_dbg_counter = 0, wait_for_acks_dbg_counter = 0;
   uint32_t credit_debug_cnt[LDR_VC_NUM] = {0};
   uint32_t outstanding_prepares = 0, completed_but_not_polled_writes = 0;

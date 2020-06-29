@@ -38,8 +38,10 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 {
   uint16_t writes_num = 0, reads_num = 0, op_i = 0, last_session = *last_session_;
   int working_session = -1;
+  // if there are clients the "all_sessions_stalled" flag is not used,
+  // so we need not bother checking it
   if (!ENABLE_CLIENTS && p_ops->all_sessions_stalled) {
-    if (ENABLE_ASSERTIONS) debug_all_sessions(ses_dbg, p_ops, t_id);
+    debug_all_sessions(ses_dbg, p_ops, t_id);
     return trace_iter;
   }
   for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
@@ -48,9 +50,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
       working_session = sess_i;
       break;
     }
-    else if (ENABLE_ASSERTIONS) {
-      debug_sessions(ses_dbg, p_ops, sess_i, t_id);
-    }
+    else debug_sessions(ses_dbg, p_ops, sess_i, t_id);
   }
   //printf("working session = %d\n", working_session);
   if (ENABLE_CLIENTS) {
@@ -73,6 +73,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
       MOD_ADD(working_session, SESSIONS_PER_THREAD);
       if (working_session == last_session) {
         passed_over_all_sessions = true;
+        // If clients are used the condition does not guarantee that sessions are stalled
         if (!ENABLE_CLIENTS) p_ops->all_sessions_stalled = true;
         break;
       }

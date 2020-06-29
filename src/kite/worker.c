@@ -149,7 +149,7 @@ void *worker(void *arg)
   };
   uint32_t waiting_dbg_counter[QP_NUM] = {0};
   uint32_t credit_debug_cnt[VC_NUM] = {0}, time_out_cnt[VC_NUM] = {0}, release_rdy_dbg_cnt = 0;
-  struct session_dbg *ses_dbg;
+  struct session_dbg *ses_dbg = NULL;
   if (DEBUG_SESSIONS) {
     ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
     memset(ses_dbg, 0, sizeof(struct session_dbg));
