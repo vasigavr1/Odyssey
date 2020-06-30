@@ -69,28 +69,26 @@ static inline bool any_request_active(uint16_t sess_id, uint32_t req_array_i, ui
 }
 
 //
-static inline void fill_req_array_when_after_rmw(loc_entry_t *loc_entry, uint16_t t_id)
+static inline void fill_req_array_when_after_rmw(uint16_t sess_id, uint32_t req_array_i, uint8_t  opcode,
+                                                 uint8_t* value_to_read, bool rmw_is_successful, uint16_t t_id)
 {
   if (ENABLE_CLIENTS) {
-    client_op_t *cl_op = &interface[t_id].req_array[loc_entry->sess_id][loc_entry->index_to_req_array];
-    if (ENABLE_ASSERTIONS) assert(loc_entry->rmw_val_len == cl_op->val_len);
-    switch (loc_entry->opcode) {
+    client_op_t *cl_op = &interface[t_id].req_array[sess_id][req_array_i];
+    switch (opcode) {
       case RMW_PLAIN_WRITE:
         // This is really a write so no need to read anything
-        //cl_op->rmw_is_successful = true;
         break;
       case FETCH_AND_ADD:
-        memcpy(cl_op->value_to_read, loc_entry->value_to_read, cl_op->val_len);
+        memcpy(cl_op->value_to_read, value_to_read, cl_op->val_len);
         //*cl_op->rmw_is_successful = true; // that will segfault, no bool pointer is passed in the FAA
-        //printf("%u %lu \n", loc_entry->log_no, *(uint64_t *)loc_entry->value_to_write);
         break;
       case COMPARE_AND_SWAP_WEAK:
       case COMPARE_AND_SWAP_STRONG:
-        *(cl_op->rmw_is_successful) = loc_entry->rmw_is_successful;
+        *(cl_op->rmw_is_successful) = rmw_is_successful;
         // the value_to_read of loc_entry is valid, because the RMW can only get
         // committed iff it has been accepted once
-        if (!loc_entry->rmw_is_successful)
-          memcpy(cl_op->value_to_read, loc_entry->value_to_read, cl_op->val_len);
+        if (!rmw_is_successful)
+          memcpy(cl_op->value_to_read, value_to_read, cl_op->val_len);
         break;
       default:
         if (ENABLE_ASSERTIONS) assert(false);
@@ -110,6 +108,24 @@ static inline void fill_req_array_on_rmw_early_fail(uint32_t sess_id, uint8_t* v
     *(cl_op->rmw_is_successful) = false;
     memcpy(cl_op->value_to_read, value_to_read, cl_op->val_len);
   }
+}
+
+
+// Returns true if it's valid to pull a request for that session
+static inline bool pull_request_from_this_session(bool stalled, uint16_t sess_i,
+                                                  uint16_t t_id)
+{
+  uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[sess_i];
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_i < SESSIONS_PER_THREAD);
+    if (ENABLE_CLIENTS) {
+      assert(pull_ptr < PER_SESSION_REQ_NUM);
+    }
+  }
+  if (ENABLE_CLIENTS)
+    return (!stalled) && is_client_req_active(sess_i, pull_ptr, t_id);
+  else
+    return (!stalled);
 }
 
 

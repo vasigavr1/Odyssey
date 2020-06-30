@@ -1,5 +1,5 @@
-#ifndef INLINE_UTILS_H
-#define INLINE_UTILS_H
+#ifndef KITE_INLINE_UTIL_H
+#define KITE_INLINE_UTIL_H
 
 //#include "kvs.h"
 #include "hrd.h"
@@ -9,10 +9,9 @@
 #include "kvs_util.h"
 #include "kite_debug_util.h"
 #include "config_util.h"
-#include "client_if_util.h"
+#include "../general_util/inline_util.h"
 #include "paxos_util.h"
 #include "reserve_stations_util.h"
-#include "../general_util/latency_util.h"
 #include "communication_utility.h"
 
 #include <stdlib.h>
@@ -46,7 +45,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   }
   for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
     uint16_t sess_i = (uint16_t)((last_session + i) % SESSIONS_PER_THREAD);
-    if (pull_request_from_this_session(p_ops, sess_i, t_id)) {
+    if (pull_request_from_this_session(p_ops->sess_info[sess_i].stalled, sess_i, t_id)) {
       working_session = sess_i;
       break;
     }
@@ -68,7 +67,8 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
                       &reads_num, ses_dbg, latency_info, sizes_dbg_cntr, t_id))
       break;
     // Find out next session to work on
-    while (!pull_request_from_this_session(p_ops, (uint16_t) working_session, t_id)) {
+    while (!pull_request_from_this_session(p_ops->sess_info[working_session].stalled,
+                                           (uint16_t) working_session, t_id)) {
       debug_sessions(ses_dbg, p_ops, (uint32_t) working_session, t_id);
       MOD_ADD(working_session, SESSIONS_PER_THREAD);
       if (working_session == last_session) {
@@ -1012,4 +1012,4 @@ static inline void remove_writes(p_ops_t *p_ops, struct latency_flags *latency_i
 
 
 
-#endif /* INLINE_UTILS_H */
+#endif /* KITE_INLINE_UTIL_H */

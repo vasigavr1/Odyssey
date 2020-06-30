@@ -91,9 +91,9 @@ void *follower(void *arg)
   };
 
 
-  zk_resp_t *resp = (zk_resp_t *)malloc(MAX_OP_BATCH * sizeof(zk_resp_t));
+  zk_resp_t *resp = (zk_resp_t *) malloc(ZK_TRACE_BATCH * sizeof(zk_resp_t));
   struct ibv_mr *w_mr;
-  zk_trace_op_t *ops = (zk_trace_op_t *) memalign(4096, MAX_OP_BATCH *  sizeof(zk_trace_op_t));
+  zk_trace_op_t *ops = (zk_trace_op_t *) memalign(4096, ZK_TRACE_BATCH *  sizeof(zk_trace_op_t));
   struct recv_info *prep_recv_info, *com_recv_info;
   prep_recv_info = init_recv_info(cb, prep_push_ptr, FLR_PREP_BUF_SLOTS,
                                   (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_qp,

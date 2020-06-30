@@ -1,5 +1,5 @@
 #include "util.h"
-#include "../../include/kite_inline_util/inline_util.h"
+#include "../../include/kite_inline_util/kite_inline_util.h"
 
 void print_latency_stats(void);
 

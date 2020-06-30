@@ -509,7 +509,7 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
   p_writes->acks_seen = (uint8_t *) calloc(size, sizeof(uint8_t));
   p_writes->flr_id = (uint8_t *) malloc(size * sizeof(uint8_t));
   p_writes->is_local = (bool *) malloc(size * sizeof(bool));
-  p_writes->session_has_pending_write = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
+  p_writes->stalled = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
   p_writes->ptrs_to_ops = (struct prepare **) malloc(size * sizeof(struct prepare *));
   if (protocol == FOLLOWER) init_fifo(&(p_writes->w_fifo), W_FIFO_SIZE * sizeof(struct w_message), 1);
   memset(p_writes->g_id, 0, size * sizeof(uint64_t));
@@ -517,7 +517,7 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
     p_writes->prep_fifo->prep_message =
     (struct prep_message *) calloc(PREP_FIFO_SIZE, sizeof(struct prep_message));
   assert(p_writes->prep_fifo != NULL);
-  for (i = 0; i < SESSIONS_PER_THREAD; i++) p_writes->session_has_pending_write[i] = false;
+  for (i = 0; i < SESSIONS_PER_THREAD; i++) p_writes->stalled[i] = false;
   for (i = 0; i < size; i++) {
     p_writes->w_state[i] = INVALID;
   }

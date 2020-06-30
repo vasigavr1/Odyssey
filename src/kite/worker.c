@@ -1,5 +1,5 @@
 #include "util.h"
-#include "../../include/kite_inline_util/inline_util.h"
+#include "../../include/kite_inline_util/kite_inline_util.h"
 #include "../../include/general_util/init_connect.h"
 #include "../../include/general_util/trace_util.h"
 #include "../../include/general_util/rdma_gen_util.h"

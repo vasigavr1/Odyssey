@@ -10,7 +10,7 @@
 #include "../general_util/latency_util.h"
 #include "kite_debug_util.h"
 #include "config_util.h"
-#include "client_if_util.h"
+#include "../general_util/client_if_util.h"
 #include "paxos_util.h"
 #include "paxos_generic_util.h"
 
@@ -31,22 +31,7 @@ static inline void KVS_isolated_op(int t_id, struct write *write);
  * --------------------------------------------------------------------------*/
 
 
-// Returns true if it's valid to pull a request for that session
-static inline bool pull_request_from_this_session(p_ops_t *p_ops, uint16_t sess_id,
-                                                  uint16_t t_id)
-{
-  uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[sess_id];
-  if (ENABLE_ASSERTIONS) {
-    assert(sess_id < SESSIONS_PER_THREAD);
-    if (ENABLE_CLIENTS) {
-      assert(pull_ptr < PER_SESSION_REQ_NUM);
-    }
-  }
-  if (ENABLE_CLIENTS)
-    return (!p_ops->sess_info[sess_id].stalled) && is_client_req_active(sess_id, pull_ptr, t_id);
-  else
-    return (!p_ops->sess_info[sess_id].stalled);
-}
+
 
 // In case of a miss in the KVS clean up the op, sessions and what not
 static inline void clean_up_on_KVS_miss(trace_op_t *op, p_ops_t *p_ops,

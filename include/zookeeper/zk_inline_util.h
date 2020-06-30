@@ -1,16 +1,11 @@
 #ifndef INLINE_UTILS_H
 #define INLINE_UTILS_H
 
-#include "../general_util/latency_util.h"
-#include "../general_util/rdma_gen_util.h"
+#include "../general_util/inline_util.h"
 #include "zk_kvs_util.h"
+#include "zk_debug_util.h"
 
-static inline void check_over(const char* message, struct commit_fifo *com_fifo)
-{
-  if (com_fifo->size > COMMIT_FIFO_SIZE)
-    printf("%s com fifo size %u/%d \n", message,  com_fifo->size, COMMIT_FIFO_SIZE);
-  assert(com_fifo->size <= COMMIT_FIFO_SIZE);
-}
+
 /* ---------------------------------------------------------------------------
 ------------------------------UTILITY --------------------------------------
 ---------------------------------------------------------------------------*/
@@ -82,121 +77,7 @@ static inline uint16_t remove_from_the_mirrored_buffer(struct fifo *mirror_buf_,
   return new_credits;
 }
 
-/* ---------------------------------------------------------------------------
-//------------------------------ ZOOKEEPER DEBUGGING -----------------------------
-//---------------------------------------------------------------------------*/
 
-
-static inline void print_ldr_stats (uint16_t t_id)
-{
-
-  my_printf(yellow, "Prepares sent %ld/%ld \n", t_stats[t_id].preps_sent_mes_num, t_stats[t_id].preps_sent );
-  my_printf(yellow, "Acks Received %ld/%ld \n", t_stats[t_id].received_acks_mes_num, t_stats[t_id].received_acks );
-  my_printf(yellow, "Commits sent %ld/%ld \n", t_stats[t_id].coms_sent_mes_num, t_stats[t_id].coms_sent );
-}
-
-static inline void print_flr_stats (uint16_t t_id)
-{
-
-  my_printf(yellow, "Prepares received %ld/%ld \n", t_stats[t_id].received_preps_mes_num, t_stats[t_id].received_preps );
-  my_printf(yellow, "Acks sent %ld/%ld \n", t_stats[t_id].acks_sent_mes_num, t_stats[t_id].acks_sent );
-  my_printf(yellow, "Commits received %ld/%ld \n", t_stats[t_id].received_coms_mes_num, t_stats[t_id].received_coms );
-}
-
-// Leader checks its debug counters
-static inline void ldr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_for_acks_dbg_counter,
-                                         uint32_t *wait_for_gid_dbg_counter,p_writes_t *p_writes,
-                                         uint16_t t_id)
-{
-  if (unlikely((*wait_for_gid_dbg_counter) > M_16)) {
-    my_printf(red, "Leader %d waits for the g_id, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_ldr_stats(t_id);
-    (*wait_for_gid_dbg_counter) = 0;
-  }
-  if (unlikely((*wait_for_acks_dbg_counter) > M_16)) {
-    my_printf(red, "Leader %d waits for acks, committed g_id %lu \n", t_id, committed_global_w_id);
-    my_printf(cyan, "Sent lid %u and state %d\n", p_writes->local_w_id, p_writes->w_state[p_writes->pull_ptr]);
-    print_ldr_stats(t_id);
-    (*wait_for_acks_dbg_counter) = 0;
-    exit(0);
-  }
-  if (unlikely(credit_debug_cnt[PREP_VC] > M_16)) {
-    my_printf(red, "Leader %d lacks prep credits, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_ldr_stats(t_id);
-    credit_debug_cnt[PREP_VC] = 0;
-  }
-  if (unlikely(credit_debug_cnt[COMM_VC] > M_16)) {
-    my_printf(red, "Leader %d lacks comm credits, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_ldr_stats(t_id);
-    credit_debug_cnt[COMM_VC] = 0;
-  }
-}
-
-// Follower checks its debug counters
-static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_for_coms_dbg_counter,
-                                         uint32_t *wait_for_preps_dbg_counter,
-                                         uint32_t *wait_for_gid_dbg_counter, volatile struct prep_message_ud_req *prep_buf,
-                                         uint32_t pull_ptr, p_writes_t *p_writes, uint16_t t_id)
-{
-
-  if (unlikely((*wait_for_preps_dbg_counter) > M_16)) {
-    my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
-    struct prepare *prep = (struct prepare *)&prep_buf[pull_ptr].prepare.prepare;
-    uint32_t l_id = *(uint32_t *)prep_buf[pull_ptr].prepare.l_id;
-    uint32_t g_id = *(uint32_t *)prep->g_id;
-    uint8_t message_opc = prep_buf[pull_ptr].prepare.opcode;
-    my_printf(cyan, "Flr %d, polling on index %u,polled opc %u, 1st write opcode: %u, l_id %u, first g_id %u, expected l_id %u\n",
-                t_id, pull_ptr, message_opc, prep->opcode, l_id, g_id, p_writes->local_w_id);
-    MOD_ADD(pull_ptr, FLR_PREP_BUF_SLOTS);
-    prep = (struct prepare *)&prep_buf[pull_ptr].prepare.prepare;
-    l_id = *(uint32_t *)prep_buf[pull_ptr].prepare.l_id;
-    g_id = *(uint32_t *)prep->g_id;
-    message_opc = prep_buf[pull_ptr].prepare.opcode;
-    my_printf(cyan, "Next index %u,polled opc %u, 1st write opcode: %u, l_id %u, first g_id %u, expected l_id %u\n",
-                pull_ptr, message_opc, prep->opcode, l_id, g_id, p_writes->local_w_id);
-    for (int i = 0; i < FLR_PREP_BUF_SLOTS; ++i) {
-      if (prep_buf[i].prepare.opcode == KVS_OP_PUT) {
-        my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, *(uint32_t *)prep_buf[i].prepare.l_id);
-      }
-      else my_printf(red, "BAD OPCODE in index %d, l_id %u \n", i, *(uint32_t *)prep_buf[i].prepare.l_id);
-
-    }
-
-    print_flr_stats(t_id);
-    (*wait_for_preps_dbg_counter) = 0;
-//    exit(0);
-  }
-  if (unlikely((*wait_for_gid_dbg_counter) > M_16)) {
-    my_printf(red, "Follower %d waits for the g_id, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_flr_stats(t_id);
-    (*wait_for_gid_dbg_counter) = 0;
-  }
-  if (unlikely((*wait_for_coms_dbg_counter) > M_16)) {
-    my_printf(red, "Follower %d waits for coms, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_flr_stats(t_id);
-    (*wait_for_coms_dbg_counter) = 0;
-  }
-  if (unlikely((*credit_debug_cnt) > M_16)) {
-    my_printf(red, "Follower %d lacks write credits, committed g_id %lu \n", t_id, committed_global_w_id);
-    print_flr_stats(t_id);
-    (*credit_debug_cnt) = 0;
-  }
-}
-
-// Check the states of pending writes
-static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
-{
-  assert(p_writes->size <= LEADER_PENDING_WRITES);
-  for (uint16_t w_i = 0; w_i < LEADER_PENDING_WRITES - p_writes->size; w_i++) {
-    uint16_t ptr = (p_writes->push_ptr + w_i) % LEADER_PENDING_WRITES;
-    if (p_writes->w_state[ptr] != INVALID) {
-      my_printf(red, "LDR %d push ptr %u, pull ptr %u, size %u, state %d at ptr %u \n",
-                 t_id, p_writes->push_ptr, p_writes->pull_ptr, p_writes->size, p_writes->w_state[ptr], ptr);
-      print_ldr_stats(t_id);
-      exit(0);
-    }
-  }
-}
 
 
 /* ---------------------------------------------------------------------------
@@ -260,7 +141,7 @@ static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
     assert(p_writes->w_state[w_ptr] == INVALID);
   }
   p_writes->w_state[w_ptr] = VALID;
-  if (local) p_writes->session_has_pending_write[session_id] = true;
+  if (local) p_writes->stalled[session_id] = true;
   p_writes->is_local[w_ptr] = local;
   p_writes->session_id[w_ptr] = (uint32_t) session_id;
   MOD_ADD(p_writes->push_ptr, LEADER_PENDING_WRITES);
@@ -297,7 +178,7 @@ static inline void flr_insert_write(p_writes_t *p_writes, zk_trace_op_t *op, uin
   write->sess_id = session_id;
   //    printf("Passed session id %u to the op in message %u, with inside ptr %u\n",
   //           *(uint32_t*)w_mes[w_ptr].write[inside_prep_ptr].session_id, w_ptr, inside_prep_ptr);
-  p_writes->session_has_pending_write[session_id] = true;
+  p_writes->stalled[session_id] = true;
   p_writes->w_fifo->size++;
   w_mes[w_ptr].write[0].w_num++;
 
@@ -319,15 +200,36 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
   uint16_t i = 0, op_i = 0, last_session = *last_session_;
   uint8_t is_update = 0;
   int working_session = -1;
-  if (p_writes->all_sessions_stalled) return trace_iter;
-  for (i = 0; i < SESSIONS_PER_THREAD; i++) {
-    if (!p_writes->session_has_pending_write[i]) {
-      working_session = i;
+  // if there are clients the "all_sessions_stalled" flag is not used,
+  // so we need not bother checking it
+  if (!ENABLE_CLIENTS && p_writes->all_sessions_stalled) {
+    return trace_iter;
+  }
+  for (uint16_t i = 0; i < SESSIONS_PER_THREAD; i++) {
+    uint16_t sess_i = (uint16_t)((last_session + i) % SESSIONS_PER_THREAD);
+    if (pull_request_from_this_session(p_writes->stalled, sess_i, t_id)) {
+      working_session = sess_i;
       break;
     }
+    else debug_sessions(ses_dbg, p_ops, sess_i, t_id);
   }
-//  printf("working session = %d\n", working_session);
-  if (ENABLE_ASSERTIONS) assert(working_session != -1);
+
+    //printf("working session = %d\n", working_session);
+  if (ENABLE_CLIENTS) {
+    if (working_session == -1) return trace_iter;
+  }
+  else if (ENABLE_ASSERTIONS ) assert(working_session != -1);
+
+//
+//  if (p_writes->all_sessions_stalled) return trace_iter;
+//  for (i = 0; i < SESSIONS_PER_THREAD; i++) {
+//    if (!p_writes->stalled[i]) {
+//      working_session = i;
+//      break;
+//    }
+//  }
+////  printf("working session = %d\n", working_session);
+//  if (ENABLE_ASSERTIONS) assert(working_session != -1);
 
   //  my_printf(green, "op_i %d , trace_iter %d, trace[trace_iter].opcode %d \n", op_i, trace_iter, trace[trace_iter].opcode);
   while (op_i < MAX_OP_BATCH && working_session < SESSIONS_PER_THREAD) {
@@ -342,7 +244,7 @@ static inline uint32_t batch_from_trace_to_cache(uint32_t trace_iter, uint16_t t
       if (protocol == LEADER) ldr_insert_write(p_writes, (void *) &ops[op_i], (uint32_t) working_session, true, t_id);
       else if (protocol == FOLLOWER) flr_insert_write(p_writes, &ops[op_i], (uint32_t )working_session, flr_id, t_id);
       else if (ENABLE_ASSERTIONS) assert(false);
-      while (p_writes->session_has_pending_write[working_session]) {
+      while (p_writes->stalled[working_session]) {
         working_session++;
         if (working_session == SESSIONS_PER_THREAD) {
           p_writes->all_sessions_stalled = true;
@@ -579,7 +481,7 @@ static inline void propagate_updates(p_writes_t *p_writes, struct commit_fifo *c
 		if (p_writes->is_local[p_writes->pull_ptr]) {
       if (DEBUG_WRITES) my_printf(cyan, "Ldr %u freeing session %u \n", t_id,
                                p_writes->session_id[p_writes->pull_ptr]);
-			p_writes->session_has_pending_write[p_writes->session_id[p_writes->pull_ptr]] = false;
+			p_writes->stalled[p_writes->session_id[p_writes->pull_ptr]] = false;
 			p_writes->all_sessions_stalled = false;
 			p_writes->is_local[p_writes->pull_ptr] = false;
 		}
@@ -1465,7 +1367,7 @@ static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_ac
 		if (p_writes->is_local[p_writes->pull_ptr]) {
       if (DEBUG_WRITES)
         my_printf(cyan, "Found a local req freeing session %d \n", p_writes->session_id[p_writes->pull_ptr]);
-			p_writes->session_has_pending_write[p_writes->session_id[p_writes->pull_ptr]] = false;
+			p_writes->stalled[p_writes->session_id[p_writes->pull_ptr]] = false;
 			p_writes->all_sessions_stalled = false;
 			p_writes->is_local[p_writes->pull_ptr] = false;
       if (MEASURE_LATENCY) change_latency_tag(latency_info, p_writes, t_id);

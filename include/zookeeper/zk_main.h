@@ -381,7 +381,7 @@ typedef struct pending_writes {
 	uint8_t *acks_seen;
 //  uint8_t *ack_bit_vectors;
 	bool *is_local;
-	bool *session_has_pending_write;
+	bool *stalled;
 	bool all_sessions_stalled;
 } p_writes_t;
 

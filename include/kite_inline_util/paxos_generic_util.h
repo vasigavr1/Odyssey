@@ -8,9 +8,10 @@
 #include <config.h>
 #include "main.h"
 #include "kite_debug_util.h"
-#include "client_if_util.h"
+#include "../general_util/client_if_util.h"
 #include "config_util.h"
 #include "reserve_stations_util.h"
+
 
 
 /* ---------------------------------------------------------------------------
@@ -107,7 +108,8 @@ static inline void free_session_from_rmw(p_ops_t *p_ops, uint16_t sess_id, bool 
       assert(false);
     }
   }
-  fill_req_array_when_after_rmw(loc_entry, t_id);
+  fill_req_array_when_after_rmw(loc_entry->sess_id, loc_entry->index_to_req_array, loc_entry->opcode,
+                                loc_entry->value_to_read, loc_entry->rmw_is_successful, t_id);
   if (VERIFY_PAXOS && allow_paxos_log) verify_paxos(loc_entry, t_id);
   // my_printf(cyan, "Session %u completing \n", loc_entry->glob_sess_id);
   signal_completion_to_client(sess_id, loc_entry->index_to_req_array, t_id);
