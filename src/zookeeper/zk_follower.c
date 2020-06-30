@@ -14,7 +14,7 @@ void *follower(void *arg)
   if (t_id == 0) my_printf(yellow, "FOLLOWER-id %d \n", flr_id);
   uint16_t remote_ldr_thread = t_id;
 
-  int protocol = FOLLOWER;
+  protocol_t protocol = FOLLOWER;
 
 
   int *recv_q_depths, *send_q_depths;
@@ -29,8 +29,8 @@ void *follower(void *arg)
 
   uint32_t prep_push_ptr = 0, prep_pull_ptr = 0;
   uint32_t com_push_ptr = 0, com_pull_ptr = 0;
-  volatile struct prep_message_ud_req *prep_buffer = (volatile struct prep_message_ud_req *)(cb->dgram_buf);
-  struct com_message_ud_req *com_buffer = (struct com_message_ud_req *)(cb->dgram_buf + FLR_PREP_BUF_SIZE);
+  volatile zk_prep_mes_ud_t *prep_buffer = (volatile zk_prep_mes_ud_t *)(cb->dgram_buf);
+  zk_com_mes_ud_t *com_buffer = (zk_com_mes_ud_t *)(cb->dgram_buf + FLR_PREP_BUF_SIZE);
 
   /* ---------------------------------------------------------------------------
   ------------------------------MULTICAST SET UP-------------------------------
@@ -107,11 +107,11 @@ void *follower(void *arg)
                                  (void*) com_buffer);
 
   p_writes_t *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, protocol);
-  p_acks_t *p_acks = (struct pending_acks *) calloc(1, sizeof(p_acks_t));
-  struct ack_message *ack = (struct ack_message *) calloc(1, sizeof(struct ack_message));
+  p_acks_t *p_acks = (p_acks_t *) calloc(1, sizeof(p_acks_t));
+  zk_ack_mes_t *ack = (zk_ack_mes_t *) calloc(1, sizeof(zk_ack_mes_t));
     
   if (!FLR_W_ENABLE_INLINING)
-    w_mr = register_buffer(cb->pd, p_writes->w_fifo->fifo, W_FIFO_SIZE * sizeof(struct w_message));
+    w_mr = register_buffer(cb->pd, p_writes->w_fifo->fifo, W_FIFO_SIZE * sizeof(zk_w_mes_t));
 
   struct fifo *remote_w_buf;
   init_fifo(&remote_w_buf, LEADER_W_BUF_SLOTS * sizeof(uint16_t), 1);
@@ -133,11 +133,6 @@ void *follower(void *arg)
   /* ---------------------------------------------------------------------------
   ------------------------------LATENCY AND DEBUG-----------------------------------
   ---------------------------------------------------------------------------*/
-  struct session_dbg *ses_dbg = NULL;
-  if (DEBUG_SESSIONS) {
-    ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
-    memset(ses_dbg, 0, sizeof(struct session_dbg));
-  }
   uint32_t wait_for_gid_dbg_counter = 0, completed_but_not_polled_coms = 0,
     completed_but_not_polled_preps = 0,
     wait_for_prepares_dbg_counter = 0, wait_for_coms_dbg_counter = 0;
@@ -191,9 +186,8 @@ void *follower(void *arg)
   ---------------------------------------------------------------------------*/
 
   // Propagate the updates before probing the cache
-    trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops, flr_id,
-                                           p_writes, resp, &latency_info, ses_dbg,
-                                           &last_session, protocol);
+    trace_iter = zk_batch_from_trace_to_KVS(trace_iter, t_id, trace, ops, flr_id,
+                                            p_writes, resp, &latency_info, &last_session, protocol);
 
 
 

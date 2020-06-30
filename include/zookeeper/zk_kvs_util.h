@@ -71,7 +71,7 @@ static inline void zk_KVS_batch_op_trace(uint16_t op_num, zk_trace_op_t *op, zk_
 }
 
 ///* The leader and follower send the writes to be committed with this function*/
-static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **preps,
+static inline void zk_KVS_batch_op_updates(uint16_t op_num, zk_prepare_t **preps,
                                            uint32_t pull_ptr, uint32_t max_op_size,
                                            bool zero_ops, uint16_t t_id)
 {
@@ -87,18 +87,18 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **pre
   mica_op_t *kv_ptr[ZK_UPDATE_BATCH];	/* Ptr to KV item in log */
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct prepare *op = preps[(pull_ptr + op_i) % max_op_size];
-    KVS_locate_one_bucket(op_i, bkt, (mica_key_t *) &op->key, bkt_ptr, tag, kv_ptr, KVS);
+    zk_prepare_t *op = preps[(pull_ptr + op_i) % max_op_size];
+    KVS_locate_one_bucket(op_i, bkt, &op->key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
   for(op_i = 0; op_i < op_num; op_i++) {
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) assert(false);
-    struct prepare *op = preps[(pull_ptr + op_i) % max_op_size];
+    zk_prepare_t *op = preps[(pull_ptr + op_i) % max_op_size];
     bool key_found = memcmp(&kv_ptr[op_i]->key, &op->key, KEY_SIZE) == 0;
     if (unlikely(ENABLE_ASSERTIONS && !key_found)) {
       my_printf(red, "Kvs update miss %u\n", op_i);
-      cust_print_key("Op", (mica_key_t *) &op->key);
+      cust_print_key("Op", &op->key);
       cust_print_key("KV_ptr", &kv_ptr[op_i]->key);
       assert(false);
     }
@@ -109,7 +109,7 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, struct prepare **pre
     }
     else {
       my_printf(red, "wrong Opcode to an update in kvs: %d, req %d, flr_id %u, val_len %u, g_id %u , \n",
-                 op->opcode, op_i, op->flr_id, op->val_len, *(uint32_t *) op->g_id);
+                 op->opcode, op_i, op->flr_id, op->val_len, op->g_id);
       assert(0);
     }
     if (zero_ops) {

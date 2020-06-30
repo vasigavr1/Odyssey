@@ -19,4 +19,13 @@ static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *mess
   }
 }
 
+static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16_t req_array_i, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(sess_id < SESSIONS_PER_THREAD);
+    assert(req_array_i < PER_SESSION_REQ_NUM);
+    assert(t_id < WORKERS_PER_MACHINE);
+  }
+}
+
 #endif //DEBUG_UTIL_H

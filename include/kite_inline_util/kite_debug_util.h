@@ -117,21 +117,21 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
     if (VERBOSE_DBG_COUNTER) {
       struct ack_message_ud_req *ack_buf = (struct ack_message_ud_req *) (buf);
       struct ack_message *ack = &ack_buf[ack_pull_ptr].ack;
-      uint64_t l_id = ack->local_id;
+      uint64_t l_id = ack->l_id;
       uint8_t message_opc = ack->opcode;
       my_printf(cyan, "Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
                 t_id, ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
       MOD_ADD(ack_pull_ptr, ACK_BUF_SLOTS);
       ack = &ack_buf[ack_pull_ptr].ack;
-      l_id = ack->local_id;
+      l_id = ack->l_id;
       message_opc = ack->opcode;
       my_printf(cyan, "Next index %u,polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
                 ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
       for (int i = 0; i < ACK_BUF_SLOTS; ++i) {
         if (ack_buf[i].ack.opcode == OP_ACK) {
-          my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, ack_buf[i].ack.local_id);
+          my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, ack_buf[i].ack.l_id);
         } else
-          my_printf(red, "BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, ack_buf[i].ack.local_id,
+          my_printf(red, "BAD OPCODE in index %d, l_id %u, from machine: %u  \n", i, ack_buf[i].ack.l_id,
                     ack_buf[i].ack.m_id);
 
       }
@@ -796,7 +796,7 @@ static inline void check_ack_message_count_stats(p_ops_t* p_ops, struct ack_mess
     assert(ack->opcode == OP_ACK);
     //      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
     assert(ack->m_id < MACHINE_NUM);
-    uint64_t l_id = ack->local_id;
+    uint64_t l_id = ack->l_id;
     uint64_t pull_lid = p_ops->local_w_id;
     assert(l_id + ack_num <= pull_lid + p_ops->w_size);
     if (DEBUG_ACKS)
@@ -1187,15 +1187,7 @@ static inline void debug_set_version_of_op_to_one(trace_op_t *op, uint8_t opcode
   }
 }
 
-static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16_t req_array_i, uint16_t t_id)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(sess_id < SESSIONS_PER_THREAD);
-    assert(req_array_i < PER_SESSION_REQ_NUM);
-    assert(t_id < WORKERS_PER_MACHINE);
 
-  }
-}
 
 
 static inline void check_all_w_meta(p_ops_t* p_ops, uint16_t t_id, const char* message)

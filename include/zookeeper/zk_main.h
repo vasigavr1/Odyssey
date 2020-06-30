@@ -11,10 +11,6 @@
 
 
 
-#define ENABLE_MULTIPLE_SESSIONS 1
-
-
-
 #define DISABLE_GID_ORDERING 0
 #define DISABLE_UPDATING_KVS 0
 
@@ -59,8 +55,8 @@
  * -----------------------------ZOOKEEPER---------------------------------------
  * --------------------------------------------------------------------------------
  * --------------------------------------------------------------------------------*/
-#define FOLLOWER 1
-#define LEADER 2
+typedef enum {FOLLOWER = 1, LEADER} protocol_t;
+
 
 #define MIN_SS_BATCH 127// The minimum SS batch
 
@@ -256,119 +252,109 @@ enum write_state {INVALID, VALID, SENT, READY, SEND_COMMITTS};
 
 
 // The format of an ack message
-struct ack_message {
-	uint8_t local_id[8]; // the first local id that is being acked
+typedef struct zk_ack_message {
+	uint64_t l_id; // the first local id that is being acked
   uint8_t follower_id;
   uint8_t opcode;
   uint16_t ack_num;
+} __attribute__((__packed__)) zk_ack_mes_t;
 
-};
 
-
-struct ack_message_ud_req {
+typedef struct zk_ack_message_ud_req {
 	uint8_t grh[GRH_SIZE];
-  struct ack_message ack;
-
- };
+  zk_ack_mes_t ack;
+} zk_ack_mes_ud_t;
 
 
 // The format of a commit message
-struct com_message {
-  uint8_t l_id[8];
+typedef struct com_message {
+  uint64_t l_id;
   uint16_t com_num;
 	uint16_t opcode;
-
-};
+} __attribute__((__packed__)) zk_com_mes_t;
 
 // commit message plus the grh
-struct com_message_ud_req {
+typedef struct zk_com_message_ud_req {
 	uint8_t grh[GRH_SIZE];
-  struct com_message com;
+  zk_com_mes_t com;
+} zk_com_mes_ud_t;
 
-};
-
-struct prepare {
+typedef struct zk_prepare {
 	uint8_t flr_id;
   uint8_t unused;
   uint16_t sess_id;
-	uint8_t g_id[4]; //send the bottom half of the gid
-	uint8_t key[8];
+	uint32_t g_id; //send the bottom half of the gid
+	mica_key_t key;
 	uint8_t opcode; //override opcode
 	uint8_t val_len;
 	uint8_t value[VALUE_SIZE];
-} __attribute__((__packed__));
+} __attribute__((__packed__)) zk_prepare_t;
 
 // prepare message
-struct prep_message {
+typedef struct zk_prep_message {
 	uint8_t opcode;
 	uint8_t coalesce_num;
-	uint8_t l_id[4]; // send the bottom half of the lid
-	struct prepare prepare[MAX_PREP_COALESCE];
-};
+	uint32_t l_id; // send the bottom half of the lid
+	zk_prepare_t prepare[MAX_PREP_COALESCE];
+} __attribute__((__packed__)) zk_prep_mes_t;
 
-struct prep_message_ud_req {
+typedef struct zk_prep_message_ud_req {
 	uint8_t grh[GRH_SIZE];
-	struct prep_message prepare;
-};
+	zk_prep_mes_t prepare;
+} zk_prep_mes_ud_t;
 
 
-struct write {
+typedef struct zk_write {
   uint8_t w_num; // the first write holds the coalesce number for the entire message
   uint8_t flr_id;
   uint8_t unused[2];
   uint32_t sess_id;
-  uint8_t key[KEY_SIZE];	/* 8B */
+  mica_key_t key;	/* 8B */
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
-} __attribute__((__packed__));
+} __attribute__((__packed__)) zk_write_t;
 
-typedef  struct w_message {
-  struct write write[MAX_W_COALESCE];
+typedef struct zk_w_message {
+  zk_write_t write[MAX_W_COALESCE];
 } zk_w_mes_t;
 
 
-struct w_message_ud_req {
+typedef struct zk_w_message_ud_req {
   uint8_t unused[GRH_SIZE];
-  struct w_message w_mes;
-};
+  zk_w_mes_t w_mes;
+} zk_w_mes_ud_t;
 
 
 
 // The entires in the commit prep_message are distinct batches of commits
 typedef struct commit_fifo {
-  struct com_message *commits;
+  zk_com_mes_t *commits;
   uint16_t push_ptr;
   uint16_t pull_ptr;
   uint32_t size; // number of commits rather than  messages
-} com_fifo_t;
-
-struct fifo {
-	void *fifo;
-	uint32_t push_ptr;
-	uint32_t pull_ptr;
-	uint32_t size;
-
-};
+} zk_com_fifo_t;
 
 
-struct prep_fifo {
-	struct prep_message *prep_message;
+
+
+typedef struct prep_fifo {
+	zk_prep_mes_t *prep_message;
 	uint32_t push_ptr;
 	uint32_t pull_ptr;
 	uint32_t bcast_pull_ptr;
 	uint32_t bcast_size; // number of prepares not messages!
 	uint32_t size;
 	uint32_t backward_ptrs[PREP_FIFO_SIZE];
-};
+} zk_prep_fifo_t;
 
 
 // A data structute that keeps track of the outstanding writes
 typedef struct pending_writes {
 	uint64_t *g_id;
-	struct prep_fifo *prep_fifo;
+	zk_prep_fifo_t *prep_fifo;
   struct fifo *w_fifo;
-	struct prepare **ptrs_to_ops;
+	zk_prepare_t **ptrs_to_ops;
 	uint64_t local_w_id;
 	uint32_t *session_id;
 	enum write_state *w_state;
@@ -390,13 +376,12 @@ typedef struct pending_writes {
 typedef struct pending_acks {
 	uint32_t slots_ahead;
 	uint32_t acks_to_send;
-
 } p_acks_t;
 
 
 typedef struct zk_trace_op {
 	uint16_t session_id;
-	struct key key;
+	mica_key_t key;
 	uint8_t opcode;// if the opcode is 0, it has never been RMWed, if it's 1 it has
 	uint8_t val_len; // this represents the maximum value len
 	uint8_t value[VALUE_SIZE]; // if it's an RMW the first 4 bytes point to the entry

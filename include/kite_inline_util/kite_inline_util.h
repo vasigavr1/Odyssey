@@ -58,10 +58,6 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   else if (ENABLE_ASSERTIONS ) assert(working_session != -1);
 
   bool passed_over_all_sessions = false;
-  //if (!passed_over_all_sessions)
-  //  my_printf(green, "Pulling from working session %d \n", working_session);
-
-
   while (op_i < MAX_OP_BATCH && !passed_over_all_sessions) {
     if (fill_trace_op(p_ops, &ops[op_i], trace_iter, trace, op_i, working_session, &writes_num,
                       &reads_num, ses_dbg, latency_info, sizes_dbg_cntr, t_id))
@@ -422,7 +418,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
     }
     if (DEBUG_ACKS)
       my_printf(yellow, "Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
-                t_id, acks[i].local_id, acks[i].credits, acks[i].ack_num, acks[i].m_id);
+                t_id, acks[i].l_id, acks[i].credits, acks[i].ack_num, acks[i].m_id);
 
     acks[i].opcode = OP_ACK;
     if (ENABLE_ASSERTIONS) {
@@ -736,7 +732,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
 
     MOD_ADD(index, ACK_BUF_SLOTS);
     polled_messages++;
-    uint64_t l_id = ack->local_id;
+    uint64_t l_id = ack->l_id;
     uint64_t pull_lid = p_ops->local_w_id; // l_id at the pull pointer
     uint32_t ack_ptr; // a pointer in the FIFO, from where ack should be added
     credits[W_VC][ack->m_id] += ack->credits;

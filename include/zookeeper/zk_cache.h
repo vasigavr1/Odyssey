@@ -140,7 +140,7 @@ void cache_populate_fixed_len(struct mica_kv* kv, int n, int val_len);
 // * But writes do not get served, writes are only propagated here to see whether their keys exist */
 //void zk_KVS_batch_op_trace(int op_num, int thread_id, struct cache_op **op, struct mica_resp *resp);
 ///* The leader sends the writes to be committed with this function*/
-//void zk_KVS_batch_op_updates(uint32_t , int , struct prepare**, struct mica_resp *,uint32_t,  uint32_t, bool);
+//void zk_KVS_batch_op_updates(uint32_t , int , zk_prepare_t**, struct mica_resp *,uint32_t,  uint32_t, bool);
 
 
 #endif

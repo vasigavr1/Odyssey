@@ -149,7 +149,7 @@
 
 // The format of an ack message
 struct ack_message {
-  uint64_t local_id ; // the first local id that is being acked
+  uint64_t l_id ; // the first local id that is being acked
   uint8_t m_id;
   uint8_t opcode;
   uint16_t credits;

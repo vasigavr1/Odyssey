@@ -89,10 +89,10 @@ typedef struct key mica_key_t;
 #define KVS_SOCKET 0// (WORKERS_PER_MACHINE < 30 ? 0 : 1 )// socket where the cache is bind
 
 // CORE CONFIGURATION
-#define WORKERS_PER_MACHINE 20
+#define WORKERS_PER_MACHINE 10
 #define MACHINE_NUM 5
-#define SESSIONS_PER_THREAD 40
-#define ENABLE_CLIENTS 1
+#define SESSIONS_PER_THREAD 20
+#define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
 #define MAX_OP_BATCH SESSIONS_PER_THREAD
@@ -449,6 +449,16 @@ extern uint64_t last_pushed_req[SESSIONS_PER_MACHINE];
 //////////////////////////////////////////////////////
 /////////////~~~~FUNCTIONS~~~~~~/////////////////////////
 //////////////////////////////////////////////////////
+
+struct fifo {
+  void *fifo;
+  uint32_t push_ptr;
+  uint32_t pull_ptr;
+  uint32_t size;
+
+};
+
+
 typedef enum {yellow, red, green, cyan, magenta, regular} color_t;
 static void my_printf(color_t color, const char *format, ...)
 {

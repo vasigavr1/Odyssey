@@ -121,6 +121,9 @@ static inline int find_how_many_messages_can_be_polled(struct ibv_cq *recv_cq, s
   int completed_messages = ibv_poll_cq(recv_cq, buf_slots, recv_wc);
   if (ENABLE_ASSERTIONS) assert(completed_messages >= 0);
 
+  // The caller knows that all complted messages get polled
+  if (completed_but_not_polled == NULL) return completed_messages;
+
   // There is a chance that you wont be able to poll all completed messages,
   // because of downstream back-pressure, in which case you
   // pass the number of completed (i.e. from the completion queue) but not polled messages to the next round

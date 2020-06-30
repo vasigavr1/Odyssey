@@ -5,6 +5,8 @@
 #ifndef KITE_CLIENT_IF_UTIL_H
 #define KITE_CLIENT_IF_UTIL_H
 
+#include "debug_util.h"
+
 /*-------------------------------- CLIENT REQUEST ARRAY ----------------------------------------*/
 // signal completion of a request to the client
 static inline void signal_completion_to_client(uint32_t sess_id,

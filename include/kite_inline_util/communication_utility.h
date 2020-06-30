@@ -307,25 +307,25 @@ static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint6
                                    const uint8_t m_id, const uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS && ack->opcode != OP_ACK) {
-    if(unlikely(ack->local_id) + ack->ack_num != l_id) {
+    if(unlikely(ack->l_id) + ack->ack_num != l_id) {
       my_printf(red, "Wrkr %u: Adding to existing ack for machine %u  with l_id %lu, "
                   "ack_num %u with new l_id %lu, coalesce_num %u, opcode %u\n", t_id, m_id,
-                ack->local_id, ack->ack_num, l_id, w_num, ack->opcode);
+                ack->l_id, ack->ack_num, l_id, w_num, ack->opcode);
       //assert(false);
       return false;
     }
   }
   if (ack->opcode == OP_ACK) {// new ack
-    //if (ENABLE_ASSERTIONS) assert((ack->local_id) + ack->ack_num == l_id);
-    memcpy(&ack->local_id, &l_id, sizeof(uint64_t));
+    //if (ENABLE_ASSERTIONS) assert((ack->l_id) + ack->ack_num == l_id);
+    memcpy(&ack->l_id, &l_id, sizeof(uint64_t));
     ack->credits = 1;
     ack->ack_num = w_num;
     ack->opcode = ACK_NOT_YET_SENT;
-    if (DEBUG_ACKS) my_printf(yellow, "Create an ack with l_id  %lu \n", ack->local_id);
+    if (DEBUG_ACKS) my_printf(yellow, "Create an ack with l_id  %lu \n", ack->l_id);
   }
   else {
     if (ENABLE_ASSERTIONS) {
-      assert(ack->local_id + ((uint64_t) ack->ack_num) == l_id);
+      assert(ack->l_id + ((uint64_t) ack->ack_num) == l_id);
       assert(ack->ack_num < 63000);
       assert(W_CREDITS > 1);
       assert(ack->credits < W_CREDITS);

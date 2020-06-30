@@ -59,30 +59,30 @@ static inline void ldr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
 // Follower checks its debug counters
 static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_for_coms_dbg_counter,
                                          uint32_t *wait_for_preps_dbg_counter,
-                                         uint32_t *wait_for_gid_dbg_counter, volatile struct prep_message_ud_req *prep_buf,
+                                         uint32_t *wait_for_gid_dbg_counter, volatile zk_prep_mes_ud_t *prep_buf,
                                          uint32_t pull_ptr, p_writes_t *p_writes, uint16_t t_id)
 {
 
   if (unlikely((*wait_for_preps_dbg_counter) > M_16)) {
     my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
-    struct prepare *prep = (struct prepare *)&prep_buf[pull_ptr].prepare.prepare;
-    uint32_t l_id = *(uint32_t *)prep_buf[pull_ptr].prepare.l_id;
-    uint32_t g_id = *(uint32_t *)prep->g_id;
+    zk_prepare_t *prep = (zk_prepare_t *)&prep_buf[pull_ptr].prepare.prepare;
+    uint32_t l_id = prep_buf[pull_ptr].prepare.l_id;
+    uint32_t g_id = prep->g_id;
     uint8_t message_opc = prep_buf[pull_ptr].prepare.opcode;
     my_printf(cyan, "Flr %d, polling on index %u,polled opc %u, 1st write opcode: %u, l_id %u, first g_id %u, expected l_id %u\n",
               t_id, pull_ptr, message_opc, prep->opcode, l_id, g_id, p_writes->local_w_id);
     MOD_ADD(pull_ptr, FLR_PREP_BUF_SLOTS);
-    prep = (struct prepare *)&prep_buf[pull_ptr].prepare.prepare;
-    l_id = *(uint32_t *)prep_buf[pull_ptr].prepare.l_id;
-    g_id = *(uint32_t *)prep->g_id;
+    prep = (zk_prepare_t *)&prep_buf[pull_ptr].prepare.prepare;
+    l_id = prep_buf[pull_ptr].prepare.l_id;
+    g_id = prep->g_id;
     message_opc = prep_buf[pull_ptr].prepare.opcode;
     my_printf(cyan, "Next index %u,polled opc %u, 1st write opcode: %u, l_id %u, first g_id %u, expected l_id %u\n",
               pull_ptr, message_opc, prep->opcode, l_id, g_id, p_writes->local_w_id);
     for (int i = 0; i < FLR_PREP_BUF_SLOTS; ++i) {
       if (prep_buf[i].prepare.opcode == KVS_OP_PUT) {
-        my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, *(uint32_t *)prep_buf[i].prepare.l_id);
+        my_printf(green, "GOOD OPCODE in index %d, l_id %u \n", i, prep_buf[i].prepare.l_id);
       }
-      else my_printf(red, "BAD OPCODE in index %d, l_id %u \n", i, *(uint32_t *)prep_buf[i].prepare.l_id);
+      else my_printf(red, "BAD OPCODE in index %d, l_id %u \n", i, prep_buf[i].prepare.l_id);
 
     }
 
@@ -120,6 +120,58 @@ static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
       exit(0);
     }
   }
+}
+
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------ POLLNG ACKS -----------------------------
+//---------------------------------------------------------------------------*/
+
+static inline void zk_check_polled_ack_and_print(zk_ack_mes_t *ack, uint16_t ack_num,
+                                                 uint64_t pull_lid, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert (ack->opcode == KVS_OP_ACK);
+    assert(ack_num > 0 && ack_num <= FLR_PENDING_WRITES);
+    assert(ack->follower_id < FOLLOWER_MACHINE_NUM);
+  }
+  if (DEBUG_ACKS)
+    my_printf(yellow, "Leader %d ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from flr %u \n",
+              t_id, ack->opcode, ack_num, ack->l_id, pull_lid, index, ack->follower_id);
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].received_acks += ack_num;
+    t_stats[t_id].received_acks_mes_num++;
+  }
+
+}
+
+static inline void zk_check_ack_l_id_is_small_enough(uint16_t ack_num,
+                                                     uint64_t l_id, p_writes_t *p_writes,
+                                                     uint64_t pull_lid, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(l_id + ack_num <= pull_lid + p_writes->size);
+    if ((l_id + ack_num < pull_lid) && (!USE_QUORUM)) {
+      my_printf(red, "l_id %u, ack_num %u, pull_lid %u \n", l_id, ack_num, pull_lid);
+      assert(false);
+    }
+  }
+}
+
+static inline void zk_debug_info_bookkeep(int completed_messages, int polled_messages,
+                                          uint32_t *dbg_counter, struct recv_info *ack_recv_info,
+                                          uint32_t *outstanding_prepares, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) assert(polled_messages == completed_messages);
+  if (polled_messages > 0) {
+    if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
+  }
+  else {
+    if (ENABLE_ASSERTIONS && (*outstanding_prepares) > 0) (*dbg_counter)++;
+    if (ENABLE_STAT_COUNTING && (*outstanding_prepares) > 0) t_stats[t_id].stalled_ack_prep++;
+  }
+  if (ENABLE_ASSERTIONS) assert(ack_recv_info->posted_recvs >= polled_messages);
 }
 
 

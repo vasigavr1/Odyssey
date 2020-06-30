@@ -4,19 +4,19 @@
 void zk_print_parameters_in_the_start()
 {
   my_printf(green, "COMMIT: commit message %lu/%d, commit message ud req %llu/%d\n",
-               sizeof(struct com_message), LDR_COM_SEND_SIZE,
-               sizeof(struct com_message_ud_req), FLR_COM_RECV_SIZE);
+               sizeof(zk_com_mes_t), LDR_COM_SEND_SIZE,
+               sizeof(zk_com_mes_ud_t), FLR_COM_RECV_SIZE);
   my_printf(cyan, "ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
-              sizeof(struct ack_message), FLR_ACK_SEND_SIZE,
-              sizeof(struct ack_message_ud_req), LDR_ACK_RECV_SIZE);
+              sizeof(zk_ack_mes_t), FLR_ACK_SEND_SIZE,
+              sizeof(zk_ack_mes_ud_t), LDR_ACK_RECV_SIZE);
   my_printf(yellow, "PREPARE: prepare %lu/%d, prep message %lu/%d, prep message ud req %llu/%d\n",
-                sizeof(struct prepare), PREP_SIZE,
-                sizeof(struct prep_message), LDR_PREP_SEND_SIZE,
-                sizeof(struct prep_message_ud_req), FLR_PREP_RECV_SIZE);
+                sizeof(zk_prepare_t), PREP_SIZE,
+                sizeof(zk_prep_mes_t), LDR_PREP_SEND_SIZE,
+                sizeof(zk_prep_mes_ud_t), FLR_PREP_RECV_SIZE);
   my_printf(cyan, "Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
-              sizeof(struct write), W_SIZE,
-              sizeof(struct w_message), FLR_W_SEND_SIZE,
-              sizeof(struct w_message_ud_req), LDR_W_RECV_SIZE);
+              sizeof(zk_write_t), W_SIZE,
+              sizeof(zk_w_mes_t), FLR_W_SEND_SIZE,
+              sizeof(zk_w_mes_ud_t), LDR_W_RECV_SIZE);
 
   my_printf(green, "LEADER PREPARE INLINING %d, LEADER PENDING WRITES %d \n",
                LEADER_PREPARE_ENABLE_INLINING, LEADER_PENDING_WRITES);
@@ -36,10 +36,10 @@ void zk_static_assert_compile_parameters()
   assert(LEADERS_PER_MACHINE == FOLLOWERS_PER_MACHINE); // hopefully temporary restriction
   assert((W_CREDITS % LDR_CREDIT_DIVIDER) == 0); // division better be perfect
   assert((COMMIT_CREDITS % FLR_CREDIT_DIVIDER) == 0); // division better be perfect
-  assert(sizeof(struct ack_message_ud_req) == LDR_ACK_RECV_SIZE);
-  assert(sizeof(struct com_message_ud_req) == FLR_COM_RECV_SIZE);
-  assert(sizeof(struct prep_message_ud_req) == FLR_PREP_RECV_SIZE);
-  assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
+  assert(sizeof(zk_ack_mes_ud_t) == LDR_ACK_RECV_SIZE);
+  assert(sizeof(zk_com_mes_ud_t) == FLR_COM_RECV_SIZE);
+  assert(sizeof(zk_prep_mes_ud_t) == FLR_PREP_RECV_SIZE);
+  assert(sizeof(zk_w_mes_ud_t) == LDR_W_RECV_SIZE);
   assert(SESSIONS_PER_THREAD < M_16);
   assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
   if (WRITE_RATIO > 0) assert(ZK_UPDATE_BATCH >= LEADER_PENDING_WRITES);
@@ -48,10 +48,10 @@ void zk_static_assert_compile_parameters()
 //
 //  my_printf(yellow, "WRITE: size of write recv slot %d size of w_message %lu , "
 //           "value size %d, size of cache op %lu , sizeof udreq w message %lu \n",
-//         LDR_W_RECV_SIZE, sizeof(struct w_message), VALUE_SIZE,
-//         sizeof(struct cache_op), sizeof(struct w_message_ud_req));
-  assert(sizeof(struct w_message_ud_req) == LDR_W_RECV_SIZE);
-  assert(sizeof(struct w_message) == FLR_W_SEND_SIZE);
+//         LDR_W_RECV_SIZE, sizeof(zk_w_mes_t), VALUE_SIZE,
+//         sizeof(struct cache_op), sizeof(zk_w_mes_ud_t));
+  assert(sizeof(zk_w_mes_ud_t) == LDR_W_RECV_SIZE);
+  assert(sizeof(zk_w_mes_t) == FLR_W_SEND_SIZE);
 }
 
 void zk_init_globals()
@@ -60,272 +60,7 @@ void zk_init_globals()
   committed_global_w_id = 0;
 }
 
-/*
-// Leader calls this function to connect with its followers
-//void get_qps_from_all_other_machines(uint16_t g_id, struct hrd_ctrl_blk *cb)
-//{
-//    int i, qp_i;
-//    int ib_port_index = 0;
-//    struct ibv_ah *follower_ah[FOLLOWER_NUM][FOLLOWER_QP_NUM];
-//    struct hrd_qp_attr *follower_qp[FOLLOWER_NUM][FOLLOWER_QP_NUM];
-//
-//    // -- CONNECT WITH FOLLOWERS
-//    for(i = 0; i < FOLLOWER_NUM; i++) {
-//        for (qp_i = 0; qp_i < FOLLOWER_QP_NUM; qp_i++) {
-//            // Compute the control block and physical port index for client @i
-//            // int cb_i = i % num_server_ports;
-//            int local_port_i = ib_port_index;// + cb_i;
-//
-//            char follower_name[QP_NAME_SIZE];
-//            sprintf(follower_name, "follower-dgram-%d-%d", i, qp_i);
-//
-//            // Get the UD queue pair for the ith machine
-//            follower_qp[i][qp_i] = NULL;
-////            printf("Leader %d is Looking for follower %s \n", l_id, follower_name);
-//            while(follower_qp[i][qp_i] == NULL) {
-//                follower_qp[i][qp_i] = hrd_get_published_qp(follower_name);
-//                if(follower_qp[i][qp_i] == NULL)
-//                    usleep(200000);
-//            }
-//            // printf("main:Leader %d found clt %d. Client LID: %d\n",
-//            //        l_id, i, follower_qp[i][qp_i]->lid);
-//            struct ibv_ah_attr ah_attr = {
-//                //-----INFINIBAND----------
-//                .is_global = 0,
-//                .dlid = (uint16_t) follower_qp[i][qp_i]->lid,
-//                .sl = (uint8_t) follower_qp[i][qp_i]->sl,
-//                .src_path_bits = 0,
-//                // port_num (> 1): device-local port for responses to this worker
-//                .port_num = (uint8_t) (local_port_i + 1),
-//            };
-//
-//            // ---ROCE----------
-//            if (is_roce == 1) {
-//                ah_attr.is_global = 1;
-//                ah_attr.dlid = 0;
-//                ah_attr.grh.dgid.global.interface_id =  follower_qp[i][qp_i]->gid_global_interface_id;
-//                ah_attr.grh.dgid.global.subnet_prefix = follower_qp[i][qp_i]->gid_global_subnet_prefix;
-//                ah_attr.grh.sgid_index = 0;
-//                ah_attr.grh.hop_limit = 1;
-//            }
-//            //
-//            follower_ah[i][qp_i]= ibv_create_ah(cb->pd, &ah_attr);
-//            assert(follower_ah[i][qp_i] != NULL);
-//            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].ah =
-//                follower_ah[i][qp_i];
-//            remote_follower_qp[i / FOLLOWERS_PER_MACHINE][i % FOLLOWERS_PER_MACHINE][qp_i].qpn =
-//                follower_qp[i][qp_i]->qpn;
-//        }
-//    }
-//}
 
-// Follower calls this function to connect with the leader
-//void get_qps_from_one_machine(uint16_t g_id, struct hrd_ctrl_blk *cb) {
-//    int i, qp_i;
-//    struct ibv_ah *leader_ah[LEADERS_PER_MACHINE][LEADER_QP_NUM];
-//    struct hrd_qp_attr *leader_qp[LEADERS_PER_MACHINE][LEADER_QP_NUM];
-//
-//    for(i = 0; i < LEADERS_PER_MACHINE; i++) {
-//        for (qp_i = 0; qp_i < LEADER_QP_NUM; qp_i++) {
-//            //Compute the control block and physical port index for leader thread @i
-//            int local_port_i = 0;
-//
-//            char ldr_name[QP_NAME_SIZE];
-//            sprintf(ldr_name, "leader-dgram-%d-%d", i, qp_i);
-//            // Get the UD queue pair for the ith leader thread
-//            leader_qp[i][qp_i] = NULL;
-////          printf("Follower %d is Looking for leader %s\n", l_id, ldr_name);
-//          while (leader_qp[i][qp_i] == NULL) {
-//                leader_qp[i][qp_i] = hrd_get_published_qp(ldr_name);
-//                //printf("Follower %d is expecting leader %s\n" , l_id, ldr_name);
-//                if (leader_qp[i][qp_i] == NULL) {
-//                    usleep(200000);
-//                }
-//            }
-//            //  printf("main: Follower %d found Leader %d. Leader LID: %d\n",
-//            //  	l_id, i, leader_qp[i][qp_i]->lid);
-//
-//            struct ibv_ah_attr ah_attr = {
-//              //-----INFINIBAND----------
-//              .is_global = 0,
-//              .dlid = (uint16_t) leader_qp[i][qp_i]->lid,
-//              .sl = leader_qp[i][qp_i]->sl,
-//              .src_path_bits = 0,
-//              // port_num (> 1): device-local port for responses to this leader thread
-//              .port_num = (uint8) (local_port_i + 1),
-//            };
-//
-//            //  ---ROCE----------
-//            if (is_roce == 1) {
-//                ah_attr.is_global = 1;
-//                ah_attr.dlid = 0;
-//                ah_attr.grh.dgid.global.interface_id = leader_qp[i][qp_i]->gid_global_interface_id;
-//                ah_attr.grh.dgid.global.subnet_prefix = leader_qp[i][qp_i]->gid_global_subnet_prefix;
-//                ah_attr.grh.sgid_index = 0;
-//                ah_attr.grh.hop_limit = 1;
-//            }
-//            leader_ah[i][qp_i] = ibv_create_ah(cb->pd, &ah_attr);
-//            assert(leader_ah[i][qp_i] != NULL);
-//            remote_leader_qp[i][qp_i].ah = leader_ah[i][qp_i];
-//            remote_leader_qp[i][qp_i].qpn = leader_qp[i][qp_i]->qpn;
-//        }
-//    }
-//}
-*/
-/*
-// Parse a trace, use this for skewed workloads as uniform trace can be manufactured easily
-int parse_trace(char* path, struct trace_command **cmds, int t_id){
-    FILE * fp;
-    ssize_t read;
-    size_t len = 0;
-    char* ptr;
-    char* word;
-    char *saveptr;
-    char* line = NULL;
-    int i = 0, cmd_count = 0, word_count = 0, writes = 0;
-    uint32_t hottest_key_counter = 0;
-
-    fp = fopen(path, "r");
-    if (fp == NULL){
-        printf ("ERROR: Cannot open file: %s\n", path);
-        exit(EXIT_FAILURE);
-    }
-
-    while ((read = getline(&line, &len, fp)) != -1)
-        cmd_count++;
-
-    fclose(fp);
-    if (line)
-        free(line);
-
-    len = 0;
-    line = NULL;
-
-    fp = fopen(path, "r");
-    if (fp == NULL){
-        printf ("ERROR: Cannot open file: %s\n", path);
-        exit(EXIT_FAILURE);
-    }
-    // printf("File %s has %d lines \n", path, cmd_count);
-    (*cmds) = (struct trace_command *)malloc((cmd_count + 1) * sizeof(struct trace_command));
-    struct timespec time;
-    clock_gettime(CLOCK_MONOTONIC, &time);
-    uint64_t seed = time.tv_nsec + ((machine_id * LEADERS_PER_MACHINE) + t_id) + (uint64_t)(*cmds);
-    srand ((uint)seed);
-    int debug_cnt = 0;
-    //parse file line by line and insert trace to cmd.
-    for (i = 0; i < cmd_count; i++) {
-        if ((getline(&line, &len, fp)) == -1)
-            die("ERROR: Problem while reading the trace\n");
-        word_count = 0;
-        word = strtok_r (line, " ", &saveptr);
-        (*cmds)[i].opcode = 0;
-
-        //Before reading the request deside if it's gone be read or write
-        uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-        if (is_update) {
-            (*cmds)[i].opcode = (uint8_t) WRITE_OP;
-            writes++;
-        }
-        else (*cmds)[i].opcode = (uint8_t) READ_OP;
-
-        while (word != NULL) {
-            if (word[strlen(word) - 1] == '\n')
-                word[strlen(word) - 1] = 0;
-
-            if (word_count == 0){
-                (*cmds)[i].key_id = (uint32_t) strtoul(word, &ptr, 10);
-                if (USE_A_SINGLE_KEY)
-                    (*cmds)[i].key_id =  0;
-              if ((*cmds)[i].key_id == 0)
-                hottest_key_counter++;
-              (*cmds)[i].key_hash = CityHash128((char *) &((*cmds)[i].key_id), 4);
-                debug_cnt++;
-            }
-            word_count++;
-            word = strtok_r(NULL, " ", &saveptr);
-            if (word == NULL && word_count < 1) {
-                printf("Thread %d Error: Reached word %d in line %d : %s \n", t_id, word_count, i, line);
-                assert(false);
-            }
-        }
-    }
-    if (t_id  == 0)
-      printf("Trace size: %d | Hottest key accessed: %.2f%% | Write Ratio: %.2f%% \n",
-             cmd_count, (100 * hottest_key_counter / (double) cmd_count),
-             (double) (writes * 100) / cmd_count);
-
-    (*cmds)[cmd_count].opcode = NOP;
-    assert(cmd_count == debug_cnt);
-    fclose(fp);
-    if (line)
-        free(line);
-    return cmd_count;
-}
-
-
-// Manufactures a trace with a uniform distrbution without a backing file
-void manufacture_trace(struct trace_command **cmds, int g_id)
-{
-  (*cmds) = (struct trace_command *)malloc((TRACE_SIZE + 1) * sizeof(struct trace_command));
-  struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC, &time);
-  uint64_t seed = time.tv_nsec + ((machine_id * LEADERS_PER_MACHINE) + g_id) + (uint64_t)(*cmds);
-  srand ((uint)seed);
-  uint32_t i, writes = 0;
-  //parse file line by line and insert trace to cmd.
-  for (i = 0; i < TRACE_SIZE; i++) {
-    (*cmds)[i].opcode = 0;
-
-    //Before reading the request deside if it's gone be read or write
-    uint8_t is_update = (rand() % 1000 < WRITE_RATIO) ? (uint8_t) 1 : (uint8_t) 0;
-    if (is_update) {
-      (*cmds)[i].opcode = (uint8_t) WRITE_OP;
-
-    }
-    else  (*cmds)[i].opcode = (uint8_t) READ_OP;
-
-    if (FOLLOWER_DOES_ONLY_READS && (!is_leader)) (*cmds)[i].opcode = (uint8_t) 2;
-
-    //--- KEY ID----------
-    (*cmds)[i].key_id = (uint32) rand() % CACHE_NUM_KEYS;
-    if(USE_A_SINGLE_KEY == 1) (*cmds)[i].key_id =  0;
-    (*cmds)[i].key_hash = CityHash128((char *) &((*cmds)[i].key_id), 4);
-
-    if ((*cmds)[i].opcode == 1) writes++;
-  }
-
-  if (g_id == 0) printf("T_id : %u Write Ratio: %.2f%% \nTrace size %d \n",
-                        g_id, (double) (writes * 100) / TRACE_SIZE, TRACE_SIZE);
-  (*cmds)[TRACE_SIZE].opcode = NOP;
-  // printf("CLient %d Trace size: %d, debug counter %d hot keys %d, cold keys %d \n",l_id, cmd_count, debug_cnt,
-  //         t_stats[l_id].hot_keys_per_trace, t_stats[l_id].cold_keys_per_trace );
-}
-
-// Initiialize the trace
-void trace_init(struct trace_command **cmds, int t_id) {
-    //create the trace path path
-    if (FEED_FROM_TRACE) {
-      char path[2048];
-      char cwd[1024];
-      char *was_successful = getcwd(cwd, sizeof(cwd));
-      if (!was_successful) {
-          printf("ERROR: getcwd failed!\n");
-          exit(EXIT_FAILURE);
-      }
-      snprintf(path, sizeof(path), "%s%s%04d%s%d%s", cwd,
-               "/../../../traces/current-splited-traces/t_",
-               GET_GLOBAL_T_ID(machine_id, t_id), "_a_0.", SKEW_EXPONENT_A, ".txt");
-
-      //initialize the command array from the trace file
-      parse_trace(path, cmds, t_id);
-    }
-    else {
-      manufacture_trace(cmds, t_id);
-    }
-
-}
-*/
 void dump_stats_2_file(struct stats* st){
     uint8_t typeNo = LEADER;
     assert(typeNo >=0 && typeNo <=3);
@@ -360,128 +95,7 @@ void dump_stats_2_file(struct stats* st){
 
     fclose(fp);
 }
-/*
-int spawn_stats_thread() {
-    pthread_t *thread_arr = malloc(sizeof(pthread_t));
-    pthread_attr_t attr;
-    cpu_set_t cpus_stats;
-    int core = -1;
-    pthread_attr_init(&attr);
-    CPU_ZERO(&cpus_stats);
-    if(num_threads < 10) {
-      core = 2 * (num_threads);
-      CPU_SET(core, &cpus_stats);
-    }
-    else if (num_threads < 20) {
-      core = 38;
-      CPU_SET(core, &cpus_stats);
-    }
-    else {
-        core = 39;
-        CPU_SET(core, &cpus_stats);
-    }
-    my_printf(yellow, "Creating stats thread at core %d\n", core);
-    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus_stats);
-    return pthread_create(&thread_arr[0], &attr, print_stats, NULL);
-}
 
-// pin threads starting from core 0
-int pin_thread(int t_id) {
-    int core;
-    core = PHYSICAL_CORE_DISTANCE * t_id;
-    if(core >= LOGICAL_CORES_PER_SOCKET) { //if you run out of cores in numa node 0
-        if (ENABLE_HYPERTHREADING) { //use hyperthreading rather than go to the other socket
-            core = LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET);
-            if (core >= TOTAL_CORES_) { // now go to the other socket
-                core = PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET) + 1 ;
-                if (core >= LOGICAL_CORES_PER_SOCKET) { // again do hyperthreading on the second socket
-                    core = LOGICAL_CORES_PER_SOCKET + 1 +
-                      PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
-                }
-            }
-        }
-        else { //spawn clients to numa node 1
-          core = PHYSICAL_CORE_DISTANCE * (t_id - PHYSICAL_CORES_PER_SOCKET) + 1;
-          if (core >= LOGICAL_CORES_PER_SOCKET) { // start hyperthreading
-            core = LOGICAL_CORES_PER_SOCKET + (PHYSICAL_CORE_DISTANCE * (t_id - LOGICAL_CORES_PER_SOCKET));
-            if (core >= TOTAL_CORES_) {
-              core = LOGICAL_CORES_PER_SOCKET + 1 +
-                     PHYSICAL_CORE_DISTANCE * (t_id - (LOGICAL_CORES_PER_SOCKET + PHYSICAL_CORES_PER_SOCKET));
-            }
-          }
-        }
-
-    }
-    assert(core >= 0 && core < TOTAL_CORES);
-    return core;
-}
-
-// pin a thread avoid collisions with pin_thread()
-int pin_threads_avoiding_collisions(int c_id) {
-    int c_core;
-    if (!ENABLE_HYPERTHREADING || FOLLOWERS_PER_MACHINE < PHYSICAL_CORES_PER_SOCKET) {
-        if (c_id < FOLLOWERS_PER_MACHINE) c_core = PHYSICAL_CORE_DISTANCE * c_id + 2;
-        else c_core = (FOLLOWERS_PER_MACHINE * 2) + (c_id * 2);
-
-        //if (DISABLE_CACHE == 1) c_core = 4 * i + 2; // when bypassing the cache
-        //if (DISABLE_HYPERTHREADING == 1) c_core = (FOLLOWERS_PER_MACHINE * 4) + (c_id * 4);
-        if (c_core > TOTAL_CORES_) { //spawn clients to numa node 1 if you run out of cores in 0
-            c_core -= TOTAL_CORES_;
-        }
-    }
-    else { //we are keeping workers on the same socket
-        c_core = (FOLLOWERS_PER_MACHINE - PHYSICAL_CORES_PER_SOCKET) * 4 + 2 + (4 * c_id);
-        if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ + 2);
-        if (c_core > TOTAL_CORES_) c_core = c_core - (TOTAL_CORES_ - 1);
-    }
-    assert(c_core >= 0 && c_core < TOTAL_CORES);
-    return c_core;
-}
-*/
-/*
-// Used by all kinds of threads to publish their QPs
-void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb)
-{
-  uint32_t qp_i;
-  for (qp_i = 0; qp_i < qp_num; qp_i++) {
-    char dgram_qp_name[QP_NAME_SIZE];
-    sprintf(dgram_qp_name, "%s-%d-%d", qp_name, global_id, qp_i);
-    hrd_publish_dgram_qp(cb, qp_i, dgram_qp_name, DEFAULT_SL);
-//    printf("Thread %d published dgram %s \n", local_id, dgram_qp_name);
-  }
-}
-
-// Followers and leaders both use this to establish connections
-void setup_connections(int global_id, struct hrd_ctrl_blk *cb)
-{
-    int qp_i;
-    int t_id = -1;
-    char dgram_qp_name[QP_NAME_SIZE];
-    if (is_leader) {
-      t_id = global_id;
-      publish_qps(LEADER_QP_NUM, global_id, "leader-dgram", cb);
-    }
-    else {
-      t_id = global_id % FOLLOWERS_PER_MACHINE;
-      publish_qps(FOLLOWER_QP_NUM, global_id, "follower-dgram", cb);
-    }
-    if (t_id == 0) {
-      if (is_leader) get_qps_from_all_other_machines(global_id, cb);
-      else get_qps_from_one_machine(global_id, cb);
-      assert(qps_are_set_up == 0);
-      // Spawn a thread that prints the stats
-      if (spawn_stats_thread() != 0)
-          my_printf(red, "Stats thread was not successfully spawned \n");
-      atomic_store_explicit(&qps_are_set_up, 1, memory_order_release);
-    }
-    else {
-        while (atomic_load_explicit(&qps_are_set_up, memory_order_acquire)== 0);  usleep(200000);
-    }
-    assert(qps_are_set_up == 1);
-//    printf("Thread %d has all the needed ahs\n", global_id );
-}
-
-*/
 
 /* ---------------------------------------------------------------------------
 ------------------------------LEADER --------------------------------------
@@ -510,19 +124,19 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
   p_writes->flr_id = (uint8_t *) malloc(size * sizeof(uint8_t));
   p_writes->is_local = (bool *) malloc(size * sizeof(bool));
   p_writes->stalled = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));
-  p_writes->ptrs_to_ops = (struct prepare **) malloc(size * sizeof(struct prepare *));
-  if (protocol == FOLLOWER) init_fifo(&(p_writes->w_fifo), W_FIFO_SIZE * sizeof(struct w_message), 1);
+  p_writes->ptrs_to_ops = (zk_prepare_t **) malloc(size * sizeof(zk_prepare_t *));
+  if (protocol == FOLLOWER) init_fifo(&(p_writes->w_fifo), W_FIFO_SIZE * sizeof(zk_w_mes_t), 1);
   memset(p_writes->g_id, 0, size * sizeof(uint64_t));
-  p_writes->prep_fifo = (struct prep_fifo *) calloc(1, sizeof(struct prep_fifo));
+  p_writes->prep_fifo = (zk_prep_fifo_t *) calloc(1, sizeof(zk_prep_fifo_t));
     p_writes->prep_fifo->prep_message =
-    (struct prep_message *) calloc(PREP_FIFO_SIZE, sizeof(struct prep_message));
+    (zk_prep_mes_t *) calloc(PREP_FIFO_SIZE, sizeof(zk_prep_mes_t));
   assert(p_writes->prep_fifo != NULL);
   for (i = 0; i < SESSIONS_PER_THREAD; i++) p_writes->stalled[i] = false;
   for (i = 0; i < size; i++) {
     p_writes->w_state[i] = INVALID;
   }
   if (protocol == LEADER) {
-    struct prep_message *preps = p_writes->prep_fifo->prep_message;
+    zk_prep_mes_t *preps = p_writes->prep_fifo->prep_message;
     for (i = 0; i < PREP_FIFO_SIZE; i++) {
       preps[i].opcode = KVS_OP_PUT;
       for (uint16_t j = 0; j < MAX_PREP_COALESCE; j++) {
@@ -531,7 +145,7 @@ p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
       }
     }
   } else { // PROTOCOL == FOLLOWER
-    struct w_message *writes = (struct w_message *) p_writes->w_fifo->fifo;
+    zk_w_mes_t *writes = (zk_w_mes_t *) p_writes->w_fifo->fifo;
     for (i = 0; i < W_FIFO_SIZE; i++) {
       for (uint16_t j = 0; j < MAX_W_COALESCE; j++) {
         writes[i].write[j].opcode = KVS_OP_PUT;
@@ -595,13 +209,13 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
 
 
 // set up some basic leader buffers
-com_fifo_t *set_up_ldr_ops(zk_resp_t *resp,  uint16_t t_id)
+zk_com_fifo_t *set_up_ldr_ops(zk_resp_t *resp,  uint16_t t_id)
 {
   int i;
   assert(resp != NULL);
-  com_fifo_t *com_fifo = calloc(1, sizeof(com_fifo_t));
-  com_fifo->commits = (struct com_message *)
-    calloc(COMMIT_FIFO_SIZE, sizeof(struct com_message));
+  zk_com_fifo_t *com_fifo = calloc(1, sizeof(zk_com_fifo_t));
+  com_fifo->commits = (zk_com_mes_t *)
+    calloc(COMMIT_FIFO_SIZE, sizeof(zk_com_mes_t));
   for(i = 0; i <  MAX_OP_BATCH; i++) resp[i].type = EMPTY;
   for(i = 0; i <  COMMIT_FIFO_SIZE; i++) {
       com_fifo->commits[i].opcode = KVS_OP_PUT;
@@ -616,10 +230,10 @@ void set_up_ldr_mrs(struct ibv_mr **prep_mr, void *prep_buf,
                     struct hrd_ctrl_blk *cb)
 {
   if (!LEADER_PREPARE_ENABLE_INLINING) {
-   *prep_mr = register_buffer(cb->pd, (void*)prep_buf, PREP_FIFO_SIZE * sizeof(struct prep_message));
+   *prep_mr = register_buffer(cb->pd, (void*)prep_buf, PREP_FIFO_SIZE * sizeof(zk_prep_mes_t));
   }
   if (!COM_ENABLE_INLINING) *com_mr = register_buffer(cb->pd, com_buf,
-                                                      COMMIT_CREDITS * sizeof(struct com_message));
+                                                      COMMIT_CREDITS * sizeof(zk_com_mes_t));
 }
 
 // Set up all leader WRs

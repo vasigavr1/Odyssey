@@ -14,7 +14,7 @@ void *leader(void *arg)
 
 	if (ENABLE_MULTICAST == 1 && t_id == 0)
 		my_printf(cyan, "MULTICAST IS ENABLED\n");
-	int protocol = LEADER;
+	protocol_t protocol = LEADER;
 
 	int *recv_q_depths, *send_q_depths;
   set_up_queue_depths_ldr_flr(&recv_q_depths, &send_q_depths, protocol);
@@ -28,15 +28,15 @@ void *leader(void *arg)
 
   uint32_t ack_buf_push_ptr = 0, ack_buf_pull_ptr = 0;
   uint32_t w_buf_push_ptr = 0, w_buf_pull_ptr = 0;
-  struct ack_message_ud_req *ack_buffer = (struct ack_message_ud_req *)(cb->dgram_buf);
-  volatile struct  w_message_ud_req *w_buffer =
-    (volatile struct w_message_ud_req *)(cb->dgram_buf + LEADER_ACK_BUF_SIZE);
+  zk_ack_mes_ud_t *ack_buffer = (zk_ack_mes_ud_t *)(cb->dgram_buf);
+  volatile zk_w_mes_ud_t *w_buffer =
+    (volatile zk_w_mes_ud_t *)(cb->dgram_buf + LEADER_ACK_BUF_SIZE);
 	/* ---------------------------------------------------------------------------
 	------------------------------MULTICAST SET UP-------------------------------
 	---------------------------------------------------------------------------*/
 
-	struct mcast_info *mcast_data;
-	struct mcast_essentials *mcast;
+	struct mcast_info *mcast_data = NULL;
+	struct mcast_essentials *mcast = NULL;
 	// need to init mcast before sync, such that we can post recvs
 	if (ENABLE_MULTICAST) {
 		zk_init_multicast(&mcast_data, &mcast, t_id, cb, protocol);
@@ -100,7 +100,7 @@ void *leader(void *arg)
 
 	zk_trace_op_t *ops = (zk_trace_op_t *) calloc((size_t) MAX_OP_BATCH, sizeof(zk_trace_op_t));
   zk_resp_t *resp = (zk_resp_t*) calloc((size_t) MAX_OP_BATCH, sizeof(zk_resp_t));
-  com_fifo_t *com_fifo = set_up_ldr_ops(resp, t_id);
+  zk_com_fifo_t *com_fifo = set_up_ldr_ops(resp, t_id);
 	struct ibv_mr *prep_mr, *com_mr;
 
 
@@ -128,18 +128,13 @@ void *leader(void *arg)
                    t_id, follower_id, prep_mr, com_mr, mcast);
 	}
 	// TRACE
-	trace_t *trace;
+	trace_t *trace = NULL;
   if (!ENABLE_CLIENTS)
     trace = trace_init(t_id);
 
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
 	---------------------------------------------------------------------------*/
-  struct session_dbg *ses_dbg = NULL;
-  if (DEBUG_SESSIONS) {
-    ses_dbg = (struct session_dbg *) malloc(sizeof(struct session_dbg));
-    memset(ses_dbg, 0, sizeof(struct session_dbg));
-  }
   uint16_t last_session = 0;
   uint32_t wait_for_gid_dbg_counter = 0, wait_for_acks_dbg_counter = 0;
   uint32_t credit_debug_cnt[LDR_VC_NUM] = {0};
@@ -160,10 +155,10 @@ void *leader(void *arg)
 		------------------------------ POLL FOR ACKS--------------------------------
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO > 0)
-      poll_for_acks(ack_buffer, &ack_buf_pull_ptr, p_writes,
-                    credits, cb->dgram_recv_cq[PREP_ACK_QP_ID], ack_recv_wc, ack_recv_info,
-                    remote_prep_buf,
-                    t_id, &wait_for_acks_dbg_counter, &outstanding_prepares);
+      ldr_poll_for_acks(ack_buffer, &ack_buf_pull_ptr, p_writes,
+                        credits, cb->dgram_recv_cq[PREP_ACK_QP_ID], ack_recv_wc, ack_recv_info,
+                        remote_prep_buf,
+                        t_id, &wait_for_acks_dbg_counter, &outstanding_prepares);
 
 /* ---------------------------------------------------------------------------
 		------------------------------ PROPAGATE UPDATES--------------------------
@@ -173,7 +168,7 @@ void *leader(void *arg)
        * to send the commits and clear the p_write buffer space. The reason behind that
        * is that we do not want to wait for the commit broadcast to happen to clear the
        * buffer space for new writes*/
-      propagate_updates(p_writes, com_fifo, resp, &latency_info, t_id, &wait_for_gid_dbg_counter);
+      ldr_propagate_updates(p_writes, com_fifo, resp, &latency_info, t_id, &wait_for_gid_dbg_counter);
 
 
     /* ---------------------------------------------------------------------------
@@ -191,9 +186,9 @@ void *leader(void *arg)
 
     // Get a new batch from the trace, pass it through the cache and create
     // the appropriate prepare messages
-		trace_iter = batch_from_trace_to_cache(trace_iter, t_id, trace, ops,
-                                           (uint8_t) FOLLOWER_MACHINE_NUM, p_writes, resp,
-                                           &latency_info, protocol);
+		trace_iter = zk_batch_from_trace_to_KVS(trace_iter, t_id, trace, ops,
+                                            (uint8_t) FOLLOWER_MACHINE_NUM, p_writes, resp,
+                                            &latency_info,  &last_session, protocol);
 
     /* ---------------------------------------------------------------------------
 		------------------------------POLL FOR REMOTE WRITES--------------------------
@@ -207,7 +202,7 @@ void *leader(void *arg)
 		------------------------------GET GLOBAL WRITE IDS--------------------------
 		---------------------------------------------------------------------------*/
     // Assign a global write  id to each new write
-    if (WRITE_RATIO > 0) get_wids(p_writes, t_id);
+    if (WRITE_RATIO > 0) zk_get_g_ids(p_writes, t_id);
 
     if (ENABLE_ASSERTIONS) check_ldr_p_states(p_writes, t_id);
 		/* ---------------------------------------------------------------------------

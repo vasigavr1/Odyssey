@@ -403,4 +403,62 @@ static inline bool is_global_ses_id_local(uint32_t glob_sess_id, uint16_t t_id)
          glob_ses_id_to_m_id(glob_sess_id) == machine_id;
 }
 
+/*------------------------------------------------------
+ * ----------------BUFFER MIRRORING------------------------
+ * ----------------------------------------------------*/
+
+/// Sometimes it's hard to infer or even send credits.
+/// For example a zk-follower infers the credits to send writes to the leader
+// by examining the incoming commits.
+/// In this case it is useful to mirror the buffer of remote machines,
+/// to infer their buffer availability
+
+// Generic function to mirror buffer spaces--used when elements are added
+static inline void add_to_the_mirrored_buffer(struct fifo *mirror_buf, uint8_t coalesce_num, uint16_t number_of_fifos,
+                                              uint32_t max_size)
+{
+  for (uint16_t i = 0; i < number_of_fifos; i++) {
+    uint32_t push_ptr = mirror_buf[i].push_ptr;
+    uint16_t *fifo = (uint16_t *) mirror_buf[i].fifo;
+    fifo[push_ptr] = (uint16_t)coalesce_num;
+    MOD_ADD(mirror_buf[i].push_ptr, max_size);
+    mirror_buf[i].size++;
+    if (ENABLE_ASSERTIONS) assert(mirror_buf[i].size <= max_size);
+  }
+}
+
+// Generic function to mirror buffer spaces--used when elements are removed
+static inline uint16_t remove_from_the_mirrored_buffer(struct fifo *mirror_buf_, uint16_t remove_num,
+                                                       uint16_t t_id, uint8_t fifo_id, uint32_t max_size)
+{
+  struct fifo *mirror_buf = &mirror_buf_[fifo_id];
+  uint16_t *fifo = (uint16_t *)mirror_buf->fifo;
+  uint16_t new_credits = 0;
+  if (ENABLE_ASSERTIONS && mirror_buf->size == 0) {
+    my_printf(red, "remove_num %u, ,mirror_buf->pull_ptr %u fifo_id %u  \n",
+              remove_num, mirror_buf->pull_ptr, fifo_id);
+    assert(false);
+  }
+  while (remove_num > 0) {
+    uint32_t pull_ptr = mirror_buf->pull_ptr;
+    if (fifo[pull_ptr] <= remove_num) {
+      remove_num -= fifo[pull_ptr];
+      MOD_ADD(mirror_buf->pull_ptr, max_size);
+      if (ENABLE_ASSERTIONS && mirror_buf->size == 0) {
+        my_printf(red, "remove_num %u, ,mirror_buf->pull_ptr %u fifo_id %u  \n",
+                  remove_num, mirror_buf->pull_ptr, fifo_id);
+        assert(false);
+      }
+      mirror_buf->size--;
+      new_credits++;
+    }
+    else {
+      fifo[pull_ptr] -= remove_num;
+      remove_num = 0;
+    }
+  }
+  return new_credits;
+}
+
+
 #endif //KITE_GENERIC_INLINE_UTIL_H
