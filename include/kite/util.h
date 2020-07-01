@@ -76,7 +76,7 @@ void set_up_bcast_WRs(struct ibv_send_wr*, struct ibv_sge*,
 void set_up_ack_n_r_rep_WRs(struct ibv_send_wr*, struct ibv_sge*,
                             struct ibv_send_wr*, struct ibv_sge*,
                             struct hrd_ctrl_blk*, struct ibv_mr*,
-                            struct ack_message*, uint16_t);
+                            ack_mes_t*, uint16_t);
 
 
 

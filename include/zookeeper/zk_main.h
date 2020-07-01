@@ -110,10 +110,9 @@ typedef enum {FOLLOWER = 1, LEADER} protocol_t;
 #define LDR_W_RECV_SIZE (GRH_SIZE + FLR_W_SEND_SIZE)
 #define FLR_W_ENABLE_INLINING ((FLR_W_SEND_SIZE > MAXIMUM_INLINE_SIZE) ?  0 : 1)
 
-//--PREPARES
 
 #define PREP_MES_HEADER 6 // opcode(1), coalesce_num(1) l_id (4)
-#define PREP_SIZE (KEY_SIZE + 2 + VALUE_SIZE + 8) // Size of a write
+#define PREP_SIZE (KEY_SIZE + VALUE_SIZE + 13) // Size of a write
 #define LDR_PREP_SEND_SIZE (PREP_MES_HEADER + (MAX_PREP_COALESCE * PREP_SIZE))
 #define FLR_PREP_RECV_SIZE (GRH_SIZE + LDR_PREP_SEND_SIZE)
 
@@ -281,12 +280,11 @@ typedef struct zk_com_message_ud_req {
 
 typedef struct zk_prepare {
 	uint8_t flr_id;
-  uint8_t unused;
+	uint8_t val_len;
   uint16_t sess_id;
-	uint32_t g_id; //send the bottom half of the gid
+	uint64_t g_id; //send the bottom half of the gid
 	mica_key_t key;
 	uint8_t opcode; //override opcode
-	uint8_t val_len;
 	uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__)) zk_prepare_t;
 

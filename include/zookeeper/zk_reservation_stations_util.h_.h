@@ -6,6 +6,7 @@
 #define KITE_ZK_RESERVATION_STATIONS_UTIL_H_H
 
 #include "../general_util/latency_util.h"
+#include "../general_util/generic_inline_util.h"
 #include "zk_debug_util.h"
 
 /*---------------------------------------------------------------------
@@ -29,29 +30,55 @@ static inline void flr_increases_write_credits(p_writes_t *p_writes,
   if (ENABLE_ASSERTIONS) assert(*credits <= W_CREDITS);
 }
 
-static inline bool zk_write_not_yet_acked(zk_com_mes_t *com,
-                                          uint16_t com_ptr,
-                                          uint16_t com_i,
-                                          uint16_t com_num,
-                                          p_writes_t *p_writes,
-                                          uint16_t t_id)
+static inline bool zk_write_not_ready(zk_com_mes_t *com,
+                                      uint16_t com_ptr,
+                                      uint16_t com_i,
+                                      uint16_t com_num,
+                                      p_writes_t *p_writes,
+                                      uint16_t t_id)
 {
   if (DEBUG_COMMITS)
     printf("Flr %d valid com %u/%u write at ptr %d with g_id %lu is ready \n",
            t_id, com_i, com_num,  com_ptr, p_writes->g_id[com_ptr]);
   // it may be that a commit refers to a subset of writes that
-  // we have seen and acked, and a subset not yet acked,
+  // we have seen and acked, and a subset not yet seen or acked,
   // We need to commit the seen subset to avoid a deadlock
-  if (p_writes->w_state[com_ptr] != SENT) {
+  bool wrap_around = com->l_id + com_i - p_writes->local_w_id >= FLR_PENDING_WRITES;
+  if (wrap_around) assert(com_ptr == p_writes->pull_ptr);
+
+
+  if (wrap_around || p_writes->w_state[com_ptr] != SENT) {
+    //printf("got here \n");
     com->com_num -= com_i;
     com->l_id += com_i;
     if (ENABLE_STAT_COUNTING)  t_stats[t_id].received_coms += com_i;
-    assert(com_ptr ==  p_writes->pull_ptr +
-           (com->l_id - p_writes->local_w_id) % FLR_PENDING_WRITES);
-    printf("got here \n");
+    uint16_t imaginary_com_ptr = (uint16_t) ((p_writes->pull_ptr +
+                                 (com->l_id - p_writes->local_w_id)) % FLR_PENDING_WRITES);
+    if(com_ptr != imaginary_com_ptr) {
+      printf("com ptr %u/%u, com->l_id %lu, pull_lid %lu, pull_ptr %u, flr pending writes %d \n",
+             com_ptr, imaginary_com_ptr, com->l_id, p_writes->local_w_id, p_writes->pull_ptr, FLR_PENDING_WRITES);
+      assert(false);
+    }
     return true;
   }
   return false;
+}
+
+/*---------------------------------------------------------------------
+ * -----------------------POLL PREPARES------------------------------
+ * ---------------------------------------------------------------------*/
+
+static inline void fill_p_writes_entry(p_writes_t *p_writes,
+                                       zk_prepare_t *prepare, uint8_t flr_id,
+                                       uint16_t t_id)
+{
+  uint32_t push_ptr = p_writes->push_ptr;
+  p_writes->ptrs_to_ops[push_ptr] = prepare;
+  p_writes->g_id[push_ptr] = prepare->g_id;
+  p_writes->flr_id[push_ptr] = prepare->flr_id;
+  p_writes->is_local[push_ptr] = prepare->flr_id == flr_id;
+  p_writes->session_id[push_ptr] = prepare->sess_id; //not useful if not local
+  p_writes->w_state[push_ptr] = VALID;
 }
 
 /*---------------------------------------------------------------------

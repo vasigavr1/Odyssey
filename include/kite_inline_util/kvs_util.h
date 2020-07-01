@@ -261,7 +261,7 @@ static inline void KVS_from_trace_acquires_ooe_reads(trace_op_t *op, mica_op_t *
 /*-----------------------------UPDATES---------------------------------------------*/
 
 // Handle a remote release/write or acquire-write the KVS
-static inline void KVS_updates_writes_or_releases_or_acquires(struct write *op,
+static inline void KVS_updates_writes_or_releases_or_acquires(write_t *op,
                                                               mica_op_t *kv_ptr, uint16_t t_id)
 {
   //my_printf(red, "received op %u with value %u \n", op->opcode, op->value[0]);
@@ -637,7 +637,7 @@ static inline void KVS_batch_op_trace(uint16_t op_num, uint16_t t_id, trace_op_t
 }
 
 /* The worker sends the remote writes to be committed with this function*/
-static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct write **writes,
+static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, write_t **writes,
                                         p_ops_t *p_ops,
                                         uint32_t pull_ptr, uint32_t max_op_size)
 {
@@ -653,14 +653,14 @@ static inline void KVS_batch_op_updates(uint16_t op_num, uint16_t t_id, struct w
      * for both GETs and PUTs.
      */
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct write *op = writes[(pull_ptr + op_i) % max_op_size];
+    write_t *op = writes[(pull_ptr + op_i) % max_op_size];
     KVS_locate_one_bucket(op_i, bkt, &op->key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
   // the following variables used to validate atomicity between a lock-free r_rep of an object
   for(op_i = 0; op_i < op_num; op_i++) {
-    struct write *write =  writes[(pull_ptr + op_i) % max_op_size];
+    write_t *write =  writes[(pull_ptr + op_i) % max_op_size];
     if (unlikely (write->opcode == OP_RELEASE_BIT_VECTOR)) continue;
     if (ENABLE_ASSERTIONS && kv_ptr[op_i] == NULL) { assert(false);}
       /* We had a tag match earlier. Now compare log entry. */
@@ -838,7 +838,7 @@ static inline void KVS_batch_op_first_read_round(uint16_t op_num, uint16_t t_id,
 
 
 // Send an isolated write to the kvs-no batching
-static inline void KVS_isolated_op(int t_id, struct write *write)
+static inline void KVS_isolated_op(int t_id, write_t *write)
 {
   int j;	/* I is batch index */
 

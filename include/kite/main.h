@@ -102,13 +102,13 @@ struct read_fifo {
 };
 
 //
-struct write_fifo {
+typedef struct write_fifo {
   struct w_message_template *w_message;
   uint32_t push_ptr;
   uint32_t bcast_pull_ptr;
   uint32_t bcast_size; // number of writes not messages!
   w_mes_info_t info[W_FIFO_SIZE];
-};
+} write_fifo_t;
 
 //
 struct r_rep_fifo {
@@ -270,13 +270,13 @@ struct pending_out_of_epoch_writes {
 };
 
 typedef struct pending_ops {
-  struct write_fifo *w_fifo;
+	write_fifo_t *w_fifo;
   struct read_fifo *r_fifo;
   struct r_rep_fifo *r_rep_fifo;
-  //struct write **ptrs_to_w_ops; // used for remote writes
+  //write_t **ptrs_to_w_ops; // used for remote writes
   void **ptrs_to_mes_ops; // used for remote reads
 
-  struct write **ptrs_to_local_w; // used for the first phase of release
+  write_t **ptrs_to_local_w; // used for the first phase of release
   uint8_t *overwritten_values;
   struct r_message **ptrs_to_mes_headers;
   bool *coalesce_r_rep;

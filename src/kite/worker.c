@@ -29,13 +29,13 @@ void *worker(void *arg)
   uint32_t ack_buf_push_ptr = 0, ack_buf_pull_ptr = 0,
     w_buf_push_ptr = 0, w_buf_pull_ptr = 0,  r_buf_push_ptr = 0, r_buf_pull_ptr = 0,
     r_rep_buf_push_ptr = 0, r_rep_buf_pull_ptr = 0;
-  struct ack_message_ud_req *ack_buffer = (struct ack_message_ud_req *)(cb->dgram_buf);
+  volatile ack_mes_ud_t *ack_buffer = (ack_mes_ud_t *)(cb->dgram_buf);
   volatile struct  w_message_ud_req *w_buffer =
-    (volatile struct w_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE);
+    (volatile w_mes_ud_t *)(cb->dgram_buf + ACK_BUF_SIZE);
   volatile struct  r_message_ud_req *r_buffer =
-    (volatile struct r_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
+    (volatile r_mes_ud_t *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
   volatile struct  r_rep_message_ud_req *r_rep_buffer =
-    (volatile struct r_rep_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
+    (volatile r_rep_mes_ud_t *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
 	/* ---------------------------------------------------------------------------
 	------------------------------PREPOST RECVS-------------------------------
 	---------------------------------------------------------------------------*/
@@ -111,7 +111,7 @@ void *worker(void *arg)
                                  MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
                                  (void*) ack_buffer);
 
-  struct ack_message acks[MACHINE_NUM] = {0};
+  ack_mes_t acks[MACHINE_NUM] = {0};
   for (uint16_t i = 0; i < MACHINE_NUM; i++) {
     acks[i].m_id = (uint8_t) machine_id;
     acks[i].opcode = OP_ACK;

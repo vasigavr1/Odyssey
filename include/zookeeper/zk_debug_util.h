@@ -115,7 +115,7 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
     my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
     zk_prepare_t *prep = (zk_prepare_t *)&prep_buf[pull_ptr].prepare.prepare;
     uint32_t l_id = prep_buf[pull_ptr].prepare.l_id;
-    uint32_t g_id = prep->g_id;
+    uint64_t g_id = prep->g_id;
     uint8_t message_opc = prep_buf[pull_ptr].prepare.opcode;
     my_printf(cyan, "Flr %d, polling on index %u,polled opc %u, 1st write opcode: %u, l_id %u, first g_id %u, expected l_id %u\n",
               t_id, pull_ptr, message_opc, prep->opcode, l_id, g_id, p_writes->local_w_id);
@@ -263,5 +263,63 @@ static inline void zk_checks_after_polling_commits(uint32_t *dbg_counter,
   }
   if (ENABLE_ASSERTIONS) assert(com_recv_info->posted_recvs >= polled_messages);
 }
+
+/* ---------------------------------------------------------------------------
+//------------------------------ POLLNG PREPARES -----------------------------
+//---------------------------------------------------------------------------*/
+
+static inline void zk_check_polled_prep_and_print(zk_prep_mes_t* prep_mes,
+                                                  p_writes_t *p_writes,
+                                                  uint8_t coalesce_num,
+                                                  uint32_t buf_ptr,
+                                                  uint32_t incoming_l_id,
+                                                  uint64_t expected_l_id,
+                                                  volatile zk_prep_mes_ud_t *incoming_preps,
+                                                  uint16_t t_id)
+{
+  if (DEBUG_PREPARES)
+    my_printf(green, "Flr %d sees a prep_mes message with %d prepares at index %u l_id %u, expected lid %lu \n",
+              t_id, coalesce_num, index, incoming_l_id, expected_l_id);
+  if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES && ENABLE_ASSERTIONS) {
+    if (expected_l_id != (uint64_t) incoming_l_id) {
+      my_printf(red, "flr %u expected l_id  %lu and received %u \n",
+                t_id, expected_l_id, incoming_l_id);
+      uint32_t dbg = B_4_ ;
+      flr_check_debug_cntrs(&dbg, &dbg, &dbg, &dbg, incoming_preps, buf_ptr, p_writes, t_id);
+      //print_flr_stats(t_id);
+      assert(false);
+    }
+  }
+  if (ENABLE_ASSERTIONS) {
+    assert(prep_mes->opcode == KVS_OP_PUT);
+    assert(expected_l_id <= (uint64_t) incoming_l_id);
+    assert(coalesce_num > 0 && coalesce_num <= MAX_PREP_COALESCE);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].received_preps += coalesce_num;
+    t_stats[t_id].received_preps_mes_num++;
+  }
+}
+
+
+static inline void
+zk_check_prepare_and_print(zk_prepare_t *prepare,
+                           p_writes_t* p_writes,
+                           uint8_t prep_i,
+                           uint16_t t_id)
+{
+  uint32_t push_ptr = p_writes->push_ptr;
+  if (ENABLE_ASSERTIONS) {
+    assert(prepare->sess_id < SESSIONS_PER_THREAD);
+    assert(prepare->flr_id <= FOLLOWER_MACHINE_NUM);
+    assert(prepare->g_id > committed_global_w_id);
+    assert(prepare->val_len == VALUE_SIZE >> SHIFT_BITS);
+    assert(p_writes->w_state[push_ptr] == INVALID);
+  }
+  if (DEBUG_PREPARES)
+    my_printf(green, "Flr %u, prep_i %u new write at ptr %u with g_id %lu and flr id %u, value_len %u \n",
+              t_id, prep_i, push_ptr, prepare->g_id, prepare->flr_id, prepare[prep_i].val_len);
+}
+
 
 #endif //KITE_ZK_DEBUG_UTIL_H

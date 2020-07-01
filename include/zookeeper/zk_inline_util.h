@@ -242,7 +242,7 @@ static inline void zk_get_g_ids(p_writes_t *p_writes, uint16_t t_id)
     uint32_t unordered_ptr = p_writes->unordered_ptr;
 		p_writes->g_id[unordered_ptr] = id + i;
 		zk_prepare_t *prep = p_writes->ptrs_to_ops[unordered_ptr];
-		prep->g_id = (uint32_t) p_writes->g_id[unordered_ptr];
+		prep->g_id = p_writes->g_id[unordered_ptr];
     MOD_INCR(p_writes->unordered_ptr, LEADER_PENDING_WRITES);
 	}
   p_writes->highest_g_id_taken = id + unordered_writes_num - 1;
@@ -887,103 +887,47 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
     //printf("this is stopping me \n");
     return;
   }
-	uint32_t index = *pull_ptr;
+	uint32_t buf_ptr = *pull_ptr;
   int completed_messages =
     find_how_many_messages_can_be_polled(prep_recv_cq, prep_recv_wc,
                                          completed_but_not_polled_preps,
                                          FLR_PREP_BUF_SLOTS, t_id);
   if (completed_messages <= 0) return;
   while (polled_messages < completed_messages) {
-	//while((incoming_preps[index].prepare.opcode == KVS_OP_PUT) &&
-   // (prep_buf_mirror->size < MAX_PREP_BUF_SLOTS_TO_BE_POLLED)) {
-    if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) break;
-    // wait for the entire message
-    //if (!wait_for_the_entire_prepare(&incoming_preps[index].prepare, t_id, index, p_writes)) break;
-    zk_prep_mes_t *prep_mes = (zk_prep_mes_t *) &incoming_preps[index].prepare;
+    zk_prep_mes_t *prep_mes = (zk_prep_mes_t *) &incoming_preps[buf_ptr].prepare;
     uint8_t coalesce_num = prep_mes->coalesce_num;
 		zk_prepare_t *prepare = prep_mes->prepare;
+    uint32_t incoming_l_id = prep_mes->l_id;
+    uint64_t expected_l_id = p_writes->local_w_id + p_writes->size;
+    if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) break;
 		if (p_writes->size + coalesce_num > FLR_PENDING_WRITES) break;
-		uint32_t incoming_l_id = prep_mes->l_id;
-		uint64_t expected_l_id = p_writes->local_w_id + p_writes->size;
-    if (DEBUG_PREPARES)
-      my_printf(green, "Flr %d sees a prep message with %d prepares at index %u l_id %u, expected lid %lu \n",
-                t_id, coalesce_num, index, incoming_l_id, expected_l_id);
-		if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES) {
-      if (expected_l_id != (uint64_t) incoming_l_id) {
-       my_printf(red, "flr %u expected l_id  %lu and received %u \n",
-                  t_id, expected_l_id, incoming_l_id);
-        uint32_t dbg = M_256 + 2 ;
-        flr_check_debug_cntrs(&dbg, &dbg, &dbg, &dbg, incoming_preps, index, p_writes, t_id);
-        //print_flr_stats(t_id);
-        assert(false);
-      }
-    }
-		if (ENABLE_ASSERTIONS) assert(expected_l_id <= (uint64_t) incoming_l_id);
-    if (ENABLE_STAT_COUNTING) {
-      t_stats[t_id].received_preps += coalesce_num;
-      t_stats[t_id].received_preps_mes_num++;
-    }
+    zk_check_polled_prep_and_print(prep_mes, p_writes, coalesce_num, buf_ptr,
+                                   incoming_l_id, expected_l_id, incoming_preps, t_id);
 
-		uint32_t extra_slots = 0;
-		// OUT-OF-ORDER message
-		if (expected_l_id < (uint64_t) incoming_l_id) {
-			extra_slots = (uint64_t) incoming_l_id - expected_l_id;
-			if (p_writes->size + extra_slots + coalesce_num > FLR_PENDING_WRITES) break;
-		}
-		else p_acks->acks_to_send+= coalesce_num; // lids are in order so ack them
-
-		if (ENABLE_ASSERTIONS) assert(coalesce_num > 0 && coalesce_num <= MAX_PREP_COALESCE);
+		p_acks->acks_to_send+= coalesce_num; // lids are in order so ack them
     add_to_the_mirrored_buffer(prep_buf_mirror, coalesce_num, 1, FLR_PREP_BUF_SLOTS);
+
 		for (uint8_t prep_i = 0; prep_i < coalesce_num; prep_i++) {
-			uint32_t push_ptr = (p_writes->push_ptr + extra_slots) % FLR_PENDING_WRITES;
-			p_writes->ptrs_to_ops[push_ptr] = &prepare[prep_i];
-			p_writes->g_id[push_ptr] = (uint64_t) prepare[prep_i].g_id;
-			p_writes->flr_id[push_ptr] = prepare[prep_i].flr_id;
-			assert(p_writes->flr_id[push_ptr] <=  FOLLOWER_MACHINE_NUM);
-//			my_printf(green, "Flr %u, prep_i %u new write at ptr %u with g_id %lu and flr id %u, value_len %u \n",
-//									 t_id, prep_i, push_ptr, p_writes->g_id[push_ptr], p_writes->flr_id[push_ptr],
-//									 prepare[prep_i].val_len);
-			if (ENABLE_ASSERTIONS) {
-				assert(prepare[prep_i].val_len == VALUE_SIZE >> SHIFT_BITS);
-				assert(p_writes->w_state[push_ptr] == INVALID);
-			}
-			// if the req originates from this follower
-			if (prepare[prep_i].flr_id == flr_id)  {
-				p_writes->is_local[push_ptr] = true;
-        p_writes->session_id[push_ptr] = prepare[prep_i].sess_id;
-//        printf("A prepare polled for local session %u/%u, push_ptr %u\n", p_writes->session_id[push_ptr], sess, push_ptr);
-			}
-			else p_writes->is_local[push_ptr] = false;
-			p_writes->w_state[push_ptr] = VALID;
-			if (extra_slots == 0) { // FIFO style insert
-				MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
-				p_writes->size++;
-			}
-			else extra_slots++; // forward insert
-		}
-		// Because of out-of-order messages it may be that the next expected message has already been seen and stored
-		while ((p_writes->w_state[p_writes->push_ptr] == VALID) &&
-           (p_writes->size < FLR_PENDING_WRITES)) {
-			if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES) assert(false);
-			MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
+      zk_check_prepare_and_print(&prepare[prep_i], p_writes, prep_i, t_id);
+      fill_p_writes_entry(p_writes, &prepare[prep_i], flr_id, t_id);
+  		MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
 			p_writes->size++;
-			p_acks->acks_to_send++;
 		}
-		incoming_preps[index].prepare.opcode = 0;
-    incoming_preps[index].prepare.coalesce_num = 0;
-		MOD_INCR(index, FLR_PREP_BUF_SLOTS);
+		if (ENABLE_ASSERTIONS) prep_mes->opcode = 0;
+		MOD_INCR(buf_ptr, FLR_PREP_BUF_SLOTS);
 		polled_messages++;
 	}
-  (*completed_but_not_polled_preps) = completed_messages - polled_messages;
-  *pull_ptr = index;
+  (*completed_but_not_polled_preps) = (uint32_t) (completed_messages - polled_messages);
+  *pull_ptr = buf_ptr;
 	if (polled_messages > 0) {
     if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
   }
   else if (ENABLE_ASSERTIONS && p_acks->acks_to_send == 0 && p_writes->size == 0) (*dbg_counter)++;
   if (ENABLE_STAT_COUNTING && p_acks->acks_to_send == 0 && p_writes->size == 0) t_stats[t_id].stalled_ack_prep++;
 	if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs >= polled_messages);
-	prep_recv_info->posted_recvs -= polled_messages;
   if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs <= FLR_MAX_RECV_PREP_WRS);
+	prep_recv_info->posted_recvs -= polled_messages;
+
 
 }
 
@@ -1212,18 +1156,16 @@ static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_
     uint64_t pull_lid = p_writes->local_w_id; // l_id at the pull pointer
     zk_check_polled_commit_and_print(com, p_writes, buf_ptr,
                                      l_id, pull_lid, com_num, t_id);
-
-    assert((l_id - pull_lid) < FLR_PENDING_WRITES);
-    assert(l_id + com_num - pull_lid < FLR_PENDING_WRITES);
     // This must always hold: l_id >= pull_lid,
     // because we need the commit to advance the pull_lid
     uint16_t com_ptr = (uint16_t)
       ((p_writes->pull_ptr + (l_id - pull_lid)) % FLR_PENDING_WRITES);
     /// loop through each commit
     for (uint16_t com_i = 0; com_i < com_num; com_i++) {
-      if (zk_write_not_yet_acked(com, com_ptr, com_i, com_num, p_writes, t_id))
+      if (zk_write_not_ready(com, com_ptr, com_i, com_num, p_writes, t_id))
         goto END_WHILE;
 
+      assert(l_id + com_i - pull_lid < FLR_PENDING_WRITES);
 			p_writes->w_state[com_ptr] = READY;
       flr_increases_write_credits(p_writes, com_ptr, remote_w_buf,
                                   credits, flr_id, t_id);
@@ -1240,8 +1182,8 @@ static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_
       send_credits_for_commits(com_recv_info, cb, credit_wr, credit_tx, 1, t_id);
 		polled_messages++;
   } // while
-  (*completed_but_not_polled_coms) = completed_messages - polled_messages;
   END_WHILE: *pull_ptr = buf_ptr;
+  (*completed_but_not_polled_coms) = completed_messages - polled_messages;
   zk_checks_after_polling_commits(dbg_counter, polled_messages, com_recv_info);
   com_recv_info->posted_recvs -= polled_messages;
 }

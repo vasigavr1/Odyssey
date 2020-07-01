@@ -107,16 +107,16 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
 {
 
 //  volatile struct  w_message_ud_req *w_buffer =
-//    (volatile struct w_message_ud_req *)(buf + ACK_BUF_SIZE);
+//    (volatile w_mes_ud_t *)(buf + ACK_BUF_SIZE);
 //  volatile struct  r_message_ud_req *r_buffer =
-//    (volatile struct r_message_ud_req *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
+//    (volatile r_mes_ud_t *)(cb->dgram_buf + ACK_BUF_SIZE + W_BUF_SIZE);
 
   // ACKS
   if (unlikely(wait_dbg_counter[ACK_QP_ID] > M_512)) {
     my_printf(red, "Worker %d waits for acks \n", t_id);
     if (VERBOSE_DBG_COUNTER) {
-      struct ack_message_ud_req *ack_buf = (struct ack_message_ud_req *) (buf);
-      struct ack_message *ack = &ack_buf[ack_pull_ptr].ack;
+      ack_mes_ud_t *ack_buf = (ack_mes_ud_t *) (buf);
+      ack_mes_t *ack = &ack_buf[ack_pull_ptr].ack;
       uint64_t l_id = ack->l_id;
       uint8_t message_opc = ack->opcode;
       my_printf(cyan, "Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
@@ -144,8 +144,8 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
   if (unlikely(wait_dbg_counter[R_REP_QP_ID] > M_512)) {
     my_printf(red, "Worker %d waits for r_reps \n", t_id);
     if (VERBOSE_DBG_COUNTER) {
-      struct r_rep_message_ud_req *r_rep_buf =
-        (struct r_rep_message_ud_req *) (buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
+      r_rep_mes_ud_t *r_rep_buf =
+        (r_rep_mes_ud_t *) (buf + ACK_BUF_SIZE + W_BUF_SIZE + R_BUF_SIZE);
       struct r_rep_message *r_rep_mes = (struct r_rep_message *)&r_rep_buf[r_rep_pull_ptr].r_rep_mes;
       uint64_t l_id = r_rep_mes->l_id;
       uint8_t message_opc = r_rep_mes->opcode;
@@ -255,7 +255,7 @@ static inline void debug_and_count_stats_when_broadcasting_writes
 
 // Perform some basic checks when inserting a write to a fresh message
 static inline void debug_checks_when_inserting_a_write
-  (const uint8_t source, struct write *write, const uint32_t w_mes_ptr,
+  (const uint8_t source, write_t *write, const uint32_t w_mes_ptr,
    const uint64_t message_l_id, p_ops_t *p_ops,
    const uint32_t w_ptr, const uint16_t t_id)
 {
@@ -331,7 +331,7 @@ static inline void checks_when_forging_a_commit(struct commit *com, struct ibv_s
 }
 
 
-static inline void checks_when_forging_a_write(struct write* write, struct ibv_sge *send_sgl,
+static inline void checks_when_forging_a_write(write_t* write, struct ibv_sge *send_sgl,
                                                uint16_t br_i, uint8_t w_i, uint8_t coalesce_num, uint16_t t_id) {
 
   if (DEBUG_WRITES)
@@ -603,7 +603,7 @@ static inline void check_the_polled_write_message(struct w_message *w_mes,
 }
 
 // When polling for writes
-static inline void check_a_polled_write(struct write* write, uint16_t w_i,
+static inline void check_a_polled_write(write_t* write, uint16_t w_i,
                                         uint16_t w_num, uint8_t mes_opcode, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -788,13 +788,13 @@ static inline bool check_entry_validity_with_key(struct key *incoming_key, mica_
 }
 
 // When polling an ack message
-static inline void check_ack_message_count_stats(p_ops_t* p_ops, struct ack_message* ack,
+static inline void check_ack_message_count_stats(p_ops_t* p_ops, ack_mes_t* ack,
                                                  uint32_t index, uint16_t ack_num, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
     assert(ack_num > 0);
     assert(ack->opcode == OP_ACK);
-    //      wait_for_the_entire_ack((volatile struct ack_message *)ack, t_id, index);
+    //      wait_for_the_entire_ack((volatile ack_mes_t *)ack, t_id, index);
     assert(ack->m_id < MACHINE_NUM);
     uint64_t l_id = ack->l_id;
     uint64_t pull_lid = p_ops->local_w_id;

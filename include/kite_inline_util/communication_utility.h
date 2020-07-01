@@ -93,7 +93,7 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
 
 
 static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                                             struct recv_info *w_recv_info, struct ack_message *acks,
+                                                             struct recv_info *w_recv_info, ack_mes_t *acks,
                                                              uint32_t *completed_but_not_polled_writes,
                                                              uint16_t t_id)
 {
@@ -303,7 +303,7 @@ static inline void post_receives_for_r_reps_for_accepts(struct recv_info *r_rep_
 }
 
 // Keep track of the write messages to send the appropriate acks
-static inline bool ack_bookkeeping(struct ack_message *ack, uint8_t w_num, uint64_t l_id,
+static inline bool ack_bookkeeping(ack_mes_t *ack, uint8_t w_num, uint64_t l_id,
                                    const uint8_t m_id, const uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS && ack->opcode != OP_ACK) {

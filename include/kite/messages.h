@@ -148,29 +148,29 @@
 
 
 // The format of an ack message
-struct ack_message {
+typedef struct ack_message {
   uint64_t l_id ; // the first local id that is being acked
   uint8_t m_id;
   uint8_t opcode;
   uint16_t credits;
   uint16_t ack_num;
-} __attribute__((__packed__));
+} __attribute__((__packed__)) ack_mes_t;
 
 
-struct ack_message_ud_req {
+typedef struct ack_message_ud_req {
   uint8_t grh[GRH_SIZE];
-  struct ack_message ack;
-};
+  ack_mes_t ack;
+} ack_mes_ud_t;
 
 
-struct write {
+typedef struct write {
   uint8_t m_id;
   uint32_t version;
   struct key key;
   uint8_t opcode;
   uint8_t val_len;
   uint8_t value[VALUE_SIZE];
-} __attribute__((__packed__));
+} __attribute__((__packed__)) write_t;
 
 
 struct accept {
@@ -232,7 +232,7 @@ struct w_message {
   uint8_t coalesce_num;
   uint8_t opcode;
   uint64_t l_id ;
-  struct write write[W_COALESCE];
+  write_t write[W_COALESCE];
 } __attribute__((__packed__));
 
 //
@@ -243,16 +243,16 @@ struct r_message {
   struct read read[R_COALESCE];
 } __attribute__((__packed__));
 
-struct w_message_ud_req {
+typedef struct w_message_ud_req {
   uint8_t unused[GRH_SIZE];
   uint8_t w_mes[ALIGNED_W_SEND_SIDE];
-};
+} w_mes_ud_t;
 
 //
-struct r_message_ud_req {
+typedef struct r_message_ud_req {
   uint8_t unused[GRH_SIZE];
   uint8_t r_mes[ALIGNED_R_SEND_SIDE];
-};
+} r_mes_ud_t;
 
 
 // Sent when the timestamps are equal or smaller
@@ -281,10 +281,10 @@ struct r_rep_message {
 } __attribute__((__packed__));
 
 
-struct r_rep_message_ud_req {
+typedef struct r_rep_message_ud_req {
   uint8_t unused[GRH_SIZE];
   uint8_t r_rep_mes[ALIGNED_R_REP_SEND_SIDE];
-};
+} r_rep_mes_ud_t;
 
 // Reply for both accepts and proposes
 // Reply with the last committed RMW if the

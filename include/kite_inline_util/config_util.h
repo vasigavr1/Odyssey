@@ -246,7 +246,7 @@ static inline bool add_failure_to_release_from_sess_id
 {
   if (TURN_OFF_KITE) return false;
 
-  struct write *write = (struct write *) (((void *) w_mes) + info->first_release_byte_ptr);
+  write_t *write = (write_t *) (((void *) w_mes) + info->first_release_byte_ptr);
   bool is_release = write->opcode == OP_RELEASE;
   bool is_accept = write->opcode == ACCEPT_OP;
   //printf("opcode %u \n", write->opcode);
@@ -345,7 +345,7 @@ static inline void raise_conf_bit_if_accept_signals_it(struct accept *acc, uint8
 
 
 //Handle the configuration bit_vec vector on receiving a release
-static inline void handle_configuration_on_receiving_rel(struct write *write, uint16_t t_id)
+static inline void handle_configuration_on_receiving_rel(write_t *write, uint16_t t_id)
 {
   if (!TURN_OFF_KITE) {
     // On receiving the 1st round of a Release/ Accept:

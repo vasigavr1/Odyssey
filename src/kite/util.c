@@ -53,7 +53,7 @@ void kite_static_assert_compile_parameters()
   // NETWORK STRUCTURES
   static_assert(sizeof(struct read) == R_SIZE, "");
   static_assert(sizeof(struct r_message) == R_MES_SIZE, "");
-  static_assert(sizeof(struct write) == W_SIZE, "");
+  static_assert(sizeof(write_t) == W_SIZE, "");
   static_assert(sizeof(struct w_message) == W_MES_SIZE, "");
   static_assert(sizeof(struct propose) == PROP_SIZE, "");
   static_assert(PROP_REP_ACCEPTED_SIZE == PROP_REP_LOG_TOO_LOW_SIZE + 1, "");
@@ -63,10 +63,10 @@ void kite_static_assert_compile_parameters()
   static_assert(sizeof(struct r_rep_big) == ACQ_REP_SIZE, "");
   static_assert(sizeof(struct commit) == COMMIT_SIZE, "");
   // UD- REQS
-  static_assert(sizeof(struct r_rep_message_ud_req) == R_REP_RECV_SIZE, "");
-  static_assert(sizeof(struct ack_message_ud_req) == ACK_RECV_SIZE, "");
-  static_assert(sizeof(struct w_message_ud_req) == W_RECV_SIZE, "");
-  static_assert(sizeof(struct r_message_ud_req) == R_RECV_SIZE, "");
+  static_assert(sizeof(r_rep_mes_ud_t) == R_REP_RECV_SIZE, "");
+  static_assert(sizeof(ack_mes_ud_t) == ACK_RECV_SIZE, "");
+  static_assert(sizeof(w_mes_ud_t) == W_RECV_SIZE, "");
+  static_assert(sizeof(r_mes_ud_t) == R_RECV_SIZE, "");
 
   // we want to have more write slots than credits such that we always know that if a machine fails
   // the pressure will appear in the credits and not the write slots
@@ -115,7 +115,7 @@ void print_parameters_in_the_start()
   my_printf(green, "READ REPLY: r_rep message %lu/%d, r_rep message ud req %llu/%d,"
                  "read info %llu\n",
                sizeof(struct r_rep_message), R_REP_SEND_SIZE,
-               sizeof(struct r_rep_message_ud_req), R_REP_RECV_SIZE,
+               sizeof(r_rep_mes_ud_t), R_REP_RECV_SIZE,
                sizeof (r_info_t));
   my_printf(green, "W_COALESCE %d, R_COALESCE %d, ACC_COALESCE %u, "
                  "PROPOSE COALESCE %d, COM_COALESCE %d, MAX_WRITE_COALESCE %d,"
@@ -125,16 +125,16 @@ void print_parameters_in_the_start()
 
 
   my_printf(cyan, "ACK: ack message %lu/%d, ack message ud req %llu/%d\n",
-              sizeof(struct ack_message), ACK_SIZE,
-              sizeof(struct ack_message_ud_req), ACK_RECV_SIZE);
+              sizeof(ack_mes_t), ACK_SIZE,
+              sizeof(ack_mes_ud_t), ACK_RECV_SIZE);
   my_printf(yellow, "READ: read %lu/%d, read message %lu/%d, read message ud req %lu/%d\n",
                 sizeof(struct read), R_SIZE,
                 sizeof(struct r_message), R_SEND_SIZE,
-                sizeof(struct r_message_ud_req), R_RECV_SIZE);
+                sizeof(r_mes_ud_t), R_RECV_SIZE);
   my_printf(cyan, "Write: write %lu/%d, write message %lu/%d, write message ud req %llu/%d\n",
-              sizeof(struct write), W_SIZE,
+              sizeof(write_t), W_SIZE,
               sizeof(struct w_message), W_SEND_SIZE,
-              sizeof(struct w_message_ud_req), W_RECV_SIZE);
+              sizeof(w_mes_ud_t), W_RECV_SIZE);
 
   my_printf(green, "W INLINING %d, PENDING WRITES %d \n",
                W_ENABLE_INLINING, PENDING_WRITES);
@@ -281,7 +281,7 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uin
   p_ops->r_rep_fifo->message_sizes = (uint16_t *) calloc((size_t) R_REP_FIFO_SIZE, sizeof(uint16_t));
 
   // W_FIFO
-  p_ops->w_fifo = (struct write_fifo *) calloc(1, sizeof(struct write_fifo));
+  p_ops->w_fifo = (write_fifo_t *) calloc(1, sizeof(write_fifo_t));
   p_ops->w_fifo->w_message =
     (struct w_message_template *) calloc((size_t)W_FIFO_SIZE, (size_t) ALIGNED_W_SEND_SIDE);
 
@@ -321,11 +321,11 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uin
 
 
   // PTRS to W_OPS
-  //p_ops->ptrs_to_w_ops = (struct write **) malloc(MAX_INCOMING_W * sizeof(struct write *));
+  //p_ops->ptrs_to_w_ops = (write_t **) malloc(MAX_INCOMING_W * sizeof(write_t *));
   // PTRS to R_OPS
   p_ops->ptrs_to_mes_ops = (void **) malloc(max_incoming_w_r * sizeof(struct read *));
   // PTRS to local ops to find the write after sending the first round of a release
-  p_ops->ptrs_to_local_w = (struct write **) malloc(pending_writes * sizeof(struct write *));
+  p_ops->ptrs_to_local_w = (write_t **) malloc(pending_writes * sizeof(write_t *));
   p_ops->overwritten_values = (uint8_t *) calloc(pending_writes, SEND_CONF_VEC_SIZE);
 
 
@@ -429,7 +429,7 @@ void set_up_bcast_WRs(struct ibv_send_wr *w_send_wr, struct ibv_sge *w_send_sgl,
 void set_up_ack_n_r_rep_WRs(struct ibv_send_wr *ack_send_wr, struct ibv_sge *ack_send_sgl,
                             struct ibv_send_wr *r_rep_send_wr, struct ibv_sge *r_rep_send_sgl,
                             struct hrd_ctrl_blk *cb, struct ibv_mr *r_rep_mr,
-                            struct ack_message *acks, uint16_t remote_thread) {
+                            ack_mes_t *acks, uint16_t remote_thread) {
   uint16_t i;
   // ACKS
   for (i = 0; i < MAX_ACK_WRS; ++i) {

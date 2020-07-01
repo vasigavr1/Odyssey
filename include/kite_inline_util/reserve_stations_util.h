@@ -22,7 +22,7 @@ static inline void fill_commit_message_from_l_entry(struct commit *com, loc_entr
 static inline void fill_commit_message_from_r_info(struct commit *com,
                                                    r_info_t* r_info, uint16_t t_id);
 
-static inline void KVS_isolated_op(int t_id, struct write *write);
+static inline void KVS_isolated_op(int t_id, write_t *write);
 
 
 
@@ -442,7 +442,7 @@ static inline uint8_t get_write_opcode(const uint8_t source, trace_op_t *op,
 }
 
 //
-static inline void increase_virt_w_size(p_ops_t *p_ops, struct write *write,
+static inline void increase_virt_w_size(p_ops_t *p_ops, write_t *write,
                                         uint8_t source, uint16_t t_id) {
   if (write->opcode == OP_RELEASE) {
     if (ENABLE_ASSERTIONS) assert(source == FROM_READ);
@@ -486,7 +486,7 @@ static inline uint16_t get_w_sess_id(p_ops_t *p_ops, trace_op_t *op,
         assert(session_id == *(uint16_t *) op);
         assert(session_id < SESSIONS_PER_THREAD);
         if (source == RELEASE_THIRD) {
-          struct write *w = (struct write *) &op->ts;
+          write_t *w = (write_t *) &op->ts;
           check_state_with_allowed_flags(3, w->opcode, OP_RELEASE_BIT_VECTOR, NO_OP_RELEASE);
         }
       }
@@ -528,7 +528,7 @@ set_w_sess_info_and_index_to_req_array(p_ops_t *p_ops, trace_op_t *write,
 
 // Set up the message depending on where it comes from: trace, 2nd round of release, 2nd round of read etc.
 static inline void write_bookkeeping_in_insertion_based_on_source
-  (p_ops_t *p_ops, struct write *write, trace_op_t *op,
+  (p_ops_t *p_ops, write_t *write, trace_op_t *op,
    const uint8_t source, const uint32_t incoming_pull_ptr,
    r_info_t *r_info, const uint16_t t_id)
 {
@@ -545,7 +545,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
     write->m_id = (uint8_t) machine_id;
   }
   else if (source == RELEASE_THIRD) { // Second round of a release
-    struct write *tmp = (struct write *) &op->ts; // we have treated the rest as a struct write
+    write_t *tmp = (write_t *) &op->ts; // we have treated the rest as a write_t
     memcpy(&write->m_id, tmp, W_SIZE);
     write->opcode = OP_RELEASE_SECOND_ROUND;
     //if (DEBUG_SESSIONS)
@@ -902,7 +902,7 @@ static inline void insert_write(p_ops_t *p_ops, trace_op_t *op, const uint8_t so
     p_ops->sess_info[sess_id].writes_not_yet_inserted--;
   }
 
-  struct write *write = (struct write *)
+  write_t *write = (write_t *)
     get_w_ptr(p_ops, opcode, (uint16_t) p_ops->w_meta[w_ptr].sess_id, t_id);
 
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
@@ -1090,7 +1090,7 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
     failure = add_failure_to_release_from_sess_id(p_ops, w_mes, info, q_info, backward_ptr, t_id);
   }
   for (uint8_t i = 0; i < coalesce_num; i++) {
-    struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
+    write_t *write = (write_t *)(((void *)w_mes) + byte_ptr);
     //printf("Write %u/%u opcode %u \n", i, coalesce_num, write->opcode);
     byte_ptr += get_write_size_from_opcode(write->opcode);
 
@@ -1131,7 +1131,7 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
       case OP_RELEASE:
         if (!TURN_OFF_KITE && failure) {
           write->opcode = NO_OP_RELEASE;
-          //struct write *first_rel = (((write *)w_mes) + info->first_release_byte_ptr);
+          //write_t *first_rel = (((write *)w_mes) + info->first_release_byte_ptr);
           //my_printf(yellow, "Wrkr %u Adding a no_op_release in position %u/%u, first opcode %u \n",
           //              t_id, i, coalesce_num, first_rel->opcode);
           *w_state = SENT_NO_OP_RELEASE;
@@ -1230,7 +1230,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (p_ops_t *
 {
   uint32_t w_pull_ptr = p_ops->w_pull_ptr;
   bool is_no_op = p_ops->w_meta[p_ops->w_pull_ptr].w_state == READY_NO_OP_RELEASE;
-  struct write *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
+  write_t *rel = p_ops->ptrs_to_local_w[w_pull_ptr];
   if (ENABLE_ASSERTIONS) {
     assert (rel != NULL);
     if (is_no_op) assert(rel->opcode == NO_OP_RELEASE);
@@ -1241,7 +1241,7 @@ static inline void commit_first_round_of_release_and_spawn_the_second (p_ops_t *
     memcpy(rel->value, &p_ops->overwritten_values[SEND_CONF_VEC_SIZE * w_pull_ptr], SEND_CONF_VEC_SIZE);
   trace_op_t op;
   op.session_id = (uint16_t) p_ops->w_meta[w_pull_ptr].sess_id;
-  memcpy((void *) &op.ts, rel, W_SIZE); // We are treating the trace op as a sess_id + struct write
+  memcpy((void *) &op.ts, rel, W_SIZE); // We are treating the trace op as a sess_id + write_t
   //if (DEBUG_SESSIONS)
   //my_printf(cyan, "Wrkr: %u Inserting the write for the second round of the "
   //            "release opcode %u that carried a bit vector: session %u\n",

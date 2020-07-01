@@ -110,7 +110,7 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, zk_prepare_t **preps
       unlock_seqlock(&kv_ptr[op_i]->seqlock);
     }
     else {
-      my_printf(red, "wrong Opcode to an update in kvs: %d, req %d, flr_id %u, val_len %u, g_id %u , \n",
+      my_printf(red, "wrong Opcode to an update in kvs: %d, req %d, flr_id %u, val_len %u, g_id %lu , \n",
                  op->opcode, op_i, op->flr_id, op->val_len, op->g_id);
       assert(0);
     }

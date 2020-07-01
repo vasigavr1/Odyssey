@@ -401,7 +401,7 @@ static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
 static inline void send_acks(struct ibv_send_wr *ack_send_wr,
                              uint64_t *sent_ack_tx,
                              struct hrd_ctrl_blk *cb, struct recv_info *w_recv_info,
-                             struct ack_message *acks, uint16_t t_id)
+                             ack_mes_t *acks, uint16_t t_id)
 {
   uint8_t ack_i = 0, prev_ack_i = 0, first_wr = 0;
   struct ibv_wc signal_send_wc;
@@ -480,10 +480,10 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
 
 
 // Poll for the write broadcasts
-static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws,
+static inline void poll_for_writes(volatile w_mes_ud_t *incoming_ws,
                                    uint32_t *pull_ptr, p_ops_t *p_ops,
                                    struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                   struct recv_info *w_recv_info, struct ack_message *acks,
+                                   struct recv_info *w_recv_info, ack_mes_t *acks,
                                    uint32_t *completed_but_not_polled_writes,
                                    uint16_t t_id)
 {
@@ -508,7 +508,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
     uint32_t running_writes_for_kvs = writes_for_kvs;
     uint16_t byte_ptr = W_MES_HEADER;
     for (uint16_t i = 0; i < w_num; i++) {
-      struct write *write = (struct write *)(((void *)w_mes) + byte_ptr);
+      write_t *write = (write_t *)(((void *)w_mes) + byte_ptr);
       byte_ptr += get_write_size_from_opcode(write->opcode);
       check_a_polled_write(write, i, w_num, w_mes->opcode, t_id);
       handle_configuration_on_receiving_rel(write, t_id);
@@ -553,7 +553,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
   if (writes_for_kvs > 0) {
     if (DEBUG_WRITES) my_printf(yellow, "Worker %u is going with %u writes to the kvs \n", t_id, writes_for_kvs);
-    KVS_batch_op_updates((uint16_t) writes_for_kvs, t_id, (struct write **) p_ops->ptrs_to_mes_ops,
+    KVS_batch_op_updates((uint16_t) writes_for_kvs, t_id, (write_t **) p_ops->ptrs_to_mes_ops,
                          p_ops, 0, (uint32_t) MAX_INCOMING_W);
     if (DEBUG_WRITES) my_printf(yellow, "Worker %u propagated %u writes to the kvs \n", t_id, writes_for_kvs);
   }
@@ -561,7 +561,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
 
 // Poll for the r_rep broadcasts
-static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
+static inline void poll_for_reads(volatile r_mes_ud_t *incoming_rs,
                                   uint32_t *pull_ptr, p_ops_t *p_ops,
                                   struct ibv_cq *r_recv_cq, struct ibv_wc *r_recv_wc,
                                   uint16_t t_id, uint32_t *dbg_counter)
@@ -711,7 +711,7 @@ static inline void apply_acks(p_ops_t *p_ops, uint16_t ack_num, uint32_t ack_ptr
 }
 
 // Worker polls for acks
-static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t *pull_ptr,
+static inline void poll_acks(volatile ack_mes_ud_t *incoming_acks, uint32_t *pull_ptr,
                              p_ops_t *p_ops,
                              uint16_t credits[][MACHINE_NUM],
                              struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
@@ -726,7 +726,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
   //printf("Wrkr %u first time %d\n", t_id, completed_messages);
   if (completed_messages <= 0) return;
   while (polled_messages < completed_messages) {
-    struct ack_message *ack = &incoming_acks[index].ack;
+    ack_mes_t *ack = (ack_mes_t *) &incoming_acks[index].ack;
     uint16_t ack_num = ack->ack_num;
     check_ack_message_count_stats(p_ops, ack, index, ack_num, t_id);
 
@@ -776,7 +776,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
 
 
 //Poll for read replies
-static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *incoming_r_reps,
+static inline void poll_for_read_replies(volatile r_rep_mes_ud_t *incoming_r_reps,
                                          uint32_t *pull_ptr, p_ops_t *p_ops,
                                          uint16_t credits[][MACHINE_NUM],
                                          struct ibv_cq *r_rep_recv_cq, struct ibv_wc *r_rep_recv_wc,
