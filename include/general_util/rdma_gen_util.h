@@ -45,7 +45,7 @@ static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t re
   for (j = 0; j < recv_num; j++) {
     recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
     //printf("Posting a receive at push ptr %u at address %lu \n", recv->w_push_ptr, recv->recv_sgl[j].addr);
-    MOD_ADD(recv->push_ptr, recv->buf_slots);
+    MOD_INCR(recv->push_ptr, recv->buf_slots);
     recv->recv_wr[j].next = (j == recv_num - 1) ?
                             NULL : &recv->recv_wr[j + 1];
   }

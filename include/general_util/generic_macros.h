@@ -19,11 +19,16 @@
 #define MAX_OF_4(x1, y1, x2, y2) (MAX(x1, y1) > MAX(x2, y2) ? (MAX(x1, y1)) : (MAX(x2, y2)))
 
 /* Useful when `x = (x + 1) % N` is done in a loop */
-#define MOD_ADD(x, N) do { \
+#define MOD_INCR(x, N) do { \
 	x = x + 1; \
 	if(x == N) { \
 		x = 0; \
 	} \
+} while(0)
+
+
+#define MOD_SUB(x, y, N) do { \
+	x = (N + x - y) % N; \
 } while(0)
 
 #define MOD_ADD_WITH_BASE(x, N, B) do { \

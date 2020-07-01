@@ -75,6 +75,8 @@ static inline void zk_KVS_batch_op_updates(uint16_t op_num, zk_prepare_t **preps
                                            uint32_t pull_ptr, uint32_t max_op_size,
                                            bool zero_ops, uint16_t t_id)
 {
+
+  if (DISABLE_UPDATING_KVS) return;
   uint16_t op_i;  /* op_i is batch index */
   if (ENABLE_ASSERTIONS) {
     assert(preps != NULL);

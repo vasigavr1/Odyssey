@@ -4,26 +4,8 @@
 #include "../general_util/inline_util.h"
 #include "zk_kvs_util.h"
 #include "zk_debug_util.h"
+#include "zk_reservation_stations_util.h_.h"
 
-
-/* ---------------------------------------------------------------------------
-------------------------------UTILITY --------------------------------------
----------------------------------------------------------------------------*/
-
-
-
-// The follower sends a write to the leader and tags it with a session id. When the leaders sends a prepare,
-// it includes that session id and a flr id
-// the follower inspects the flr id, such that it can unblock the session id, if the write originated locally
-// we hijack that connection for the latency, remembering the session that gets stuck on a write
-static inline void change_latency_tag(struct latency_flags *latency_info, p_writes_t *p_writes,
-                                      uint16_t t_id)
-{
-  if (latency_info->measured_req_flag == WRITE_REQ_BEFORE_CACHE &&
-      machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&
-      latency_info->measured_sess_id == p_writes->session_id[p_writes->pull_ptr])
-    latency_info-> measured_req_flag = WRITE_REQ;
-}
 
 
 /* ---------------------------------------------------------------------------
@@ -115,12 +97,12 @@ static inline void fill_write(zk_write_t *write, mica_key_t key, uint8_t opcode,
   p_writes->w_state[w_ptr] = VALID;
   p_writes->is_local[w_ptr] = local;
   p_writes->session_id[w_ptr] = (uint32_t) session_id;
-  MOD_ADD(p_writes->push_ptr, LEADER_PENDING_WRITES);
+  MOD_INCR(p_writes->push_ptr, LEADER_PENDING_WRITES);
   p_writes->size++;
   p_writes->prep_fifo->bcast_size++;
   preps[prep_ptr].coalesce_num++;
   if (preps[prep_ptr].coalesce_num == MAX_PREP_COALESCE) {
-    MOD_ADD(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
+    MOD_INCR(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
     preps[p_writes->prep_fifo->push_ptr].coalesce_num = 0;
   }
 }
@@ -142,7 +124,7 @@ static inline void flr_insert_write(p_writes_t *p_writes, zk_trace_op_t *op, uin
   w_mes[w_ptr].write[0].w_num++;
 
   if (w_mes[w_ptr].write[0].w_num == MAX_W_COALESCE) {
-    MOD_ADD(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
+    MOD_INCR(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
     w_mes[p_writes->w_fifo->push_ptr].write[0].w_num = 0;
    //my_printf(yellow, "Zeroing when in cache at pointer %u \n", p_writes->w_fifo->push_ptr);
   }
@@ -206,18 +188,19 @@ static inline uint32_t zk_batch_from_trace_to_KVS(uint32_t trace_iter, uint16_t 
   if (ENABLE_CLIENTS) {
     if (working_session == -1) return trace_iter;
   }
-  else if (ENABLE_ASSERTIONS ) assert(working_session != -1);
+  else if (ENABLE_ASSERTIONS) assert(working_session != -1);
 
   bool passed_over_all_sessions = false;
   //  my_printf(green, "op_i %d , trace_iter %d, trace[trace_iter].opcode %d \n", op_i, trace_iter, trace[trace_iter].opcode);
+  /// main loop
   while (op_i < ZK_TRACE_BATCH && !passed_over_all_sessions) {
 
     zk_fill_trace_op(&trace[trace_iter], ops, op_i, working_session, protocol,
                      p_writes, flr_id, latency_info, t_id);
-
     while (!pull_request_from_this_session(p_writes->stalled[working_session],
                                            (uint16_t) working_session, t_id)) {
-      MOD_ADD(working_session, SESSIONS_PER_THREAD);
+
+      MOD_INCR(working_session, SESSIONS_PER_THREAD);
       if (working_session == last_session) {
         passed_over_all_sessions = true;
         // If clients are used the condition does not guarantee that sessions are stalled
@@ -260,8 +243,9 @@ static inline void zk_get_g_ids(p_writes_t *p_writes, uint16_t t_id)
 		p_writes->g_id[unordered_ptr] = id + i;
 		zk_prepare_t *prep = p_writes->ptrs_to_ops[unordered_ptr];
 		prep->g_id = (uint32_t) p_writes->g_id[unordered_ptr];
-    MOD_ADD(p_writes->unordered_ptr, LEADER_PENDING_WRITES);
+    MOD_INCR(p_writes->unordered_ptr, LEADER_PENDING_WRITES);
 	}
+  p_writes->highest_g_id_taken = id + unordered_writes_num - 1;
 	if (id > B_4) {
     if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE) print_latency_stats();
     assert(false);
@@ -324,7 +308,7 @@ static inline void zk_apply_acks(uint16_t ack_num, uint32_t ack_ptr,
       p_writes->w_state[ack_ptr] = READY;
 
     }
-    MOD_ADD(ack_ptr, LEADER_PENDING_WRITES);
+    MOD_INCR(ack_ptr, LEADER_PENDING_WRITES);
   }
 }
 
@@ -342,18 +326,21 @@ static inline void ldr_poll_for_acks(zk_ack_mes_ud_t *incoming_acks, uint32_t *p
   int completed_messages =
     find_how_many_messages_can_be_polled(ack_recv_cq, ack_recv_wc,
                                          NULL, LEADER_ACK_BUF_SLOTS, t_id);
-  if (completed_messages <= 0) return;
+  if (completed_messages <= 0) {
+    if (*outstanding_prepares > 0) (*dbg_counter)++;
+    return;
+  }
   while (polled_messages < completed_messages) {
 		zk_ack_mes_t *ack = &incoming_acks[buf_ptr].ack;
 		uint16_t ack_num = ack->ack_num;
 		uint64_t l_id = ack->l_id;
 		uint64_t pull_lid = p_writes->local_w_id; // l_id at the pull pointer
 		uint32_t ack_ptr; // a pointer in the FIFO, from where ack should be added
-    zk_check_polled_ack_and_print(ack, ack_num, pull_lid, t_id);
+    zk_check_polled_ack_and_print(ack, ack_num, pull_lid, buf_ptr, t_id);
     zk_increase_prep_credits(credits, ack, remote_prep_buf, t_id);
 
     // bookkeep early, because the ack may get skipped
-    MOD_ADD(buf_ptr, LEADER_ACK_BUF_SLOTS);
+    MOD_INCR(buf_ptr, LEADER_ACK_BUF_SLOTS);
     polled_messages++;
     // if the pending write FIFO is empty it means the acks are for committed messages.
     // in which case we only need to increase credits
@@ -402,7 +389,7 @@ static inline void forge_commit_message(zk_com_fifo_t *com_fifo, uint64_t l_id, 
 	new_commit->l_id = l_id;
 	new_commit->com_num = update_op_i;
 	com_fifo->size++;
-	MOD_ADD(com_fifo->push_ptr, COMMIT_FIFO_SIZE);
+	MOD_INCR(com_fifo->push_ptr, COMMIT_FIFO_SIZE);
 	if (ENABLE_ASSERTIONS) {
 		assert(com_fifo->size <= COMMIT_FIFO_SIZE );
 	}
@@ -410,12 +397,13 @@ static inline void forge_commit_message(zk_com_fifo_t *com_fifo, uint64_t l_id, 
 
 // Leader propagates Updates that have seen all acks to the KVS
 static inline void ldr_propagate_updates(p_writes_t *p_writes, zk_com_fifo_t *com_fifo,
-                                         zk_resp_t *resp, struct latency_flags *latency_info,
+                                         zk_resp_t *resp, latency_info_t *latency_info,
                                          uint16_t t_id, uint32_t *dbg_counter)
 {
 //  printf("Ldr %d propagating updates \n", t_id);
 	uint16_t update_op_i = 0;
-	uint32_t pull_ptr = p_writes->pull_ptr;
+  // remember the starting point to use it when writing the KVS
+	uint32_t starting_pull_ptr = p_writes->pull_ptr;
 
 	// Read the latest committed g_id
 	uint64_t committed_g_id = atomic_load_explicit(&committed_global_w_id, memory_order_relaxed);
@@ -423,43 +411,27 @@ static inline void ldr_propagate_updates(p_writes_t *p_writes, zk_com_fifo_t *co
     // the commit prep_message is full: that may be too restricting,
     // but it does not affect performance or correctness
 		if (com_fifo->size == COMMIT_FIFO_SIZE) break;
-		if (p_writes->g_id[p_writes->pull_ptr] != committed_g_id + 1 && (!DISABLE_GID_ORDERING)) {
-      assert(committed_g_id < p_writes->g_id[p_writes->pull_ptr]);
-			if (ENABLE_ASSERTIONS) (*dbg_counter)++;
-      if (ENABLE_STAT_COUNTING) t_stats[t_id].stalled_gid++;
-			break;
-		}
-//    printf("Leader found updates to propagate\n");
-		p_writes->w_state[p_writes->pull_ptr] = INVALID;
-    p_writes->acks_seen[p_writes->pull_ptr] = 0;
-		if (p_writes->is_local[p_writes->pull_ptr]) {
-      if (DEBUG_WRITES) my_printf(cyan, "Ldr %u freeing session %u \n", t_id,
-                               p_writes->session_id[p_writes->pull_ptr]);
-			p_writes->stalled[p_writes->session_id[p_writes->pull_ptr]] = false;
-			p_writes->all_sessions_stalled = false;
-			p_writes->is_local[p_writes->pull_ptr] = false;
-		}
-		MOD_ADD(p_writes->pull_ptr, LEADER_PENDING_WRITES);
-		update_op_i++;
-		committed_g_id++;
-	}
+    if (!is_expected_g_id_ready(p_writes, committed_g_id, dbg_counter, LEADER, t_id))
+      break;
+    bookkeep_after_finding_expected_gid(p_writes, latency_info,
+                                        LEADER, dbg_counter, t_id);
 
+
+
+    MOD_INCR(p_writes->pull_ptr, LEADER_PENDING_WRITES);
+    update_op_i++;
+    committed_g_id++; // this is getting checked in every iteration, so it's needed
+	}
 	if (update_op_i > 0) {
-    if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
 		forge_commit_message(com_fifo, p_writes->local_w_id, update_op_i);
 		p_writes->local_w_id += update_op_i; // advance the local_w_id
 
     if (ENABLE_ASSERTIONS) assert(p_writes->size >= update_op_i);
     p_writes->size -= update_op_i;
-    if (!DISABLE_UPDATING_KVS)
-      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, pull_ptr,
-                              LEADER_PENDING_WRITES, false, t_id);
+    zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops, starting_pull_ptr,
+                            LEADER_PENDING_WRITES, false, t_id);
 		atomic_store_explicit(&committed_global_w_id, committed_g_id, memory_order_relaxed);
-    if (MEASURE_LATENCY && latency_info->measured_req_flag == WRITE_REQ &&
-        machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&
-        latency_info->measured_sess_id < p_writes->local_w_id)
-      report_latency(latency_info);
-//    if (t_id == 0)  my_printf(yellow, "Committed global id %lu \n", committed_g_id);
+    zk_take_latency_measurement_for_writes(p_writes, latency_info, t_id);
 	}
 }
 
@@ -503,7 +475,7 @@ static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t
 	// Start polling
   while (polled_messages < completed_messages) {
 	//while (incoming_ws[index].w_mes.write[0].w_num > 0) {
-    wait_for_the_entire_write(&incoming_ws[index].w_mes, t_id, index);
+   // wait_for_the_entire_write(&incoming_ws[index].w_mes, t_id, index);
 		 if (DEBUG_WRITES) printf("Leader sees a write Opcode %d at offset %d  \n",
                               incoming_ws[index].w_mes.write[0].opcode, index);
 		zk_w_mes_t *w_mes = (zk_w_mes_t *) &incoming_ws[index].w_mes;
@@ -527,7 +499,7 @@ static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t
       t_stats[t_id].received_writes_mes_num++;
     }
     incoming_ws[index].w_mes.write[0].w_num = 0;
-    MOD_ADD(index, LEADER_W_BUF_SLOTS);
+    MOD_INCR(index, LEADER_W_BUF_SLOTS);
     polled_messages++;
 	}
   (*pull_ptr) = index;
@@ -691,7 +663,7 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
 		//commits_sent += com_mes->com_num;
 		com_fifo->size--;
 		// Don't zero the com_num because there may be no INLINING
-		MOD_ADD(com_fifo->pull_ptr, COMMIT_FIFO_SIZE);
+		MOD_INCR(com_fifo->pull_ptr, COMMIT_FIFO_SIZE);
     br_i++;
 		if (ENABLE_ASSERTIONS) {
 			assert(br_i <= COMMIT_CREDITS);
@@ -819,12 +791,12 @@ static inline void broadcast_prepares(p_writes_t *p_writes,
     // This message has been sent do not add other prepares to it!
     if (coalesce_num < MAX_PREP_COALESCE) {
 //      my_printf(yellow, "Broadcasting prep with coalesce num %u \n", coalesce_num);
-      MOD_ADD(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
+      MOD_INCR(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
       p_writes->prep_fifo->prep_message[p_writes->prep_fifo->push_ptr].coalesce_num = 0;
     }
     p_writes->prep_fifo->bcast_size -= coalesce_num;
 //    preps_sent += coalesce_num;
-    MOD_ADD(bcast_pull_ptr, PREP_FIFO_SIZE);
+    MOD_INCR(bcast_pull_ptr, PREP_FIFO_SIZE);
 		if (br_i == MAX_BCAST_BATCH) {
       uint32_t recvs_to_post_num = LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs;
       //printf("Ldr %d posting %d recvs\n",t_id,  recvs_to_post_num);
@@ -984,7 +956,7 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
 			else p_writes->is_local[push_ptr] = false;
 			p_writes->w_state[push_ptr] = VALID;
 			if (extra_slots == 0) { // FIFO style insert
-				MOD_ADD(p_writes->push_ptr, FLR_PENDING_WRITES);
+				MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
 				p_writes->size++;
 			}
 			else extra_slots++; // forward insert
@@ -992,13 +964,13 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
 		// Because of out-of-order messages it may be that the next expected message has already been seen and stored
 		while ((p_writes->w_state[p_writes->push_ptr] ==  VALID) &&  (p_writes->size < FLR_PENDING_WRITES)) {
 			if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES) assert(false);
-			MOD_ADD(p_writes->push_ptr, FLR_PENDING_WRITES);
+			MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
 			p_writes->size++;
 			p_acks->acks_to_send++;
 		}
 		incoming_preps[index].prepare.opcode = 0;
     incoming_preps[index].prepare.coalesce_num = 0;
-		MOD_ADD(index, FLR_PREP_BUF_SLOTS);
+		MOD_INCR(index, FLR_PREP_BUF_SLOTS);
 		polled_messages++;
 	}
   (*completed_but_not_polled_preps) = completed_messages - polled_messages;
@@ -1182,7 +1154,6 @@ static inline void send_writes_to_the_ldr(p_writes_t *p_writes,
     zk_w_mes_t *w_mes = &w_mes_fifo[w_ptr];
     uint16_t coalesce_num = w_mes->write[0].w_num;
 
-    //mirror_remote_buffer(remote_prep_buf, credits, coalesce_num); // TODO FIX THE MIRRORING
     if (ENABLE_ASSERTIONS) {
       assert(p_writes->w_fifo->size >= coalesce_num);
       (*outstanding_writes) += coalesce_num;
@@ -1193,13 +1164,13 @@ static inline void send_writes_to_the_ldr(p_writes_t *p_writes,
     }
     // This message has been sent do not add other writes to it!
     if (coalesce_num < MAX_W_COALESCE) {
-      MOD_ADD(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
+      MOD_INCR(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
       w_mes_fifo[p_writes->w_fifo->push_ptr].write[0].w_num = 0;
 //      my_printf(yellow, "Zeroing when sending at pointer %u \n", p_writes->prep_fifo->push_ptr);
 
     }
     add_to_the_mirrored_buffer(remote_w_buf, coalesce_num, 1, LEADER_W_BUF_SLOTS);
-    MOD_ADD(p_writes->w_fifo->pull_ptr, W_FIFO_SIZE);
+    MOD_INCR(p_writes->w_fifo->pull_ptr, W_FIFO_SIZE);
     p_writes->w_fifo->size -= coalesce_num;
     w_i++;
   }
@@ -1222,75 +1193,53 @@ static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_
                                  uint32_t *completed_but_not_polled_coms,
                                  uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
 {
-  uint32_t index = *pull_ptr;
+  uint32_t buf_ptr = *pull_ptr;
   uint32_t polled_messages = 0;
 
   int completed_messages =
     find_how_many_messages_can_be_polled(com_recv_cq, com_recv_wc,
                                          completed_but_not_polled_coms,
                                          FLR_COM_BUF_SLOTS, t_id);
-  if (completed_messages <= 0) return;
+  if (completed_messages <= 0) {
+    if (ENABLE_ASSERTIONS  && p_writes->size > 0) (*dbg_counter)++;
+    return;
+  }
   while (polled_messages < completed_messages) {
-    zk_com_mes_t *com = &incoming_coms[index].com;
+    zk_com_mes_t *com = &incoming_coms[buf_ptr].com;
     uint16_t com_num = com->com_num;
     uint64_t l_id = com->l_id;
     uint64_t pull_lid = p_writes->local_w_id; // l_id at the pull pointer
-    uint16_t com_ptr; // a pointer in the FIFO, where the committed write lives
-//    my_printf(yellow, "Flr %d com opcode %d with %d coms for l_id %lu, oldest lid %lu, at offset %d at address %u \n",
-//                  t_id, com->opcode, com_num, l_id, pull_lid, index, &(incoming_coms[index]));
-    if (ENABLE_ASSERTIONS) {
-			if ((pull_lid > l_id) || ((l_id + com_num > pull_lid + p_writes->size) && (!USE_QUORUM))) {
-        my_printf(red, "Flr %d, COMMIT: received lid %lu, com_num %u, pull_lid %lu, p_writes size  %u \n",
-                   t_id, l_id, com_num, pull_lid, p_writes->size);
-        print_ldr_stats(t_id);
-        exit(0);
-      }
-      assert(com_num > 0 && com_num <= MAX_LIDS_IN_A_COMMIT);
-		}
+    zk_check_polled_commit_and_print(com, p_writes, buf_ptr,
+                                     l_id, pull_lid, com_num, t_id);
 
-    // This must always hold: l_id >= pull_lid
-		com_ptr = (p_writes->pull_ptr + (l_id - pull_lid)) % FLR_PENDING_WRITES;
-//    if (p_writes->w_state[(com_ptr + com_num - 1) % FLR_PENDING_WRITES] == VALID) return;
+    // This must always hold: l_id >= pull_lid,
+    // because we need the commit to advance the pull_lid
+    uint16_t com_ptr = (uint16_t)
+      ((p_writes->pull_ptr + (l_id - pull_lid)) % FLR_PENDING_WRITES);
+    /// loop through each commit
     for (uint16_t com_i = 0; com_i < com_num; com_i++) {
-//      printf("Flr %d valid com %u/%u write at ptr %d with g_id %lu is ready \n",
-//               t_id, com_i, com_num,  com_ptr, p_writes->g_id[com_ptr]);
-      // it may be that a commit refers to a subset of writes that we have seen,
-      // but we need to commit that subset to avoid a deadlock
-      if (p_writes->w_state[com_ptr] != SENT) {
-        com->com_num -= com_i;
-        l_id += com_i;
-        com->l_id = l_id;
+      if (zk_write_not_yet_acked(com, com_ptr, com_i, com_num, p_writes, t_id))
         goto END_WHILE;
-      }
+
 			p_writes->w_state[com_ptr] = READY;
-			if (p_writes->flr_id[com_ptr] == flr_id) {
-        (*credits) += remove_from_the_mirrored_buffer(remote_w_buf, 1, t_id, 0, LEADER_W_BUF_SLOTS);
-        if (DEBUG_WRITES)
-          my_printf(yellow, "Received a credit, credits: %u \n", *credits);
-        }
-      MOD_ADD(com_ptr, FLR_PENDING_WRITES);
-    }
-    if (ENABLE_ASSERTIONS) assert(*credits <= W_CREDITS);
-    memset(com, 0, LDR_COM_SEND_SIZE); // need to delete the l_id too
-		MOD_ADD(index, FLR_COM_BUF_SLOTS);
+      flr_increases_write_credits(p_writes, com_ptr, remote_w_buf,
+                                  credits, flr_id, t_id);
+      MOD_INCR(com_ptr, FLR_PENDING_WRITES);
+    } ///
+
+    if (ENABLE_ASSERTIONS) com->opcode = 0;
+		MOD_INCR(buf_ptr, FLR_COM_BUF_SLOTS);
     if (ENABLE_STAT_COUNTING) {
       t_stats[t_id].received_coms += com_num;
       t_stats[t_id].received_coms_mes_num++;
     }
-    if (index % FLR_CREDITS_IN_MESSAGE == 0)
+    if (buf_ptr % FLR_CREDITS_IN_MESSAGE == 0)
       send_credits_for_commits(com_recv_info, cb, credit_wr, credit_tx, 1, t_id);
 		polled_messages++;
   } // while
   (*completed_but_not_polled_coms) = completed_messages - polled_messages;
-  END_WHILE: *pull_ptr = index;
-  // Poll for the completion of the receives
-  if (polled_messages > 0) {
-    if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
-  }
-  else {
-    if (ENABLE_ASSERTIONS  && p_writes->size > 0) (*dbg_counter)++;
-  }
-  if (ENABLE_ASSERTIONS) assert(com_recv_info->posted_recvs >= polled_messages);
+  END_WHILE: *pull_ptr = buf_ptr;
+  zk_checks_after_polling_commits(dbg_counter, polled_messages, com_recv_info);
   com_recv_info->posted_recvs -= polled_messages;
 }
 
@@ -1298,46 +1247,30 @@ static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_
 // Follower propagates Updates that have seen all acks to the KVS
 static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_acks *p_acks,
                                          zk_resp_t *resp, struct fifo *prep_buf_mirror,
-                                         struct latency_flags *latency_info,
+                                         latency_info_t *latency_info,
                                          uint16_t t_id, uint32_t *dbg_counter)
 {
 	uint16_t update_op_i = 0;
-	uint32_t pull_ptr = p_writes->pull_ptr;
-
+  // remember the starting point to use it when writing the KVS
+	uint32_t starting_pull_ptr = p_writes->pull_ptr;
 	// Read the latest committed g_id
 	uint64_t committed_g_id = atomic_load_explicit(&committed_global_w_id, memory_order_relaxed);
-  if (ENABLE_STAT_COUNTING) {
-    if ((p_writes->g_id[p_writes->pull_ptr] == committed_g_id + 1) && (p_writes->w_state[p_writes->pull_ptr] == SENT))
-      t_stats[t_id].stalled_com_credit++;
-  }
+  flr_increase_counter_if_waiting_for_commit(p_writes, committed_g_id, t_id);
+
 	while(p_writes->w_state[p_writes->pull_ptr] == READY) {
-		if (p_writes->g_id[p_writes->pull_ptr] != committed_g_id + 1 && (!DISABLE_GID_ORDERING)) {
-      assert(committed_g_id < p_writes->g_id[p_writes->pull_ptr]);
-      if (ENABLE_ASSERTIONS) (*dbg_counter)++;
-      if (ENABLE_STAT_COUNTING) t_stats[t_id].stalled_gid++;
+    if (!is_expected_g_id_ready(p_writes, committed_g_id, dbg_counter, FOLLOWER, t_id))
       break;
-    }
-//    printf("Follower found updates to propagate\n");
-		p_writes->w_state[p_writes->pull_ptr] = INVALID;
-		if (p_writes->is_local[p_writes->pull_ptr]) {
-      if (DEBUG_WRITES)
-        my_printf(cyan, "Found a local req freeing session %d \n", p_writes->session_id[p_writes->pull_ptr]);
-			p_writes->stalled[p_writes->session_id[p_writes->pull_ptr]] = false;
-			p_writes->all_sessions_stalled = false;
-			p_writes->is_local[p_writes->pull_ptr] = false;
-      if (MEASURE_LATENCY) change_latency_tag(latency_info, p_writes, t_id);
-      if (MEASURE_LATENCY && latency_info->measured_req_flag == WRITE_REQ_BEFORE_CACHE &&
-          machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&
-          latency_info->measured_sess_id == p_writes->session_id[p_writes->pull_ptr])
-        latency_info->measured_req_flag = WRITE_REQ;
-		}
-		MOD_ADD(p_writes->pull_ptr, FLR_PENDING_WRITES);
-		update_op_i++;
-		committed_g_id++;
-	}
+
+    bookkeep_after_finding_expected_gid(p_writes, latency_info,
+                                        FOLLOWER, dbg_counter,
+                                        t_id);
+    MOD_INCR(p_writes->pull_ptr, FLR_PENDING_WRITES);
+    update_op_i++;
+    committed_g_id++; // this is getting checked in every iteration, so it's needed
+  }
+
 	if (update_op_i > 0) {
     remove_from_the_mirrored_buffer(prep_buf_mirror, update_op_i, t_id, 0, FLR_PREP_BUF_SLOTS);
-    if (ENABLE_ASSERTIONS)(*dbg_counter) = 0;
 		p_writes->local_w_id += update_op_i; // advance the local_w_id
 		if (ENABLE_ASSERTIONS) {
 			assert(p_writes->size >= update_op_i);
@@ -1345,17 +1278,10 @@ static inline void flr_propagate_updates(p_writes_t *p_writes, struct pending_ac
 		}
 		p_acks->slots_ahead -= update_op_i;
 		p_writes->size -= update_op_i;
-		if (!DISABLE_UPDATING_KVS)
-      zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops,  pull_ptr,
-                              FLR_PENDING_WRITES, true, t_id);
-    else
-      for (uint16_t i = 0; i < update_op_i; i++) p_writes->ptrs_to_ops[(pull_ptr + i) % FLR_PENDING_WRITES]->opcode = 5;
-
+    zk_KVS_batch_op_updates((uint16_t) update_op_i, p_writes->ptrs_to_ops,  starting_pull_ptr,
+                            FLR_PENDING_WRITES, true, t_id);
 		atomic_store_explicit(&committed_global_w_id, committed_g_id, memory_order_relaxed);
-    if (MEASURE_LATENCY && latency_info->measured_req_flag == WRITE_REQ &&
-        machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD )
-      report_latency(latency_info);
-//		my_printf(yellow, "Committed global id %lu \n", committed_g_id);
+    zk_take_latency_measurement_for_writes(p_writes, latency_info, t_id);
 	}
 }
 

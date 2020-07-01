@@ -35,7 +35,7 @@ static inline bool search_out_of_epoch_writes(p_ops_t *p_ops,
       //          writes->size, writes->push_ptr, writes->pull_ptr, writes->r_info_ptrs[w_i]);
       return true;
     }
-    MOD_ADD(w_i, PENDING_READS);
+    MOD_INCR(w_i, PENDING_READS);
   }
   return false;
 }
@@ -122,8 +122,8 @@ static inline void KVS_from_trace_writes(trace_op_t *op,
     r_info->val_len = op->real_val_len;
     p_ops->p_ooe_writes->r_info_ptrs[p_ops->p_ooe_writes->push_ptr] = r_push_ptr;
     p_ops->p_ooe_writes->size++;
-    MOD_ADD(p_ops->p_ooe_writes->push_ptr, PENDING_READS);
-    MOD_ADD(r_push_ptr, PENDING_READS);
+    MOD_INCR(p_ops->p_ooe_writes->push_ptr, PENDING_READS);
+    MOD_INCR(r_push_ptr, PENDING_READS);
     resp->type = KVS_GET_TS_SUCCESS;
     (*r_push_ptr_) =  r_push_ptr;
   }
@@ -170,7 +170,7 @@ static inline void KVS_from_trace_releases(trace_op_t *op,
   // Store the value to be written in the read_info to be used in the second round
   memcpy(r_info->value, op->value_to_write, op->real_val_len);
   r_info->val_len = op->real_val_len;
-  MOD_ADD(r_push_ptr, PENDING_READS);
+  MOD_INCR(r_push_ptr, PENDING_READS);
   resp->type = KVS_GET_TS_SUCCESS;
   (*r_push_ptr_) =  r_push_ptr;
 }
@@ -252,7 +252,7 @@ static inline void KVS_from_trace_acquires_ooe_reads(trace_op_t *op, mica_op_t *
   r_info->is_read = true;
   r_info->opcode = op->opcode; // it could be an acquire or an out-of-epoch read
   r_info->r_ptr = r_push_ptr;
-  MOD_ADD(r_push_ptr, PENDING_READS);
+  MOD_INCR(r_push_ptr, PENDING_READS);
   resp->type = KVS_GET_SUCCESS;
   (*r_push_ptr_) =  r_push_ptr;
 }
@@ -536,7 +536,7 @@ static inline void KVS_out_of_epoch_writes(r_info_t *r_info, mica_op_t *kv_ptr,
   if (ENABLE_ASSERTIONS) assert(r_info->ts_to_read.m_id == machine_id);
 
   p_ops->p_ooe_writes->size--;
-  MOD_ADD(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
+  MOD_INCR(p_ops->p_ooe_writes->pull_ptr, PENDING_READS);
 }
 
 // Handle committing an RMW/write from a response to an acquire or ooe-read

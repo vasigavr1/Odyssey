@@ -93,7 +93,7 @@ void *leader(void *arg)
                                  (void*) ack_buffer);
 
 
-	struct latency_flags latency_info = {
+	latency_info_t latency_info = {
 			.measured_req_flag = NO_REQ,
 			.measured_sess_id = 0,
 	};

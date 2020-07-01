@@ -38,7 +38,7 @@ static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
             my_printf(green, "Client %u pulling req from worker %u for session %u, slot %u\n",
                          t_id, wrkr, s_i, pull_ptr);
           atomic_store_explicit(&interface[wrkr].req_array[s_i][pull_ptr].state, INVALID_REQ, memory_order_relaxed);
-          MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
+          MOD_INCR(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
         }
       }
     }
@@ -62,7 +62,7 @@ static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
           memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, KEY_SIZE);
           atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ,
                                 memory_order_release);
-          MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+          MOD_INCR(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
           trace_ptr++;
           if (trace[trace_ptr].opcode == NOP) trace_ptr = 0;
         }
@@ -536,7 +536,7 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
     uint16_t real_sess_i = sess_offset + s_i;
     if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
     stack_id[s_i] = stack_id_cntr;
-    MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+    MOD_INCR(stack_id_cntr, NUM_OF_RMW_KEYS);
     last_req_id[s_i] = (uint32_t)  async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
                                                     sizeof(struct top), real_sess_i);
     state[s_i] = TR_READ_TOP;
@@ -559,7 +559,7 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
         }
         if (success[s_i]) {
           stack_id[s_i] = stack_id_cntr;
-          MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+          MOD_INCR(stack_id_cntr, NUM_OF_RMW_KEYS);
           last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
                                                           sizeof(struct top), real_sess_i);
           success[s_i] = false;
@@ -588,7 +588,7 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
         break;
       default: assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 
   //printf("Completed %u pushes in %u stacks \n", SESSIONS_PER_MACHINE, SESSIONS_PER_MACHINE);
@@ -619,7 +619,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
     uint16_t real_sess_i = sess_offset + s_i;
     if (ENABLE_ASSERTIONS) assert(real_sess_i < SESSIONS_PER_MACHINE);
     stack_id[s_i] = stack_id_cntr;
-    MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+    MOD_INCR(stack_id_cntr, NUM_OF_RMW_KEYS);
     last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
                                                     sizeof(struct top), real_sess_i);
     for (uint16_t i = 1; i < TREIBER_WRITES_NUM; i++) {
@@ -642,7 +642,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
         }
         if (success[s_i]) {
           stack_id[s_i] = stack_id_cntr;
-          MOD_ADD(stack_id_cntr, NUM_OF_RMW_KEYS);
+          MOD_INCR(stack_id_cntr, NUM_OF_RMW_KEYS);
           last_req_id[s_i] = (uint32_t) async_read_strong(stack_id[s_i], (uint8_t *) &top[s_i],
                                                           sizeof(struct top), real_sess_i);
           for (uint16_t i = 1; i < TREIBER_WRITES_NUM; i++) {
@@ -672,7 +672,7 @@ static inline void treiber_push_multi_session(uint16_t t_id)
         break;
       default: assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 
 }
@@ -735,7 +735,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
 //          }
           blocking_read(top->key_id, (uint8_t *) &first_node[0],
                             sizeof(struct node), real_sess_i);
-          MOD_ADD(dbg_count, M_4);
+          MOD_INCR(dbg_count, M_4);
 //          if (first_node[0].stack_id == (uint16_t) info->stack_id)
 //            my_printf(green, "Repeat: Sess %u Popping stack %u -- Read node %u stack id %u \n",
 //                        info->glob_sess_i,
@@ -764,7 +764,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
 //              my_printf(green, "sess %u/%u, Read key becomes correct %u/%u/%u/%u \n",
 //                           info->glob_sess_i, t_id, first_node[0].next_key_id,
 //                           first_node[0].pushed, first_node[0].stack_id, first_node[0].push_counter);
-            MOD_ADD(dbg_count, M_4);
+            MOD_INCR(dbg_count, M_4);
           }
         }
 
@@ -785,7 +785,7 @@ static inline void treiber_pop_state_machine_dbg(struct tr_sess_info_dbg *info,
         info->done_cas = false;
         if (!TREIBER_NO_CONFLICTS) {
           info->stack_id = *stack_id_cntr;
-          MOD_ADD(*stack_id_cntr,
+          MOD_INCR(*stack_id_cntr,
                   NUMBER_OF_STACKS);// (top->key_id + new_top->push_counter + (uint32_t)(&info->stack_id) +
         }
           //(uint32_t)(c_stats[t_id].treiber_pops * c_stats[t_id].treiber_pushes) ) % NUMBER_OF_STACKS;
@@ -859,7 +859,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
   //my_printf(green, "Session %u state %u, top key_id %u\n", s_i, info->state, top->key_id);
   switch (info->state) {
     case TR_INIT: // INITIAL phase of a push: come here in the first push ever, and after every successful push
-      //MOD_ADD(*stack_id_cntr, NUMBER_OF_STACKS);
+      //MOD_INCR(*stack_id_cntr, NUMBER_OF_STACKS);
       info->done_cas = false;
       assert(!info->success);
       async_read_strong(info->owned_key, (uint8_t *) info->owned_node,
@@ -917,7 +917,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
                          new_node[0].next_key_id, new_top->push_counter - 1, new_top->pop_counter);
             }
 
-            MOD_ADD(dbg_count, M_4);
+            MOD_INCR(dbg_count, M_4);
           }
         }
 
@@ -1027,7 +1027,7 @@ static inline void treiber_push_pull_multi_session_dbg(uint16_t t_id)
         break;
       default: if (ENABLE_ASSERTIONS) assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 
 }
@@ -1096,7 +1096,7 @@ static inline void treiber_pop_state_machine(struct tr_sess_info *info,
         info->success = false;
         if (!TREIBER_NO_CONFLICTS) {
            info->stack_id = *stack_id_cntr;
-           MOD_ADD(*stack_id_cntr, NUMBER_OF_STACKS);
+           MOD_INCR(*stack_id_cntr, NUMBER_OF_STACKS);
         }
         c_stats[t_id].microbench_pops++;
         // Transition to pushing
@@ -1260,7 +1260,7 @@ static inline void treiber_push_pull_multi_session(uint16_t t_id)
         break;
       default: if (ENABLE_ASSERTIONS) assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 
 }
@@ -1609,7 +1609,7 @@ static inline void ms_set_up_tail_and_head(uint16_t t_id)
 
 
     dummy_key += MS_WRITES_NUM; tail_key_id++; head_key_id++;
-    //MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    //MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
   printf("CLient %u initialiazed %u queues \n", t_id, MS_QUEUES_NUM);
   uint8_t init_done_flag = MS_INIT_DONE_FLAG;
@@ -1873,7 +1873,7 @@ static inline void ms_dequeue_state_machine(struct ms_sess_info *info,
         if (CLIENT_ASSERTIONS) assert(c_stats[t_id].microbench_pushes >= c_stats[t_id].microbench_pops);
         if (!MS_NO_CONFLICT) {
           info->queue_id = *queue_id_cntr;
-          MOD_ADD(*queue_id_cntr, MS_QUEUES_NUM);
+          MOD_INCR(*queue_id_cntr, MS_QUEUES_NUM);
         }
         info->enq_or_deq_state = MS_ENQUEUING;
         info->state = MS_INIT;
@@ -1949,7 +1949,7 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
         break;
       default: if (CLIENT_ASSERTIONS) assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 }
 
@@ -2534,7 +2534,7 @@ static inline void hm_delete_state_machine(struct hm_sess_info *info,
         //              info->glob_sess_i, info->owned_key_ptr, info->list_id);
         if (!HM_NO_CONFLICT) {
           info->list_id = *queue_id_cntr;
-          MOD_ADD(*queue_id_cntr, HM_LISTS_NUM);
+          MOD_INCR(*queue_id_cntr, HM_LISTS_NUM);
         }
 
       }
@@ -2617,7 +2617,7 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
         break;
       default: if (CLIENT_ASSERTIONS) assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 }
 
@@ -2797,7 +2797,7 @@ static inline void pc_per_sess_state_machine(struct pc_sess_info *info_,
       default:
         if (CLIENT_ASSERTIONS) assert(false);
     }
-    MOD_ADD(s_i, SESSIONS_PER_CLIENT);
+    MOD_INCR(s_i, SESSIONS_PER_CLIENT);
   }
 
 }

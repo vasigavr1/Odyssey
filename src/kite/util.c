@@ -469,7 +469,7 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
   for(i = 0; i < number_of_recvs; i++) {
         hrd_post_dgram_recv(recv_qp,	(buf + ((*push_ptr) * message_size)),
                             message_size, lkey);
-      MOD_ADD(*push_ptr, max_reqs);
+      MOD_INCR(*push_ptr, max_reqs);
   }
 }
 

@@ -29,7 +29,10 @@ void zk_print_parameters_in_the_start()
 }
 
 void zk_static_assert_compile_parameters()
-{if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
+{
+  static_assert(!ENABLE_CLIENTS, " ");
+
+  if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
   assert(LEADER_MACHINE < MACHINE_NUM);
   assert(LEADER_PENDING_WRITES >= SESSIONS_PER_THREAD);
   assert(sizeof(struct key) == KEY_SIZE);
@@ -203,7 +206,7 @@ void pre_post_recvs(uint32_t* push_ptr, struct ibv_qp *recv_qp, uint32_t lkey, v
   for(i = 0; i < number_of_recvs; i++) {
         hrd_post_dgram_recv(recv_qp,	(buf + *push_ptr * message_size),
                             message_size, lkey);
-      MOD_ADD(*push_ptr, max_reqs);
+      MOD_INCR(*push_ptr, max_reqs);
   }
 }
 

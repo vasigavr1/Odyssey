@@ -143,7 +143,7 @@ void *worker(void *arg)
 	/* ---------------------------------------------------------------------------
 	------------------------------LATENCY AND DEBUG-----------------------------------
 	---------------------------------------------------------------------------*/
-  struct latency_flags latency_info = {
+  latency_info_t latency_info = {
     .measured_req_flag = NO_REQ,
     .measured_sess_id = 0,
   };

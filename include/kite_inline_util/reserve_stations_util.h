@@ -35,7 +35,7 @@ static inline void KVS_isolated_op(int t_id, struct write *write);
 
 // In case of a miss in the KVS clean up the op, sessions and what not
 static inline void clean_up_on_KVS_miss(trace_op_t *op, p_ops_t *p_ops,
-                                        struct latency_flags *latency_info, uint16_t t_id)
+                                        latency_info_t *latency_info, uint16_t t_id)
 {
   if (op->opcode == OP_RELEASE || op->opcode == OP_ACQUIRE) {
     uint16_t session_id = op->session_id;
@@ -236,7 +236,7 @@ static inline uint16_t get_read_size_from_opcode(uint8_t opcode) {
 // Set up a fresh read message to coalesce requests -- Proposes, reads, acquires
 static inline void reset_read_message(p_ops_t *p_ops)
 {
-  MOD_ADD(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
+  MOD_INCR(p_ops->r_fifo->push_ptr, R_FIFO_SIZE);
   uint32_t r_mes_ptr = p_ops->r_fifo->push_ptr;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_ptr];
   r_mes_info_t * info = &p_ops->r_fifo->info[r_mes_ptr];
@@ -301,7 +301,7 @@ static inline void* get_r_ptr(p_ops_t *p_ops, uint8_t opcode,
 static inline void reset_write_message(p_ops_t *p_ops)
 {
 
-  MOD_ADD(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
+  MOD_INCR(p_ops->w_fifo->push_ptr, W_FIFO_SIZE);
   uint32_t w_mes_ptr = p_ops->w_fifo->push_ptr;
   struct w_message *w_mes = (struct w_message *)
     &p_ops->w_fifo->w_message[w_mes_ptr];
@@ -592,7 +592,7 @@ static inline void write_bookkeeping_in_insertion_based_on_source
 static inline void set_up_r_rep_entry(struct r_rep_fifo *r_rep_fifo, uint8_t rem_m_id, uint64_t l_id,
                                       uint8_t read_opcode, bool is_rmw)
 {
-  MOD_ADD(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE);
+  MOD_INCR(r_rep_fifo->push_ptr, R_REP_FIFO_SIZE);
   uint32_t r_rep_mes_ptr = r_rep_fifo->push_ptr;
   struct r_rep_message *r_rep_mes = (struct r_rep_message *) &r_rep_fifo->r_rep_message[r_rep_mes_ptr];
   r_rep_mes->coalesce_num = 0;
@@ -836,7 +836,7 @@ static inline void insert_read(p_ops_t *p_ops, trace_op_t *op,
   p_ops->r_fifo->bcast_size++;
 
   check_read_fifo_metadata(p_ops, r_mes, t_id);
-  MOD_ADD(p_ops->r_push_ptr, PENDING_READS);
+  MOD_INCR(p_ops->r_push_ptr, PENDING_READS);
 
   if (ENABLE_STAT_COUNTING) {
     t_stats[t_id].reads_sent ++;
@@ -934,7 +934,7 @@ static inline void insert_write(p_ops_t *p_ops, trace_op_t *op, const uint8_t so
   p_ops->w_size++;
   p_ops->w_fifo->bcast_size++;
   increase_virt_w_size(p_ops, write, source, t_id);
-  MOD_ADD(p_ops->w_push_ptr, PENDING_WRITES);
+  MOD_INCR(p_ops->w_push_ptr, PENDING_WRITES);
 }
 
 
@@ -955,7 +955,7 @@ static inline void insert_r_rep(p_ops_t *p_ops, uint64_t l_id, uint16_t t_id,
 static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
                                  uint32_t trace_iter, trace_t *trace,
                                  uint16_t op_i, int working_session, uint16_t *writes_num_, uint16_t *reads_num_,
-                                 struct session_dbg *ses_dbg,struct latency_flags *latency_info,
+                                 struct session_dbg *ses_dbg,latency_info_t *latency_info,
                                  uint32_t *sizes_dbg_cntr,
                                  uint16_t t_id)
 {
@@ -1065,7 +1065,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
   if (ENABLE_CLIENTS) {
     signal_in_progress_to_client(op->session_id, op->index_to_req_array, t_id);
     if (ENABLE_ASSERTIONS) assert(interface[t_id].wrkr_pull_ptr[working_session] == op->index_to_req_array);
-    MOD_ADD(interface[t_id].wrkr_pull_ptr[working_session], PER_SESSION_REQ_NUM);
+    MOD_INCR(interface[t_id].wrkr_pull_ptr[working_session], PER_SESSION_REQ_NUM);
   }
   debug_set_version_of_op_to_one(op, opcode, t_id);
   return false;
@@ -1164,7 +1164,7 @@ static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info
       for (uint8_t m_i = 0; m_i < q_info->active_num; m_i++)
         w_meta->expected_ids[m_i] = q_info->active_ids[m_i];
 
-      MOD_ADD(backward_ptr, PENDING_WRITES);
+      MOD_INCR(backward_ptr, PENDING_WRITES);
     }
 
 
@@ -1296,7 +1296,7 @@ static inline void attempt_to_free_partially_acked_write(p_ops_t *p_ops, uint16_
             update_sess_info_partially_acked_write(p_ops, w_pull_ptr, t_id);
         }
         else if (p_ops->w_meta[w_pull_ptr].w_state < SENT_PUT) { break; }
-        MOD_ADD(w_pull_ptr, PENDING_WRITES);
+        MOD_INCR(w_pull_ptr, PENDING_WRITES);
       }
     }
   }
@@ -1584,7 +1584,7 @@ static inline bool handle_single_r_rep(struct r_rep_big *r_rep, uint32_t *r_ptr_
       assert(read_info->rep_num <= REM_MACH_NUM);
     }
   }
-  MOD_ADD(r_ptr, PENDING_READS);
+  MOD_INCR(r_ptr, PENDING_READS);
   r_rep->opcode = INVALID_OPCODE;
   *r_ptr_ = r_ptr;
   return false;

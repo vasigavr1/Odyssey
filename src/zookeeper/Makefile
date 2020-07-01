@@ -1,7 +1,7 @@
 LD      := gcc
 LDFLAGS := -O3 -std=gnu2x -flto -libverbs -lpthread -lnuma -lrdmacm
 CC  = gcc
-CFLAGS   = -O3 -std=gnu2x -Wno-address-of-packed-member -Wno-format-truncation -g  -march=native -DZOOKEEPER \
+CFLAGS   = -O3 -std=gnu2x -Wno-address-of-packed-member -Wno-format-truncation -g -march=native -DZOOKEEPER \
            -I../../include/mica -I../../include/libhrd -I../../include/zookeeper -I../../include/general_util
 APPS    := zookeeper clean-o
 PROF    := -g -fno-omit-frame-pointer

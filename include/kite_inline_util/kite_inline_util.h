@@ -31,7 +31,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
                                              uint32_t trace_iter, trace_t *trace,
                                              trace_op_t *ops,
                                              p_ops_t *p_ops, kv_resp_t *resp,
-                                             struct latency_flags *latency_info,
+                                             latency_info_t *latency_info,
                                              struct session_dbg *ses_dbg, uint16_t *last_session_,
                                              uint32_t *sizes_dbg_cntr)
 {
@@ -66,7 +66,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
     while (!pull_request_from_this_session(p_ops->sess_info[working_session].stalled,
                                            (uint16_t) working_session, t_id)) {
       debug_sessions(ses_dbg, p_ops, (uint32_t) working_session, t_id);
-      MOD_ADD(working_session, SESSIONS_PER_THREAD);
+      MOD_INCR(working_session, SESSIONS_PER_THREAD);
       if (working_session == last_session) {
         passed_over_all_sessions = true;
         // If clients are used the condition does not guarantee that sessions are stalled
@@ -267,7 +267,7 @@ static inline void broadcast_writes(p_ops_t *p_ops,
     // This message has been sent, do not add other writes to it!
     if (p_ops->w_fifo->bcast_size == 0) reset_write_message(p_ops);
     mes_sent++;
-    MOD_ADD(bcast_pull_ptr, W_FIFO_SIZE);
+    MOD_INCR(bcast_pull_ptr, W_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
       post_receives_for_r_reps_for_accepts(r_rep_recv_info, t_id);
       post_quorum_broadasts_and_recvs(ack_recv_info, MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
@@ -330,7 +330,7 @@ static inline void broadcast_reads(p_ops_t *p_ops,
     if (p_ops->r_fifo->bcast_size == 0) reset_read_message(p_ops);
     //reads_sent += coalesce_num;
     mes_sent++;
-    MOD_ADD(bcast_pull_ptr, R_FIFO_SIZE);
+    MOD_INCR(bcast_pull_ptr, R_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
       post_quorum_broadasts_and_recvs(r_rep_recv_info, MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs,
                                       p_ops->q_info, br_i, *r_br_tx, r_send_wr, cb->dgram_qp[R_QP_ID],
@@ -375,7 +375,7 @@ static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
       accept_recvs_to_post++;
     else if (r_rep_mes->opcode != ACCEPT_REPLY_NO_CREDITS)
       read_recvs_to_post++;
-    MOD_ADD(pull_ptr, R_REP_FIFO_SIZE);
+    MOD_INCR(pull_ptr, R_REP_FIFO_SIZE);
     mes_i++;
   }
   if (mes_i > 0) {
@@ -546,7 +546,7 @@ static inline void poll_for_writes(volatile struct w_message_ud_req *incoming_ws
 
     writes_for_kvs = running_writes_for_kvs;
     count_stats_on_receiving_w_mes_reset_w_num(w_mes, w_num, t_id);
-    MOD_ADD(buf_ptr, W_BUF_SLOTS);
+    MOD_INCR(buf_ptr, W_BUF_SLOTS);
     polled_messages++;
   }
   (*pull_ptr) = buf_ptr;
@@ -605,7 +605,7 @@ static inline void poll_for_reads(volatile struct r_message_ud_req *incoming_rs,
       byte_ptr += get_read_size_from_opcode(read->opcode);
     }
     if (ENABLE_ASSERTIONS) r_mes->coalesce_num = 0;
-    MOD_ADD(index, R_BUF_SLOTS);
+    MOD_INCR(index, R_BUF_SLOTS);
     polled_messages++;
     if (ENABLE_ASSERTIONS)
       assert(polled_messages + p_ops->r_rep_fifo->mes_size < R_REP_FIFO_SIZE);
@@ -626,7 +626,7 @@ static inline void apply_acks(p_ops_t *p_ops, uint16_t ack_num, uint32_t ack_ptr
                               uint8_t ack_m_id, uint32_t *outstanding_writes,
                               uint64_t l_id, uint64_t pull_lid,
                               struct quorum_info *q_info,
-                              struct latency_flags *latency_info, uint16_t t_id)
+                              latency_info_t *latency_info, uint16_t t_id)
 {
   for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {
     //printf("Checking my acks \n");
@@ -706,7 +706,7 @@ static inline void apply_acks(p_ops_t *p_ops, uint16_t ack_num, uint32_t ack_ptr
       if (complete_requests_that_wait_all_acks(&w_meta->w_state, ack_ptr, t_id))
         update_sess_info_with_fully_acked_write(p_ops, ack_ptr, t_id);
     }
-    MOD_ADD(ack_ptr, PENDING_WRITES);
+    MOD_INCR(ack_ptr, PENDING_WRITES);
   }
 }
 
@@ -716,7 +716,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
                              uint16_t credits[][MACHINE_NUM],
                              struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
                              struct recv_info *ack_recv_info,
-                             struct latency_flags *latency_info,
+                             latency_info_t *latency_info,
                              uint16_t t_id, uint32_t *dbg_counter,
                              uint32_t *outstanding_writes)
 {
@@ -730,7 +730,7 @@ static inline void poll_acks(struct ack_message_ud_req *incoming_acks, uint32_t 
     uint16_t ack_num = ack->ack_num;
     check_ack_message_count_stats(p_ops, ack, index, ack_num, t_id);
 
-    MOD_ADD(index, ACK_BUF_SLOTS);
+    MOD_INCR(index, ACK_BUF_SLOTS);
     polled_messages++;
     uint64_t l_id = ack->l_id;
     uint64_t pull_lid = p_ops->local_w_id; // l_id at the pull pointer
@@ -799,7 +799,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
       increase_credits_when_polling_r_reps(credits, is_accept, r_rep_mes->m_id, t_id);
 
     polled_messages++;
-    MOD_ADD(index, R_REP_BUF_SLOTS);
+    MOD_INCR(index, R_REP_BUF_SLOTS);
     // If it is a reply to a propose/accept only call a different handler
     if (is_propose || is_accept) {
       handle_rmw_rep_replies(p_ops, r_rep_mes, is_accept, t_id);
@@ -868,7 +868,7 @@ static inline void poll_for_read_replies(volatile struct r_rep_message_ud_req *i
 // Handle the first round of Lin Writes
 // Increment the epoch_id after an acquire that learnt the node has missed messages
 static inline void commit_reads(p_ops_t *p_ops,
-                                struct latency_flags * latency_info, uint16_t t_id)
+                                latency_info_t * latency_info, uint16_t t_id)
 {
   uint32_t pull_ptr = p_ops->r_pull_ptr;
   uint16_t writes_for_cache = 0;
@@ -938,7 +938,7 @@ static inline void commit_reads(p_ops_t *p_ops,
     read_commit_complete_and_empty_read_info(p_ops, read_info, signal_completion,
                                              signal_completion_after_kvs_write,
                                              pull_ptr, t_id);
-    MOD_ADD(pull_ptr, PENDING_READS);
+    MOD_INCR(pull_ptr, PENDING_READS);
   }
   p_ops->r_pull_ptr = pull_ptr;
   if (writes_for_cache > 0)
@@ -949,7 +949,7 @@ static inline void commit_reads(p_ops_t *p_ops,
 
 
 // Remove writes that have seen all acks
-static inline void remove_writes(p_ops_t *p_ops, struct latency_flags *latency_info,
+static inline void remove_writes(p_ops_t *p_ops, latency_info_t *latency_info,
                                  uint16_t t_id)
 {
   while(p_ops->w_meta[p_ops->w_pull_ptr].w_state >= READY_PUT) {
@@ -999,7 +999,7 @@ static inline void remove_writes(p_ops_t *p_ops, struct latency_flags *latency_i
     w_meta->acks_seen = 0;
     p_ops->local_w_id++;
     memset(w_meta->seen_expected, 0, REM_MACH_NUM);
-    MOD_ADD(p_ops->w_pull_ptr, PENDING_WRITES);
+    MOD_INCR(p_ops->w_pull_ptr, PENDING_WRITES);
   } // while loop
 
   attempt_to_free_partially_acked_write(p_ops, t_id);

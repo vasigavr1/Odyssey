@@ -100,4 +100,19 @@ static inline bool trigger_measurement(uint16_t local_client_id)
 }
 
 
+
+// The follower sends a write to the leader and tags it with a session id. When the leaders sends a prepare,
+// it includes that session id and a flr id
+// the follower inspects the flr id, such that it can unblock the session id, if the write originated locally
+// we hijack that connection for the latency, remembering the session that gets stuck on a write
+static inline void change_latency_tag(latency_info_t *latency_info, uint32_t sess_id,
+                                      uint16_t t_id)
+{
+  if (latency_info->measured_req_flag == WRITE_REQ_BEFORE_CACHE &&
+      machine_id == LATENCY_MACHINE && t_id == LATENCY_THREAD &&
+      latency_info->measured_sess_id == sess_id)
+    latency_info-> measured_req_flag = WRITE_REQ;
+}
+
+
 #endif //KITE_LATENCY_UTIL_H

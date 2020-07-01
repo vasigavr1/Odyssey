@@ -83,7 +83,7 @@ typedef enum {FOLLOWER = 1, LEADER} protocol_t;
 // -------ACKS-------------
 #define USE_QUORUM 1
 #define QUORUM_NUM ((MACHINE_NUM / 2) + 1)
-#define LDR_QUORUM_OF_ACKS (USE_QUORUM == 1 ? (QUORUM_NUM - 1): FOLLOWER_MACHINE_NUM) //()
+#define LDR_QUORUM_OF_ACKS FOLLOWER_MACHINE_NUM //(USE_QUORUM == 1 ? (QUORUM_NUM - 1): FOLLOWER_MACHINE_NUM) //()
 
 #define MAX_LIDS_IN_AN_ACK K_64_
 #define ACK_SIZE 12
@@ -248,7 +248,7 @@ typedef enum {FOLLOWER = 1, LEADER} protocol_t;
  *  SEND_COMMITS menas it has been propagated to the
  *  cache and commits should be sent out
  * */
-enum write_state {INVALID, VALID, SENT, READY, SEND_COMMITTS};
+typedef enum write_state {INVALID, VALID, SENT, READY, SEND_COMMITTS} w_state_t;
 
 
 // The format of an ack message
@@ -363,9 +363,10 @@ typedef struct pending_writes {
 	uint32_t prep_pull_ptr; // Where to pull prepares from
 	uint32_t size;
 	uint32_t unordered_ptr;
+  uint64_t highest_g_id_taken;
 	uint8_t *flr_id;
 	uint8_t *acks_seen;
-//  uint8_t *ack_bit_vectors;
+
 	bool *is_local;
 	bool *stalled;
 	bool all_sessions_stalled;

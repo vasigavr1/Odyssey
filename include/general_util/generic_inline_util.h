@@ -421,7 +421,7 @@ static inline void add_to_the_mirrored_buffer(struct fifo *mirror_buf, uint8_t c
     uint32_t push_ptr = mirror_buf[i].push_ptr;
     uint16_t *fifo = (uint16_t *) mirror_buf[i].fifo;
     fifo[push_ptr] = (uint16_t)coalesce_num;
-    MOD_ADD(mirror_buf[i].push_ptr, max_size);
+    MOD_INCR(mirror_buf[i].push_ptr, max_size);
     mirror_buf[i].size++;
     if (ENABLE_ASSERTIONS) assert(mirror_buf[i].size <= max_size);
   }
@@ -443,7 +443,7 @@ static inline uint16_t remove_from_the_mirrored_buffer(struct fifo *mirror_buf_,
     uint32_t pull_ptr = mirror_buf->pull_ptr;
     if (fifo[pull_ptr] <= remove_num) {
       remove_num -= fifo[pull_ptr];
-      MOD_ADD(mirror_buf->pull_ptr, max_size);
+      MOD_INCR(mirror_buf->pull_ptr, max_size);
       if (ENABLE_ASSERTIONS && mirror_buf->size == 0) {
         my_printf(red, "remove_num %u, ,mirror_buf->pull_ptr %u fifo_id %u  \n",
                   remove_num, mirror_buf->pull_ptr, fifo_id);

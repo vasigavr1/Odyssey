@@ -85,7 +85,7 @@ void *follower(void *arg)
   uint32_t credit_debug_cnt = 0, outstanding_writes = 0;
   long trace_iter = 0, sent_ack_tx = 0, credit_tx = 0, w_tx = 0;
 
-  struct latency_flags latency_info = {
+  latency_info_t latency_info = {
     .measured_req_flag = NO_REQ,
     .measured_sess_id = 0,
   };

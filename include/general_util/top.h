@@ -91,7 +91,7 @@ typedef struct key mica_key_t;
 // CORE CONFIGURATION
 #define WORKERS_PER_MACHINE 10
 #define MACHINE_NUM 5
-#define SESSIONS_PER_THREAD 20
+#define SESSIONS_PER_THREAD 22
 #define ENABLE_CLIENTS 0
 #define CLIENTS_PER_MACHINE_ 5
 #define CLIENTS_PER_MACHINE (ENABLE_CLIENTS ? CLIENTS_PER_MACHINE_ : 0)
@@ -160,6 +160,7 @@ typedef struct key mica_key_t;
 --------------------------------------------------*/
 //It may be that ENABLE_ASSERTIONS  must be up for these to work
 #define DEBUG_PREPARES 0 // zookeeper only
+#define DEBUG_COMMITS 0
 #define DEBUG_WRITES 0
 #define DEBUG_ACKS 0
 #define DEBUG_READS 0

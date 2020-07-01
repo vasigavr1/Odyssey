@@ -121,7 +121,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
       uint8_t message_opc = ack->opcode;
       my_printf(cyan, "Wrkr %d, polling on index %u, polled opc %u, 1st ack opcode: %u, l_id %lu, expected l_id %lu\n",
                 t_id, ack_pull_ptr, message_opc, ack->opcode, l_id, p_ops->local_w_id);
-      MOD_ADD(ack_pull_ptr, ACK_BUF_SLOTS);
+      MOD_INCR(ack_pull_ptr, ACK_BUF_SLOTS);
       ack = &ack_buf[ack_pull_ptr].ack;
       l_id = ack->l_id;
       message_opc = ack->opcode;
@@ -151,7 +151,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
       uint8_t message_opc = r_rep_mes->opcode;
       my_printf(cyan, "Wrkr %d, polling on index %u, polled opc %u, 1st r_rep opcode: %u, l_id %lu, expected l_id %lu\n",
                 t_id, r_rep_pull_ptr, message_opc, r_rep_mes->opcode, l_id, p_ops->local_r_id);
-      MOD_ADD(r_rep_pull_ptr, R_REP_BUF_SLOTS);
+      MOD_INCR(r_rep_pull_ptr, R_REP_BUF_SLOTS);
       r_rep_mes = (struct r_rep_message *)&r_rep_buf[r_rep_pull_ptr].r_rep_mes;
       l_id = r_rep_mes->l_id;
       message_opc = r_rep_mes->opcode;

@@ -150,7 +150,7 @@ static inline uint64_t poll(uint16_t session_id)
     check_return_values(pull_clt_op);
     atomic_store_explicit(&pull_clt_op->state, (uint8_t) INVALID_REQ, memory_order_relaxed);
     check_state_with_allowed_flags(2, push_clt_op->state, INVALID_REQ);
-    MOD_ADD(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
+    MOD_INCR(interface[wrkr].clt_pull_ptr[s_i], PER_SESSION_REQ_NUM);
     last_pulled_req[session_id]++; // no races across clients
   }
   return last_pulled_req[session_id];
@@ -222,7 +222,7 @@ static inline int access_blocking(uint32_t key_id, uint8_t *value_to_read,
 
   // Implicit assumption: other client threads are not racing for this slot
   atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
-  MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+  MOD_INCR(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
   last_pushed_req[session_id]++;
 
   // Polling for completion
@@ -281,7 +281,7 @@ static inline int access_async(uint32_t key_id, uint8_t *value_to_read,
   //my_printf(green, "Sess %u Activating poll ptr %u for req %u at state %u \n",
   //             s_i, push_ptr, cl_op->opcode, cl_op->state);
   atomic_store_explicit(&cl_op->state, (uint8_t) ACTIVE_REQ, memory_order_release);
-  MOD_ADD(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
+  MOD_INCR(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);
   last_pushed_req[session_id]++;
   return (int)last_pushed_req[session_id];
 }

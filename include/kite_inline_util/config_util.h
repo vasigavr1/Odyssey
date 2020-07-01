@@ -110,7 +110,7 @@ static inline bool take_ownership_of_a_conf_bit(const uint64_t local_r_id, const
   if (conf_bit_vec[acq_m_id].bit != UP_STABLE) {
     uint32_t ses_i = conf_bit_vec[acq_m_id].sess_num[t_id];
     conf_bit_vec[acq_m_id].owners[t_id][ses_i] = local_r_id;
-    MOD_ADD(conf_bit_vec[acq_m_id].sess_num[t_id], SESSIONS_PER_THREAD);
+    MOD_INCR(conf_bit_vec[acq_m_id].sess_num[t_id], SESSIONS_PER_THREAD);
     owned_a_failure = true;
     conf_bit_vec[acq_m_id].bit = DOWN_TRANSIENT_OWNED;
   }
