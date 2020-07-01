@@ -962,7 +962,8 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
 			else extra_slots++; // forward insert
 		}
 		// Because of out-of-order messages it may be that the next expected message has already been seen and stored
-		while ((p_writes->w_state[p_writes->push_ptr] ==  VALID) &&  (p_writes->size < FLR_PENDING_WRITES)) {
+		while ((p_writes->w_state[p_writes->push_ptr] == VALID) &&
+           (p_writes->size < FLR_PENDING_WRITES)) {
 			if (FLR_DISALLOW_OUT_OF_ORDER_PREPARES) assert(false);
 			MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
 			p_writes->size++;
@@ -1212,6 +1213,8 @@ static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_
     zk_check_polled_commit_and_print(com, p_writes, buf_ptr,
                                      l_id, pull_lid, com_num, t_id);
 
+    assert((l_id - pull_lid) < FLR_PENDING_WRITES);
+    assert(l_id + com_num - pull_lid < FLR_PENDING_WRITES);
     // This must always hold: l_id >= pull_lid,
     // because we need the commit to advance the pull_lid
     uint16_t com_ptr = (uint16_t)
