@@ -201,7 +201,7 @@ static inline void set_conf_bit_after_detecting_failure(const uint16_t m_id, con
 
 // returns the number of failures
 static inline uint8_t create_bit_vec_of_failures(p_ops_t *p_ops, struct w_message *w_mes,
-                                                 w_mes_info_t *info, struct quorum_info *q_info,
+                                                 w_mes_info_t *info, quorum_info_t *q_info,
                                                  uint8_t *bit_vector_to_send, uint16_t t_id)
 {
   if (TURN_OFF_KITE) return 0;
@@ -241,7 +241,7 @@ static inline uint8_t create_bit_vec_of_failures(p_ops_t *p_ops, struct w_messag
 // When forging a write
 static inline bool add_failure_to_release_from_sess_id
   (p_ops_t *p_ops, struct w_message *w_mes,
-   w_mes_info_t *info, struct quorum_info *q_info,
+   w_mes_info_t *info, quorum_info_t *q_info,
    uint32_t backward_ptr, uint16_t t_id)
 {
   if (TURN_OFF_KITE) return false;
@@ -430,8 +430,8 @@ static inline void detect_false_positives_on_read_info_bookkeeping(struct r_rep_
 //---------------------------------------------------------------------------*/
 // Update the quorum info, use this one a timeout
 // On a timeout it goes through all machines
-static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[][MACHINE_NUM],
-                                 uint16_t min_credits, uint8_t vc, uint16_t t_id)
+static inline void update_q_info(quorum_info_t *q_info,  uint16_t *credits,
+                                 uint16_t min_credits, uint16_t t_id)
 {
   uint8_t i, rm_id;
   q_info->missing_num = 0;
@@ -439,7 +439,7 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
   for (i = 0; i < MACHINE_NUM; i++) {
     if (i == machine_id) continue;
     rm_id = mid_to_rmid(i);
-    if (credits[vc][i] < min_credits) {
+    if (credits[i] < min_credits) {
       q_info->missing_ids[q_info->missing_num] = i;
       q_info->missing_num++;
       q_info->send_vector[rm_id] = false;
@@ -469,8 +469,20 @@ static inline void update_q_info(struct quorum_info *q_info,  uint16_t credits[]
   }
 }
 
+
+static inline bool all_q_info_targets_are_reached(quorum_info_t *q_info,
+                                                  uint16_t miss_i)
+{
+  for (int tar_i = 0; tar_i < q_info->num_of_credit_targets; ++tar_i) {
+      if (q_info->credit_ptrs[tar_i][q_info->missing_ids[miss_i]] != q_info->targets[tar_i])
+        return false;
+  }
+  return true;
+}
+
+
 // Bring back a machine
-static inline void revive_machine(struct quorum_info *q_info,
+static inline void revive_machine(quorum_info_t *q_info,
                                   uint8_t revived_mach_id)
 {
 
@@ -506,7 +518,7 @@ static inline void revive_machine(struct quorum_info *q_info,
 }
 
 // Update the links between the send Work Requests for broadcasts given the quorum information
-static inline void update_bcast_wr_links(struct quorum_info *q_info, struct ibv_send_wr *wr, uint16_t t_id)
+static inline void update_bcast_wr_links(quorum_info_t *q_info, struct ibv_send_wr *wr, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
   uint8_t prev_i = 0, avail_mach = 0;

@@ -78,7 +78,7 @@ static inline void check_sess_info_after_completing_release
 // so that we know this amchine has not acked the write
 static inline void update_sess_info_missing_ids_when_sending
   (p_ops_t *p_ops, w_mes_info_t *info,
-   struct quorum_info *q_info, uint8_t w_i, uint16_t t_id)
+   quorum_info_t *q_info, uint8_t w_i, uint16_t t_id)
 {
   if (q_info->missing_num == 0 ) return;
   sess_info_t *sess_info = &p_ops->sess_info[info->per_message_sess_id[w_i]];
@@ -180,7 +180,7 @@ static inline void update_sess_info_partially_acked_write(p_ops_t *p_ops,
 
 
 static inline void reset_sess_info_on_release(sess_info_t *sess_info,
-                                              struct quorum_info *q_info, uint16_t t_id)
+                                              quorum_info_t *q_info, uint16_t t_id)
 {
   if (TURN_OFF_KITE) return;
   sess_info->missing_num = q_info->missing_num;
@@ -1081,7 +1081,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
 static inline void set_w_state_for_each_write(p_ops_t *p_ops, w_mes_info_t *info,
                                               struct w_message *w_mes, uint32_t backward_ptr,
                                               uint8_t coalesce_num, struct ibv_sge *send_sgl,
-                                              uint16_t br_i, struct quorum_info *q_info, uint16_t t_id)
+                                              uint16_t br_i, quorum_info_t *q_info, uint16_t t_id)
 {
   uint16_t byte_ptr = W_MES_HEADER;
   bool failure = false;

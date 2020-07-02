@@ -92,7 +92,7 @@ static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *sen
 
 // Post a quorum broadcast and post the appropriate receives for it
 static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, uint32_t recvs_to_post_num,
-                                                   struct quorum_info *q_info, uint16_t br_i, uint64_t br_tx,
+                                                   quorum_info_t *q_info, uint16_t br_i, uint64_t br_tx,
                                                    struct ibv_send_wr *send_wr, struct ibv_qp *send_qp,
                                                    int enable_inlining)
 {

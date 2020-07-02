@@ -308,7 +308,7 @@ typedef struct pending_ops {
   per_write_meta_t *w_meta;
   uint32_t full_w_q_fifo;
   bool all_sessions_stalled;
-  struct quorum_info *q_info;
+  quorum_info_t *q_info;
 } p_ops_t;
 
 // A helper to debug sessions by remembering which write holds a given session

@@ -449,7 +449,8 @@ static void setup_connections_and_spawn_stats_thread(uint32_t g_id,
 
   if (t_id == 0) atomic_store_explicit(&qps_are_set_up, true, memory_order_release);
   else {
-    while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));  usleep(200000);
+    while (!atomic_load_explicit(&qps_are_set_up, memory_order_acquire));
+    usleep(200000);
   }
 }
 

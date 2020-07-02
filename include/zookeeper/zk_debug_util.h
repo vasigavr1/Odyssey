@@ -110,8 +110,8 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
                                          uint32_t *wait_for_gid_dbg_counter, volatile zk_prep_mes_ud_t *prep_buf,
                                          uint32_t pull_ptr, p_writes_t *p_writes, uint16_t t_id)
 {
-
-  if (unlikely((*wait_for_preps_dbg_counter) > M_16)) {
+  uint32_t waiting_time = M_16;
+  if (unlikely((*wait_for_preps_dbg_counter) > waiting_time)) {
     my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
     zk_prepare_t *prep = (zk_prepare_t *)&prep_buf[pull_ptr].prepare.prepare;
     uint32_t l_id = prep_buf[pull_ptr].prepare.l_id;
@@ -138,17 +138,17 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
     (*wait_for_preps_dbg_counter) = 0;
 //    exit(0);
   }
-  if (unlikely((*wait_for_gid_dbg_counter) > M_16)) {
+  if (unlikely((*wait_for_gid_dbg_counter) > waiting_time)) {
     zk_print_error_message("waits for the g_id", FOLLOWER, p_writes, t_id);
     print_flr_stats(t_id);
     (*wait_for_gid_dbg_counter) = 0;
   }
-  if (unlikely((*wait_for_coms_dbg_counter) > M_16)) {
+  if (unlikely((*wait_for_coms_dbg_counter) > waiting_time)) {
     zk_print_error_message("waits for coms", FOLLOWER, p_writes, t_id);
     print_flr_stats(t_id);
     (*wait_for_coms_dbg_counter) = 0;
   }
-  if (unlikely((*credit_debug_cnt) > M_16)) {
+  if (unlikely((*credit_debug_cnt) > waiting_time)) {
     zk_print_error_message("acks write credits", FOLLOWER, p_writes, t_id);
     print_flr_stats(t_id);
     (*credit_debug_cnt) = 0;
@@ -268,6 +268,16 @@ static inline void zk_checks_after_polling_commits(uint32_t *dbg_counter,
 //------------------------------ POLLNG PREPARES -----------------------------
 //---------------------------------------------------------------------------*/
 
+
+static inline void zk_increment_wait_for_preps_cntr(p_writes_t *p_writes,
+                                                    p_acks_t *p_acks,
+                                                    uint32_t *wait_for_prepares_dbg_counter)
+{
+  if (ENABLE_ASSERTIONS && p_acks->acks_to_send == 0 && p_writes->size == 0)
+    (*wait_for_prepares_dbg_counter)++;
+}
+
+
 static inline void zk_check_polled_prep_and_print(zk_prep_mes_t* prep_mes,
                                                   p_writes_t *p_writes,
                                                   uint8_t coalesce_num,
@@ -320,6 +330,47 @@ zk_check_prepare_and_print(zk_prepare_t *prepare,
     my_printf(green, "Flr %u, prep_i %u new write at ptr %u with g_id %lu and flr id %u, value_len %u \n",
               t_id, prep_i, push_ptr, prepare->g_id, prepare->flr_id, prepare[prep_i].val_len);
 }
+
+
+static inline void zk_checks_after_polling_prepares(p_writes_t *p_writes,
+                                                    uint32_t *wait_for_prepares_dbg_counter,
+                                                    uint32_t polled_messages,
+                                                    struct recv_info *prep_recv_info,
+                                                    p_acks_t *p_acks, uint16_t t_id)
+{
+
+
+  if (polled_messages > 0) {
+    if (ENABLE_ASSERTIONS) (*wait_for_prepares_dbg_counter) = 0;
+  }
+  if (ENABLE_STAT_COUNTING && p_acks->acks_to_send == 0 && p_writes->size == 0) t_stats[t_id].stalled_ack_prep++;
+  if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs >= polled_messages);
+  if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs <= FLR_MAX_RECV_PREP_WRS);
+}
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------ BROADCASTS -----------------------------
+//---------------------------------------------------------------------------*/
+
+static inline void zk_checks_and_stats_on_bcasting_prepares(p_writes_t *p_writes,
+                                                            uint8_t coalesce_num,
+                                                            uint32_t *outstanding_prepares,
+                                                            uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(p_writes->prep_fifo->bcast_size >= coalesce_num);
+    (*outstanding_prepares) +=
+      coalesce_num;
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].preps_sent +=
+      coalesce_num;
+    t_stats[t_id].preps_sent_mes_num++;
+  }
+}
+
+
 
 
 #endif //KITE_ZK_DEBUG_UTIL_H

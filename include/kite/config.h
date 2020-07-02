@@ -35,7 +35,7 @@
 
 #define ENABLE_COMMITS_WITH_NO_VAL 1
 #define ENABLE_CAS_CANCELLING 1
-#define PUT_A_MACHINE_TO_SLEEP 0
+#define PUT_A_MACHINE_TO_SLEEP 1
 #define MACHINE_THAT_SLEEPS 1
 #define ENABLE_ALL_ABOARD 0
 #define EMULATE_ABD 0
@@ -56,6 +56,11 @@
 #define PRINT_LOGS 0
 #define COMMIT_LOGS 0
 #define DUMP_STATS_2_FILE 0
+
+//q_info config
+#define Q_INFO_NUM_SEND_WRS 2
+#define Q_INFO_CREDIT_TARGETS 2
+
 
 
 

@@ -47,8 +47,6 @@ void *worker(void *arg)
   pre_post_recvs(&r_buf_push_ptr, cb->dgram_qp[R_QP_ID], cb->dgram_buf_mr->lkey, (void *)r_buffer,
                  R_BUF_SLOTS, MAX_RECV_R_WRS, R_QP_ID, R_RECV_SIZE);
 
-  // Initialize the RMW struct, before anyone tries to touch it
-  if (t_id == 0) set_up_rmw_struct();
 	/* -----------------------------------------------------
 	--------------CONNECT WITH ALL MACHINES-----------------------
 	---------------------------------------------------------*/
@@ -118,7 +116,7 @@ void *worker(void *arg)
   }
   p_ops_t *p_ops;
   struct ibv_mr *r_mr, *w_mr, *r_rep_mr;
-  p_ops = set_up_pending_ops(PENDING_WRITES, PENDING_READS, t_id);
+  p_ops = set_up_pending_ops(PENDING_WRITES, PENDING_READS, w_send_wr, r_send_wr, credits, t_id);
   void *r_fifo_buf = p_ops->r_fifo->r_message;
   void *w_fifo_buf = p_ops->w_fifo->w_message;
   void *r_rep_fifo_buf = (void *)p_ops->r_rep_fifo->r_rep_message;

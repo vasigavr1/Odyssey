@@ -242,7 +242,7 @@ static inline void broadcast_writes(p_ops_t *p_ops,
   if (release_not_ready(p_ops, &p_ops->w_fifo->info[bcast_pull_ptr], (struct w_message *)
     &p_ops->w_fifo->w_message[bcast_pull_ptr], release_rdy_dbg_cnt, t_id))
     return;
-  if (!check_bcast_credits(credits, p_ops->q_info, time_out_cnt, vc,
+  if (!check_bcast_credits(credits[vc], p_ops->q_info, &time_out_cnt[vc],
                            &available_credits, r_send_wr, w_send_wr,
                            1, t_id))
     return;
@@ -300,14 +300,12 @@ static inline void broadcast_reads(p_ops_t *p_ops,
                                    uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
                                    uint16_t t_id, uint32_t *outstanding_reads)
 {
-  //  printf("Worker %d bcasting reads \n", g_id);
   uint8_t vc = R_VC;
-  //uint16_t reads_sent = 0,
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
 
   if (p_ops->r_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits, p_ops->q_info, time_out_cnt, vc,
+    if (!check_bcast_credits(credits[vc], p_ops->q_info, &time_out_cnt[vc],
                              &available_credits, r_send_wr, w_send_wr, 1,  t_id))
       return;
   }
@@ -328,7 +326,6 @@ static inline void broadcast_reads(p_ops_t *p_ops,
     }
     p_ops->r_fifo->bcast_size -= coalesce_num;
     if (p_ops->r_fifo->bcast_size == 0) reset_read_message(p_ops);
-    //reads_sent += coalesce_num;
     mes_sent++;
     MOD_INCR(bcast_pull_ptr, R_FIFO_SIZE);
     if (br_i == MAX_BCAST_BATCH) {
@@ -625,7 +622,7 @@ static inline void poll_for_reads(volatile r_mes_ud_t *incoming_rs,
 static inline void apply_acks(p_ops_t *p_ops, uint16_t ack_num, uint32_t ack_ptr,
                               uint8_t ack_m_id, uint32_t *outstanding_writes,
                               uint64_t l_id, uint64_t pull_lid,
-                              struct quorum_info *q_info,
+                              quorum_info_t *q_info,
                               latency_info_t *latency_info, uint16_t t_id)
 {
   for (uint16_t ack_i = 0; ack_i < ack_num; ack_i++) {

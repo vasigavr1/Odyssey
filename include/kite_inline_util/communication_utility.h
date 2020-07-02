@@ -14,7 +14,7 @@
 
 
 
-static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
+static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], quorum_info_t *q_info,
                                     uint16_t mes_sent, uint8_t vc)
 {
   for (uint8_t i = 0; i < q_info->active_num; i++) {
@@ -29,49 +29,54 @@ static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], struct quor
 
 // Check credits, first see if there are credits from all active nodes, then if not and enough time has passed,
 // transition to write_quorum broadcasts
-static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct quorum_info *q_info,
-                                       uint32_t *time_out_cnt, uint8_t vc,
+static inline bool check_bcast_credits(uint16_t *credits,
+                                       quorum_info_t *q_info,
+                                       uint32_t *time_out_cnt,
                                        uint16_t *available_credits,
-                                       struct ibv_send_wr *r_send_wr, struct ibv_send_wr *w_send_wr,
+                                       struct ibv_send_wr *r_send_wr,
+                                       struct ibv_send_wr *w_send_wr,
                                        uint16_t min_credits, uint16_t t_id)
 {
   uint16_t i;
   // First check the active ids, to have a fast path when there are not enough credits
   for (i = 0; i < q_info->active_num; i++) {
-    if (credits[vc][q_info->active_ids[i]] < min_credits) {
-      time_out_cnt[vc]++;
+    if (credits[q_info->active_ids[i]] < min_credits) {
+      (*time_out_cnt)++;
       //if (DEBUG_BIT_VECS && t_id >= 0 && time_out_cnt[vc] % M_1 == 0)
       //my_printf(red, "WKR %u: the timeout cnt is %u for vc %u machine %u, credits %u\n",
       //          t_id, time_out_cnt[vc], vc, q_info->active_ids[i], credits[vc][q_info->active_ids[i]]);
-      if (time_out_cnt[vc] == CREDIT_TIMEOUT) {
+      if (*time_out_cnt == CREDIT_TIMEOUT) {
         if (DEBUG_QUORUM)
-          my_printf(red, "Worker %u timed_out on machine %u  for vc % u, writes  done %lu \n",
-                    t_id, q_info->active_ids[i], vc, t_stats[t_id].writes_sent);
+          my_printf(red, "Worker %u timed_out on machine %u , writes  done %lu \n",
+                    t_id, q_info->active_ids[i], t_stats[t_id].writes_sent);
         // assert(false);
-        update_q_info(q_info, credits, min_credits, vc, t_id);
-        update_bcast_wr_links(q_info, r_send_wr, t_id);
-        update_bcast_wr_links(q_info, w_send_wr, t_id);
-        time_out_cnt[vc] = 0;
+        update_q_info(q_info, credits, min_credits, t_id);
+        for (int wr_i = 0; wr_i < q_info->num_of_send_wrs; ++wr_i) {
+          update_bcast_wr_links(q_info, q_info->send_wrs_ptrs[wr_i], t_id);
+        }
+
+        (*time_out_cnt) = 0;
       }
       return false;
     }
   }
 
-  time_out_cnt[vc] = 0;
+  (*time_out_cnt) = 0;
 
   // then check the missing credits to see if we need to change the configuration
   if (q_info->missing_num > 0) {
     for (i = 0; i < q_info->missing_num; i++) {
-      if (credits[W_VC][q_info->missing_ids[i]] == W_CREDITS &&
-          credits[R_VC][q_info->missing_ids[i]] == R_CREDITS ) {
+      if (all_q_info_targets_are_reached(q_info, i)) {
         if (DEBUG_QUORUM)
           my_printf(red, "Worker %u revives machine %u \n", t_id, q_info->missing_ids[i]);
         revive_machine(q_info, q_info->missing_ids[i]);
         // printf("Wrkr %u, after reviving, active num %u, active_id %u, %u, %u, %u \n",
         //t_id, q_info->active_num, q_info->active_ids[0], q_info->active_ids[1],
         //       q_info->active_ids[2],q_info->active_ids[3]);
-        update_bcast_wr_links(q_info, r_send_wr, t_id);
-        update_bcast_wr_links(q_info, w_send_wr, t_id);
+
+        for (int wr_i = 0; wr_i < q_info->num_of_send_wrs; ++wr_i) {
+          update_bcast_wr_links(q_info, q_info->send_wrs_ptrs[wr_i], t_id);
+        }
       }
     }
   }
@@ -82,8 +87,8 @@ static inline bool check_bcast_credits(uint16_t credits[][MACHINE_NUM], struct q
   for (i = 0; i < q_info->active_num; i++) {
     if (ENABLE_ASSERTIONS) assert(q_info->active_ids[i] < MACHINE_NUM &&
                                   q_info->active_ids[i] != machine_id);
-    if (credits[vc][q_info->active_ids[i]] < avail_cred)
-      avail_cred = credits[vc][q_info->active_ids[i]];
+    if (credits[q_info->active_ids[i]] < avail_cred)
+      avail_cred = credits[q_info->active_ids[i]];
   }
   *available_credits = avail_cred;
   return true;
@@ -165,7 +170,7 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops
 
 // Form the Broadcast work request for the red
 static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
-                              struct quorum_info *q_info,
+                              quorum_info_t *q_info,
                               struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
                               struct ibv_send_wr *send_wr, uint64_t *r_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],

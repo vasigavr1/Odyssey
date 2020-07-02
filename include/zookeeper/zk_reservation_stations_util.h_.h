@@ -169,7 +169,21 @@ static inline void bookkeep_after_finding_expected_gid(p_writes_t *p_writes,
 
 
 
+/* ---------------------------------------------------------------------------
+//------------------------------ BROADCASTS -----------------------------
+//---------------------------------------------------------------------------*/
 
+static inline void zk_reset_prep_message(p_writes_t *p_writes,
+                                         uint8_t coalesce_num,
+                                         uint16_t t_id)
+{
+  // This message has been sent do not add other prepares to it!
+  if (coalesce_num < MAX_PREP_COALESCE) {
+//      my_printf(yellow, "Broadcasting prep with coalesce num %u \n", coalesce_num);
+    MOD_INCR(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
+    p_writes->prep_fifo->prep_message[p_writes->prep_fifo->push_ptr].coalesce_num = 0;
+  }
+}
 
 
 

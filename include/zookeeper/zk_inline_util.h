@@ -191,7 +191,6 @@ static inline uint32_t zk_batch_from_trace_to_KVS(uint32_t trace_iter, uint16_t 
   else if (ENABLE_ASSERTIONS) assert(working_session != -1);
 
   bool passed_over_all_sessions = false;
-  //  my_printf(green, "op_i %d , trace_iter %d, trace[trace_iter].opcode %d \n", op_i, trace_iter, trace[trace_iter].opcode);
   /// main loop
   while (op_i < ZK_TRACE_BATCH && !passed_over_all_sessions) {
 
@@ -208,7 +207,6 @@ static inline uint32_t zk_batch_from_trace_to_KVS(uint32_t trace_iter, uint16_t 
         break;
       }
     }
-    // printf("thread %d t_id next working session %d\n total ops %d\n", t_id, working_session, op_i);
     resp[op_i].type = EMPTY;
     trace_iter++;
     if (trace[trace_iter].opcode == NOP) trace_iter = 0;
@@ -237,8 +235,8 @@ static inline void zk_get_g_ids(p_writes_t *p_writes, uint16_t t_id)
   }
 
 	for (uint16_t i = 0; i < unordered_writes_num; ++i) {
-    //uint16_t unordered_ptr = (uint16_t) ((LEADER_PENDING_WRITES + p_writes->push_ptr - unordered_writes_num + i)
-    //                         % LEADER_PENDING_WRITES);
+    assert(p_writes->unordered_ptr == ((LEADER_PENDING_WRITES + p_writes->push_ptr - unordered_writes_num + i)
+                                      % LEADER_PENDING_WRITES));
     uint32_t unordered_ptr = p_writes->unordered_ptr;
 		p_writes->g_id[unordered_ptr] = id + i;
 		zk_prepare_t *prep = p_writes->ptrs_to_ops[unordered_ptr];
@@ -246,13 +244,8 @@ static inline void zk_get_g_ids(p_writes_t *p_writes, uint16_t t_id)
     MOD_INCR(p_writes->unordered_ptr, LEADER_PENDING_WRITES);
 	}
   p_writes->highest_g_id_taken = id + unordered_writes_num - 1;
-	if (id > B_4) {
-    if (MEASURE_LATENCY && machine_id == LATENCY_MACHINE) print_latency_stats();
-    assert(false);
-  }
-//  if (unordered_writes_num > 0)
-//    printf("Thread %d got id %lu to id %lu for its write for %u writes \n",
-//           t_id,  id, id + unordered_writes_num - 1,  unordered_writes_num);
+
+
 	if (ENABLE_ASSERTIONS)
     assert(p_writes->unordered_ptr == p_writes->push_ptr);
 
@@ -538,9 +531,9 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
 }
 
 //Checks if there are enough credits to perform a broadcast
-static inline bool check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], hrd_ctrl_blk_t* cb,
-                                       struct ibv_wc* credit_wc,
-                                       uint32_t* credit_debug_cnt, uint8_t vc)
+static inline bool zk_check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], hrd_ctrl_blk_t* cb,
+                                         struct ibv_wc* credit_wc,
+                                         uint32_t* credit_debug_cnt, uint8_t vc)
 {
   bool poll_for_credits = false;
   uint16_t j;
@@ -650,7 +643,7 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
   uint16_t  br_i = 0, credit_recv_counter = 0;
   while (com_fifo->size > 0) {
     // Check if there are enough credits for a Broadcast
-    if (!check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc)) {
+    if (!zk_check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc)) {
       if (ENABLE_STAT_COUNTING) t_stats[t_id].stalled_com_credit++;
       break;
     }
@@ -744,7 +737,7 @@ static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
 	(*prep_br_tx)++;
 	if ((*prep_br_tx) % PREP_BCAST_SS_BATCH == PREP_BCAST_SS_BATCH - 1) {
 //    printf("Leader %u POLLING for a send completion in prepares \n", t_id);
-		poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc, "sneding prepares");
+		poll_cq(cb->dgram_send_cq[PREP_ACK_QP_ID], 1, &signal_send_wc, "sending prepares");
 	}
 	// Have the last message of each broadcast pointing to the first message of the next bcast
 	if (br_i > 0)
@@ -763,13 +756,13 @@ static inline void broadcast_prepares(p_writes_t *p_writes,
 {
 //  printf("Ldr %d bcasting prepares \n", t_id);
 	uint8_t vc = PREP_VC;
-	uint16_t br_i = 0, j, credit_recv_counter = 0;
+	uint16_t br_i = 0, credit_recv_counter = 0;
 	uint32_t bcast_pull_ptr = p_writes->prep_fifo->bcast_pull_ptr;
 //	uint32_t posted_recvs = ack_recv_info->posted_recvs;
 
 	while (p_writes->prep_fifo->bcast_size > 0) {
 
-		if (!check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc))
+		if (!zk_check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc))
 			break;
     if (DEBUG_PREPARES)
       printf("LDR %d has %u bcasts to send credits %d\n",t_id, p_writes->prep_fifo->bcast_size, credits[PREP_VC][0]);
@@ -780,22 +773,11 @@ static inline void broadcast_prepares(p_writes_t *p_writes,
     uint8_t coalesce_num = p_writes->prep_fifo->prep_message[bcast_pull_ptr].coalesce_num;
     add_to_the_mirrored_buffer(remote_prep_buf, coalesce_num, FOLLOWER_MACHINE_NUM, FLR_PREP_BUF_SLOTS);
     for (uint16_t i = 0; i < FOLLOWER_MACHINE_NUM; i++) credits[PREP_VC][i]--;
-    if (ENABLE_ASSERTIONS) {
-      assert( p_writes->prep_fifo->bcast_size >= coalesce_num);
-      (*outstanding_prepares) += coalesce_num;
-    }
-    if (ENABLE_STAT_COUNTING) {
-      t_stats[t_id].preps_sent += coalesce_num;
-      t_stats[t_id].preps_sent_mes_num++;
-    }
-    // This message has been sent do not add other prepares to it!
-    if (coalesce_num < MAX_PREP_COALESCE) {
-//      my_printf(yellow, "Broadcasting prep with coalesce num %u \n", coalesce_num);
-      MOD_INCR(p_writes->prep_fifo->push_ptr, PREP_FIFO_SIZE);
-      p_writes->prep_fifo->prep_message[p_writes->prep_fifo->push_ptr].coalesce_num = 0;
-    }
+
+    zk_checks_and_stats_on_bcasting_prepares(p_writes, coalesce_num, outstanding_prepares, t_id);
+    zk_reset_prep_message(p_writes, coalesce_num,t_id);
+
     p_writes->prep_fifo->bcast_size -= coalesce_num;
-//    preps_sent += coalesce_num;
     MOD_INCR(bcast_pull_ptr, PREP_FIFO_SIZE);
 		if (br_i == MAX_BCAST_BATCH) {
       uint32_t recvs_to_post_num = LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs;
@@ -825,66 +807,16 @@ static inline void broadcast_prepares(p_writes_t *p_writes,
 //------------------------------ FOLLOWER MAIN LOOP -----------------------------
 //---------------------------------------------------------------------------*/
 
-// Spin until you make sure the entire message is there
-// (Experience shows that if this hits, the message has come and has been falsely deleted)
-static inline bool wait_for_the_entire_prepare(volatile zk_prep_mes_t *prep_mes,
-                                               uint16_t t_id, uint32_t index, p_writes_t *p_writes)
-{
-  uint8_t coalesce_num = prep_mes->coalesce_num;
-  uint32_t debug_cntr = 0;
-  while (prep_mes->coalesce_num == 0) {
-    if (ENABLE_ASSERTIONS) {
-      debug_cntr++;
-      if (debug_cntr == B_4_) {
-        my_printf(red, "Flr %d stuck waiting for a prep coalesce num to not be zero, index %u, coalesce %u\n",
-                   t_id, index, prep_mes->coalesce_num);
-        print_flr_stats(t_id);
-        debug_cntr = 0;
-        return false;
-      }
-    }
-  }
-  while (prep_mes->prepare[prep_mes->coalesce_num - 1].opcode != KVS_OP_PUT) {
-    if (ENABLE_ASSERTIONS) {
-      debug_cntr++;
-      if (debug_cntr == B_4_) {
-        my_printf(red, "Flr %d stuck waiting for a prepare to come index %u prep id %u l_id %u\n",
-                   t_id, index, coalesce_num - 1, prep_mes->l_id);
-        for (uint16_t i = 0; i < coalesce_num; i++) {
-          uint32_t session_id;
-          session_id = prep_mes->prepare[i].sess_id;
-          my_printf(green, "Prepare %u, flr_id %u, session id %u opcode %u, val_len %u,  \n",
-          i, prep_mes->prepare[i].flr_id, session_id,
-                       prep_mes->prepare[i].opcode, prep_mes->prepare[i].val_len);
-        }
-        for (uint16_t i = 0; i < p_writes->size; i++) {
-          uint16_t ptr = (uint16_t) ((p_writes->pull_ptr + i) % FLR_PENDING_WRITES);
-          if (p_writes->ptrs_to_ops[ptr] == prep_mes->prepare) {
-            my_printf(red, "write %ptr already points to that op \n");
-          }
-        }
-        print_flr_stats(t_id);
-        //exit(0);
-        debug_cntr = 0;
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-
 // Poll for prepare messages
 static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_preps, uint32_t *pull_ptr,
                                          p_writes_t *p_writes, struct pending_acks *p_acks,
                                          struct ibv_cq *prep_recv_cq, struct ibv_wc *prep_recv_wc,
                                          struct recv_info *prep_recv_info, struct fifo *prep_buf_mirror,
                                          uint32_t *completed_but_not_polled_preps,
-                                         uint16_t t_id, uint8_t flr_id, uint32_t *dbg_counter)
+                                         uint16_t t_id, uint8_t flr_id, uint32_t *wait_for_prepares_dbg_counter)
 {
 	uint16_t polled_messages = 0;
 	if (prep_buf_mirror->size == MAX_PREP_BUF_SLOTS_TO_BE_POLLED) {
-    //printf("this is stopping me \n");
     return;
   }
 	uint32_t buf_ptr = *pull_ptr;
@@ -892,7 +824,10 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
     find_how_many_messages_can_be_polled(prep_recv_cq, prep_recv_wc,
                                          completed_but_not_polled_preps,
                                          FLR_PREP_BUF_SLOTS, t_id);
-  if (completed_messages <= 0) return;
+  if (completed_messages <= 0) {
+    zk_increment_wait_for_preps_cntr(p_writes, p_acks, wait_for_prepares_dbg_counter);
+    return;
+  }
   while (polled_messages < completed_messages) {
     zk_prep_mes_t *prep_mes = (zk_prep_mes_t *) &incoming_preps[buf_ptr].prepare;
     uint8_t coalesce_num = prep_mes->coalesce_num;
@@ -906,29 +841,23 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
 
 		p_acks->acks_to_send+= coalesce_num; // lids are in order so ack them
     add_to_the_mirrored_buffer(prep_buf_mirror, coalesce_num, 1, FLR_PREP_BUF_SLOTS);
-
+    ///Loop throug prepares inside the message
 		for (uint8_t prep_i = 0; prep_i < coalesce_num; prep_i++) {
       zk_check_prepare_and_print(&prepare[prep_i], p_writes, prep_i, t_id);
       fill_p_writes_entry(p_writes, &prepare[prep_i], flr_id, t_id);
   		MOD_INCR(p_writes->push_ptr, FLR_PENDING_WRITES);
 			p_writes->size++;
-		}
+		} ///
+
 		if (ENABLE_ASSERTIONS) prep_mes->opcode = 0;
 		MOD_INCR(buf_ptr, FLR_PREP_BUF_SLOTS);
 		polled_messages++;
 	}
   (*completed_but_not_polled_preps) = (uint32_t) (completed_messages - polled_messages);
   *pull_ptr = buf_ptr;
-	if (polled_messages > 0) {
-    if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
-  }
-  else if (ENABLE_ASSERTIONS && p_acks->acks_to_send == 0 && p_writes->size == 0) (*dbg_counter)++;
-  if (ENABLE_STAT_COUNTING && p_acks->acks_to_send == 0 && p_writes->size == 0) t_stats[t_id].stalled_ack_prep++;
-	if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs >= polled_messages);
-  if (ENABLE_ASSERTIONS) assert(prep_recv_info->posted_recvs <= FLR_MAX_RECV_PREP_WRS);
 	prep_recv_info->posted_recvs -= polled_messages;
-
-
+  zk_checks_after_polling_prepares(p_writes, wait_for_prepares_dbg_counter, polled_messages,
+                                   prep_recv_info, p_acks,  t_id);
 }
 
 

@@ -393,17 +393,28 @@ typedef struct recv_info {
   void* buf;
 } recv_info_t;
 
-struct quorum_info {
+typedef struct quorum_info {
   uint8_t missing_num;
   uint8_t missing_ids[REM_MACH_NUM];
   uint8_t active_num;
   uint8_t active_ids[REM_MACH_NUM];
   bool send_vector[REM_MACH_NUM];
+
   // These are not a machine_ids, they ranges= from 0 to REM_MACH_NUM -1
   // to facilitate usage with the ib_send_wrs
   uint8_t first_active_rm_id;
   uint8_t last_active_rm_id;
-};
+
+  // The number of send_wrs we are reconfiguring
+  uint8_t num_of_send_wrs;
+  struct ibv_send_wr **send_wrs_ptrs;
+
+  //Create the revive condition: which credits must reach what target
+  uint8_t num_of_credit_targets;
+  uint16_t **credit_ptrs;
+  uint16_t *targets;
+
+} quorum_info_t;
 
 //////////////////////////////////////////////////////
 /////////////~~~~CLIENT STRUCTS~~~~~~/////////////////////////

@@ -58,12 +58,13 @@ void print_latency_stats(void);
 
 //Set up the depths of all QPs
 void set_up_queue_depths(int**, int**);
-// Initialize the rmw struct
-void set_up_rmw_struct();
 // Initialize the struct that holds all pending ops
-p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uint16_t t_id);
-// Initialize the quorum info that contains the system configuration
-void set_up_q_info(struct quorum_info **q_info);
+p_ops_t* set_up_pending_ops(uint32_t pending_writes,
+														uint32_t pending_reads,
+														struct ibv_send_wr *w_send_wr,
+														struct ibv_send_wr *r_send_wr,
+                            uint16_t credits[][MACHINE_NUM],
+														uint16_t t_id);
 // Set up the memory registrations in case inlining is disabled
 // Set up the memory registrations required
 void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t buffer_size,

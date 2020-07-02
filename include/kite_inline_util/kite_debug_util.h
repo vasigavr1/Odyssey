@@ -495,7 +495,7 @@ static inline void print_all_stalled_sessions(p_ops_t *p_ops, uint16_t t_id)
 
 
 // Prints out information about the participants
-static inline void print_q_info(struct quorum_info *q_info)
+static inline void print_q_info(quorum_info_t *q_info)
 {
   my_printf(yellow, "-----QUORUM INFO----- \n");
   my_printf(green, "Active m_ids: \n");

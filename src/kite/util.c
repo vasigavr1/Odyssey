@@ -240,22 +240,53 @@ void set_up_queue_depths(int** recv_q_depths, int** send_q_depths)
 /* ---------------------------------------------------------------------------
 ------------------------------DRF WORKER --------------------------------------
 ---------------------------------------------------------------------------*/
-// Initialize the rmw struct
-void set_up_rmw_struct()
+
+
+// Initialize the quorum info that contains the system configuration
+quorum_info_t* set_up_q_info(struct ibv_send_wr *w_send_wr,
+                             struct ibv_send_wr *r_send_wr,
+                             uint16_t credits[][MACHINE_NUM])
 {
-//  memset(&rmw, 0, sizeof(struct rmw_info));
-//  if (ENABLE_DEBUG_RMW_KV_PTR) {
-//    for (int i = 0; i < RMW_ENTRIES_NUM; i++)
-//      rmw.entry[i].dbg = (struct dbg_glob_entry *) calloc(1, sizeof(struct dbg_glob_entry));
-//  }
+  quorum_info_t * q_info = (quorum_info_t *) calloc(1, sizeof(quorum_info_t));
+  q_info->active_num = REM_MACH_NUM;
+  q_info->first_active_rm_id = 0;
+  q_info->last_active_rm_id = REM_MACH_NUM - 1;
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    uint8_t m_id = i < machine_id ? i : (uint8_t) (i + 1);
+    q_info->active_ids[i] = m_id;
+    q_info->send_vector[i] = true;
+  }
+
+  q_info->num_of_send_wrs = Q_INFO_NUM_SEND_WRS;
+  q_info->send_wrs_ptrs = (struct ibv_send_wr **) malloc(Q_INFO_NUM_SEND_WRS * sizeof(struct ibv_send_wr *));
+  q_info->send_wrs_ptrs[0] = w_send_wr;
+  q_info->send_wrs_ptrs[1] = r_send_wr;
+
+  q_info->num_of_credit_targets = Q_INFO_CREDIT_TARGETS;
+  q_info->targets = malloc (q_info->num_of_credit_targets * sizeof(uint16_t));
+  q_info->targets[0] = W_CREDITS;
+  q_info->targets[1] = R_CREDITS;
+  q_info->credit_ptrs = malloc(q_info->num_of_credit_targets * sizeof(uint16_t*));
+  q_info->credit_ptrs[0] = credits[W_VC];
+  q_info->credit_ptrs[1] = credits[R_VC];
+
+
+  return q_info;
+
 }
 
+
 // Initialize the pending ops struct
-p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uint16_t t_id)
+p_ops_t* set_up_pending_ops(uint32_t pending_writes,
+                            uint32_t pending_reads,
+                            struct ibv_send_wr *w_send_wr,
+                            struct ibv_send_wr *r_send_wr,
+                            uint16_t credits[][MACHINE_NUM],
+                            uint16_t t_id)
 {
   uint32_t i, j;
    p_ops_t *p_ops = (p_ops_t *) calloc(1, sizeof(p_ops_t));
-  set_up_q_info(&p_ops->q_info);
+  p_ops->q_info = set_up_q_info(w_send_wr, r_send_wr, credits);
 
 
   //p_ops->w_state = (uint8_t *) malloc(pending_writes * sizeof(uint8_t *));
@@ -362,20 +393,7 @@ p_ops_t* set_up_pending_ops(uint32_t pending_writes, uint32_t pending_reads, uin
  return p_ops;
 }
 
-// Initialize the quorum info that contains the system configuration
-void set_up_q_info(struct quorum_info **q_info)
-{
-  (*q_info) = (struct quorum_info *) calloc(1, sizeof(struct quorum_info));
-  (*q_info)->active_num = REM_MACH_NUM;
-  (*q_info)->first_active_rm_id = 0;
-  (*q_info)->last_active_rm_id = REM_MACH_NUM - 1;
-  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
-    uint8_t m_id = i < machine_id ? i : (uint8_t) (i + 1);
-    (*q_info)->active_ids[i] = m_id;
-    (*q_info)->send_vector[i] = true;
-  }
 
-}
 
 // Set up the memory registrations required
 void set_up_mr(struct ibv_mr **mr, void *buf, uint8_t enable_inlining, uint32_t buffer_size,
