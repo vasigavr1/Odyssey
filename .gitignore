@@ -2,11 +2,14 @@ src/kite/kite
 src/kite/core
 src/zookeeper/core
 src/zookeeper/zookeeper
-CMakeLists.txt
+#CMakeLists.txt
+build
+*o
 .idea/
 .idea/*
 *.out
 *.csv
+src/*/Makefile
 src/PaxosVerifier/pv
 src/PaxosVerifier/copy_from_remote_machines
 src/kite/profile_info

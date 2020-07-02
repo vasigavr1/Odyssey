@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 #houston-sanantonio-austin-indianapolis-philly-atlanta-chicago-detroit-baltimore
 #allIPs=(192.168.8.4 #houston
 #        192.168.8.6 #austin

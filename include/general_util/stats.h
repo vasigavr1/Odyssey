@@ -18,6 +18,7 @@
 // Store statistics from the workers, for the stats thread to use
 typedef struct thread_stats t_stats_t;
 
+
 typedef struct client_stats {
   uint64_t microbench_pushes;
   uint64_t microbench_pops;

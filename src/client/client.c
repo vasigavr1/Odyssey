@@ -2,10 +2,12 @@
 // Created by vasilis on 05/02/19.
 //
 
-#include "util.h"
-#include "../../include/kite_inline_util/kite_inline_util.h"
-#include "../../include/general_util/interface.h"
-#include "../../include/general_util/trace_util.h"
+//#include "util.h"
+//#include "kite_inline_util.h"
+#include "interface.h"
+#include "trace_util.h"
+#include "kvs.h"
+#include "stats.h"
 
 
 #define CLIENT_ASSERTIONS 1
@@ -427,7 +429,7 @@ static inline void treiber_push_blocking(uint16_t session_id, uint32_t stack_id,
   assert(key_id_to_push >= TR_KEY_OFFSET);
   assert(key_id_to_push < KVS_NUM_KEYS);
   assert(session_id < SESSIONS_PER_MACHINE);
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
 
   struct top top, new_top;
@@ -459,7 +461,7 @@ static inline int treiber_pop_blocking(uint16_t session_id, uint32_t stack_id)
   uint32_t top_key_id = stack_id;
   assert(top_key_id < TR_KEY_OFFSET);
   assert(session_id < SESSIONS_PER_MACHINE);
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
 
   struct top top, new_top;
@@ -515,7 +517,7 @@ static inline void treiber_push_pop_blocking()
 static inline void treiber_pop_multi_session(uint16_t t_id)
 {
 
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   uint16_t s_i = 0;
   uint16_t sess_offset = (uint16_t) (t_id * SESSIONS_PER_CLIENT);
@@ -598,7 +600,7 @@ static inline void treiber_pop_multi_session(uint16_t t_id)
 static inline void treiber_push_multi_session(uint16_t t_id)
 {
 
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   uint16_t s_i = 0;
   uint32_t key_offset = (uint32_t) (NUM_OF_RMW_KEYS + (NUM_OF_RMW_KEYS * machine_id));
@@ -867,7 +869,9 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
       info->last_req_id = (uint32_t) async_read_strong(info->stack_id, (uint8_t *) top,
                                                        sizeof(struct top), real_sess_i);
 
-      if (ENABLE_ASSERTIONS) t_stats[info->wrkr].writes_asked_by_clients+= (TREIBER_WRITES_NUM - 1);
+      //if (ENABLE_ASSERTIONS)
+      //  t_stats[info->wrkr].writes_asked_by_clients+= (TREIBER_WRITES_NUM - 1);
+
 //      if (info->wrkr == 13)
 //        my_printf(yellow, "Clt %u have Asked worker %u for %lu writes \n",
 //                      t_id, info->wrkr, t_stats[info->wrkr].writes_asked_by_clients);
@@ -943,7 +947,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
 //        printf("Sess %u Trying to push %u  to stack %u : %u/%u \n",
 //               real_sess_i, info->owned_key, info->stack_id, new_top->push_counter, new_top->pop_counter);
 
-        if (ENABLE_ASSERTIONS) t_stats[info->wrkr].writes_asked_by_clients++;
+        //if (ENABLE_ASSERTIONS) t_stats[info->wrkr].writes_asked_by_clients++;
 
         async_write_strong(info->owned_key, (uint8_t *) &new_node[0],
                            sizeof(struct node), real_sess_i);
@@ -978,7 +982,7 @@ static inline void treiber_push_state_machine_dbg(struct tr_sess_info_dbg *info,
 static inline void treiber_push_pull_multi_session_dbg(uint16_t t_id)
 {
 
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   assert(TREIBER_WRITES_NUM > 0);
   uint16_t s_i = 0;
@@ -1213,7 +1217,7 @@ static inline void treiber_push_state_machine(struct tr_sess_info *info,
 static inline void treiber_push_pull_multi_session(uint16_t t_id)
 {
 
-  assert(sizeof(struct top) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct top) <= VALUE_SIZE);
   assert(sizeof(struct node) == VALUE_SIZE);
   assert(TREIBER_WRITES_NUM > 0);
   assert(NUMBER_OF_STACKS >= GLOBAL_SESSION_NUM);
@@ -1381,11 +1385,11 @@ static inline void check_write_if_msq_active(mica_op_t *kv_ptr, uint8_t *new_val
 {
   if (!ENABLE_MS_ASSERTIONS) return;
   uint32_t key_id = kv_ptr->key_id;
-  const char* message = committing_flag_to_str(flag);
+  //const char* message = committing_flag_to_str(flag);
   assert(key_id < LAST_MS_NODE_PTR ||
          (key_id >= DUMMY_KEY_ID_OFFSET && key_id <=  MS_INIT_DONE_FLAG_KEY));
   if (key_id == MS_INIT_DONE_FLAG_KEY)
-    my_printf(green, "Writting ms_init_done_flag, %s\n", message);
+    my_printf(green, "Writting ms_init_done_flag, %u\n", flag);
   // MS_PTR
   if (kv_ptr->key_id < LAST_MS_NODE_PTR) {
     struct ms_ptr *kv_ms_ptr = (struct ms_ptr *) kv_ptr->value;
@@ -1895,7 +1899,7 @@ static inline void ms_enqueue_dequeue_multi_session(uint16_t t_id)
     ms_set_up_tail_and_head(t_id);
   else ms_wait_for_init(t_id);
 
-  assert(sizeof(struct ms_ptr) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct ms_ptr) <= VALUE_SIZE);
   assert(sizeof(struct ms_node) <= VALUE_SIZE);
   assert(MS_WRITES_NUM > 0);
   uint16_t s_i = 0;
@@ -2561,7 +2565,7 @@ static inline void hm_insert_delete_multi_session(uint16_t t_id)
   }
   else hm_wait_for_init(t_id);
 
-  assert(sizeof(struct hm_ptr) <= RMW_VALUE_SIZE);
+  assert(sizeof(struct hm_ptr) <= VALUE_SIZE);
   assert(sizeof(struct hm_node) <= VALUE_SIZE);
   assert(NUM_OF_RMW_KEYS > LAST_HM_NODE_PTR);
   assert(HM_WRITES_NUM > 0);

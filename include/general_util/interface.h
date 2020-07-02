@@ -5,6 +5,7 @@
 #ifndef KITE_INTERFACE_H
 #define KITE_INTERFACE_H
 
+#include <city.h>
 #include "top.h"
 
 // API_OPCODE
