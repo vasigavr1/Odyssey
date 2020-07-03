@@ -16,15 +16,15 @@ static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb,uint32_t push_ptr, ui
                                    struct ibv_sge *recv_sgl,
                                    void* buf)
 {
-  recv_info_t* recv = (recv_info_t*) malloc(sizeof(struct recv_info));
+  recv_info_t* recv = (recv_info_t*) malloc(sizeof(recv_info_t));
   recv->push_ptr = push_ptr;
   recv->buf_slots = buf_slots;
   recv->slot_size = slot_size;
   recv->posted_recvs = posted_recvs;
   recv->recv_qp = recv_qp;
   recv->buf = buf;
-  recv->recv_wr = recv_wr; //(struct ibv_recv_wr *) malloc(max_recv_wrs * sizeof(struct ibv_recv_wr));
-  recv->recv_sgl = recv_sgl;//(struct ibv_sge *) malloc(max_recv_wrs * sizeof(struct ibv_sge));
+  recv->recv_wr = recv_wr;
+  recv->recv_sgl = recv_sgl;
 
   for (int i = 0; i < max_recv_wrs; i++) {
     recv->recv_sgl[i].length = slot_size;
@@ -37,7 +37,7 @@ static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb,uint32_t push_ptr, ui
 
 
 // Post Receives
-static inline void post_recvs_with_recv_info(struct recv_info *recv, uint32_t recv_num)
+static inline void post_recvs_with_recv_info(recv_info_t *recv, uint32_t recv_num)
 {
   if (recv_num == 0) return;
   uint16_t j;
@@ -91,7 +91,7 @@ static inline void adaptive_inlining (uint32_t mes_size, struct ibv_send_wr *sen
 }
 
 // Post a quorum broadcast and post the appropriate receives for it
-static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, uint32_t recvs_to_post_num,
+static inline void post_quorum_broadasts_and_recvs(recv_info_t *recv_info, uint32_t recvs_to_post_num,
                                                    quorum_info_t *q_info, uint16_t br_i, uint64_t br_tx,
                                                    struct ibv_send_wr *send_wr, struct ibv_qp *send_qp,
                                                    int enable_inlining)
@@ -109,7 +109,7 @@ static inline void post_quorum_broadasts_and_recvs(struct recv_info *recv_info, 
   int ret = ibv_post_send(send_qp, &send_wr[q_info->first_active_rm_id], &bad_send_wr);
   if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
   if (!ENABLE_ADAPTIVE_INLINING)
-    send_wr[q_info->first_active_rm_id].send_flags = enable_inlining == 1 ? IBV_SEND_INLINE : 0;
+    send_wr[q_info->first_active_rm_id].send_flags = enable_inlining ? IBV_SEND_INLINE : 0;
 }
 
 

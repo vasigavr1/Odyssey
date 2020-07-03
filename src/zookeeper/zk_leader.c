@@ -75,11 +75,11 @@ void *leader(void *arg)
   struct ibv_wc credit_wc[LDR_MAX_CREDIT_RECV];
   struct ibv_recv_wr credit_recv_wr[LDR_MAX_CREDIT_RECV];
 
- 	uint16_t credits[LDR_VC_NUM][FOLLOWER_MACHINE_NUM];
+ 	uint16_t credits[LDR_VC_NUM][MACHINE_NUM];
 	uint32_t trace_iter = 0;
-  long prep_br_tx = 0, commit_br_tx = 0;
+  uint64_t prep_br_tx = 0, commit_br_tx = 0;
 
-  struct recv_info *w_recv_info, *ack_recv_info;
+  recv_info_t *w_recv_info, *ack_recv_info, *com_rev_info;
   w_recv_info =  init_recv_info(cb, w_buf_push_ptr, LEADER_W_BUF_SLOTS,
                                 (uint32_t) LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS,
                                 cb->dgram_qp[COMMIT_W_QP_ID],
@@ -91,6 +91,11 @@ void *leader(void *arg)
                                  (uint32_t) LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID],
                                  LDR_MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
                                  (void*) ack_buffer);
+
+  //com_rev_info = init_recv_info(cb, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
+  //                              (uint32_t) LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID],
+  //                              LDR_MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
+  //                              (void*) ack_buffer);
 
 
 	latency_info_t latency_info = {
@@ -105,7 +110,8 @@ void *leader(void *arg)
 
 
 
-  p_writes_t *p_writes = set_up_pending_writes(LEADER_PENDING_WRITES, protocol);
+  p_writes_t *p_writes = set_up_pending_writes(LEADER_PENDING_WRITES, prep_send_wr,
+                                               com_send_wr, credits, protocol);
   void *prep_buf = (void *) p_writes->prep_fifo->prep_message;
   set_up_ldr_mrs(&prep_mr, prep_buf, &com_mr, (void *)com_fifo->commits, cb);
 
@@ -137,7 +143,7 @@ void *leader(void *arg)
 	---------------------------------------------------------------------------*/
   uint16_t last_session = 0;
   uint32_t wait_for_gid_dbg_counter = 0, wait_for_acks_dbg_counter = 0;
-  uint32_t credit_debug_cnt[LDR_VC_NUM] = {0};
+  uint32_t credit_debug_cnt[LDR_VC_NUM] = {0}, time_out_cnt[LDR_VC_NUM] = {0};
   uint32_t outstanding_prepares = 0, completed_but_not_polled_writes = 0;
 	struct timespec start, end;
   if (t_id == 0) my_printf(green, "Leader %d  reached the loop \n", t_id);
@@ -175,7 +181,7 @@ void *leader(void *arg)
 		------------------------------ BROADCAST COMMITS--------------------------
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO > 0)
-      broadcast_commits(credits, cb, com_fifo,
+      broadcast_commits(p_writes, credits, cb, com_fifo,
                         &commit_br_tx, credit_debug_cnt, credit_wc,
                         com_send_sgl, com_send_wr, credit_recv_wr,
                         w_recv_info, t_id);
@@ -211,10 +217,8 @@ void *leader(void *arg)
 		if (WRITE_RATIO > 0)
 			/* Poll for credits - Perform broadcasts
 				 Post the appropriate number of credit receives before sending anything */
-      broadcast_prepares(p_writes, credits, cb, credit_wc, credit_debug_cnt,
-                         prep_send_sgl, prep_send_wr, &prep_br_tx, ack_recv_info,
-                         remote_prep_buf, t_id,
-                         &outstanding_prepares);
+      broadcast_prepares(p_writes, credits, cb, prep_send_sgl, prep_send_wr, &prep_br_tx, ack_recv_info,
+                         remote_prep_buf, time_out_cnt, &outstanding_prepares, t_id);
     if (ENABLE_ASSERTIONS) {
       assert(p_writes->size <= LEADER_PENDING_WRITES);
       for (uint16_t i = 0; i < LEADER_PENDING_WRITES - p_writes->size; i++) {

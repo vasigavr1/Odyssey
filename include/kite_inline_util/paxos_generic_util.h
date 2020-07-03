@@ -9,7 +9,7 @@
 #include "main.h"
 #include "kite_debug_util.h"
 #include "../general_util/client_if_util.h"
-#include "config_util.h"
+#include "kite_config_util.h"
 #include "reserve_stations_util.h"
 
 

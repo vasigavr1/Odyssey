@@ -72,7 +72,9 @@ void print_latency_stats(void);
 void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t);
 
 // Set up a struct that stores pending writes
-p_writes_t* set_up_pending_writes(uint32_t size, int);
+p_writes_t* set_up_pending_writes(uint32_t size, struct ibv_send_wr*,
+                                  struct ibv_send_wr*, uint16_t credits[][MACHINE_NUM],
+                                  protocol_t);
 
 // Set up all leader WRs
 void set_up_ldr_WRs(struct ibv_send_wr*, struct ibv_sge*,
@@ -101,7 +103,7 @@ zk_com_fifo_t* set_up_ldr_ops(zk_resp_t*, uint16_t);
 void set_up_ldr_mrs(struct ibv_mr**, void*, struct ibv_mr**, void*,
                     struct hrd_ctrl_blk*);
 // Set up the credits for leader
-void ldr_set_up_credits_and_WRs(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
+void ldr_set_up_credits_and_WRs(uint16_t credits[][MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
                                 struct ibv_sge *credit_recv_sgl, struct hrd_ctrl_blk *cb,
                                 uint32_t max_credit_recvs);
 

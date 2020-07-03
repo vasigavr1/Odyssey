@@ -1,6 +1,7 @@
 #ifndef INLINE_UTILS_H
 #define INLINE_UTILS_H
 
+#include "config_util.h"
 #include "../general_util/inline_util.h"
 #include "zk_kvs_util.h"
 #include "zk_debug_util.h"
@@ -74,7 +75,7 @@ static inline void fill_write(zk_write_t *write, mica_key_t key, uint8_t opcode,
   if (local) {
     zk_trace_op_t *op = (zk_trace_op_t *) source;
     fill_prep(prep, op->key, op->opcode, op->val_len, op->value,
-              FOLLOWER_MACHINE_NUM, (uint16_t) session_id);
+              MACHINE_NUM, (uint16_t) session_id);
   }
   else {
     zk_write_t *rem_write = (zk_write_t *) source;
@@ -257,13 +258,14 @@ static inline void zk_get_g_ids(p_writes_t *p_writes, uint16_t t_id)
 
 
 
-static inline void zk_increase_prep_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], zk_ack_mes_t *ack,
+static inline void zk_increase_prep_credits(uint16_t credits[][MACHINE_NUM], zk_ack_mes_t *ack,
                                             struct fifo *remote_prep_buf, uint16_t t_id)
 {
+  assert(LEADER_MACHINE == 0);
   credits[PREP_VC][ack->follower_id] +=
-    remove_from_the_mirrored_buffer(remote_prep_buf, ack->ack_num, t_id, ack->follower_id, FLR_PREP_BUF_SLOTS);
+    remove_from_the_mirrored_buffer(remote_prep_buf, ack->ack_num, t_id, ack->follower_id - 1, FLR_PREP_BUF_SLOTS);
 
-  if (ENABLE_ASSERTIONS) assert(credits[PREP_VC][ack->follower_id] <= PREPARE_CREDITS);
+  if (ENABLE_ASSERTIONS) assert(credits[PREP_VC][ack->follower_id - 1] <= PREPARE_CREDITS);
 }
 
 static inline uint32_t zk_find_the_first_prepare_that_gets_acked(uint16_t *ack_num,
@@ -308,9 +310,9 @@ static inline void zk_apply_acks(uint16_t ack_num, uint32_t ack_ptr,
 // Leader polls for acks
 static inline void ldr_poll_for_acks(zk_ack_mes_ud_t *incoming_acks, uint32_t *pull_ptr,
                                      p_writes_t *p_writes,
-                                     uint16_t credits[][FOLLOWER_MACHINE_NUM],
+                                     uint16_t credits[][MACHINE_NUM],
                                      struct ibv_cq *ack_recv_cq, struct ibv_wc *ack_recv_wc,
-                                     struct recv_info *ack_recv_info, struct fifo *remote_prep_buf,
+                                     recv_info_t *ack_recv_info, struct fifo *remote_prep_buf,
                                      uint16_t t_id, uint32_t *dbg_counter,
                                      uint32_t *outstanding_prepares)
 {
@@ -451,7 +453,7 @@ static inline void wait_for_the_entire_write(volatile zk_w_mes_t *w_mes,
 static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t *pull_ptr,
 																	 p_writes_t *p_writes,
 																	 struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                   struct recv_info *w_recv_info,
+                                   recv_info_t *w_recv_info,
                                    uint32_t *completed_but_not_polled_writes,
                                    uint16_t t_id)
 {
@@ -511,7 +513,7 @@ static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t
 
 // Poll for credits and increment the credits according to the protocol
 static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc* credit_wc,
-                                    uint16_t credits[][FOLLOWER_MACHINE_NUM])
+                                    uint16_t credits[][MACHINE_NUM])
 {
   int credits_found = 0;
   credits_found = ibv_poll_cq(credit_recv_cq, LDR_MAX_CREDIT_RECV, credit_wc);
@@ -531,13 +533,13 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
 }
 
 //Checks if there are enough credits to perform a broadcast
-static inline bool zk_check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NUM], hrd_ctrl_blk_t* cb,
+static inline bool zk_check_bcast_credits(uint16_t credits[][MACHINE_NUM], hrd_ctrl_blk_t* cb,
                                          struct ibv_wc* credit_wc,
                                          uint32_t* credit_debug_cnt, uint8_t vc)
 {
   bool poll_for_credits = false;
   uint16_t j;
-  for (j = 0; j < FOLLOWER_MACHINE_NUM; j++) {
+  for (j = 0; j < MACHINE_NUM; j++) {
     if (credits[vc][j] == 0) {
       poll_for_credits = true;
       break;
@@ -553,7 +555,7 @@ static inline bool zk_check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NU
   if (poll_for_credits)
     ldr_poll_credits(cb->dgram_recv_cq[FC_QP_ID], credit_wc, credits);
   // We polled for credits, if we did not find enough just break
-  for (j = 0; j < FOLLOWER_MACHINE_NUM; j++) {
+  for (j = 0; j < MACHINE_NUM; j++) {
     if (credits[vc][j] == 0) {
       if (ENABLE_ASSERTIONS) credit_debug_cnt[vc]++;
       return false;
@@ -567,8 +569,8 @@ static inline bool zk_check_bcast_credits(uint16_t credits[][FOLLOWER_MACHINE_NU
 // Form Broadcast work requests for the leader
 static inline void forge_commit_wrs(zk_com_mes_t *com_mes, uint16_t t_id,
                                    uint16_t br_i, struct hrd_ctrl_blk *cb, struct ibv_sge *com_send_sgl,
-                                   struct ibv_send_wr *com_send_wr,  long *commit_br_tx,
-                                    uint16_t credits[][FOLLOWER_MACHINE_NUM])
+                                   struct ibv_send_wr *com_send_wr,  uint64_t *commit_br_tx,
+                                    uint16_t credits[][MACHINE_NUM])
 {
   struct ibv_wc signal_send_wc;
   com_send_sgl[br_i].addr = (uint64_t) (uintptr_t) com_mes;
@@ -578,8 +580,8 @@ static inline void forge_commit_wrs(zk_com_mes_t *com_mes, uint16_t t_id,
     if (!USE_QUORUM)
       assert(com_mes->com_num <= LEADER_PENDING_WRITES);
   }
-//  my_printf(green, "Leader %d : I BROADCAST a message with %d commits with %d credits: %d \n",
-//               t_id, com_mes->com_num, com_mes->opcode, credits[COMM_VC][0]);
+  //my_printf(green, "Leader %d : I BROADCAST a message with %d commits with %d credits: %d \n",
+  //             t_id, com_mes->com_num, com_mes->opcode, credits[COMM_VC][0]);
 
   // Do a Signaled Send every BROADCAST_SS_BATCH broadcasts (BROADCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
   if ((*commit_br_tx) % COM_BCAST_SS_BATCH == 0) com_send_wr[0].send_flags |= IBV_SEND_SIGNALED;
@@ -610,7 +612,7 @@ static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_
       credit_recv_wr[j].next = (j == (FOLLOWER_MACHINE_NUM * (*credit_recv_counter)) - 1) ?
                                NULL : &credit_recv_wr[j + 1];
     }
-//    my_printf(cyan, "Leader posting a credit receive\n");
+    //my_printf(cyan, "Leader posting a credit receive\n");
     ret = ibv_post_recv(cb->dgram_qp[FC_QP_ID], &credit_recv_wr[0], &bad_recv_wr);
     CPE(ret, "ibv_post_recv error: posting recvs for credits before broadcasting", ret);
     *credit_recv_counter = 0;
@@ -629,12 +631,13 @@ static inline void post_recvs_and_batch_bcasts_to_NIC(uint16_t br_i, struct hrd_
 
 
 // Leader broadcasts commits
-static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct hrd_ctrl_blk *cb,
-                                     zk_com_fifo_t *com_fifo, long *commit_br_tx,
+static inline void broadcast_commits(p_writes_t *p_writes, uint16_t credits[][MACHINE_NUM],
+                                     hrd_ctrl_blk_t *cb,
+                                     zk_com_fifo_t *com_fifo, uint64_t *commit_br_tx,
 																		 uint32_t *credit_debug_cnt, struct ibv_wc *credit_wc,
                                      struct ibv_sge *com_send_sgl, struct ibv_send_wr *com_send_wr,
                                      struct ibv_recv_wr *credit_recv_wr,
-																		 struct recv_info *w_recv_info, uint16_t t_id)
+																		 recv_info_t *w_recv_info, uint16_t t_id)
 {
 
   if (com_fifo->size == 0) return;
@@ -651,52 +654,37 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
     // Create the broadcast messages
     forge_commit_wrs(com_mes, t_id, br_i, cb, com_send_sgl,
                      com_send_wr,  commit_br_tx, credits);
-    (*commit_br_tx)++;
-    for (uint16_t j = 0; j < FOLLOWER_MACHINE_NUM; j++) { credits[COMM_VC][j]--; }
-		//commits_sent += com_mes->com_num;
+    for (uint16_t j = 0; j < FOLLOWER_MACHINE_NUM; j++) { assert(LEADER_MACHINE == 0); credits[COMM_VC][j + 1]--; }
 		com_fifo->size--;
 		// Don't zero the com_num because there may be no INLINING
 		MOD_INCR(com_fifo->pull_ptr, COMMIT_FIFO_SIZE);
     br_i++;
-		if (ENABLE_ASSERTIONS) {
-			assert(br_i <= COMMIT_CREDITS);
-      assert(com_fifo != NULL);
-      if (com_fifo->size > COMMIT_FIFO_SIZE)
-        printf("com fifo size %u/%d \n", com_fifo->size, COMMIT_FIFO_SIZE);
-			assert(com_fifo->size <= COMMIT_FIFO_SIZE);
-			assert(com_mes->com_num > 0 && com_mes->com_num <= MAX_LIDS_IN_A_COMMIT);
-		}
-    if (ENABLE_STAT_COUNTING) {
-      t_stats[t_id].coms_sent += com_mes->com_num;
-      t_stats[t_id].coms_sent_mes_num++;
-    }
+
+    zk_checks_and_stats_on_bcasting_commits(com_fifo, com_mes, br_i, t_id);
     if ((*commit_br_tx) % FLR_CREDITS_IN_MESSAGE == 0) credit_recv_counter++;
     if (br_i == MAX_BCAST_BATCH) {
-      uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
-      post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
-      w_recv_info->posted_recvs += recvs_to_post_num;
+      post_quorum_broadasts_and_recvs(w_recv_info, LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs,
+                                      p_writes->q_info, br_i, *commit_br_tx, com_send_wr, cb->dgram_qp[COMMIT_W_QP_ID],
+                                      COM_ENABLE_INLINING);
+
+
+      //uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
+      //post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
+      //w_recv_info->posted_recvs += recvs_to_post_num;
       //printf("Broadcasting %u commits \n", br_i);
-      post_recvs_and_batch_bcasts_to_NIC(br_i, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
-			com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
+      post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
+			//com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
       br_i = 0;
     }
   }
 	if (br_i > 0) {
     //printf("Broadcasting %u commits \n", br_i);
-    uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
-    post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
-    w_recv_info->posted_recvs += recvs_to_post_num;
-    for (int com_i = 0; com_i < MESSAGES_IN_BCAST; ++com_i) {
-      if (com_i < MESSAGES_IN_BCAST - 1)
-        assert(com_send_wr[com_i].next == &com_send_wr[com_i + 1]);
-      else assert(com_send_wr[com_i].next == NULL);
-      assert(com_send_wr[com_i].num_sge == 1);
-      assert(com_send_wr[com_i].sg_list == com_send_sgl);
-      assert(com_send_wr[com_i].opcode == IBV_WR_SEND);
-    }
+    post_quorum_broadasts_and_recvs(w_recv_info, LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs,
+                                    p_writes->q_info, br_i, *commit_br_tx, com_send_wr, cb->dgram_qp[COMMIT_W_QP_ID],
+                                    COM_ENABLE_INLINING);
 
-		post_recvs_and_batch_bcasts_to_NIC(br_i, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
-		com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
+		post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
+		//com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
 	}
 	if (ENABLE_ASSERTIONS) assert(w_recv_info->posted_recvs <= LDR_MAX_RECV_W_WRS);
 
@@ -707,8 +695,8 @@ static inline void broadcast_commits(uint16_t credits[][FOLLOWER_MACHINE_NUM], s
 // Form the Broadcast work request for the prepare
 static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
 																 struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
-																 struct ibv_send_wr *send_wr, long *prep_br_tx,
-																 uint16_t br_i, uint16_t credits[][FOLLOWER_MACHINE_NUM],
+																 struct ibv_send_wr *send_wr, uint64_t *prep_br_tx,
+																 uint16_t br_i, uint16_t credits[][MACHINE_NUM],
 																 uint8_t vc, uint16_t t_id) {
 	uint16_t i;
 	struct ibv_wc signal_send_wc;
@@ -748,57 +736,49 @@ static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
 
 // Leader Broadcasts its Prepares
 static inline void broadcast_prepares(p_writes_t *p_writes,
-																			uint16_t credits[][FOLLOWER_MACHINE_NUM], struct hrd_ctrl_blk *cb,
-																			struct ibv_wc *credit_wc, uint32_t *credit_debug_cnt,
+																			uint16_t credits[][MACHINE_NUM], struct hrd_ctrl_blk *cb,
 																			struct ibv_sge *prep_send_sgl, struct ibv_send_wr *prep_send_wr,
-																			long *prep_br_tx, struct recv_info *ack_recv_info, struct fifo *remote_prep_buf,
-                                      uint16_t t_id, uint32_t *outstanding_prepares)
+																			uint64_t *prep_br_tx, recv_info_t *ack_recv_info,
+                                      struct fifo *remote_prep_buf, uint32_t *time_out_cnt,
+                                      uint32_t *outstanding_prepares, uint16_t t_id)
 {
-//  printf("Ldr %d bcasting prepares \n", t_id);
 	uint8_t vc = PREP_VC;
-	uint16_t br_i = 0, credit_recv_counter = 0;
+	uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
 	uint32_t bcast_pull_ptr = p_writes->prep_fifo->bcast_pull_ptr;
-//	uint32_t posted_recvs = ack_recv_info->posted_recvs;
 
-	while (p_writes->prep_fifo->bcast_size > 0) {
-
-		if (!zk_check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc))
-			break;
+  if (p_writes->prep_fifo->bcast_size == 0)  return;
+  else if (!check_bcast_credits(credits[vc], p_writes->q_info, &time_out_cnt[vc],
+                                &available_credits, 1,  t_id)) return;
+	while (p_writes->prep_fifo->bcast_size > 0 && mes_sent < available_credits) {
     if (DEBUG_PREPARES)
       printf("LDR %d has %u bcasts to send credits %d\n",t_id, p_writes->prep_fifo->bcast_size, credits[PREP_VC][0]);
 		// Create the broadcast messages
 
-		forge_prep_wr((uint16_t) bcast_pull_ptr, p_writes, cb,  prep_send_sgl, prep_send_wr, prep_br_tx, br_i, credits, vc, t_id);
+		forge_prep_wr((uint16_t) bcast_pull_ptr, p_writes, cb,  prep_send_sgl,
+                  prep_send_wr, prep_br_tx, br_i, credits, vc, t_id);
 		br_i++;
+    mes_sent++;
     uint8_t coalesce_num = p_writes->prep_fifo->prep_message[bcast_pull_ptr].coalesce_num;
     add_to_the_mirrored_buffer(remote_prep_buf, coalesce_num, FOLLOWER_MACHINE_NUM, FLR_PREP_BUF_SLOTS);
-    for (uint16_t i = 0; i < FOLLOWER_MACHINE_NUM; i++) credits[PREP_VC][i]--;
-
     zk_checks_and_stats_on_bcasting_prepares(p_writes, coalesce_num, outstanding_prepares, t_id);
     zk_reset_prep_message(p_writes, coalesce_num,t_id);
-
     p_writes->prep_fifo->bcast_size -= coalesce_num;
     MOD_INCR(bcast_pull_ptr, PREP_FIFO_SIZE);
 		if (br_i == MAX_BCAST_BATCH) {
-      uint32_t recvs_to_post_num = LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs;
-      //printf("Ldr %d posting %d recvs\n",t_id,  recvs_to_post_num);
-      if (recvs_to_post_num) post_recvs_with_recv_info(ack_recv_info, recvs_to_post_num);
-      ack_recv_info->posted_recvs += recvs_to_post_num;
-			post_recvs_and_batch_bcasts_to_NIC(br_i, cb, prep_send_wr, NULL, &credit_recv_counter, PREP_ACK_QP_ID);
-			br_i = 0;
-			prep_send_wr[0].send_flags = LEADER_PREPARE_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
+      post_quorum_broadasts_and_recvs(ack_recv_info, LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
+                                      p_writes->q_info, br_i, *prep_br_tx, prep_send_wr, cb->dgram_qp[PREP_ACK_QP_ID],
+                                      LEADER_PREPARE_ENABLE_INLINING);
+      br_i = 0;
 		}
 	}
   if (br_i > 0) {
-    uint32_t recvs_to_post_num = LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs;
-    //printf("Ldr %d posting %d recvs (2nd round)\n",t_id,  recvs_to_post_num);
-    if (recvs_to_post_num) post_recvs_with_recv_info(ack_recv_info, recvs_to_post_num);
-    ack_recv_info->posted_recvs += recvs_to_post_num;
-    post_recvs_and_batch_bcasts_to_NIC(br_i, cb, prep_send_wr, NULL, &credit_recv_counter, PREP_ACK_QP_ID);
-		prep_send_wr[0].send_flags = LEADER_PREPARE_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
+    post_quorum_broadasts_and_recvs(ack_recv_info, LDR_MAX_RECV_ACK_WRS - ack_recv_info->posted_recvs,
+                                    p_writes->q_info, br_i, *prep_br_tx, prep_send_wr, cb->dgram_qp[PREP_ACK_QP_ID],
+                                    LEADER_PREPARE_ENABLE_INLINING);
   }
   if (ENABLE_ASSERTIONS) assert(ack_recv_info->posted_recvs <= LDR_MAX_RECV_ACK_WRS);
 	p_writes->prep_fifo->bcast_pull_ptr = bcast_pull_ptr;
+  if (mes_sent > 0) decrease_credits(credits, p_writes->q_info, mes_sent, vc);
 }
 
 
@@ -811,7 +791,7 @@ static inline void broadcast_prepares(p_writes_t *p_writes,
 static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_preps, uint32_t *pull_ptr,
                                          p_writes_t *p_writes, struct pending_acks *p_acks,
                                          struct ibv_cq *prep_recv_cq, struct ibv_wc *prep_recv_wc,
-                                         struct recv_info *prep_recv_info, struct fifo *prep_buf_mirror,
+                                         recv_info_t *prep_recv_info, struct fifo *prep_buf_mirror,
                                          uint32_t *completed_but_not_polled_preps,
                                          uint16_t t_id, uint8_t flr_id, uint32_t *wait_for_prepares_dbg_counter)
 {
@@ -864,7 +844,7 @@ static inline void flr_poll_for_prepares(volatile zk_prep_mes_ud_t *incoming_pre
 // Send a batched ack that denotes the first local write id and the number of subsequent lid that are being acked
 static inline void send_acks_to_ldr(p_writes_t *p_writes, struct ibv_send_wr *ack_send_wr,
 																		struct ibv_sge *ack_send_sgl, long *sent_ack_tx,
-																		struct hrd_ctrl_blk *cb, struct recv_info *prep_recv_info,
+																		struct hrd_ctrl_blk *cb, recv_info_t *prep_recv_info,
 																		uint8_t flr_id, zk_ack_mes_t *ack,
 																		struct pending_acks *p_acks, uint16_t t_id)
 {
@@ -930,7 +910,7 @@ static inline void send_acks_to_ldr(p_writes_t *p_writes, struct ibv_send_wr *ac
 
 
 //Send credits for the commits
-static inline void send_credits_for_commits(struct recv_info *com_recv_info, struct hrd_ctrl_blk *cb,
+static inline void send_credits_for_commits(recv_info_t *com_recv_info, struct hrd_ctrl_blk *cb,
                                             struct ibv_send_wr *credit_wr, long *credit_tx,
                                             uint16_t credit_num, uint16_t t_id)
 {
@@ -1061,7 +1041,7 @@ static inline void send_writes_to_the_ldr(p_writes_t *p_writes,
 static inline void poll_for_coms(zk_com_mes_ud_t *incoming_coms, uint32_t *pull_ptr,
                                  p_writes_t *p_writes, uint16_t *credits,
                                  struct ibv_cq * com_recv_cq, struct ibv_wc *com_recv_wc,
-                                 struct recv_info *com_recv_info, struct hrd_ctrl_blk *cb,
+                                 recv_info_t *com_recv_info, struct hrd_ctrl_blk *cb,
                                  struct ibv_send_wr *credit_wr, long *credit_tx,
                                  struct fifo *remote_w_buf,
                                  uint32_t *completed_but_not_polled_coms,

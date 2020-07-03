@@ -494,26 +494,6 @@ static inline void print_all_stalled_sessions(p_ops_t *p_ops, uint16_t t_id)
 }
 
 
-// Prints out information about the participants
-static inline void print_q_info(quorum_info_t *q_info)
-{
-  my_printf(yellow, "-----QUORUM INFO----- \n");
-  my_printf(green, "Active m_ids: \n");
-  for (uint8_t i = 0; i < q_info->active_num; i++) {
-    my_printf(green, "%u) %u \n", i, q_info->active_ids[i]);
-  }
-  my_printf(red, "Missing m_ids: \n");
-  for (uint8_t i = 0; i < q_info->missing_num; i++) {
-    my_printf(red, "%u) %u \n", i, q_info->missing_ids[i]);
-  }
-  my_printf(yellow, "Send vector : ");
-  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
-    my_printf(yellow, "%d ", q_info->send_vector[i]);
-  }
-  my_printf(yellow, "\n First rm_id: %u, Last rm_id: %u \n",
-            q_info->first_active_rm_id, q_info->last_active_rm_id);
-}
-
 // From commit reads
 static inline void checks_when_committing_a_read(p_ops_t *p_ops, uint32_t pull_ptr,
                                                  bool acq_second_round_to_flip_bit, bool insert_write_flag,

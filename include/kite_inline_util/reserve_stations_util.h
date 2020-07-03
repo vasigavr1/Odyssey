@@ -9,7 +9,7 @@
 #include "main.h"
 #include "../general_util/latency_util.h"
 #include "kite_debug_util.h"
-#include "config_util.h"
+#include "kite_config_util.h"
 #include "../general_util/client_if_util.h"
 #include "paxos_util.h"
 #include "paxos_generic_util.h"

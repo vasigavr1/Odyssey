@@ -45,10 +45,7 @@
 
 
 
-// ------COMMON-------------------
-#define MAX_BCAST_BATCH (ENABLE_MULTICAST == 1 ? 4 : 4) //how many broadcasts can fit in a batch
-#define MESSAGES_IN_BCAST (ENABLE_MULTICAST == 1 ? 1 : (FOLLOWER_MACHINE_NUM))
-#define MESSAGES_IN_BCAST_BATCH MAX_BCAST_BATCH * MESSAGES_IN_BCAST //must be smaller than the q_depth
+
 
 
 /* --------------------------------------------------------------------------------

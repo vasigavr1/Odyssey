@@ -40,7 +40,7 @@ set(COMMON_FILES
         include/general_util/debug_util.h
         include/general_util/inline_util.h
         include/general_util/sizes.h
-        )
+        include/general_util/config_util.h)
 
 set(KITE_SOURCE_FILES
         src/kite/util.c
@@ -55,7 +55,7 @@ set(KITE_SOURCE_FILES
         include/kite_inline_util/generic_util.h
         include/kite_inline_util/kvs_util.h
         include/kite_inline_util/kite_debug_util.h
-        include/kite_inline_util/config_util.h
+        include/kite_inline_util/kite_config_util.h
         include/kite_inline_util/paxos_util.h
         include/kite_inline_util/reserve_stations_util.h
         include/kite_inline_util/communication_utility.h

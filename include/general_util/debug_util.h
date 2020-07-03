@@ -28,4 +28,24 @@ static inline void check_session_id_and_req_array_index(uint16_t sess_id, uint16
   }
 }
 
+// Prints out information about the participants
+static inline void print_q_info(quorum_info_t *q_info)
+{
+  my_printf(yellow, "-----QUORUM INFO----- \n");
+  my_printf(green, "Active m_ids: \n");
+  for (uint8_t i = 0; i < q_info->active_num; i++) {
+    my_printf(green, "%u) %u \n", i, q_info->active_ids[i]);
+  }
+  my_printf(red, "Missing m_ids: \n");
+  for (uint8_t i = 0; i < q_info->missing_num; i++) {
+    my_printf(red, "%u) %u \n", i, q_info->missing_ids[i]);
+  }
+  my_printf(yellow, "Send vector : ");
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    my_printf(yellow, "%d ", q_info->send_vector[i]);
+  }
+  my_printf(yellow, "\n First rm_id: %u, Last rm_id: %u \n",
+            q_info->first_active_rm_id, q_info->last_active_rm_id);
+}
+
 #endif //DEBUG_UTIL_H

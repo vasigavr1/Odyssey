@@ -6,10 +6,6 @@
 #define KITE_MESSAGES_H
 
 
-// ------COMMON-------------------
-#define MAX_BCAST_BATCH (1) //how many broadcasts can fit in a batch
-#define MESSAGES_IN_BCAST (REM_MACH_NUM)
-#define MESSAGES_IN_BCAST_BATCH (MAX_BCAST_BATCH * MESSAGES_IN_BCAST) //must be smaller than the q_depth
 // post some extra receives to avoid spurious out_of_buffer errors
 #define RECV_WR_SAFETY_MARGIN 2
 

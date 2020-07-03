@@ -9,7 +9,7 @@ void *follower(void *arg)
   struct thread_params params = *(struct thread_params *) arg;
   uint32_t g_id = (uint32_t)( machine_id > LEADER_MACHINE ? ((machine_id - 1) * FOLLOWERS_PER_MACHINE) + params.id :
                   (machine_id * FOLLOWERS_PER_MACHINE) + params.id);
-  uint8_t flr_id = (uint8_t) (machine_id > LEADER_MACHINE ? (machine_id - 1) : machine_id);
+  uint8_t flr_id = (uint8_t) machine_id; // (machine_id > LEADER_MACHINE ? (machine_id - 1) : machine_id);
   uint16_t t_id = (uint16_t) params.id;
   if (t_id == 0) my_printf(yellow, "FOLLOWER-id %d \n", flr_id);
   uint16_t remote_ldr_thread = t_id;
@@ -94,7 +94,7 @@ void *follower(void *arg)
   zk_resp_t *resp = (zk_resp_t *) malloc(ZK_TRACE_BATCH * sizeof(zk_resp_t));
   struct ibv_mr *w_mr;
   zk_trace_op_t *ops = (zk_trace_op_t *) memalign(4096, ZK_TRACE_BATCH *  sizeof(zk_trace_op_t));
-  struct recv_info *prep_recv_info, *com_recv_info;
+  recv_info_t *prep_recv_info, *com_recv_info;
   prep_recv_info = init_recv_info(cb, prep_push_ptr, FLR_PREP_BUF_SLOTS,
                                   (uint32_t) FLR_PREP_RECV_SIZE, FLR_MAX_RECV_PREP_WRS, prep_recv_qp,
                                   FLR_MAX_RECV_PREP_WRS,
@@ -106,7 +106,7 @@ void *follower(void *arg)
                                  com_recv_wr, com_recv_sgl,
                                  (void*) com_buffer);
 
-  p_writes_t *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, protocol);
+  p_writes_t *p_writes = set_up_pending_writes(FLR_PENDING_WRITES, NULL, NULL, NULL, protocol);
   p_acks_t *p_acks = (p_acks_t *) calloc(1, sizeof(p_acks_t));
   zk_ack_mes_t *ack = (zk_ack_mes_t *) calloc(1, sizeof(zk_ack_mes_t));
     

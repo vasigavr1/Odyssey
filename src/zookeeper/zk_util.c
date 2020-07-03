@@ -115,8 +115,8 @@ void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
 }
 
 // Initialize the quorum info that contains the system configuration
-quorum_info_t* set_up_q_info(struct ibv_send_wr *w_send_wr,
-                             struct ibv_send_wr *r_send_wr,
+quorum_info_t* set_up_q_info(struct ibv_send_wr *prep_send_wr,
+                             struct ibv_send_wr *com_send_wr,
                              uint16_t credits[][MACHINE_NUM])
 {
   quorum_info_t * q_info = (quorum_info_t *) calloc(1, sizeof(quorum_info_t));
@@ -129,30 +129,34 @@ quorum_info_t* set_up_q_info(struct ibv_send_wr *w_send_wr,
     q_info->send_vector[i] = true;
   }
 
-  //q_info->num_of_send_wrs = Q_INFO_NUM_SEND_WRS;
-  //q_info->send_wrs_ptrs = (struct ibv_send_wr **) malloc(Q_INFO_NUM_SEND_WRS * sizeof(struct ibv_send_wr *));
-  //q_info->send_wrs_ptrs[0] = w_send_wr;
-  //q_info->send_wrs_ptrs[1] = r_send_wr;
-  //
-  //q_info->num_of_credit_targets = Q_INFO_CREDIT_TARGETS;
-  //q_info->targets = malloc (q_info->num_of_credit_targets * sizeof(uint16_t));
-  //q_info->targets[0] = W_CREDITS;
-  //q_info->targets[1] = R_CREDITS;
-  //q_info->credit_ptrs = malloc(q_info->num_of_credit_targets * sizeof(uint16_t*));
-  //q_info->credit_ptrs[0] = credits[W_VC];
-  //q_info->credit_ptrs[1] = credits[R_VC];
+  q_info->num_of_send_wrs = Q_INFO_NUM_SEND_WRS;
+  q_info->send_wrs_ptrs = (struct ibv_send_wr **) malloc(Q_INFO_NUM_SEND_WRS * sizeof(struct ibv_send_wr *));
+  q_info->send_wrs_ptrs[0] = prep_send_wr;
+  q_info->send_wrs_ptrs[1] = com_send_wr;
 
-
+  q_info->num_of_credit_targets = Q_INFO_CREDIT_TARGETS;
+  q_info->targets = malloc (q_info->num_of_credit_targets * sizeof(uint16_t));
+  q_info->targets[0] = W_CREDITS;
+  q_info->targets[1] = COMMIT_CREDITS;
+  q_info->credit_ptrs = malloc(q_info->num_of_credit_targets * sizeof(uint16_t*));
+  q_info->credit_ptrs[0] = credits[PREP_VC];
+  q_info->credit_ptrs[1] = credits[COMM_VC];
   return q_info;
 
 }
 
 
 // Set up a struct that stores pending writes
-p_writes_t* set_up_pending_writes(uint32_t size, int protocol)
+p_writes_t* set_up_pending_writes(uint32_t size, struct ibv_send_wr *prep_send_wr,
+                                  struct ibv_send_wr *com_send_wr,
+                                  uint16_t credits[][MACHINE_NUM],
+                                  protocol_t protocol)
 {
   int i;
   p_writes_t* p_writes = (p_writes_t*) calloc(1,sizeof(p_writes_t));
+  p_writes->q_info = protocol == LEADER ? set_up_q_info(prep_send_wr, com_send_wr, credits) : NULL;
+
+
   p_writes->g_id = (uint64_t *) malloc(size * sizeof(uint64_t));
   p_writes->w_state = (enum write_state *) malloc(size * sizeof(enum write_state));
   p_writes->session_id = (uint32_t *) calloc(size, sizeof(uint32_t));
@@ -326,12 +330,12 @@ void set_up_ldr_WRs(struct ibv_send_wr *prep_send_wr, struct ibv_sge *prep_send_
 }
 // The Leader sends credits to the followers when it receives their writes
 // The follower sends credits to the leader when it receives commit messages
-void ldr_set_up_credits_and_WRs(uint16_t credits[][FOLLOWER_MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
+void ldr_set_up_credits_and_WRs(uint16_t credits[][MACHINE_NUM], struct ibv_recv_wr *credit_recv_wr,
                                 struct ibv_sge *credit_recv_sgl, struct hrd_ctrl_blk *cb,
                                 uint32_t max_credit_recvs)
 {
   int i = 0;
-  for (i = 0; i < FOLLOWER_MACHINE_NUM; i++) {
+  for (i = 0; i < MACHINE_NUM; i++) {
     credits[PREP_VC][i] = PREPARE_CREDITS;
     credits[COMM_VC][i] = COMMIT_CREDITS;
   }

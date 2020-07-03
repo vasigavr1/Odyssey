@@ -104,6 +104,8 @@ typedef struct key mica_key_t;
 #define MEASURE_READ_LATENCY 2 // 2 means mixed
 #define ENABLE_STAT_COUNTING 1
 
+#define CREDIT_TIMEOUT  M_16 // B_4_EXACT //
+
 // PRINTS -- STATS
 #define EXIT_ON_PRINT 0
 #define PRINT_NUM 4
@@ -305,6 +307,14 @@ typedef struct mcast_essentials {
   uint32_t qpn[MCAST_QP_NUM];
   uint32_t qkey[MCAST_QP_NUM];
 } mcast_essentials_t;
+
+
+/*-------------------------------------------------
+	-----------------BROADCAST-------------------------
+--------------------------------------------------*/
+#define MAX_BCAST_BATCH (ENABLE_MULTICAST == 1 ? 4 : 4) //how many broadcasts can fit in a batch
+#define MESSAGES_IN_BCAST (ENABLE_MULTICAST == 1 ? 1 : (REM_MACH_NUM))
+#define MESSAGES_IN_BCAST_BATCH MAX_BCAST_BATCH * MESSAGES_IN_BCAST //must be smaller than the q_depth
 
 //////////////////////////////////////////////////////
 /////////////~~~~GLOBALS~~~~~~/////////////////////////

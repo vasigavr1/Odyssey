@@ -110,7 +110,7 @@ static inline void flr_check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *w
                                          uint32_t *wait_for_gid_dbg_counter, volatile zk_prep_mes_ud_t *prep_buf,
                                          uint32_t pull_ptr, p_writes_t *p_writes, uint16_t t_id)
 {
-  uint32_t waiting_time = M_16;
+  uint32_t waiting_time = M_256;
   if (unlikely((*wait_for_preps_dbg_counter) > waiting_time)) {
     my_printf(red, "Follower %d waits for preps, committed g_id %lu \n", t_id, committed_global_w_id);
     zk_prepare_t *prep = (zk_prepare_t *)&prep_buf[pull_ptr].prepare.prepare;
@@ -182,7 +182,7 @@ static inline void zk_check_polled_ack_and_print(zk_ack_mes_t *ack, uint16_t ack
   if (ENABLE_ASSERTIONS) {
     assert (ack->opcode == KVS_OP_ACK);
     assert(ack_num > 0 && ack_num <= FLR_PENDING_WRITES);
-    assert(ack->follower_id < FOLLOWER_MACHINE_NUM);
+    assert(ack->follower_id < MACHINE_NUM);
   }
   if (DEBUG_ACKS)
     my_printf(yellow, "Leader %d ack opcode %d with %d acks for l_id %lu, oldest lid %lu, at offset %d from flr %u \n",
@@ -208,7 +208,7 @@ static inline void zk_check_ack_l_id_is_small_enough(uint16_t ack_num,
 }
 
 static inline void zk_debug_info_bookkeep(int completed_messages, int polled_messages,
-                                          uint32_t *dbg_counter, struct recv_info *ack_recv_info,
+                                          uint32_t *dbg_counter, recv_info_t *ack_recv_info,
                                           uint32_t *outstanding_prepares, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) assert(polled_messages == completed_messages);
@@ -256,7 +256,7 @@ static inline void zk_check_polled_commit_and_print(zk_com_mes_t *com,
 
 static inline void zk_checks_after_polling_commits(uint32_t *dbg_counter,
                                                    uint32_t polled_messages,
-                                                   struct recv_info *com_recv_info)
+                                                   recv_info_t *com_recv_info)
 {
   if (polled_messages > 0) {
     if (ENABLE_ASSERTIONS) (*dbg_counter) = 0;
@@ -321,7 +321,7 @@ zk_check_prepare_and_print(zk_prepare_t *prepare,
   uint32_t push_ptr = p_writes->push_ptr;
   if (ENABLE_ASSERTIONS) {
     assert(prepare->sess_id < SESSIONS_PER_THREAD);
-    assert(prepare->flr_id <= FOLLOWER_MACHINE_NUM);
+    assert(prepare->flr_id <= MACHINE_NUM);
     assert(prepare->g_id > committed_global_w_id);
     assert(prepare->val_len == VALUE_SIZE >> SHIFT_BITS);
     assert(p_writes->w_state[push_ptr] == INVALID);
@@ -335,7 +335,7 @@ zk_check_prepare_and_print(zk_prepare_t *prepare,
 static inline void zk_checks_after_polling_prepares(p_writes_t *p_writes,
                                                     uint32_t *wait_for_prepares_dbg_counter,
                                                     uint32_t polled_messages,
-                                                    struct recv_info *prep_recv_info,
+                                                    recv_info_t *prep_recv_info,
                                                     p_acks_t *p_acks, uint16_t t_id)
 {
 
@@ -370,6 +370,25 @@ static inline void zk_checks_and_stats_on_bcasting_prepares(p_writes_t *p_writes
   }
 }
 
+
+static inline void zk_checks_and_stats_on_bcasting_commits(zk_com_fifo_t *com_fifo,
+                                                           zk_com_mes_t *com_mes,
+                                                           uint16_t  br_i,
+                                                           uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(br_i <= COMMIT_CREDITS);
+    assert(com_fifo != NULL);
+    if (com_fifo->size > COMMIT_FIFO_SIZE)
+      printf("com fifo size %u/%d \n", com_fifo->size, COMMIT_FIFO_SIZE);
+    assert(com_fifo->size <= COMMIT_FIFO_SIZE);
+    assert(com_mes->com_num > 0 && com_mes->com_num <= MAX_LIDS_IN_A_COMMIT);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].coms_sent += com_mes->com_num;
+    t_stats[t_id].coms_sent_mes_num++;
+  }
+}
 
 
 

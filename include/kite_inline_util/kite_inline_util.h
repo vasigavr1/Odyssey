@@ -8,7 +8,7 @@
 #include "generic_util.h"
 #include "kvs_util.h"
 #include "kite_debug_util.h"
-#include "config_util.h"
+#include "kite_config_util.h"
 #include "../general_util/inline_util.h"
 #include "paxos_util.h"
 #include "reserve_stations_util.h"
@@ -230,8 +230,8 @@ static inline void broadcast_writes(p_ops_t *p_ops,
                                     uint32_t *release_rdy_dbg_cnt, uint32_t *time_out_cnt,
                                     struct ibv_sge *w_send_sgl, struct ibv_send_wr *r_send_wr,
                                     struct ibv_send_wr *w_send_wr,
-                                    uint64_t *w_br_tx, struct recv_info *ack_recv_info,
-                                    struct recv_info *r_rep_recv_info,
+                                    uint64_t *w_br_tx, recv_info_t *ack_recv_info,
+                                    recv_info_t *r_rep_recv_info,
                                     uint16_t t_id, uint32_t *outstanding_writes, uint64_t *expected_next_l_id)
 {
   //printf("Worker %d bcasting writes \n", t_id);
@@ -296,7 +296,7 @@ static inline void broadcast_reads(p_ops_t *p_ops,
                                    uint32_t *time_out_cnt,
                                    struct ibv_sge *r_send_sgl, struct ibv_send_wr *r_send_wr,
                                    struct ibv_send_wr *w_send_wr,
-                                   uint64_t *r_br_tx, struct recv_info *r_rep_recv_info,
+                                   uint64_t *r_br_tx, recv_info_t *r_rep_recv_info,
                                    uint16_t t_id, uint32_t *outstanding_reads)
 {
   uint8_t vc = R_VC;
@@ -348,7 +348,7 @@ static inline void broadcast_reads(p_ops_t *p_ops,
 // Send Read Replies
 static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
                                struct ibv_send_wr *r_rep_send_wr, struct ibv_sge *r_rep_send_sgl,
-                               struct recv_info *r_recv_info, struct recv_info *w_recv_info,
+                               recv_info_t *r_recv_info, recv_info_t *w_recv_info,
                                uint64_t *r_rep_tx,  uint16_t t_id)
 {
   uint16_t mes_i = 0, accept_recvs_to_post = 0, read_recvs_to_post = 0;
@@ -373,7 +373,6 @@ static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
     mes_i++;
   }
   if (mes_i > 0) {
-    //if (ENABLE_ASSERTIONS) assert(mes_i == accept_recvs_to_post + read_recvs_to_post);
     if (read_recvs_to_post > 0) {
       if (DEBUG_READ_REPS) printf("Wrkr %d posting %d read recvs\n", t_id,  read_recvs_to_post);
       post_recvs_with_recv_info(r_recv_info, read_recvs_to_post);
@@ -394,7 +393,7 @@ static inline void send_r_reps(p_ops_t *p_ops, struct hrd_ctrl_blk *cb,
 // Send a batched ack that denotes the first local write id and the number of subsequent lids that are being acked
 static inline void send_acks(struct ibv_send_wr *ack_send_wr,
                              uint64_t *sent_ack_tx,
-                             struct hrd_ctrl_blk *cb, struct recv_info *w_recv_info,
+                             struct hrd_ctrl_blk *cb, recv_info_t *w_recv_info,
                              ack_mes_t *acks, uint16_t t_id)
 {
   uint8_t ack_i = 0, prev_ack_i = 0, first_wr = 0;
@@ -477,7 +476,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
 static inline void poll_for_writes(volatile w_mes_ud_t *incoming_ws,
                                    uint32_t *pull_ptr, p_ops_t *p_ops,
                                    struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                   struct recv_info *w_recv_info, ack_mes_t *acks,
+                                   recv_info_t *w_recv_info, ack_mes_t *acks,
                                    uint32_t *completed_but_not_polled_writes,
                                    uint16_t t_id)
 {
@@ -709,7 +708,7 @@ static inline void poll_acks(volatile ack_mes_ud_t *incoming_acks, uint32_t *pul
                              p_ops_t *p_ops,
                              uint16_t credits[][MACHINE_NUM],
                              struct ibv_cq * ack_recv_cq, struct ibv_wc *ack_recv_wc,
-                             struct recv_info *ack_recv_info,
+                             recv_info_t *ack_recv_info,
                              latency_info_t *latency_info,
                              uint16_t t_id, uint32_t *dbg_counter,
                              uint32_t *outstanding_writes)
@@ -774,7 +773,7 @@ static inline void poll_for_read_replies(volatile r_rep_mes_ud_t *incoming_r_rep
                                          uint32_t *pull_ptr, p_ops_t *p_ops,
                                          uint16_t credits[][MACHINE_NUM],
                                          struct ibv_cq *r_rep_recv_cq, struct ibv_wc *r_rep_recv_wc,
-                                         struct recv_info *r_rep_recv_info, uint16_t t_id,
+                                         recv_info_t *r_rep_recv_info, uint16_t t_id,
                                          uint32_t *outstanding_reads, uint32_t *debug_cntr)
 {
   if (p_ops->r_rep_fifo->mes_size == R_REP_FIFO_SIZE) return;

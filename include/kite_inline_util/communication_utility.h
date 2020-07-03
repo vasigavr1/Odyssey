@@ -8,32 +8,13 @@
 #include "main.h"
 #include "../general_util/latency_util.h"
 #include "kite_debug_util.h"
-#include "config_util.h"
+#include "kite_config_util.h"
 #include "../general_util/rdma_gen_util.h"
 #include "reserve_stations_util.h"
 
 
-
-static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], quorum_info_t *q_info,
-                                    uint16_t mes_sent, uint8_t vc)
-{
-  for (uint8_t i = 0; i < q_info->active_num; i++) {
-    if (ENABLE_ASSERTIONS) {
-      assert(credits[vc][q_info->active_ids[i]] >= mes_sent);
-      assert(q_info->active_ids[i] != machine_id && q_info->active_ids[i] < MACHINE_NUM);
-      //assert(q_info->active_num == REM_MACH_NUM); // debug no-failure case
-    }
-    credits[vc][q_info->active_ids[i]] -= mes_sent;
-  }
-}
-
-
-
-
-
-
 static inline int find_how_many_write_messages_can_be_polled(struct ibv_cq *w_recv_cq, struct ibv_wc *w_recv_wc,
-                                                             struct recv_info *w_recv_info, ack_mes_t *acks,
+                                                             recv_info_t *w_recv_info, ack_mes_t *acks,
                                                              uint32_t *completed_but_not_polled_writes,
                                                              uint16_t t_id)
 {
@@ -231,7 +212,7 @@ static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
 
 // Whe broadcasting writes, some of them may be accepts which trigger read replies instead of write acks
 // For that reason we need to potentially also post receives for r_reps when broadcasting writes
-static inline void post_receives_for_r_reps_for_accepts(struct recv_info *r_rep_recv_info,
+static inline void post_receives_for_r_reps_for_accepts(recv_info_t *r_rep_recv_info,
                                                         uint16_t t_id)
 {
   uint32_t recvs_to_post_num = MAX_RECV_R_REP_WRS - r_rep_recv_info->posted_recvs;
