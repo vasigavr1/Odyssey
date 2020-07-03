@@ -219,7 +219,6 @@ static inline void post_receives_for_r_reps_for_accepts(recv_info_t *r_rep_recv_
   if (recvs_to_post_num > 0) {
     // printf("Wrkr %d posting %d recvs\n", t_id,  recvs_to_post_num);
     if (recvs_to_post_num) post_recvs_with_recv_info(r_rep_recv_info, recvs_to_post_num);
-    r_rep_recv_info->posted_recvs += recvs_to_post_num;
   }
 }
 

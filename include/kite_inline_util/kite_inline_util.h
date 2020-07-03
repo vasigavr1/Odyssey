@@ -442,7 +442,7 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
   if (recvs_to_post_num > 0) {
     post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
     if (DEBUG_RECEIVES) {
-      w_recv_info->posted_recvs += recvs_to_post_num;
+      //w_recv_info->posted_recvs += recvs_to_post_num;
       assert(w_recv_info->posted_recvs == MAX_RECV_W_WRS);
     }
     //w_recv_info->posted_recvs += recvs_to_post_num;

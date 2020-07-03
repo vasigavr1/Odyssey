@@ -501,7 +501,8 @@ static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t
 
 	if (polled_messages > 0) {
     //poll_cq(w_recv_cq, polled_messages, w_recv_wc, "polling for writes");
-    post_recvs_with_recv_info(w_recv_info, polled_messages);
+    w_recv_info->posted_recvs -= polled_messages;
+    //post_recvs_with_recv_info(w_recv_info, polled_messages);
   }
 }
 
@@ -513,7 +514,7 @@ static inline void poll_for_writes(volatile zk_w_mes_ud_t *incoming_ws, uint32_t
 
 // Poll for credits and increment the credits according to the protocol
 static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc* credit_wc,
-                                    uint16_t credits[][MACHINE_NUM])
+                                    uint16_t credits[][MACHINE_NUM], recv_info_t *cred_recv_info)
 {
   int credits_found = 0;
   credits_found = ibv_poll_cq(credit_recv_cq, LDR_MAX_CREDIT_RECV, credit_wc);
@@ -522,6 +523,7 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
       fprintf(stderr, "Bad wc status when polling for credits to send a broadcast %d\n", credit_wc[credits_found -1].status);
       assert(false);
     }
+    cred_recv_info->posted_recvs -= credits_found;
     for (uint32_t j = 0; j < credits_found; j++) {
       credits[COMMIT_W_QP_ID][credit_wc[j].imm_data]+= FLR_CREDITS_IN_MESSAGE;
     }
@@ -534,8 +536,9 @@ static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc
 
 //Checks if there are enough credits to perform a broadcast
 static inline bool zk_check_bcast_credits(uint16_t credits[][MACHINE_NUM], hrd_ctrl_blk_t* cb,
-                                         struct ibv_wc* credit_wc,
-                                         uint32_t* credit_debug_cnt, uint8_t vc)
+                                          struct ibv_wc* credit_wc,
+                                          uint32_t* credit_debug_cnt, uint8_t vc,
+                                          recv_info_t *cred_recv_info)
 {
   bool poll_for_credits = false;
   uint16_t j;
@@ -553,7 +556,7 @@ static inline bool zk_check_bcast_credits(uint16_t credits[][MACHINE_NUM], hrd_c
   if (vc == PREP_VC) return !poll_for_credits;
 
   if (poll_for_credits)
-    ldr_poll_credits(cb->dgram_recv_cq[FC_QP_ID], credit_wc, credits);
+    ldr_poll_credits(cb->dgram_recv_cq[FC_QP_ID], credit_wc, credits, cred_recv_info);
   // We polled for credits, if we did not find enough just break
   for (j = 0; j < MACHINE_NUM; j++) {
     if (credits[vc][j] == 0) {
@@ -636,7 +639,7 @@ static inline void broadcast_commits(p_writes_t *p_writes, uint16_t credits[][MA
                                      zk_com_fifo_t *com_fifo, uint64_t *commit_br_tx,
 																		 uint32_t *credit_debug_cnt, struct ibv_wc *credit_wc,
                                      struct ibv_sge *com_send_sgl, struct ibv_send_wr *com_send_wr,
-                                     struct ibv_recv_wr *credit_recv_wr,
+                                     recv_info_t * cred_recv_info, //struct ibv_recv_wr *credit_recv_wr,
 																		 recv_info_t *w_recv_info, uint16_t t_id)
 {
 
@@ -646,7 +649,7 @@ static inline void broadcast_commits(p_writes_t *p_writes, uint16_t credits[][MA
   uint16_t  br_i = 0, credit_recv_counter = 0;
   while (com_fifo->size > 0) {
     // Check if there are enough credits for a Broadcast
-    if (!zk_check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc)) {
+    if (!zk_check_bcast_credits(credits, cb, credit_wc, credit_debug_cnt, vc, cred_recv_info)) {
       if (ENABLE_STAT_COUNTING) t_stats[t_id].stalled_com_credit++;
       break;
     }
@@ -663,27 +666,31 @@ static inline void broadcast_commits(p_writes_t *p_writes, uint16_t credits[][MA
     zk_checks_and_stats_on_bcasting_commits(com_fifo, com_mes, br_i, t_id);
     if ((*commit_br_tx) % FLR_CREDITS_IN_MESSAGE == 0) credit_recv_counter++;
     if (br_i == MAX_BCAST_BATCH) {
+      post_recvs_with_recv_info(cred_recv_info, LDR_MAX_CREDIT_RECV - cred_recv_info->posted_recvs);
       post_quorum_broadasts_and_recvs(w_recv_info, LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs,
                                       p_writes->q_info, br_i, *commit_br_tx, com_send_wr, cb->dgram_qp[COMMIT_W_QP_ID],
                                       COM_ENABLE_INLINING);
+
 
 
       //uint32_t recvs_to_post_num = LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs;
       //post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
       //w_recv_info->posted_recvs += recvs_to_post_num;
       //printf("Broadcasting %u commits \n", br_i);
-      post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
+      //post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
 			//com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
       br_i = 0;
     }
   }
 	if (br_i > 0) {
     //printf("Broadcasting %u commits \n", br_i);
+    post_recvs_with_recv_info(cred_recv_info, LDR_MAX_CREDIT_RECV - cred_recv_info->posted_recvs);
     post_quorum_broadasts_and_recvs(w_recv_info, LDR_MAX_RECV_W_WRS - w_recv_info->posted_recvs,
                                     p_writes->q_info, br_i, *commit_br_tx, com_send_wr, cb->dgram_qp[COMMIT_W_QP_ID],
                                     COM_ENABLE_INLINING);
 
-		post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
+
+		//post_recvs_and_batch_bcasts_to_NIC(0, cb, com_send_wr, credit_recv_wr, &credit_recv_counter, COMMIT_W_QP_ID);
 		//com_send_wr[0].send_flags = COM_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
 	}
 	if (ENABLE_ASSERTIONS) assert(w_recv_info->posted_recvs <= LDR_MAX_RECV_W_WRS);
@@ -895,7 +902,6 @@ static inline void send_acks_to_ldr(p_writes_t *p_writes, struct ibv_send_wr *ac
 	uint32_t recvs_to_post_num = FLR_MAX_RECV_PREP_WRS - posted_recvs;
 	if (recvs_to_post_num > 0) {
     post_recvs_with_recv_info(prep_recv_info, recvs_to_post_num);
-    prep_recv_info->posted_recvs += recvs_to_post_num;
 //    printf("FLR %d posting %u recvs and has a total of %u recvs for prepares \n",
 //           t_id, recvs_to_post_num,  prep_recv_info->posted_recvs);
     if (ENABLE_ASSERTIONS) {
@@ -920,7 +926,7 @@ static inline void send_credits_for_commits(recv_info_t *com_recv_info, struct h
   uint32_t recvs_to_post_num = (uint32_t) (credit_num * FLR_CREDITS_IN_MESSAGE);
   if (ENABLE_ASSERTIONS) assert(recvs_to_post_num < FLR_MAX_RECV_COM_WRS);
   post_recvs_with_recv_info(com_recv_info, recvs_to_post_num);
-    com_recv_info->posted_recvs += recvs_to_post_num;
+    //com_recv_info->posted_recvs += recvs_to_post_num;
 //		printf("FLR %d posting %u recvs and has a total of %u recvs for commits \n",
 //					 t_id, recvs_to_post_num,  com_recv_info->posted_recvs);
 

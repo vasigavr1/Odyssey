@@ -79,7 +79,7 @@ void *leader(void *arg)
 	uint32_t trace_iter = 0;
   uint64_t prep_br_tx = 0, commit_br_tx = 0;
 
-  recv_info_t *w_recv_info, *ack_recv_info, *com_rev_info;
+  recv_info_t *w_recv_info, *ack_recv_info, *cred_recv_info;
   w_recv_info =  init_recv_info(cb, w_buf_push_ptr, LEADER_W_BUF_SLOTS,
                                 (uint32_t) LDR_W_RECV_SIZE, LDR_MAX_RECV_W_WRS,
                                 cb->dgram_qp[COMMIT_W_QP_ID],
@@ -92,10 +92,9 @@ void *leader(void *arg)
                                  LDR_MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
                                  (void*) ack_buffer);
 
-  //com_rev_info = init_recv_info(cb, ack_buf_push_ptr, LEADER_ACK_BUF_SLOTS,
-  //                              (uint32_t) LDR_ACK_RECV_SIZE, 0, cb->dgram_qp[PREP_ACK_QP_ID],
-  //                              LDR_MAX_RECV_ACK_WRS, ack_recv_wr, ack_recv_sgl,
-  //                              (void*) ack_buffer);
+  cred_recv_info = init_recv_info(cb, 0, 0, 64, 0, cb->dgram_qp[FC_QP_ID],
+                                 LDR_MAX_CREDIT_RECV, credit_recv_wr, &credit_recv_sgl,
+                                 (void*) cb->dgram_buf);
 
 
 	latency_info_t latency_info = {
@@ -125,14 +124,14 @@ void *leader(void *arg)
 	/* ---------------------------------------------------------------------------
 	------------------------------INITIALIZE STATIC STRUCTUREs--------------------
 		---------------------------------------------------------------------------*/
+  for (uint8_t m_id = 0; m_id < MACHINE_NUM; m_id++) {
+    credits[PREP_VC][m_id] = PREPARE_CREDITS;
+    credits[COMM_VC][m_id] = COMMIT_CREDITS;
+  }
+  set_up_ldr_WRs(prep_send_wr, prep_send_sgl,
+                  com_send_wr, com_send_sgl,
+                  t_id, follower_id, prep_mr, com_mr, mcast);
 
-	if (WRITE_RATIO > 0) {
-    ldr_set_up_credits_and_WRs(credits, credit_recv_wr,
-                               &credit_recv_sgl, cb, LDR_MAX_CREDIT_RECV);
-		set_up_ldr_WRs(prep_send_wr, prep_send_sgl,
-                   com_send_wr, com_send_sgl,
-                   t_id, follower_id, prep_mr, com_mr, mcast);
-	}
 	// TRACE
 	trace_t *trace = NULL;
   if (!ENABLE_CLIENTS)
@@ -183,7 +182,7 @@ void *leader(void *arg)
     if (WRITE_RATIO > 0)
       broadcast_commits(p_writes, credits, cb, com_fifo,
                         &commit_br_tx, credit_debug_cnt, credit_wc,
-                        com_send_sgl, com_send_wr, credit_recv_wr,
+                        com_send_sgl, com_send_wr, cred_recv_info,
                         w_recv_info, t_id);
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------

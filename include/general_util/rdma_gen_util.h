@@ -9,7 +9,7 @@
 #include "hrd.h"
 
 // Set up the receive info
-static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb,uint32_t push_ptr, uint32_t buf_slots,
+static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb, uint32_t push_ptr, uint32_t buf_slots,
                                    uint32_t slot_size, uint32_t posted_recvs,
                                    struct ibv_qp *recv_qp, int max_recv_wrs,
                                    struct ibv_recv_wr *recv_wr,
@@ -27,9 +27,19 @@ static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb,uint32_t push_ptr, ui
   recv->recv_sgl = recv_sgl;
 
   for (int i = 0; i < max_recv_wrs; i++) {
-    recv->recv_sgl[i].length = slot_size;
-    recv->recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
-    recv->recv_wr[i].sg_list = &(recv->recv_sgl[i]);
+    // It can be that incoming messages have no payload,
+    // and thus sgls (which store buffer pointers) are not useful
+    if (recv->buf_slots == 0) {
+      recv->recv_wr[i].sg_list = recv->recv_sgl;
+      recv->recv_sgl->addr = (uintptr_t) buf;
+      recv->recv_sgl->length = slot_size;
+      recv->recv_sgl->lkey = cb->dgram_buf_mr->lkey;
+    }
+    else {
+      recv->recv_wr[i].sg_list = &(recv->recv_sgl[i]);
+      recv->recv_sgl[i].length = slot_size;
+      recv->recv_sgl[i].lkey = cb->dgram_buf_mr->lkey;
+    }
     recv->recv_wr[i].num_sge = 1;
   }
   return recv;
@@ -39,17 +49,20 @@ static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb,uint32_t push_ptr, ui
 // Post Receives
 static inline void post_recvs_with_recv_info(recv_info_t *recv, uint32_t recv_num)
 {
+  if (ENABLE_ASSERTIONS) assert(recv_num < BILLION); // asserting the number is positive
   if (recv_num == 0) return;
   uint16_t j;
   struct ibv_recv_wr *bad_recv_wr;
   for (j = 0; j < recv_num; j++) {
-    recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
+    if (recv->buf_slots > 0)
+      recv->recv_sgl[j].addr = (uintptr_t) recv->buf + (recv->push_ptr * recv->slot_size);
     //printf("Posting a receive at push ptr %u at address %lu \n", recv->w_push_ptr, recv->recv_sgl[j].addr);
     MOD_INCR(recv->push_ptr, recv->buf_slots);
     recv->recv_wr[j].next = (j == recv_num - 1) ?
                             NULL : &recv->recv_wr[j + 1];
   }
   int ret = ibv_post_recv(recv->recv_qp, &recv->recv_wr[0], &bad_recv_wr);
+  recv->posted_recvs += recv_num;
   if (ENABLE_ASSERTIONS) {
     if (ret != 0 ) {
       my_printf(red, "ibv_post_recv error %d \n", ret);
@@ -100,7 +113,6 @@ static inline void post_quorum_broadasts_and_recvs(recv_info_t *recv_info, uint3
   if (recvs_to_post_num > 0) {
     // printf("Wrkr %d posting %d recvs\n", g_id,  recvs_to_post_num);
     if (recvs_to_post_num) post_recvs_with_recv_info(recv_info, recvs_to_post_num);
-    recv_info->posted_recvs += recvs_to_post_num;
   }
   if (DEBUG_SS_BATCH)
     my_printf(green, "Sending %u bcasts, total %lu \n", br_i, br_tx);
