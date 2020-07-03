@@ -2,12 +2,9 @@
 // Created by vasilis on 05/02/19.
 //
 
-//#include "util.h"
-//#include "kite_inline_util.h"
 #include "interface.h"
 #include "trace_util.h"
 #include "kvs.h"
-#include "stats.h"
 
 
 #define CLIENT_ASSERTIONS 1

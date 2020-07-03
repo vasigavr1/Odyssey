@@ -7,7 +7,7 @@ set(KeyValueCache_VERSION_MINOR 0)
 include_directories(include/libhrd include/kite include/mica include/general_util  include/zookeeper
         include/kite_inline_util /usr/include/)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu2x -Wno-address-of-packed-member \
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -Wno-address-of-packed-member \
 -Wno-format-truncation -g  -march=native")
 
 

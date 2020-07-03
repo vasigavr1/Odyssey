@@ -243,8 +243,7 @@ static inline void broadcast_writes(p_ops_t *p_ops,
     &p_ops->w_fifo->w_message[bcast_pull_ptr], release_rdy_dbg_cnt, t_id))
     return;
   if (!check_bcast_credits(credits[vc], p_ops->q_info, &time_out_cnt[vc],
-                           &available_credits, r_send_wr, w_send_wr,
-                           1, t_id))
+                           &available_credits, 1, t_id))
     return;
   if (ENABLE_ASSERTIONS) assert(available_credits <= W_CREDITS);
 
@@ -304,12 +303,10 @@ static inline void broadcast_reads(p_ops_t *p_ops,
   uint16_t br_i = 0, mes_sent = 0, available_credits = 0;
   uint32_t bcast_pull_ptr = p_ops->r_fifo->bcast_pull_ptr;
 
-  if (p_ops->r_fifo->bcast_size > 0) {
-    if (!check_bcast_credits(credits[vc], p_ops->q_info, &time_out_cnt[vc],
-                             &available_credits, r_send_wr, w_send_wr, 1,  t_id))
-      return;
-  }
-  else return;
+  if (p_ops->r_fifo->bcast_size == 0)  return;
+  else if (!check_bcast_credits(credits[vc], p_ops->q_info, &time_out_cnt[vc],
+                                &available_credits, 1,  t_id)) return;
+
   if (ENABLE_ASSERTIONS) assert(available_credits <= R_CREDITS);
 
   while (p_ops->r_fifo->bcast_size > 0 &&  mes_sent < available_credits) {

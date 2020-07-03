@@ -114,6 +114,39 @@ void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t fifos_num)
   }
 }
 
+// Initialize the quorum info that contains the system configuration
+quorum_info_t* set_up_q_info(struct ibv_send_wr *w_send_wr,
+                             struct ibv_send_wr *r_send_wr,
+                             uint16_t credits[][MACHINE_NUM])
+{
+  quorum_info_t * q_info = (quorum_info_t *) calloc(1, sizeof(quorum_info_t));
+  q_info->active_num = REM_MACH_NUM;
+  q_info->first_active_rm_id = 0;
+  q_info->last_active_rm_id = REM_MACH_NUM - 1;
+  for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
+    uint8_t m_id = i < machine_id ? i : (uint8_t) (i + 1);
+    q_info->active_ids[i] = m_id;
+    q_info->send_vector[i] = true;
+  }
+
+  //q_info->num_of_send_wrs = Q_INFO_NUM_SEND_WRS;
+  //q_info->send_wrs_ptrs = (struct ibv_send_wr **) malloc(Q_INFO_NUM_SEND_WRS * sizeof(struct ibv_send_wr *));
+  //q_info->send_wrs_ptrs[0] = w_send_wr;
+  //q_info->send_wrs_ptrs[1] = r_send_wr;
+  //
+  //q_info->num_of_credit_targets = Q_INFO_CREDIT_TARGETS;
+  //q_info->targets = malloc (q_info->num_of_credit_targets * sizeof(uint16_t));
+  //q_info->targets[0] = W_CREDITS;
+  //q_info->targets[1] = R_CREDITS;
+  //q_info->credit_ptrs = malloc(q_info->num_of_credit_targets * sizeof(uint16_t*));
+  //q_info->credit_ptrs[0] = credits[W_VC];
+  //q_info->credit_ptrs[1] = credits[R_VC];
+
+
+  return q_info;
+
+}
+
 
 // Set up a struct that stores pending writes
 p_writes_t* set_up_pending_writes(uint32_t size, int protocol)

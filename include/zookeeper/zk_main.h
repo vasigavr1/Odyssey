@@ -368,6 +368,7 @@ typedef struct pending_writes {
 	bool *is_local;
 	bool *stalled;
 	bool all_sessions_stalled;
+  quorum_info_t *q_info;
 } p_writes_t;
 
 
