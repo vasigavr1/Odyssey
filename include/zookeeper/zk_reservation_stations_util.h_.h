@@ -271,5 +271,51 @@ static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
 }
 
 
+/* ---------------------------------------------------------------------------
+//------------------------------ UNICASTS --------------------------------
+//---------------------------------------------------------------------------*/
+
+
+// Form the Write work request for the write
+static inline void forge_w_wr(p_writes_t *p_writes,
+                              struct hrd_ctrl_blk *cb, struct ibv_sge *w_send_sgl,
+                              struct ibv_send_wr *w_send_wr, uint64_t *w_tx,
+                              uint16_t w_i, uint16_t credits,
+                              uint16_t t_id)
+{
+  zk_w_mes_t *w_mes_fifo = (zk_w_mes_t *) p_writes->w_fifo->fifo;
+  uint32_t w_ptr = p_writes->w_fifo->pull_ptr;
+  zk_w_mes_t *w_mes = &w_mes_fifo[w_ptr];
+  uint16_t coalesce_num = w_mes->write[0].w_num;
+  if (ENABLE_ASSERTIONS) assert(coalesce_num > 0);
+  w_send_sgl[w_i].length = coalesce_num * sizeof(zk_write_t);
+  w_send_sgl[w_i].addr = (uint64_t) (uintptr_t) w_mes;
+
+  checks_and_print_when_forging_write(w_mes, coalesce_num, w_send_sgl[w_i].length,
+                                      credits, t_id);
+
+  selective_signaling_for_unicast(w_tx, WRITE_SS_BATCH, w_send_wr,
+                                  w_i, cb->dgram_send_cq[COMMIT_W_QP_ID], FLR_W_ENABLE_INLINING,
+                                  "sending credits", t_id);
+  // Have the last message point to the current message
+  if (w_i > 0) w_send_wr[w_i - 1].next = &w_send_wr[w_i];
+
+}
+
+static inline void reset_write_mes(p_writes_t *p_writes,
+                                   zk_w_mes_t *w_mes_fifo,
+                                   uint16_t coalesce_num,
+                                   uint16_t t_id)
+{
+  // This message has been sent do not add other writes to it!
+  if (coalesce_num < MAX_W_COALESCE) {
+    MOD_INCR(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
+    w_mes_fifo[p_writes->w_fifo->push_ptr].write[0].w_num = 0;
+    //my_printf(yellow, "Zeroing when sending at pointer %u \n", p_writes->prep_fifo->push_ptr);
+  }
+}
+
+
+
 #endif //KITE_ZK_RESERVATION_STATIONS_UTIL_H_H
 

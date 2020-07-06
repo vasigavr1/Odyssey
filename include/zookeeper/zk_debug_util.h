@@ -429,4 +429,39 @@ static inline void checks_and_prints_posting_recvs_for_preps(recv_info_t *prep_r
 }
 
 
+static inline void checks_and_print_when_forging_write(zk_w_mes_t *w_mes, uint16_t coalesce_num,
+                                                       uint32_t length, uint16_t credits, uint16_t t_id)
+{
+  for (uint16_t i = 0; i < coalesce_num; i++) {
+    if (DEBUG_WRITES)
+      printf("Write %d, session id %u, val-len %u, message size %d\n", i,
+             w_mes->write[i].sess_id,
+             w_mes->write[i].val_len,
+             length);
+    if (ENABLE_ASSERTIONS) {
+      assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
+      assert(w_mes->write[i].opcode == KVS_OP_PUT);
+    }
+  }
+  if (DEBUG_WRITES)
+    my_printf(green, "Follower %d : I sent a write message %d of %u writes with size %u,  with  credits: %d \n",
+              t_id, w_mes->write->opcode, coalesce_num, length, credits);
+}
+
+
+static inline void checks_and_stats_when_sending_write(p_writes_t *p_writes,
+                                                       uint16_t coalesce_num,
+                                                       uint32_t *outstanding_writes,
+                                                       uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(p_writes->w_fifo->size >= coalesce_num);
+    (*outstanding_writes) += coalesce_num;
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].writes_sent += coalesce_num;
+    t_stats[t_id].writes_sent_mes_num++;
+  }
+}
+
 #endif //KITE_ZK_DEBUG_UTIL_H

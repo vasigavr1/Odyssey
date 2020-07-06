@@ -178,7 +178,7 @@ static inline void selective_signaling_for_unicast(uint64_t *tx, int ss_batch,
                                                    const char *mes,
                                                    uint16_t t_id)
 {
-  if (ENABLE_ADAPTIVE_INLINING)
+  if (!allow_inline && ENABLE_ADAPTIVE_INLINING)
     adaptive_inlining(send_wr->sg_list->length, &send_wr[mes_i], 1);
   else send_wr[mes_i].send_flags = allow_inline ? IBV_SEND_INLINE : 0;
 

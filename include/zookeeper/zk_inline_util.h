@@ -704,80 +704,28 @@ static inline void send_acks_to_ldr(p_writes_t *p_writes, struct ibv_send_wr *ac
 
 //Send credits for the commits
 static inline void send_credits_for_commits(recv_info_t *com_recv_info, struct hrd_ctrl_blk *cb,
-                                            struct ibv_send_wr *credit_wr, long *credit_tx,
+                                            struct ibv_send_wr *credit_wr, uint64_t *credit_tx,
                                             uint16_t credit_num, uint16_t t_id)
 {
   struct ibv_send_wr *bad_send_wr;
-  struct ibv_wc signal_send_wc;
   // RECEIVES FOR COMMITS
   uint32_t recvs_to_post_num = (uint32_t) (credit_num * FLR_CREDITS_IN_MESSAGE);
   if (ENABLE_ASSERTIONS) assert(recvs_to_post_num < FLR_MAX_RECV_COM_WRS);
   post_recvs_with_recv_info(com_recv_info, recvs_to_post_num);
-    //com_recv_info->posted_recvs += recvs_to_post_num;
-    //printf("FLR %d posting %u recvs and has a total of %u recvs for commits \n",
-			//		 t_id, recvs_to_post_num,  com_recv_info->posted_recvs);
+  //printf("FLR %d posting %u recvs and has a total of %u recvs for commits \n",
+	//		    t_id, recvs_to_post_num,  com_recv_info->posted_recvs);
 
   for (uint16_t credit_wr_i = 0; credit_wr_i < credit_num; credit_wr_i++) {
-    if (((*credit_tx) % COM_CREDIT_SS_BATCH) == 0) {
-     credit_wr->send_flags |= IBV_SEND_SIGNALED;
-    } else credit_wr->send_flags = IBV_SEND_INLINE;
-    if (((*credit_tx) % COM_CREDIT_SS_BATCH) == COM_CREDIT_SS_BATCH - 1) {
-     poll_cq(cb->dgram_send_cq[FC_QP_ID], 1, &signal_send_wc, "sending credits");
-    }
+    selective_signaling_for_unicast(credit_tx, COM_CREDIT_SS_BATCH, credit_wr,
+                                    credit_wr_i, cb->dgram_send_cq[FC_QP_ID], true,
+                                    "sending credits", t_id);
   }
-  (*credit_tx)++;
   credit_wr[credit_num - 1].next = NULL;
-//   my_printf(yellow, "I am sending %d credit message(s)\n", credit_num);
+  //my_printf(yellow, "I am sending %d credit message(s)\n", credit_num);
   int ret = ibv_post_send(cb->dgram_qp[FC_QP_ID], &credit_wr[0], &bad_send_wr);
   CPE(ret, "ibv_post_send error in credits", ret);
 }
 
-
-
-// Form the Write work request for the write
-static inline void forge_w_wr(p_writes_t *p_writes,
-                              struct hrd_ctrl_blk *cb, struct ibv_sge *w_send_sgl,
-                              struct ibv_send_wr *w_send_wr, long *w_tx,
-                              uint16_t w_i, uint16_t *credits,
-                              uint16_t t_id) {
-  uint16_t i;
-  struct ibv_wc signal_send_wc;
-  zk_w_mes_t *w_mes_fifo = (zk_w_mes_t *) p_writes->w_fifo->fifo;
-  uint32_t w_ptr = p_writes->w_fifo->pull_ptr;
-  zk_w_mes_t *w_mes = &w_mes_fifo[w_ptr];
-  uint16_t coalesce_num = w_mes->write[0].w_num;
-  if (ENABLE_ASSERTIONS) assert(coalesce_num > 0);
-  w_send_sgl[w_i].length = coalesce_num * sizeof(zk_write_t);
-  w_send_sgl[w_i].addr = (uint64_t) (uintptr_t) w_mes;
-
-  for (i = 0; i < coalesce_num; i++) {
-    if (DEBUG_WRITES)
-      printf("Write %d, session id %u, val-len %u, message size %d\n", i,
-             w_mes->write[i].sess_id,
-             w_mes->write[i].val_len,
-             w_send_sgl[w_i].length);
-    if (ENABLE_ASSERTIONS) {
-      assert(w_mes->write[i].val_len == VALUE_SIZE >> SHIFT_BITS);
-      assert(w_mes->write[i].opcode == KVS_OP_PUT);
-    }
-  }
-  if (FLR_W_ENABLE_INLINING) w_send_wr[w_i].send_flags = IBV_SEND_INLINE;
-  else w_send_wr[w_i].send_flags = 0;
-  if (DEBUG_WRITES)
-    my_printf(green, "Follower %d : I sent a write message %d of %u writes with size %u,  with  credits: %d \n",
-                 t_id, w_mes->write->opcode, coalesce_num, w_send_sgl[w_i].length, *credits);
-  if ((*w_tx) % WRITE_SS_BATCH == 0) w_send_wr[w_i].send_flags |= IBV_SEND_SIGNALED;
-  (*w_tx)++;
-  (*credits)--;
-  if ((*w_tx) % WRITE_SS_BATCH == WRITE_SS_BATCH - 1) {
-    // printf("Leader %u POLLING for a send completion in writes \n", t_id);
-    poll_cq(cb->dgram_send_cq[COMMIT_W_QP_ID], 1, &signal_send_wc, "sending writes");
-  }
-  // Have the last message point to the current message
-  if (w_i > 0)
-    w_send_wr[w_i - 1].next = &w_send_wr[w_i];
-
-}
 
 
 // Send the local writes to the ldr
@@ -787,7 +735,6 @@ static inline void send_writes_to_the_ldr(p_writes_t *p_writes,
                                           uint64_t *w_tx, struct fifo *remote_w_buf,
                                           uint16_t t_id, uint32_t *outstanding_writes)
 {
-//  printf("Ldr %d bcasting prepares \n", t_id);
   struct ibv_send_wr *bad_send_wr;
   uint16_t w_i = 0;
 
@@ -795,28 +742,16 @@ static inline void send_writes_to_the_ldr(p_writes_t *p_writes,
     if (DEBUG_WRITES)
       printf("FLR %d has %u writes to send credits %d\n", t_id, p_writes->w_fifo->size, *credits);
     // Create the messages
-    forge_w_wr(p_writes, cb, w_send_sgl, w_send_wr, w_tx, w_i, credits, t_id);
+    forge_w_wr(p_writes, cb, w_send_sgl, w_send_wr, w_tx, w_i, *credits, t_id);
     zk_w_mes_t *w_mes_fifo = (zk_w_mes_t *) p_writes->w_fifo->fifo;
     uint32_t w_ptr = p_writes->w_fifo->pull_ptr;
     zk_w_mes_t *w_mes = &w_mes_fifo[w_ptr];
     uint16_t coalesce_num = w_mes->write[0].w_num;
-
-    if (ENABLE_ASSERTIONS) {
-      assert(p_writes->w_fifo->size >= coalesce_num);
-      (*outstanding_writes) += coalesce_num;
-    }
-    if (ENABLE_STAT_COUNTING) {
-      t_stats[t_id].writes_sent += coalesce_num;
-      t_stats[t_id].writes_sent_mes_num++;
-    }
-    // This message has been sent do not add other writes to it!
-    if (coalesce_num < MAX_W_COALESCE) {
-      MOD_INCR(p_writes->w_fifo->push_ptr, W_FIFO_SIZE);
-      w_mes_fifo[p_writes->w_fifo->push_ptr].write[0].w_num = 0;
-//      my_printf(yellow, "Zeroing when sending at pointer %u \n", p_writes->prep_fifo->push_ptr);
-
-    }
-    add_to_the_mirrored_buffer(remote_w_buf, coalesce_num, 1, LEADER_W_BUF_SLOTS, p_writes->q_info);
+    (*credits)--;
+    checks_and_stats_when_sending_write(p_writes, coalesce_num, outstanding_writes, t_id);
+    reset_write_mes(p_writes, w_mes_fifo, coalesce_num, t_id);
+    add_to_the_mirrored_buffer(remote_w_buf, (uint8_t) coalesce_num, 1,
+                               LEADER_W_BUF_SLOTS, p_writes->q_info);
     MOD_INCR(p_writes->w_fifo->pull_ptr, W_FIFO_SIZE);
     p_writes->w_fifo->size -= coalesce_num;
     w_i++;
