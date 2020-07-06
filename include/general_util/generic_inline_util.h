@@ -415,7 +415,7 @@ static inline bool is_global_ses_id_local(uint32_t glob_sess_id, uint16_t t_id)
 
 // Generic function to mirror buffer spaces--used when elements are added
 static inline void add_to_the_mirrored_buffer(struct fifo *mirror_buf, uint8_t coalesce_num, uint16_t number_of_fifos,
-                                              uint32_t max_size)
+                                              uint32_t max_size, quorum_info_t *q_info)
 {
   for (uint16_t i = 0; i < number_of_fifos; i++) {
     uint32_t push_ptr = mirror_buf[i].push_ptr;
@@ -423,7 +423,12 @@ static inline void add_to_the_mirrored_buffer(struct fifo *mirror_buf, uint8_t c
     fifo[push_ptr] = (uint16_t)coalesce_num;
     MOD_INCR(mirror_buf[i].push_ptr, max_size);
     mirror_buf[i].size++;
-    if (ENABLE_ASSERTIONS) assert(mirror_buf[i].size <= max_size);
+    if (mirror_buf[i].size > max_size) {
+      // this may noy be an error if there is a failure
+      assert(q_info != NULL);
+      assert(q_info->missing_num > 0);
+    }
+    //if (ENABLE_ASSERTIONS) assert(mirror_buf[i].size <= max_size);
   }
 }
 

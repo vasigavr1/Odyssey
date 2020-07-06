@@ -117,11 +117,12 @@ static inline void post_quorum_broadasts_and_recvs(recv_info_t *recv_info, uint3
   if (DEBUG_SS_BATCH)
     my_printf(green, "Sending %u bcasts, total %lu \n", br_i, br_tx);
 
-  send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next = NULL;
-  int ret = ibv_post_send(send_qp, &send_wr[q_info->first_active_rm_id], &bad_send_wr);
+  //send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next = NULL;
+  send_wr[get_last_message_of_bcast(br_i, q_info)].next = NULL;
+  int ret = ibv_post_send(send_qp, &send_wr[get_first_mes_of_bcast(q_info)], &bad_send_wr);
   if (ENABLE_ASSERTIONS) CPE(ret, "Broadcast ibv_post_send error", ret);
   if (!ENABLE_ADAPTIVE_INLINING)
-    send_wr[q_info->first_active_rm_id].send_flags = enable_inlining ? IBV_SEND_INLINE : 0;
+    send_wr[get_first_mes_of_bcast(q_info)].send_flags = enable_inlining ? IBV_SEND_INLINE : 0;
 }
 
 
@@ -145,6 +146,52 @@ static inline int find_how_many_messages_can_be_polled(struct ibv_cq *recv_cq, s
   }
 
   return completed_messages;
+}
+
+
+static inline void form_bcast_links(uint64_t *br_tx, int bcast_ss_batch, quorum_info_t *q_info,
+                                    uint16_t br_i, struct ibv_send_wr *send_wr,
+                                    struct ibv_cq *dgram_send_cq, const char *mes, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) assert (bcast_ss_batch > 0);
+  struct ibv_wc signal_send_wc;
+
+  // Do a Signaled Send every PREP_BCAST_SS_BATCH broadcasts (PREP_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
+  if ((*br_tx) % bcast_ss_batch == 0)
+    flag_the_first_bcast_message_signaled(q_info, send_wr);
+
+  (*br_tx)++;
+  if ((*br_tx) % bcast_ss_batch == bcast_ss_batch - 1) {
+    poll_cq(dgram_send_cq, 1, &signal_send_wc, mes);
+  }
+  // Have the last message of each broadcast pointing to the first message of the next bcast
+  if (br_i > 0)
+    last_mes_of_bcast_point_to_frst_mes_of_next_bcast(br_i, q_info, send_wr);
+}
+
+
+static inline void selective_signaling_for_unicast(uint64_t *tx, int ss_batch,
+                                                   struct ibv_send_wr *send_wr,
+                                                   uint16_t mes_i,
+                                                   struct ibv_cq *dgram_send_cq,
+                                                   bool allow_inline,
+                                                   const char *mes,
+                                                   uint16_t t_id)
+{
+  if (ENABLE_ADAPTIVE_INLINING)
+    adaptive_inlining(send_wr->sg_list->length, &send_wr[mes_i], 1);
+  else send_wr[mes_i].send_flags = allow_inline ? IBV_SEND_INLINE : 0;
+
+
+  struct ibv_wc signal_send_wc;
+  if ((*tx) % ss_batch == 0) {
+    send_wr[mes_i].send_flags |= IBV_SEND_SIGNALED;
+  }
+
+  if ((*tx) % ss_batch == ss_batch - 1) {
+    poll_cq(dgram_send_cq, 1, &signal_send_wc, mes);
+  }
+  (*tx)++;
 }
 
 

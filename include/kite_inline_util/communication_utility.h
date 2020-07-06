@@ -50,13 +50,9 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops
                                   struct ibv_send_wr *send_wr, uint64_t *r_rep_tx,
                                   uint16_t t_id) {
 
-  struct ibv_wc signal_send_wc;
   struct r_rep_fifo *r_rep_fifo = p_ops->r_rep_fifo;
   struct r_rep_message *r_rep_mes = (struct r_rep_message *) &r_rep_fifo->r_rep_message[r_rep_pull_ptr];
   uint8_t coalesce_num = r_rep_mes->coalesce_num;
-  //struct rmw_rep_message *rmw_rep_mes = (struct rmw_rep_message *)r_rep_mes;
-  //printf("%u\n", rmw_rep_mes->rmw_rep[0].opcode);
-
   send_sgl[mes_i].length = r_rep_fifo->message_sizes[r_rep_pull_ptr];
   if (ENABLE_ASSERTIONS) assert(send_sgl[mes_i].length <= R_REP_SEND_SIZE);
   //printf("Forging a r_resp with size %u \n", send_sgl[mes_i].length);
@@ -64,22 +60,12 @@ static inline void forge_r_rep_wr(uint32_t r_rep_pull_ptr, uint16_t mes_i, p_ops
 
   checks_and_prints_when_forging_r_rep_wr(coalesce_num, mes_i, send_sgl, r_rep_pull_ptr,
                                           r_rep_mes, r_rep_fifo, t_id);
-
   uint8_t rm_id = r_rep_fifo->rem_m_id[r_rep_pull_ptr];
-  if (ENABLE_ADAPTIVE_INLINING)
-    adaptive_inlining(send_sgl[mes_i].length, &send_wr[mes_i], 1);
-  else send_wr[mes_i].send_flags = R_REP_ENABLE_INLINING ? IBV_SEND_INLINE : 0;
   send_wr[mes_i].wr.ud.ah = rem_qp[rm_id][t_id][R_REP_QP_ID].ah;
   send_wr[mes_i].wr.ud.remote_qpn = (uint32) rem_qp[rm_id][t_id][R_REP_QP_ID].qpn;
-  // Do a Signaled Send every R_SS_BATCH messages
-  if ((*r_rep_tx) % R_REP_SS_BATCH == 0) send_wr[mes_i].send_flags |= IBV_SEND_SIGNALED;
-  (*r_rep_tx)++;
-  if ((*r_rep_tx) % R_REP_SS_BATCH == R_REP_SS_BATCH - 1) {
-    //printf("Wrkr %u POLLING for a send completion in read replies \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_REP_QP_ID], 1, &signal_send_wc, "POLL_CQ_R_REP");
-  }
+  selective_signaling_for_unicast(r_rep_tx, R_REP_SS_BATCH, send_wr,
+                                  mes_i, cb->dgram_send_cq[R_REP_QP_ID], R_REP_ENABLE_INLINING, "sending r_reps", t_id);
   if (mes_i > 0) send_wr[mes_i - 1].next = &send_wr[mes_i];
-
 }
 
 
@@ -92,7 +78,6 @@ static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
                               uint8_t vc, uint16_t t_id) {
   uint16_t i;
-  struct ibv_wc signal_send_wc;
   struct r_message *r_mes = (struct r_message *) &p_ops->r_fifo->r_message[r_mes_i];
   r_mes_info_t *info = &p_ops->r_fifo->info[r_mes_i];
   uint16_t coalesce_num = r_mes->coalesce_num;
@@ -133,20 +118,9 @@ static inline void forge_r_wr(uint32_t r_mes_i, p_ops_t *p_ops,
       }
     }
   }
-  //send_wr[0].send_flags = R_ENABLE_INLINING == 1 ? IBV_SEND_INLINE : 0;
-  // Do a Signaled Send every R_BCAST_SS_BATCH broadcasts (R_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
-  if ((*r_br_tx) % R_BCAST_SS_BATCH == 0)
-    send_wr[q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
-  (*r_br_tx)++;
-  if ((*r_br_tx) % R_BCAST_SS_BATCH == R_BCAST_SS_BATCH - 1) {
-    //printf("Wrkr %u POLLING for a send completion in reads \n", m_id);
-    poll_cq(cb->dgram_send_cq[R_QP_ID], 1, &signal_send_wc, "POLL_CQ_R");
-  }
-  // Have the last message of each broadcast pointing to the first message of the next bcast
-  if (br_i > 0)
-    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id].next =
-      &send_wr[(br_i * MESSAGES_IN_BCAST) + q_info->first_active_rm_id];
 
+  form_bcast_links(r_br_tx, R_BCAST_SS_BATCH, p_ops->q_info, br_i,
+                   send_wr, cb->dgram_send_cq[R_QP_ID], "forging reads", t_id);
 }
 
 
@@ -156,12 +130,9 @@ static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
                               struct ibv_send_wr *send_wr, uint64_t *w_br_tx,
                               uint16_t br_i, uint16_t credits[][MACHINE_NUM],
                               uint8_t vc, uint16_t t_id) {
-  struct ibv_wc signal_send_wc;
   struct w_message *w_mes = (struct w_message *) &p_ops->w_fifo->w_message[w_mes_i];
   w_mes_info_t *info = &p_ops->w_fifo->info[w_mes_i];
   uint8_t coalesce_num = w_mes->coalesce_num;
-  bool has_writes = info->writes_num > 0;
-  bool all_writes = info->writes_num == w_mes->coalesce_num;
   uint32_t backward_ptr = info->backward_ptr;
   send_sgl[br_i].length = info->message_size;
   send_sgl[br_i].addr = (uint64_t) (uintptr_t) w_mes;
@@ -189,23 +160,9 @@ static inline void forge_w_wr(uint32_t w_mes_i, p_ops_t *p_ops,
               acc->log_no, acc->ts.version);
   }
 
-  // Do a Signaled Send every W_BCAST_SS_BATCH broadcasts (W_BCAST_SS_BATCH * (MACHINE_NUM - 1) messages)
-  if ((*w_br_tx) % W_BCAST_SS_BATCH == 0) {
-    if (DEBUG_SS_BATCH)
-      printf("Wrkr %u Sending signaled the first message, total %lu, br_i %u \n", t_id, *w_br_tx, br_i);
-    send_wr[p_ops->q_info->first_active_rm_id].send_flags |= IBV_SEND_SIGNALED;
-  }
-  (*w_br_tx)++;
-  if ((*w_br_tx) % W_BCAST_SS_BATCH == W_BCAST_SS_BATCH - 1) {
-    if (DEBUG_SS_BATCH)
-      printf("Wrkr %u POLLING for a send completion in writes, total %lu \n", t_id, *w_br_tx);
-    poll_cq(cb->dgram_send_cq[W_QP_ID], 1, &signal_send_wc, "POLL_CQ_W");
-  }
-  // Have the last message of each broadcast pointing to the first message of the next bcast
-  if (br_i > 0) {
-    send_wr[((br_i - 1) * MESSAGES_IN_BCAST) + p_ops->q_info->last_active_rm_id].next =
-      &send_wr[(br_i * MESSAGES_IN_BCAST) + p_ops->q_info->first_active_rm_id];
-  }
+  form_bcast_links(w_br_tx, W_BCAST_SS_BATCH, p_ops->q_info, br_i,
+                   send_wr, cb->dgram_send_cq[W_QP_ID], "forging writes", t_id);
+
 }
 
 

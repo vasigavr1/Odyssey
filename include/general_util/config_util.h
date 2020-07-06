@@ -31,10 +31,9 @@ static inline void update_q_info(quorum_info_t *q_info,  uint16_t *credits,
       //set_conf_bit_after_detecting_failure(t_id, i); // this function changes both vectors
       //if (DEBUG_QUORUM) my_printf(yellow, "Worker flips the vector bit_vec for machine %u, send vector bit_vec %u \n",
       //                               i, send_bit_vector.bit_vec[i].bit);
-      if (!DEBUG_BIT_VECS) {
-        if (t_id == 0)
-          my_printf(cyan, "Wrkr %u detects that machine %u has failed \n", t_id, i);
-      }
+      if (t_id == 0)
+        my_printf(cyan, "Wrkr %u detects that machine %u has failed \n", t_id, i);
+
     }
     else {
       q_info->active_ids[q_info->active_num] = i;
@@ -104,7 +103,11 @@ static inline void revive_machine(quorum_info_t *q_info,
 // Update the links between the send Work Requests for broadcasts given the quorum information
 static inline void update_bcast_wr_links(quorum_info_t *q_info, struct ibv_send_wr *wr, uint16_t t_id)
 {
-  if (ENABLE_ASSERTIONS) assert(MESSAGES_IN_BCAST == REM_MACH_NUM);
+  if (MESSAGES_IN_BCAST != REM_MACH_NUM) {
+    assert(ENABLE_MULTICAST);
+    // bcast wr links need not be updated on multicasts
+    return;
+  }
   uint8_t prev_i = 0, avail_mach = 0;
   if (DEBUG_QUORUM) my_printf(green, "Worker %u fixing the links between the wrs \n", t_id);
   for (uint8_t i = 0; i < REM_MACH_NUM; i++) {
@@ -199,5 +202,46 @@ static inline void decrease_credits(uint16_t credits[][MACHINE_NUM], quorum_info
 }
 
 
+static inline uint32_t get_last_message_of_bcast(uint16_t br_i,
+                                                  quorum_info_t *q_info)
+{
+  if (ENABLE_ASSERTIONS) assert(br_i > 0);
+  if (ENABLE_MULTICAST)
+    return (uint32_t) ((br_i * MESSAGES_IN_BCAST) - 1);
+  else return  (uint32_t)
+      (((br_i - 1) * MESSAGES_IN_BCAST) + q_info->last_active_rm_id);
+}
+
+static inline uint32_t get_first_message_of_next_bcast(uint16_t br_i,
+                                                       quorum_info_t *q_info)
+{
+  if (ENABLE_ASSERTIONS) assert(br_i > 0);
+  if (ENABLE_MULTICAST)
+    return (uint32_t) (br_i * MESSAGES_IN_BCAST) ;
+  else return  (uint32_t)
+      ((br_i * MESSAGES_IN_BCAST) + q_info->first_active_rm_id);
+}
+
+
+static inline void last_mes_of_bcast_point_to_frst_mes_of_next_bcast(uint16_t br_i,
+                                                                     quorum_info_t *q_info,
+                                                                     struct ibv_send_wr *send_wr)
+{
+  if (ENABLE_ASSERTIONS) assert(br_i > 0);
+  send_wr[get_last_message_of_bcast(br_i, q_info)].next =
+    &send_wr[get_first_message_of_next_bcast(br_i, q_info)];
+
+}
+
+static inline uint32_t get_first_mes_of_bcast(quorum_info_t *q_info)
+{
+  return (uint32_t) (ENABLE_MULTICAST ? 0 : q_info->first_active_rm_id);
+}
+
+static inline void flag_the_first_bcast_message_signaled(quorum_info_t *q_info,
+                                                         struct ibv_send_wr *send_wr)
+{
+  send_wr[get_first_mes_of_bcast(q_info)].send_flags |= IBV_SEND_SIGNALED;
+}
 
 #endif //CONFIG_UTIL_H

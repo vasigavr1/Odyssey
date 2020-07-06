@@ -391,5 +391,42 @@ static inline void zk_checks_and_stats_on_bcasting_commits(zk_com_fifo_t *com_fi
 }
 
 
+/* ---------------------------------------------------------------------------
+//------------------------------ UNICASTS------- -----------------------------
+//---------------------------------------------------------------------------*/
+
+
+static inline void check_stats_prints_when_sending_acks(zk_ack_mes_t *ack,
+                                                        p_writes_t *p_writes,
+                                                        p_acks_t *p_acks,
+                                                        uint64_t l_id_to_send, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(ack->l_id == l_id_to_send);
+    assert (p_acks->slots_ahead <= p_writes->size);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].acks_sent += ack->ack_num;
+    t_stats[t_id].acks_sent_mes_num++;
+  }
+
+  if (DEBUG_ACKS)
+    my_printf(yellow, "Flr %d is sending an ack for lid %lu and ack num %d and flr id %d, p_writes size %u/%d \n",
+              t_id, l_id_to_send, ack->ack_num, ack->follower_id, p_writes->size, FLR_PENDING_WRITES);
+  if (ENABLE_ASSERTIONS) assert(ack->ack_num > 0 && ack->ack_num <= FLR_PENDING_WRITES);
+}
+
+static inline void checks_and_prints_posting_recvs_for_preps(recv_info_t *prep_recv_info,
+                                                             uint32_t recvs_to_post_num,
+                                                             uint16_t t_id)
+{
+  //printf("FLR %d posting %u recvs and has a total of %u recvs for prepares \n",
+  //       t_id, recvs_to_post_num,  prep_recv_info->posted_recvs);
+  if (ENABLE_ASSERTIONS) {
+    assert(recvs_to_post_num <= FLR_MAX_RECV_PREP_WRS);
+    assert(prep_recv_info->posted_recvs <= FLR_MAX_RECV_PREP_WRS);
+  }
+}
+
 
 #endif //KITE_ZK_DEBUG_UTIL_H

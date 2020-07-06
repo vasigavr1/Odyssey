@@ -98,6 +98,9 @@ typedef struct key mica_key_t;
 #define MAX_OP_BATCH SESSIONS_PER_THREAD
 #define ENABLE_LOCK_FREE_READING 1
 
+#define PUT_A_MACHINE_TO_SLEEP 1
+#define MACHINE_THAT_SLEEPS 1
+
 #define MEASURE_LATENCY 0
 #define LATENCY_MACHINE 0
 #define LATENCY_THREAD 15
@@ -249,7 +252,8 @@ enum {
 	-----------------MULTICAST-------------------------
 --------------------------------------------------*/
 // Multicast defines are not used, but are kept them for possible extension
-#define ENABLE_MULTICAST 0
+#define ENABLE_MULTICAST_ 1
+#define ENABLE_MULTICAST (COMPILED_SYSTEM  ==  kite_sys ? 0 : ENABLE_MULTICAST_)
 #define MULTICAST_TESTING_ 0
 #define MULTICAST_TESTING (ENABLE_MULTICAST == 1 ? MULTICAST_TESTING_ : 0)
 #define MCAST_QPS MACHINE_NUM

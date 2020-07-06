@@ -185,6 +185,90 @@ static inline void zk_reset_prep_message(p_writes_t *p_writes,
   }
 }
 
+// Poll for credits and increment the credits according to the protocol
+static inline void ldr_poll_credits(struct ibv_cq* credit_recv_cq, struct ibv_wc* credit_wc,
+                                    uint16_t *credits, recv_info_t *cred_recv_info,
+                                    quorum_info_t *q_info, uint16_t t_id)
+{
+
+  bool poll_for_credits = false;
+  for (uint8_t j = 0; j < q_info->active_num; j++) {
+    if (credits[q_info->active_ids[j]] == 0) {
+      poll_for_credits = true;
+      break;
+    }
+  }
+  if (!poll_for_credits) return;
+
+  int credits_found = 0;
+  credits_found = ibv_poll_cq(credit_recv_cq, LDR_MAX_CREDIT_RECV, credit_wc);
+  if(credits_found > 0) {
+    if(unlikely(credit_wc[credits_found - 1].status != 0)) {
+      fprintf(stderr, "Bad wc status when polling for credits to send a broadcast %d\n", credit_wc[credits_found -1].status);
+      assert(false);
+    }
+    cred_recv_info->posted_recvs -= credits_found;
+    for (uint32_t j = 0; j < credits_found; j++) {
+      credits[credit_wc[j].imm_data]+= FLR_CREDITS_IN_MESSAGE;
+    }
+
+  }
+  else if(unlikely(credits_found < 0)) {
+    printf("ERROR In the credit CQ\n"); exit(0);
+  }
+}
+
+
+// Form Broadcast work requests for the leader
+static inline void forge_commit_wrs(zk_com_mes_t *com_mes, quorum_info_t *q_info, uint16_t t_id,
+                                    uint16_t br_i, struct hrd_ctrl_blk *cb, struct ibv_sge *com_send_sgl,
+                                    struct ibv_send_wr *send_wr,  uint64_t *commit_br_tx,
+                                    uint16_t credits[][MACHINE_NUM])
+{
+  com_send_sgl[br_i].addr = (uint64_t) (uintptr_t) com_mes;
+  com_send_sgl[br_i].length = LDR_COM_SEND_SIZE;
+  if (ENABLE_ASSERTIONS) {
+    assert(com_send_sgl[br_i].length <= LDR_COM_SEND_SIZE);
+    if (!USE_QUORUM)
+      assert(com_mes->com_num <= LEADER_PENDING_WRITES);
+  }
+  //my_printf(green, "Leader %d : I BROADCAST a message with %d commits with %d credits: %d \n",
+  //             t_id, com_mes->com_num, com_mes->opcode, credits[COMM_VC][0]);
+  form_bcast_links(commit_br_tx, COM_BCAST_SS_BATCH, q_info, br_i,
+                   send_wr, cb->dgram_send_cq[COMMIT_W_QP_ID], "forging commits", t_id);
+
+}
+
+
+// Form the Broadcast work request for the prepare
+static inline void forge_prep_wr(uint16_t prep_i, p_writes_t *p_writes,
+                                 struct hrd_ctrl_blk *cb, struct ibv_sge *send_sgl,
+                                 struct ibv_send_wr *send_wr, uint64_t *prep_br_tx,
+                                 uint16_t br_i, uint16_t credits[][MACHINE_NUM],
+                                 uint8_t vc, uint16_t t_id) {
+  uint16_t i;
+  zk_prep_mes_t *prep = &p_writes->prep_fifo->prep_message[prep_i];
+  uint32_t backward_ptr = p_writes->prep_fifo->backward_ptrs[prep_i];
+  uint16_t coalesce_num = prep->coalesce_num;
+  send_sgl[br_i].length = PREP_MES_HEADER + coalesce_num * sizeof(zk_prepare_t);
+  send_sgl[br_i].addr = (uint64_t) (uintptr_t) prep;
+  for (i = 0; i < coalesce_num; i++) {
+    p_writes->w_state[(backward_ptr + i) % LEADER_PENDING_WRITES] = SENT;
+    if (DEBUG_PREPARES)
+      printf("Prepare %d, val-len %u, message size %d\n", i, prep->prepare[i].val_len,
+             send_sgl[br_i].length);
+    if (ENABLE_ASSERTIONS) {
+      assert(prep->prepare[i].val_len == VALUE_SIZE >> SHIFT_BITS);
+      assert(prep->prepare[i].opcode == KVS_OP_PUT);
+    }
+
+  }
+  if (DEBUG_PREPARES)
+    my_printf(green, "Leader %d : I BROADCAST a prepare message %d of %u prepares with size %u,  with  credits: %d, lid: %u  \n",
+              t_id, prep->opcode, coalesce_num, send_sgl[br_i].length, credits[vc][0], prep->l_id);
+  form_bcast_links(prep_br_tx, PREP_BCAST_SS_BATCH, p_writes->q_info, br_i,
+                   send_wr, cb->dgram_send_cq[PREP_ACK_QP_ID], "forging prepares", t_id);
+}
 
 
 #endif //KITE_ZK_RESERVATION_STATIONS_UTIL_H_H

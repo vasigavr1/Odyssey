@@ -47,6 +47,8 @@ void zk_static_assert_compile_parameters()
   assert(FLR_MAX_RECV_COM_WRS >= FLR_CREDITS_IN_MESSAGE);
   if (WRITE_RATIO > 0) assert(ZK_UPDATE_BATCH >= LEADER_PENDING_WRITES);
 
+  if (PUT_A_MACHINE_TO_SLEEP) assert(MACHINE_THAT_SLEEPS != LEADER_MACHINE);
+
 
 //
 //  my_printf(yellow, "WRITE: size of write recv slot %d size of w_message %lu , "

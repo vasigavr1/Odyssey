@@ -82,8 +82,8 @@ void *follower(void *arg)
   struct ibv_sge credit_send_sgl;
   uint16_t credits = W_CREDITS;
 
-  uint32_t credit_debug_cnt = 0, outstanding_writes = 0;
-  long trace_iter = 0, sent_ack_tx = 0, credit_tx = 0, w_tx = 0;
+  uint32_t credit_debug_cnt = 0, outstanding_writes = 0, trace_iter = 0;
+  uint64_t sent_ack_tx = 0, credit_tx = 0, w_tx = 0;
 
   latency_info_t latency_info = {
     .measured_req_flag = NO_REQ,
@@ -143,12 +143,19 @@ void *follower(void *arg)
   /* ---------------------------------------------------------------------------
   ------------------------------START LOOP--------------------------------
   ---------------------------------------------------------------------------*/
-  while(1) {
+  while(true) {
     if (t_stats[t_id].received_preps_mes_num > 0 && FLR_CHECK_DBG_COUNTERS)
       flr_check_debug_cntrs(&credit_debug_cnt, &wait_for_coms_dbg_counter,
                             &wait_for_prepares_dbg_counter,
                             &wait_for_gid_dbg_counter, prep_buffer ,prep_pull_ptr, p_writes, t_id);
 
+
+
+    if (PUT_A_MACHINE_TO_SLEEP && (machine_id == MACHINE_THAT_SLEEPS) &&
+        (t_stats[WORKERS_PER_MACHINE -1].cache_hits_per_thread > 4 * MILLION)) {
+      if (t_id == 0) my_printf(yellow, "Machine performs scheduled failure\n");
+      exit(0);
+    }
   /* ---------------------------------------------------------------------------
   ------------------------------ POLL FOR PREPARES--------------------------
   ---------------------------------------------------------------------------*/

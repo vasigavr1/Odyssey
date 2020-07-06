@@ -181,8 +181,8 @@ void *leader(void *arg)
 		---------------------------------------------------------------------------*/
     if (WRITE_RATIO > 0)
       broadcast_commits(p_writes, credits, cb, com_fifo,
-                        &commit_br_tx, credit_debug_cnt, credit_wc,
-                        com_send_sgl, com_send_wr, cred_recv_info,
+                        &commit_br_tx, credit_wc,
+                        com_send_sgl, com_send_wr, cred_recv_info, time_out_cnt,
                         w_recv_info, t_id);
     /* ---------------------------------------------------------------------------
     ------------------------------PROBE THE CACHE--------------------------------------

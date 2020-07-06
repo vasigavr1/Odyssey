@@ -1680,5 +1680,46 @@ static inline void print_after_stealing_proposed(mica_op_t *kv_ptr,
 }
 
 
+//-------------------------SENDING ACKS
+static inline void checks_stats_prints_when_sending_acks(ack_mes_t *acks,
+                                                         uint8_t m_i, uint16_t t_id)
+{
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[t_id].per_worker_acks_sent[m_i] += acks[m_i].ack_num;
+    t_stats[t_id].per_worker_acks_mes_sent[m_i]++;
+    t_stats[t_id].acks_sent += acks[m_i].ack_num;
+    t_stats[t_id].acks_sent_mes_num++;
+  }
+  if (DEBUG_ACKS)
+    my_printf(yellow, "Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
+              t_id, acks[m_i].l_id, acks[m_i].credits, acks[m_i].ack_num, acks[m_i].m_id);
+
+  if (ENABLE_ASSERTIONS) {
+    assert(acks[m_i].credits <= acks[m_i].ack_num);
+    if (acks[m_i].ack_num > MAX_MES_IN_WRITE) assert(acks[m_i].credits > 1);
+    assert(acks[m_i].credits <= W_CREDITS);
+    assert(acks[m_i].ack_num > 0);
+  }
+}
+
+static inline void checks_when_posting_write_receives(recv_info_t *w_recv_info, uint32_t recvs_to_post_num,
+                                                      uint8_t ack_i)
+{
+  if (DEBUG_RECEIVES) {
+    //w_recv_info->posted_recvs += recvs_to_post_num;
+    assert(w_recv_info->posted_recvs == MAX_RECV_W_WRS);
+  }
+  //w_recv_info->posted_recvs += recvs_to_post_num;
+  // printf("Wrkr %d posting %u recvs and has a total of %u recvs for writes \n",
+  //       g_id, recvs_to_post_num,  w_recv_info->posted_recvs);
+  if (ENABLE_ASSERTIONS) {
+
+    assert(recvs_to_post_num <= MAX_RECV_W_WRS);
+    if (ack_i > 0) assert(recvs_to_post_num >= ack_i);
+    if (W_CREDITS == 1) assert(recvs_to_post_num == ack_i);
+    //assert(w_recv_info->posted_recvs <= MAX_RECV_W_WRS);
+  }
+}
+
 
 #endif //KITE_DEBUG_UTIL_H

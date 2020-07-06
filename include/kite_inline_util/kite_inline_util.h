@@ -397,64 +397,30 @@ static inline void send_acks(struct ibv_send_wr *ack_send_wr,
                              ack_mes_t *acks, uint16_t t_id)
 {
   uint8_t ack_i = 0, prev_ack_i = 0, first_wr = 0;
-  struct ibv_wc signal_send_wc;
   struct ibv_send_wr *bad_send_wr;
   uint32_t recvs_to_post_num = 0;
 
-  for (uint8_t i = 0; i < MACHINE_NUM; i++) {
-    if (acks[i].opcode == OP_ACK) continue;
-    if (ENABLE_STAT_COUNTING) {
-      t_stats[t_id].per_worker_acks_sent[i] += acks[i].ack_num;
-      t_stats[t_id].per_worker_acks_mes_sent[i]++;
-      t_stats[t_id].acks_sent += acks[i].ack_num;
-      t_stats[t_id].acks_sent_mes_num++;
-    }
-    if (DEBUG_ACKS)
-      my_printf(yellow, "Wrkr %d is sending an ack for lid %lu, credits %u and ack num %d and m id %d \n",
-                t_id, acks[i].l_id, acks[i].credits, acks[i].ack_num, acks[i].m_id);
+  for (uint8_t m_i = 0; m_i < MACHINE_NUM; m_i++) {
+    if (acks[m_i].opcode == OP_ACK) continue;
+    checks_stats_prints_when_sending_acks(acks, m_i, t_id);
+    acks[m_i].opcode = OP_ACK;
 
-    acks[i].opcode = OP_ACK;
-    if (ENABLE_ASSERTIONS) {
-      assert(acks[i].credits <= acks[i].ack_num);
-      if (acks[i].ack_num > MAX_MES_IN_WRITE) assert(acks[i].credits > 1);
-      assert(acks[i].credits <= W_CREDITS);
-      assert(acks[i].ack_num > 0);
-    }
-    if ((*sent_ack_tx) % ACK_SS_BATCH == 0) {
-      ack_send_wr[i].send_flags |= IBV_SEND_SIGNALED;
-      // if (g_id == 0) my_printf(green, "Sending ack %llu signaled \n", *sent_ack_tx);
-    } else ack_send_wr[i].send_flags = IBV_SEND_INLINE;
-    if ((*sent_ack_tx) % ACK_SS_BATCH == ACK_SS_BATCH - 1) {
-      // if (g_id == 0) my_printf(green, "Polling for ack  %llu \n", *sent_ack_tx);
-      poll_cq(cb->dgram_send_cq[ACK_QP_ID], 1, &signal_send_wc, "POLL_CQ_ACK");
-    }
+    selective_signaling_for_unicast(sent_ack_tx, ACK_SS_BATCH, ack_send_wr,
+                                    m_i, cb->dgram_send_cq[ACK_QP_ID], true, "sending acks", t_id);
     if (ack_i > 0) {
-      if (DEBUG_ACKS) my_printf(yellow, "Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, i);
-      ack_send_wr[prev_ack_i].next = &ack_send_wr[i];
+      if (DEBUG_ACKS) my_printf(yellow, "Wrkr %u, ack %u points to ack %u \n", t_id, prev_ack_i, m_i);
+      ack_send_wr[prev_ack_i].next = &ack_send_wr[m_i];
     }
-    else first_wr = i;
-    (*sent_ack_tx)++; // Selective signaling
-    recvs_to_post_num += acks[i].credits;
+    else first_wr = m_i;
+
+    recvs_to_post_num += acks[m_i].credits;
     ack_i++;
-    prev_ack_i = i;
+    prev_ack_i = m_i;
   }
   // RECEIVES for writes
   if (recvs_to_post_num > 0) {
     post_recvs_with_recv_info(w_recv_info, recvs_to_post_num);
-    if (DEBUG_RECEIVES) {
-      //w_recv_info->posted_recvs += recvs_to_post_num;
-      assert(w_recv_info->posted_recvs == MAX_RECV_W_WRS);
-    }
-    //w_recv_info->posted_recvs += recvs_to_post_num;
-    // printf("Wrkr %d posting %u recvs and has a total of %u recvs for writes \n",
-    //       g_id, recvs_to_post_num,  w_recv_info->posted_recvs);
-    if (ENABLE_ASSERTIONS) {
-
-      assert(recvs_to_post_num <= MAX_RECV_W_WRS);
-      if (ack_i > 0) assert(recvs_to_post_num >= ack_i);
-      if (W_CREDITS == 1) assert(recvs_to_post_num == ack_i);
-      //assert(w_recv_info->posted_recvs <= MAX_RECV_W_WRS);
-    }
+    checks_when_posting_write_receives(w_recv_info, recvs_to_post_num, ack_i);
   }
   // SEND the acks
   if (ack_i > 0) {
