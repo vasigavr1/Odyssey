@@ -6,6 +6,9 @@
 #define DEBUG_UTIL_H
 
 #include "top.h"
+//#include "client_if_util.h"
+
+static inline bool is_client_req_active(uint32_t sess_id, uint32_t req_array_i, uint16_t t_id);
 
 // called when failing see an even version -- I.E. called by reads
 static inline void debug_stalling_on_lock(uint32_t *debug_cntr, const char *message, uint16_t t_id)
@@ -46,6 +49,26 @@ static inline void print_q_info(quorum_info_t *q_info)
   }
   my_printf(yellow, "\n First rm_id: %u, Last rm_id: %u \n",
             q_info->first_active_rm_id, q_info->last_active_rm_id);
+}
+
+static inline void check_client_req_state_when_filling_op(int working_session,
+                                                          uint32_t pull_ptr,
+                                                          uint32_t index_to_req_array,
+                                                          uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
+    uint32_t next_pull_ptr = (pull_ptr + 1) % PER_SESSION_REQ_NUM;
+    uint32_t prev_pull_ptr = (PER_SESSION_REQ_NUM + pull_ptr - 1) % PER_SESSION_REQ_NUM;
+    // if the next req is not active, no request can be active, so check the previous
+    if (!is_client_req_active((uint32_t) working_session, next_pull_ptr, t_id) &&
+        next_pull_ptr != prev_pull_ptr && prev_pull_ptr != pull_ptr)
+      assert(!is_client_req_active((uint32_t) working_session, prev_pull_ptr, t_id));
+  }
+  //printf("Wrkr %u sess %u saves poll ptr %u for req at state %u \n", t_id,
+  //       working_session,
+  //       index_to_req_array,
+  //       interface[t_id].req_array[working_session][index_to_req_array].state);
 }
 
 #endif //DEBUG_UTIL_H

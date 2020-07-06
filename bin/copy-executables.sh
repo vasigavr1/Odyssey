@@ -22,6 +22,7 @@ SCRIPT_FOLDER=$4
 DEST_FOLDER=$5
 
 cd $MAKE_FOLDER
+make clean
 make $1
 rm -rf core
 cd -

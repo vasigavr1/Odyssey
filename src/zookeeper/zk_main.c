@@ -1,6 +1,5 @@
 #include "../../include/mica/kvs.h"
 #include "../../include/zookeeper/zk_util.h"
-#include "../../include/zookeeper/zk_main.h"
 #include "../../include/general_util/init_func.h"
 
 
@@ -32,13 +31,13 @@ int main(int argc, char *argv[])
 	init_globals(QP_NUM);
   zk_init_globals();
   handle_program_inputs(argc, argv);
-	int i;
+	//int i;
 	struct thread_params *param_arr;
 	/* Launch leader/follower threads */
 	is_leader = machine_id == LEADER_MACHINE;
 	num_threads =  is_leader ? LEADERS_PER_MACHINE : FOLLOWERS_PER_MACHINE;
-	param_arr = malloc(num_threads * sizeof(struct thread_params));
-  pthread_t * thread_arr = malloc(num_threads * sizeof(pthread_t));
+	param_arr = malloc(TOTAL_THREADS * sizeof(struct thread_params));
+  pthread_t * thread_arr = malloc(TOTAL_THREADS * sizeof(pthread_t));
 
 	pthread_attr_t attr;
 	cpu_set_t pinned_hw_threads;
@@ -54,19 +53,21 @@ int main(int argc, char *argv[])
     sprintf(node_purpose, "Follower");
     thread_func = follower;
   }
-	for(i = 0; i < TOTAL_THREADS; i++) {
+	for(uint16_t i = 0; i < TOTAL_THREADS; i++) {
     if (i < WORKERS_PER_MACHINE) {
       spawn_threads(param_arr, i, node_purpose, &pinned_hw_threads,
                     &attr, thread_arr, thread_func, occupied_cores);
     }
-    else {
-      assert(ENABLE_CLIENTS);
-      fopen_client_logs(i);
-      spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
-                    &attr, thread_arr, client, occupied_cores);
+    else if (machine_id == LEADER_MACHINE || !MAKE_FOLLOWERS_PASSIVE) {
+        assert(ENABLE_CLIENTS);
+        fopen_client_logs(i);
+        spawn_threads(param_arr, i, "Client", &pinned_hw_threads,
+                      &attr, thread_arr, client, occupied_cores);
     }
 	}
-	for(i = 0; i < num_threads; i++)
+
+
+	for(uint16_t i = 0; i < TOTAL_THREADS; i++)
 		pthread_join(thread_arr[i], NULL);
 
 	return 0;

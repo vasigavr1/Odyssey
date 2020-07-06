@@ -30,7 +30,7 @@ void zk_print_parameters_in_the_start()
 
 void zk_static_assert_compile_parameters()
 {
-  static_assert(!ENABLE_CLIENTS, " ");
+  //static_assert(!ENABLE_CLIENTS, " ");
 
   if (ENABLE_MULTICAST) assert(MCAST_QP_NUM == MCAST_GROUPS_NUM);
   assert(LEADER_MACHINE < MACHINE_NUM);
@@ -163,6 +163,8 @@ p_writes_t* set_up_pending_writes(uint32_t size, struct ibv_send_wr *prep_send_w
   p_writes->w_state = (enum write_state *) malloc(size * sizeof(enum write_state));
   p_writes->session_id = (uint32_t *) calloc(size, sizeof(uint32_t));
   p_writes->acks_seen = (uint8_t *) calloc(size, sizeof(uint8_t));
+  p_writes->w_index_to_req_array = (uint32_t *) calloc(SESSIONS_PER_THREAD, sizeof(uint32_t));
+
   p_writes->flr_id = (uint8_t *) malloc(size * sizeof(uint8_t));
   p_writes->is_local = (bool *) malloc(size * sizeof(bool));
   p_writes->stalled = (bool *) malloc(SESSIONS_PER_THREAD * sizeof(bool));

@@ -418,10 +418,6 @@ typedef struct trace_op {
 
 
 
-
-
-
-
 // A bit of a bit vector: can be a send bit vector
 // or a configuration bit vector and can be owned
 // by a release or an acquire respectively

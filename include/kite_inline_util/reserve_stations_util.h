@@ -6,6 +6,7 @@
 #define KITE_RESERVE_STATIONS_UTIL_H
 
 
+#include <inline_util.h>
 #include "main.h"
 #include "../general_util/latency_util.h"
 #include "kite_debug_util.h"
@@ -953,58 +954,23 @@ static inline void insert_r_rep(p_ops_t *p_ops, uint64_t l_id, uint16_t t_id,
 
 // Fill the trace_op to be passed to the KVS. Returns whether no more requests can be processed
 static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
-                                 uint32_t trace_iter, trace_t *trace,
+                                 trace_t *trace,
                                  uint16_t op_i, int working_session, uint16_t *writes_num_, uint16_t *reads_num_,
                                  struct session_dbg *ses_dbg,latency_info_t *latency_info,
                                  uint32_t *sizes_dbg_cntr,
                                  uint16_t t_id)
 {
-  uint8_t opcode;
-  struct key *key;
-  uint8_t *value_to_write, *value_to_read;
-  uint32_t real_val_len;
-  if (ENABLE_CLIENTS) {
-    uint32_t pull_ptr = interface[t_id].wrkr_pull_ptr[working_session];
-    client_op_t *if_cl_op = &interface[t_id].req_array[working_session][pull_ptr];
-    opcode = if_cl_op->opcode;
-    key = &if_cl_op->key;
-    op->index_to_req_array = pull_ptr;
-    value_to_write = if_cl_op->value_to_write;
-    value_to_read = if_cl_op->value_to_read;
-    real_val_len = if_cl_op->val_len;
-    if (ENABLE_ASSERTIONS) {
-      assert(is_client_req_active((uint32_t) working_session, pull_ptr, t_id));
-      uint32_t next_pull_ptr = (pull_ptr + 1) % PER_SESSION_REQ_NUM;
-      uint32_t prev_pull_ptr = (PER_SESSION_REQ_NUM + pull_ptr - 1) % PER_SESSION_REQ_NUM;
-      // if the next req is not active, no request can be active, so check the previous
-      if (!is_client_req_active((uint32_t) working_session, next_pull_ptr, t_id) &&
-          next_pull_ptr != prev_pull_ptr && prev_pull_ptr != pull_ptr)
-        assert(!is_client_req_active((uint32_t) working_session, prev_pull_ptr, t_id));
-    }
-    //printf("Wrkr %u sess %u saves poll ptr %u for req at state %u \n", t_id,
-    //       working_session,
-    //       op->index_to_req_array,
-    //       interface[t_id].req_array[working_session][ op->index_to_req_array].state);
-  }
-  else {
-    check_trace_req(p_ops, &trace[trace_iter], working_session, t_id);
-    opcode = trace[trace_iter].opcode;
-    key = (struct key *) &trace[trace_iter].key_hash;
-    value_to_read = op->value;
-    value_to_write = op->value;
-    if (opcode == FETCH_AND_ADD) *(uint64_t *) op->value = 1;
-    real_val_len = (uint32_t) VALUE_SIZE;
-  }
-
-
-  op->opcode = opcode;
+  create_inputs_of_op(&op->value_to_write, &op->value_to_read, &op->real_val_len,
+                      &op->opcode, &op->index_to_req_array,
+                      &op->key, op->value, trace, working_session, t_id);
+  if (!ENABLE_CLIENTS) check_trace_req(p_ops, trace, op, working_session, t_id);
   uint16_t writes_num = *writes_num_, reads_num = *reads_num_;
   // Create some back pressure from the buffers, since the sessions may never be stalled
   if (!EMULATE_ABD) {
-    if (opcode == (uint8_t) KVS_OP_PUT) writes_num++;
+    if (op->opcode == (uint8_t) KVS_OP_PUT) writes_num++;
     //if (opcode == (uint8_t) OP_RELEASE) writes_num+= 2;
     // A write (relaxed or release) may first trigger a read
-    reads_num += opcode == (uint8_t) OP_ACQUIRE ? 2 : 1;
+    reads_num += op->opcode == (uint8_t) OP_ACQUIRE ? 2 : 1;
     if (p_ops->virt_w_size + writes_num >= MAX_ALLOWED_W_SIZE ||
         p_ops->virt_r_size + reads_num >= MAX_ALLOWED_R_SIZE) {
       if (ENABLE_ASSERTIONS) {
@@ -1019,32 +985,26 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
       return true;
     } else if (ENABLE_ASSERTIONS) *sizes_dbg_cntr = 0;
   }
-  memcpy(&op->key, key, KEY_SIZE);
-  bool is_update = (opcode == (uint8_t) KVS_OP_PUT ||
-                    opcode == (uint8_t) OP_RELEASE);
-  bool is_rmw = opcode_is_rmw(opcode);
+  bool is_update = (op->opcode == (uint8_t) KVS_OP_PUT ||
+                    op->opcode == (uint8_t) OP_RELEASE);
+  bool is_rmw = opcode_is_rmw(op->opcode);
   bool is_read = !is_update && !is_rmw;
 
   if (ENABLE_ASSERTIONS) assert(is_read || is_update || is_rmw);
-  if (is_update || is_rmw) op->value_to_write = value_to_write;
+  //if (is_update || is_rmw) op->value_to_write = value_to_write;
   if (ENABLE_ASSERTIONS && !ENABLE_CLIENTS && op->opcode == FETCH_AND_ADD) {
     assert(is_rmw);
     assert(op->value_to_write == op->value);
     assert(*(uint64_t *) op->value_to_write == 1);
   }
-  if (is_read || is_rmw ) {
-    op->value_to_read = value_to_read;
-  }
-  op->real_val_len = real_val_len;
-
   if (is_rmw && ENABLE_ALL_ABOARD) {
     op->attempt_all_aboard = p_ops->q_info->missing_num == 0;
   }
 
-  if (opcode == KVS_OP_PUT) {
+  if (op->opcode == KVS_OP_PUT) {
     add_request_to_sess_info(&p_ops->sess_info[working_session], t_id);
   }
-  increment_per_req_counters(opcode, t_id);
+  increment_per_req_counters(op->opcode, t_id);
 
 
   op->val_len = is_update ? (uint8_t) (VALUE_SIZE >> SHIFT_BITS) : (uint8_t) 0;
@@ -1067,7 +1027,7 @@ static inline bool fill_trace_op(p_ops_t *p_ops, trace_op_t *op,
     if (ENABLE_ASSERTIONS) assert(interface[t_id].wrkr_pull_ptr[working_session] == op->index_to_req_array);
     MOD_INCR(interface[t_id].wrkr_pull_ptr[working_session], PER_SESSION_REQ_NUM);
   }
-  debug_set_version_of_op_to_one(op, opcode, t_id);
+  debug_set_version_of_op_to_one(op, op->opcode, t_id);
   return false;
 }
 

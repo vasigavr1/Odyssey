@@ -7,6 +7,7 @@
 
 #include "top.h"
 #include "hrd.h"
+#include "config_util.h"
 
 // Set up the receive info
 static recv_info_t* init_recv_info(struct hrd_ctrl_blk *cb, uint32_t push_ptr, uint32_t buf_slots,

@@ -364,6 +364,8 @@ typedef struct pending_writes {
   uint64_t highest_g_id_taken;
 	uint8_t *flr_id;
 	uint8_t *acks_seen;
+  uint32_t *w_index_to_req_array; // [SESSIONS_PER_THREAD]
+
 
 	bool *is_local;
 	bool *stalled;

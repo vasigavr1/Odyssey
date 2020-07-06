@@ -189,7 +189,7 @@ static inline void check_debug_cntrs(uint32_t *credit_debug_cnt, uint32_t *wait_
 }
 
 // When pulling a n ew req from the trace, check the req and the working session
-static inline void check_trace_req(p_ops_t *p_ops, trace_t *trace,
+static inline void check_trace_req(p_ops_t *p_ops, trace_t *trace, trace_op_t *op,
                                    int working_session, uint16_t t_id)
 {
   if (ENABLE_ASSERTIONS) {
@@ -197,6 +197,7 @@ static inline void check_trace_req(p_ops_t *p_ops, trace_t *trace,
     check_state_with_allowed_flags(8, trace->opcode, OP_RELEASE, KVS_OP_PUT,
                                    OP_ACQUIRE, KVS_OP_GET, FETCH_AND_ADD, COMPARE_AND_SWAP_WEAK,
                                    COMPARE_AND_SWAP_STRONG);
+    assert(op->opcode == trace->opcode);
     assert(!p_ops->sess_info[working_session].stalled);
     if (ENABLE_RMWS && p_ops->prop_info->entry[working_session].state != INVALID_RMW) {
       my_printf(cyan, "wrk %u  Session %u has loc_entry state %u , helping flag %u\n", t_id,

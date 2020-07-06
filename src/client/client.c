@@ -30,6 +30,7 @@ static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
       uint16_t wrkr = w_i + first_worker;
       for (s_i = 0; s_i < SESSIONS_PER_THREAD; s_i++) {
         uint16_t pull_ptr = interface[wrkr].clt_pull_ptr[s_i];
+        //printf("Client %u  wrkr %u s_i %u, pull_ptr %u \n", t_id, wrkr, s_i, pull_ptr);
         while (interface[wrkr].req_array[s_i][pull_ptr].state == COMPLETED_REQ) {
           // get the result
           polled = true;
@@ -59,6 +60,7 @@ static inline uint32_t send_reqs_from_trace(trace_t *trace, uint16_t t_id)
                           t_id, wrkr, s_i, push_ptr, trace_ptr, &interface[wrkr].req_array[s_i][push_ptr].state);
           interface[wrkr].req_array[s_i][push_ptr].opcode = trace[trace_ptr].opcode;
           memcpy(&interface[wrkr].req_array[s_i][push_ptr].key, trace[trace_ptr].key_hash, KEY_SIZE);
+          interface[wrkr].req_array[s_i][push_ptr].val_len = (uint32_t) VALUE_SIZE;
           atomic_store_explicit(&interface[wrkr].req_array[s_i][push_ptr].state, (uint8_t) ACTIVE_REQ,
                                 memory_order_release);
           MOD_INCR(interface[wrkr].clt_push_ptr[s_i], PER_SESSION_REQ_NUM);

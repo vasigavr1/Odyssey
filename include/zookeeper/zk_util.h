@@ -48,22 +48,10 @@ void print_latency_stats(void);
 ------------------------------INITIALIZATION --------------------------------------
 ---------------------------------------------------------------------------*/
 
-
-//// Follower calls this function to conenct with the leader
-//void get_qps_from_one_machine(uint16_t g_id, struct hrd_ctrl_blk *cb);
-//// Leader calls this function to connect with its followers
-//void get_qps_from_all_other_machines(uint16_t g_id, struct hrd_ctrl_blk *cb);
-//// Used by all kinds of threads to publish their QPs
-//void publish_qps(uint32_t qp_num, uint32_t global_id, const char* qp_name, struct hrd_ctrl_blk *cb);
-
-//int parse_trace(char* path, struct trace_command **cmds, int t_id);
-
-
-//void trace_init(struct trace_command **cmds, int t_id);
-//void init_multicast(struct mcast_info**, struct mcast_essentials**, int, struct hrd_ctrl_blk*, int);
-// Connect with Workers and Clients
-//void setup_connections(int, struct hrd_ctrl_blk *);
-
+// Set up a struct that stores pending writes
+p_writes_t* set_up_pending_writes(uint32_t size, struct ibv_send_wr*,
+																	struct ibv_send_wr*, uint16_t credits[][MACHINE_NUM],
+																	protocol_t);
 
 /* ---------------------------------------------------------------------------
 ------------------------------LEADER--------------------------------------
@@ -71,10 +59,7 @@ void print_latency_stats(void);
 // construct a prep_message-- max_size must be in bytes
 void init_fifo(struct fifo **fifo, uint32_t max_size, uint32_t);
 
-// Set up a struct that stores pending writes
-p_writes_t* set_up_pending_writes(uint32_t size, struct ibv_send_wr*,
-                                  struct ibv_send_wr*, uint16_t credits[][MACHINE_NUM],
-                                  protocol_t);
+
 
 // Set up all leader WRs
 void set_up_ldr_WRs(struct ibv_send_wr*, struct ibv_sge*,

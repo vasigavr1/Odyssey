@@ -59,7 +59,7 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
 
   bool passed_over_all_sessions = false;
   while (op_i < MAX_OP_BATCH && !passed_over_all_sessions) {
-    if (fill_trace_op(p_ops, &ops[op_i], trace_iter, trace, op_i, working_session, &writes_num,
+    if (fill_trace_op(p_ops, &ops[op_i], &trace[trace_iter], op_i, working_session, &writes_num,
                       &reads_num, ses_dbg, latency_info, sizes_dbg_cntr, t_id))
       break;
     // Find out next session to work on
@@ -89,12 +89,9 @@ static inline uint32_t batch_requests_to_KVS(uint16_t t_id,
   KVS_batch_op_trace(op_i, t_id, ops, resp, p_ops);
   //my_printf(cyan, "thread %d  adds %d/%d ops\n", t_id, op_i, MAX_OP_BATCH);
   for (uint16_t i = 0; i < op_i; i++) {
-//    signal_in_progress_to_client(ops[i].session_id, ops[i].index_to_req_array, t_id);
-    //printf("%u %u \n", i, ops[i].opcode);
-
     // my_printf(green, "After: OP_i %u -> session %u \n", i, *(uint32_t *) &ops[i]);
     if (resp[i].type == KVS_MISS)  {
-      my_printf(green, "Cache_miss %u: bkt %u, server %u, tag %u \n", i,
+      my_printf(green, "KVS miss %u: bkt %u, server %u, tag %u \n", i,
                    ops[i].key.bkt, ops[i].key.server, ops[i].key.tag);
       assert(false);
       clean_up_on_KVS_miss(&ops[i], p_ops, latency_info, t_id);

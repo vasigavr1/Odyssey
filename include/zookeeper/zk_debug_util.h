@@ -165,7 +165,7 @@ static inline void check_ldr_p_states(p_writes_t *p_writes, uint16_t t_id)
       my_printf(red, "LDR %d push ptr %u, pull ptr %u, size %u, state %d at ptr %u \n",
                 t_id, p_writes->push_ptr, p_writes->pull_ptr, p_writes->size, p_writes->w_state[ptr], ptr);
       print_ldr_stats(t_id);
-      exit(0);
+      assert(false);
     }
   }
 }
@@ -463,5 +463,50 @@ static inline void checks_and_stats_when_sending_write(p_writes_t *p_writes,
     t_stats[t_id].writes_sent_mes_num++;
   }
 }
+
+
+
+/* ---------------------------------------------------------------------------
+//------------------------------TRACE --------------------------------
+//---------------------------------------------------------------------------*/
+
+static inline void zk_check_op(zk_trace_op_t *op)
+{
+  if (ENABLE_ASSERTIONS) {
+    check_state_with_allowed_flags(3, op->opcode, KVS_OP_PUT, KVS_OP_GET);
+    assert(op->real_val_len > 0);
+    assert(op->index_to_req_array < PER_SESSION_REQ_NUM);
+    assert(op->session_id < SESSIONS_PER_THREAD);
+    assert(op->key.bkt > 0);
+  }
+}
+
+static inline void checks_when_leader_creates_write(zk_prep_mes_t *preps, uint32_t prep_ptr,
+                                                    uint32_t inside_prep_ptr, p_writes_t *p_writes,
+                                                    uint32_t w_ptr, uint16_t t_id)
+{
+  if (ENABLE_ASSERTIONS) {
+    if (inside_prep_ptr == 0) {
+      uint32_t message_l_id = preps[prep_ptr].l_id;
+      if (message_l_id > MAX_PREP_COALESCE) {
+        uint32_t prev_prep_ptr = (prep_ptr + PREP_FIFO_SIZE - 1) % PREP_FIFO_SIZE;
+        uint32_t prev_l_id = preps[prev_prep_ptr].l_id;
+        uint8_t prev_coalesce = preps[prev_prep_ptr].coalesce_num;
+        if (message_l_id != prev_l_id + prev_coalesce) {
+          my_printf(red, "Current message l_id %u, previous message l_id %u , previous coalesce %u\n",
+                    message_l_id, prev_l_id, prev_coalesce);
+        }
+      }
+    }
+    if (p_writes->w_state[w_ptr] != INVALID)
+      my_printf(red, "Leader %u w_state %d at w_ptr %u, g_id %lu, cache hits %lu, size %u \n",
+                t_id, p_writes->w_state[w_ptr], w_ptr, p_writes->g_id[w_ptr],
+                t_stats[t_id].cache_hits_per_thread, p_writes->size);
+    //printf("Sent %d, Valid %d, Ready %d \n", SENT, VALID, READY);
+    assert(p_writes->w_state[w_ptr] == INVALID);
+
+  }
+}
+
 
 #endif //KITE_ZK_DEBUG_UTIL_H

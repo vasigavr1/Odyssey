@@ -16,8 +16,8 @@ static inline void signal_completion_to_client(uint32_t sess_id,
     client_op_t *req_array = &interface[t_id].req_array[sess_id][req_array_i];
     check_session_id_and_req_array_index((uint16_t) sess_id, (uint16_t) req_array_i, t_id);
 
-//    my_printf(yellow, "Wrkr %u/%u completing poll ptr %u for req %u at state %u \n", t_id,
-//           sess_id, req_array_i, req_array->opcode, req_array->state);
+    //my_printf(yellow, "Wrkr %u/%u completing poll ptr %u for req %u at state %u \n", t_id,
+    //       sess_id, req_array_i, req_array->opcode, req_array->state);
 
     if (ENABLE_ASSERTIONS) {
       if (req_array->state != IN_PROGRESS_REQ)
