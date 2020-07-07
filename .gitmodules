@@ -4,3 +4,6 @@
 [submodule "kite"]
 	path = kite
 	url = https://github.com/vasigavr1/Kite.git
+[submodule "zookeeper"]
+	path = zookeeper
+	url = https://github.com/vasigavr1/Zookeeper.git
