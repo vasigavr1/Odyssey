@@ -6,10 +6,12 @@ set(odyssey_VERSION_MAJOR 1)
 include_directories(shared/include/libhrd kite/include/kite shared/include/mica shared/include/general_util zookeeper/include/zookeeper
         kite/include/kite_inline_util /usr/include/)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -Wno-address-of-packed-member \
--Wno-format-truncation -g  -march=native")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
+-Wno-format-truncation -g  -fsanitize=address")
+#set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 
-
+# -Wfno-omit-frame-pointer  enable the frame pointer to trace stack
+#-fsanitize=address
 
 
 set(COMMON_FILES
