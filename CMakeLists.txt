@@ -7,10 +7,11 @@ include_directories(shared/include/libhrd kite/include/kite shared/include/mica 
         kite/include/kite_inline_util /usr/include/)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -g  -fsanitize=address")
+-Wno-format-truncation -g -fsanitize=address")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 
-# -Wfno-omit-frame-pointer  enable the frame pointer to trace stack
+# -fno-omit-frame-pointer  enable the frame pointer to trace stack
+#-fno-inline
 #-fsanitize=address
 
 
@@ -63,7 +64,7 @@ set(KITE_SOURCE_FILES
         kite/include/kite_inline_util/paxos_generic_util.h
         kite/include/kite/messages.h
         kite/include/kite/buffer_sizes.h
-        )
+        shared/include/general_util/multicast.h)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_main.c
