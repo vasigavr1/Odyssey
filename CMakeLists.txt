@@ -3,16 +3,23 @@ project(odyssey)
 
 set(odyssey_VERSION_MAJOR 1)
 
-include_directories(shared/include/libhrd kite/include/kite shared/include/mica shared/include/general_util zookeeper/include/zookeeper
-        kite/include/kite_inline_util /usr/include/)
+include_directories(
+        shared/include/libhrd
+        kite/include/kite
+        shared/include/mica
+        shared/include/general_util
+        shared/include/multicast
+        zookeeper/include/zookeeper
+        kite/include/kite_inline_util
+        /usr/include/)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -g -fsanitize=address")
+-Wno-format-truncation -g   -D_GNU_SOURCE")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
 #-fno-inline
-#-fsanitize=address
+#-fsanitize=address -fsanitize=thread
 
 
 set(COMMON_FILES
@@ -42,7 +49,9 @@ set(COMMON_FILES
         shared/include/general_util/debug_util.h
         shared/include/general_util/inline_util.h
         shared/include/general_util/sizes.h
-        shared/include/general_util/config_util.h)
+        shared/include/general_util/config_util.h
+        shared/include/multicast/multicast.h
+        shared/src/multicast/multicast.c)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
@@ -64,7 +73,7 @@ set(KITE_SOURCE_FILES
         kite/include/kite_inline_util/paxos_generic_util.h
         kite/include/kite/messages.h
         kite/include/kite/buffer_sizes.h
-        shared/include/general_util/multicast.h)
+        )
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_main.c
@@ -89,7 +98,7 @@ add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
 
-set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE)
+set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
 
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
