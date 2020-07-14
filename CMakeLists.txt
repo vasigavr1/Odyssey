@@ -14,7 +14,7 @@ include_directories(
         /usr/include/)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -g   -D_GNU_SOURCE")
+-Wno-format-truncation -g -fsanitize=address -fno-inline -D_GNU_SOURCE ")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
@@ -51,7 +51,7 @@ set(COMMON_FILES
         shared/include/general_util/sizes.h
         shared/include/general_util/config_util.h
         shared/include/multicast/multicast.h
-        shared/src/multicast/multicast.c)
+        shared/src/multicast/multicast.c shared/include/general_util/network_context.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
