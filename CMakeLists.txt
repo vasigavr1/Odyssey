@@ -14,12 +14,13 @@ include_directories(
         /usr/include/)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -g -fsanitize=address -fno-inline -fno-omit-frame-pointer -D_GNU_SOURCE ")
+-Wno-format-truncation -g  -D_GNU_SOURCE ")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
 #-fno-inline
 #-fsanitize=address -fsanitize=thread
+# -fsanitize=address -fno-inline -fno-omit-frame-pointer
 
 
 set(COMMON_FILES
