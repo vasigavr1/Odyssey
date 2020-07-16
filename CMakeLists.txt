@@ -52,7 +52,9 @@ set(COMMON_FILES
         shared/include/general_util/sizes.h
         shared/include/general_util/config_util.h
         shared/include/multicast/multicast.h
-        shared/src/multicast/multicast.c shared/include/general_util/network_context.h)
+        shared/src/multicast/multicast.c
+        shared/include/general_util/network_context.h
+        shared/include/general_util/fifo.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
@@ -82,7 +84,6 @@ set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_follower.c
         zookeeper/src/zookeeper/zk_stats.c
         zookeeper/src/zookeeper/zk_util.c
-        zookeeper/include/zookeeper/zk_cache.h
         zookeeper/include/zookeeper/zk_inline_util.h
         zookeeper/include/zookeeper/zk_main.h
         zookeeper/include/zookeeper/zk_util.h
@@ -91,7 +92,7 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_opcodes.h
         zookeeper/include/zookeeper/zk_debug_util.h
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
-        )
+        zookeeper/include/zookeeper/zk_generic_util.h)
 
 
 
