@@ -80,8 +80,7 @@ set(KITE_SOURCE_FILES
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_main.c
-        zookeeper/src/zookeeper/zk_leader.c
-        zookeeper/src/zookeeper/zk_follower.c
+        zookeeper/src/zookeeper/zk_worker.c
         zookeeper/src/zookeeper/zk_stats.c
         zookeeper/src/zookeeper/zk_util.c
         zookeeper/include/zookeeper/zk_inline_util.h
