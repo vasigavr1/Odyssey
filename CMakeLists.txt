@@ -93,7 +93,7 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
         zookeeper/include/zookeeper/zk_generic_util.h)
 
-
+set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 
