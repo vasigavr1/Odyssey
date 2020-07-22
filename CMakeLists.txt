@@ -14,7 +14,7 @@ include_directories(
         /usr/include/)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -D_GNU_SOURCE -g -fsanitize=address -fno-inline -fno-omit-frame-pointer ")
+-Wno-format-truncation -D_GNU_SOURCE ")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 # -g
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
@@ -93,7 +93,7 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
         zookeeper/include/zookeeper/zk_generic_util.h)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 
