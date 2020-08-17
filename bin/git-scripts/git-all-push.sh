@@ -14,5 +14,5 @@ echo "----------Pushing to Zookeeper-------------------------"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Od-lib-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-od-lib-push.sh "$1"
+/home/s1687259/odyssey/bin/git-scripts/git-odlib-push.sh "$1"
 echo "------------------------------------------------------"
