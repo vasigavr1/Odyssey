@@ -4,11 +4,11 @@ project(odyssey)
 set(odyssey_VERSION_MAJOR 1)
 
 include_directories(
-        shared/include/libhrd
+        odlib/include/libhrd
         kite/include/kite
-        shared/include/mica
-        shared/include/general_util
-        shared/include/multicast
+        odlib/include/mica
+        odlib/include/general_util
+        odlib/include/multicast
         zookeeper/include/zookeeper
         kite/include/kite_inline_util
         /usr/include/)
@@ -24,37 +24,37 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of
 
 
 set(COMMON_FILES
-        shared/src/mica/kvs.c
+        odlib/src/mica/kvs.c
         #libhrd
-        shared/include/libhrd/hrd.h
-        shared/src/libhrd/hrd_util.c
-        shared/src/libhrd/hrd_conn.c
+        odlib/include/libhrd/hrd.h
+        odlib/src/libhrd/hrd_util.c
+        odlib/src/libhrd/hrd_conn.c
         #mica
-        shared/src/mica/city.c
-        shared/include/mica/kvs.h
-        shared/include/mica/city.h
+        odlib/src/mica/city.c
+        odlib/include/mica/kvs.h
+        odlib/include/mica/city.h
         /usr/include/infiniband/verbs.h
-        shared/src/client/client.c
-        shared/include/general_util/generic_macros.h
-        shared/include/general_util/client_if_util.h
-        shared/include/general_util/interface.h
-        shared/include/general_util/latency_util.h
-        shared/include/general_util/stats.h
-        shared/include/general_util/top.h
-        shared/include/general_util/init_func.h
-        shared/include/general_util/generic_inline_util.h
-        shared/include/general_util/init_connect.h
-        shared/include/general_util/generic_opcodes.h
-        shared/include/general_util/trace_util.h
-        shared/include/general_util/rdma_gen_util.h
-        shared/include/general_util/debug_util.h
-        shared/include/general_util/inline_util.h
-        shared/include/general_util/sizes.h
-        shared/include/general_util/config_util.h
-        shared/include/multicast/multicast.h
-        shared/src/multicast/multicast.c
-        shared/include/general_util/network_context.h
-        shared/include/general_util/fifo.h)
+        odlib/src/client/client.c
+        odlib/include/general_util/generic_macros.h
+        odlib/include/general_util/client_if_util.h
+        odlib/include/general_util/interface.h
+        odlib/include/general_util/latency_util.h
+        odlib/include/general_util/stats.h
+        odlib/include/general_util/top.h
+        odlib/include/general_util/init_func.h
+        odlib/include/general_util/generic_inline_util.h
+        odlib/include/general_util/init_connect.h
+        odlib/include/general_util/generic_opcodes.h
+        odlib/include/general_util/trace_util.h
+        odlib/include/general_util/rdma_gen_util.h
+        odlib/include/general_util/debug_util.h
+        odlib/include/general_util/inline_util.h
+        odlib/include/general_util/sizes.h
+        odlib/include/general_util/config_util.h
+        odlib/include/multicast/multicast.h
+        odlib/src/multicast/multicast.c
+        odlib/include/general_util/network_context.h
+        odlib/include/general_util/fifo.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c

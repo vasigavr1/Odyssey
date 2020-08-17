@@ -13,6 +13,6 @@ echo "----------Pushing to Zookeeper-------------------------"
 /home/s1687259/odyssey/bin/git-scripts/git-zk-push.sh "$1"
 echo "------------------------------------------------------"
 
-echo "----------Pushing to Shared-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-shared-push.sh "$1"
+echo "----------Pushing to Od-lib-------------------------"
+/home/s1687259/odyssey/bin/git-scripts/git-od-lib-push.sh "$1"
 echo "------------------------------------------------------"
