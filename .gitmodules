@@ -1,6 +1,6 @@
 [submodule "shared"]
-	path = shared
-	url = https://github.com/vasigavr1/odyssey-shared.git
+	path = odlib
+	url = https://github.com/vasigavr1/Odyssey-lib.git
 [submodule "kite"]
 	path = kite
 	url = https://github.com/vasigavr1/Kite.git
