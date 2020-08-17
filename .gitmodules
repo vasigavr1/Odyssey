@@ -7,3 +7,6 @@
 [submodule "zookeeper"]
 	path = zookeeper
 	url = https://github.com/vasigavr1/Zookeeper.git
+[submodule "odlib"]
+	path = odlib
+	url = https://github.com/vasigavr1/Odyssey-lib
