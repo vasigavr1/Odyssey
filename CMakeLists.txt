@@ -53,8 +53,8 @@ set(COMMON_FILES
         odlib/include/general_util/config_util.h
         odlib/include/multicast/multicast.h
         odlib/src/multicast/multicast.c
-        odlib/include/general_util/network_context.h
-        odlib/include/general_util/fifo.h)
+        odlib/include/network_api/network_context.h
+        odlib/include/general_util/fifo.h odlib/include/network_api/netw_func.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
