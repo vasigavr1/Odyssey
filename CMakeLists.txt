@@ -10,6 +10,7 @@ include_directories(
         odlib/include/general_util
         odlib/include/multicast
         zookeeper/include/zookeeper
+        zookeeper/include/derecho
         kite/include/kite_inline_util
         /usr/include/)
 
@@ -24,6 +25,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of
 
 
 set(COMMON_FILES
+        odlib/src/main/main.c
+        odlib/src/main/worker.c
         odlib/src/mica/kvs.c
         #libhrd
         odlib/include/libhrd/hrd.h
@@ -58,8 +61,6 @@ set(COMMON_FILES
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
-        kite/src/kite/main.c
-        kite/src/kite/worker.c
         kite/src/kite/stats.c
         kite/include/kite_inline_util/kite_inline_util.h
         kite/include/kite/main.h
@@ -79,8 +80,6 @@ set(KITE_SOURCE_FILES
         )
 
 set(ZK_SOURCE_FILES
-        zookeeper/src/zookeeper/zk_main.c
-        zookeeper/src/zookeeper/zk_worker.c
         zookeeper/src/zookeeper/zk_stats.c
         zookeeper/src/zookeeper/zk_util.c
         zookeeper/include/zookeeper/zk_inline_util.h
@@ -93,15 +92,19 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
         zookeeper/include/zookeeper/zk_generic_util.h)
 
+set(DR_SOURCE_FILES zookeeper/include/derecho/dr_config.h zookeeper/include/derecho/dr_inline_util.h)
+
 #set(CMAKE_BUILD_TYPE Release)
 
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
-
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
+add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
+set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
 target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
+target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
 

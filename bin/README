@@ -1,0 +1,6 @@
+In order to add a new protocol you need to modify the following places 
+
+* top.h
+* main.c
+* worker.c
+* kvs.h
