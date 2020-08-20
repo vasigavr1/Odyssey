@@ -4,3 +4,4 @@ In order to add a new protocol you need to modify the following places
 * main.c
 * worker.c
 * kvs.h
+* odlib/src/main/stats.c

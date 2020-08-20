@@ -28,6 +28,7 @@ set(COMMON_FILES
         odlib/src/main/main.c
         odlib/src/main/worker.c
         odlib/src/mica/kvs.c
+        odlib/src/main/stats.c
         #libhrd
         odlib/include/libhrd/hrd.h
         odlib/src/libhrd/hrd_util.c
@@ -92,19 +93,22 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
         zookeeper/include/zookeeper/zk_generic_util.h)
 
-set(DR_SOURCE_FILES zookeeper/include/derecho/dr_config.h zookeeper/include/derecho/dr_inline_util.h)
+set(DR_SOURCE_FILES zookeeper/include/derecho/dr_config.h zookeeper/include/derecho/dr_inline_util.h zookeeper/src/derecho/dr_stats.c)
 
 #set(CMAKE_BUILD_TYPE Release)
 
+add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
-add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 
+
+set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
-set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 
+
+target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
 target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
-target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
+
 
