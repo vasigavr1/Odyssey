@@ -9,8 +9,9 @@ include_directories(
         odlib/include/mica
         odlib/include/general_util
         odlib/include/multicast
+        odlib/include/network_api
         zookeeper/include/zookeeper
-        zookeeper/include/derecho
+        derecho/include/derecho
         kite/include/kite_inline_util
         /usr/include/)
 
@@ -93,7 +94,16 @@ set(ZK_SOURCE_FILES
         zookeeper/include/zookeeper/zk_reservation_stations_util.h
         zookeeper/include/zookeeper/zk_generic_util.h)
 
-set(DR_SOURCE_FILES zookeeper/include/derecho/dr_config.h zookeeper/include/derecho/dr_inline_util.h zookeeper/src/derecho/dr_stats.c zookeeper/include/derecho/dr_messages.h zookeeper/include/derecho/dr_reserve_stations.h zookeeper/include/derecho/dr_debug_util.h zookeeper/include/derecho/dr_kvs_util.h zookeeper/include/derecho/dr_generic_util.h)
+set(DR_SOURCE_FILES
+        derecho/include/derecho/dr_config.h
+        derecho/include/derecho/dr_inline_util.h
+        derecho/src/derecho/dr_stats.c
+        derecho/include/derecho/dr_messages.h
+        derecho/include/derecho/dr_reserve_stations.h
+        derecho/include/derecho/dr_debug_util.h
+        derecho/include/derecho/dr_kvs_util.h
+        derecho/include/derecho/dr_generic_util.h
+        derecho/include/derecho/dr_util.h)
 
 #set(CMAKE_BUILD_TYPE Release)
 

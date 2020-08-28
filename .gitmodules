@@ -10,3 +10,6 @@
 [submodule "odlib"]
 	path = odlib
 	url = https://github.com/vasigavr1/Odyssey-lib
+[submodule "Derecho"]
+	path = derecho
+	url = git@github.com:vasigavr1/Derecho.git
