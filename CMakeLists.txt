@@ -105,20 +105,23 @@ set(DR_SOURCE_FILES
         derecho/include/derecho/dr_generic_util.h
         derecho/include/derecho/dr_util.h)
 
-set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
+add_executable(zk-perf ${ZK_SOURCE_FILES} ${COMMON_FILES})
 
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
+set_target_properties(zk-perf PROPERTIES COMPILE_FLAGS -DZOOKEEPER PROPERTIES COMPILE_FLAGS -DWORKERS_PER_MACHINE 10)
 
 
 target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
 target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
+target_link_libraries(zk-perf pthread ibverbs rt numa rdmacm)
 
 
