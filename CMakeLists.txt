@@ -105,7 +105,7 @@ set(DR_SOURCE_FILES
         derecho/include/derecho/dr_generic_util.h
         derecho/include/derecho/dr_util.h)
 
-#set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
