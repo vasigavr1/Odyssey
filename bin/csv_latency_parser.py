@@ -10,10 +10,16 @@ Parser 4 aggregated over time results
 class LatencyParser:
     def __init__(self):
         self.latency_values = []
+
         self.reads = []
         self.max_read_latency = 0
-        self.max_write_latency = 0
+
         self.writes = []
+        self.max_write_latency = 0
+
+        self.rmws = []
+        self.max_rmw_latency = 0
+
         self.all_reqs = []
         self.parseInputStats()
         self.printAllStats()
@@ -38,6 +44,8 @@ class LatencyParser:
         self.printStats(self.writes, self.max_write_latency)
         print "\n~~~~~~ Read Stats ~~~~~~~~"
         self.printStats(self.reads, self.max_read_latency)
+        print "\n~~~~~~ RMWs Stats ~~~~~~~~"
+        self.printStats(self.rmws, self.max_rmw_latency)
         print "\n~~~~~~ Overall Stats ~~~~~~~~~"
         self.printStats(self.all_reqs, max(self.max_read_latency, self.max_write_latency))
 
@@ -98,6 +106,14 @@ class LatencyParser:
                 self.writes.append(int(words[1].strip()))
                 self.all_reqs[lr_lines] = self.all_reqs[lr_lines] + self.writes[-1]
                 lr_lines = lr_lines + 1
+            elif command == 'rmws':
+                words = words.strip().split(",")
+                self.rmws.append(int(words[1].strip()))
+                self.all_reqs.append(int(words[1].strip()))
+                lr_lines = lr_lines + 1
+            elif command == 'rmws-hl':
+                words = words.strip().split(",")
+                self.max_rmw_latency = int(words[0].strip())
             elif command == 'reads-hl':
                 words = words.strip().split(",")
                 self.max_read_latency = int(words[0].strip())
