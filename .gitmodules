@@ -13,3 +13,6 @@
 [submodule "Derecho"]
 	path = derecho
 	url = git@github.com:vasigavr1/Derecho.git
+[submodule "Hermes"]
+	path = hermes
+	url = git@github.com:vasigavr1/Hermes.git

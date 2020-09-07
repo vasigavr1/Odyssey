@@ -13,7 +13,12 @@ include_directories(
         zookeeper/include/zookeeper
         derecho/include/derecho
         kite/include/kite_inline_util
-        /usr/include/)
+        /usr/include/
+        hermes/include/hermes
+#        hermes/include/libhrd
+#        hermes/include/optik
+#        hermes/include/mica-herd
+  )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
 -Wno-format-truncation -D_GNU_SOURCE -g ")
@@ -105,23 +110,54 @@ set(DR_SOURCE_FILES
         derecho/include/derecho/dr_generic_util.h
         derecho/include/derecho/dr_util.h)
 
+set(HERMES_SOURCE_FILES
+        hermes/include/hermes/hr_config.h
+        hermes/include/hermes/hr_inline_util.h
+        hermes/include/hermes/hr_util.h
+#        hermes/include/hades/hades.h
+#        hermes/include/hermes/h_config.h
+#        hermes/include/hermes/h_inline_util.h
+#        hermes/include/hermes/spacetime.h
+#        hermes/include/hermes/h_util.h
+#        hermes/include/mica-herd/city.h
+#        hermes/include/mica-herd/hrd.h
+#        hermes/include/mica-herd/mica.h
+#        hermes/include/mica-herd/sizes.h
+#        hermes/include/utils/bit_vector.h
+#        hermes/include/utils/concur_ctrl.h
+#        hermes/include/utils/time_rdtsc.h
+#        hermes/include/wings/wings.h
+#        hermes/include/wings/wings_api.h
+#        hermes/src/hades/hades.c
+#        hermes/src/hermes/hermes_worker.c
+#        hermes/src/hermes/hermesKV.c
+#        hermes/src/hermes/main.c
+#        hermes/src/hermes/spacetime.c
+#        hermes/src/hermes/stats.c
+#        hermes/src/hermes/h_util.c
+#        hermes/src/mica-herd/city.c
+#        hermes/src/mica-herd/herd.c
+#        hermes/src/mica-herd/mica.c
+#        hermes/src/wings/wings.c
+   )
+
 set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
-add_executable(zk-perf ${ZK_SOURCE_FILES} ${COMMON_FILES})
+add_executable(hermes ${HERMES_SOURCE_FILES} ${COMMON_FILES})
 
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
-set_target_properties(zk-perf PROPERTIES COMPILE_FLAGS -DZOOKEEPER PROPERTIES COMPILE_FLAGS -DWORKERS_PER_MACHINE 10)
+set_target_properties(hermes PROPERTIES COMPILE_FLAGS -DHERMES)
 
 
 target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
 target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
-target_link_libraries(zk-perf pthread ibverbs rt numa rdmacm)
+target_link_libraries(hermes pthread ibverbs rt numa rdmacm)
 
 
