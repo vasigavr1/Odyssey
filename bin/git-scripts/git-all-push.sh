@@ -9,6 +9,9 @@ echo "----------Pushing to Derecho-------------------------"
 /home/s1687259/odyssey/bin/git-scripts/git-push.sh "derecho" "$1"
 echo "------------------------------------------------------"
 
+echo "----------Pushing to Hermes-------------------------"
+/home/s1687259/odyssey/bin/git-scripts/git-push.sh "hermes" "$1"
+echo "------------------------------------------------------"
 
 echo "----------Pushing to Zookeeper-------------------------"
 /home/s1687259/odyssey/bin/git-scripts/git-push.sh "zookeeper" "$1"

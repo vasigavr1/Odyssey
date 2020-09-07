@@ -108,7 +108,7 @@ set(DR_SOURCE_FILES
         derecho/include/derecho/dr_debug_util.h
         derecho/include/derecho/dr_kvs_util.h
         derecho/include/derecho/dr_generic_util.h
-        derecho/include/derecho/dr_util.h)
+        derecho/include/derecho/dr_util.h hermes/include/hermes/hr_messages.h)
 
 set(HERMES_SOURCE_FILES
         hermes/include/hermes/hr_config.h
@@ -139,7 +139,7 @@ set(HERMES_SOURCE_FILES
 #        hermes/src/mica-herd/herd.c
 #        hermes/src/mica-herd/mica.c
 #        hermes/src/wings/wings.c
-   )
+        hermes/include/hermes/hr_messages.h hermes/src/hermes/hr_stats.c)
 
 set(CMAKE_BUILD_TYPE Release)
 
