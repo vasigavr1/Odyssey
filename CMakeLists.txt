@@ -139,7 +139,7 @@ set(HERMES_SOURCE_FILES
 #        hermes/src/mica-herd/herd.c
 #        hermes/src/mica-herd/mica.c
 #        hermes/src/wings/wings.c
-        hermes/include/hermes/hr_messages.h hermes/src/hermes/hr_stats.c)
+        hermes/include/hermes/hr_messages.h hermes/src/hermes/hr_stats.c hermes/include/hermes/hr_kvs_util.h hermes/include/hermes/hr_debug_util.h)
 
 set(CMAKE_BUILD_TYPE Release)
 
