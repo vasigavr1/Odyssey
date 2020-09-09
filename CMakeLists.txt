@@ -108,40 +108,18 @@ set(DR_SOURCE_FILES
         derecho/include/derecho/dr_debug_util.h
         derecho/include/derecho/dr_kvs_util.h
         derecho/include/derecho/dr_generic_util.h
-        derecho/include/derecho/dr_util.h hermes/include/hermes/hr_messages.h)
+        derecho/include/derecho/dr_util.h)
 
 set(HERMES_SOURCE_FILES
         hermes/include/hermes/hr_config.h
         hermes/include/hermes/hr_inline_util.h
         hermes/include/hermes/hr_util.h
-#        hermes/include/hades/hades.h
-#        hermes/include/hermes/h_config.h
-#        hermes/include/hermes/h_inline_util.h
-#        hermes/include/hermes/spacetime.h
-#        hermes/include/hermes/h_util.h
-#        hermes/include/mica-herd/city.h
-#        hermes/include/mica-herd/hrd.h
-#        hermes/include/mica-herd/mica.h
-#        hermes/include/mica-herd/sizes.h
-#        hermes/include/utils/bit_vector.h
-#        hermes/include/utils/concur_ctrl.h
-#        hermes/include/utils/time_rdtsc.h
-#        hermes/include/wings/wings.h
-#        hermes/include/wings/wings_api.h
-#        hermes/src/hades/hades.c
-#        hermes/src/hermes/hermes_worker.c
-#        hermes/src/hermes/hermesKV.c
-#        hermes/src/hermes/main.c
-#        hermes/src/hermes/spacetime.c
-#        hermes/src/hermes/stats.c
-#        hermes/src/hermes/h_util.c
-#        hermes/src/mica-herd/city.c
-#        hermes/src/mica-herd/herd.c
-#        hermes/src/mica-herd/mica.c
-#        hermes/src/wings/wings.c
-        hermes/include/hermes/hr_messages.h hermes/src/hermes/hr_stats.c hermes/include/hermes/hr_kvs_util.h hermes/include/hermes/hr_debug_util.h)
+        hermes/include/hermes/hr_messages.h
+        hermes/src/hermes/hr_stats.c
+        hermes/include/hermes/hr_kvs_util.h
+        hermes/include/hermes/hr_debug_util.h)
 
-set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
