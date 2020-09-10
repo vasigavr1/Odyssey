@@ -15,9 +15,6 @@ include_directories(
         kite/include/kite_inline_util
         /usr/include/
         hermes/include/hermes
-#        hermes/include/libhrd
-#        hermes/include/optik
-#        hermes/include/mica-herd
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
@@ -30,7 +27,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of
 # -fsanitize=address -fno-inline -fno-omit-frame-pointer
 
 
-set(COMMON_FILES
+set(ODLIB_FILES
         odlib/src/main/main.c
         odlib/src/main/worker.c
         odlib/src/mica/kvs.c
@@ -64,7 +61,12 @@ set(COMMON_FILES
         odlib/include/multicast/multicast.h
         odlib/src/multicast/multicast.c
         odlib/include/network_api/network_context.h
-        odlib/include/general_util/fifo.h odlib/include/network_api/netw_func.h)
+        odlib/include/general_util/fifo.h
+        odlib/include/network_api/netw_func.h
+        odlib/include/network_api/ctx_templates.h
+        odlib/src/network_api/init_qp_meta.c
+        odlib/src/network_api/init_ctx.c
+        odlib/src/network_api/main_loop_api.c)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
@@ -117,14 +119,14 @@ set(HERMES_SOURCE_FILES
         hermes/include/hermes/hr_messages.h
         hermes/src/hermes/hr_stats.c
         hermes/include/hermes/hr_kvs_util.h
-        hermes/include/hermes/hr_debug_util.h)
+        hermes/include/hermes/hr_debug_util.h hermes/src/hermes/hr_main_loop.c hermes/src/hermes/hr_kvs.c hermes/src/hermes/hr_util.c)
 
 #set(CMAKE_BUILD_TYPE Release)
 
-add_executable(derecho ${DR_SOURCE_FILES} ${COMMON_FILES})
-add_executable(kite ${KITE_SOURCE_FILES} ${COMMON_FILES})
-add_executable(zookeeper ${ZK_SOURCE_FILES} ${COMMON_FILES})
-add_executable(hermes ${HERMES_SOURCE_FILES} ${COMMON_FILES})
+add_executable(derecho ${DR_SOURCE_FILES} ${ODLIB_FILES})
+add_executable(kite ${KITE_SOURCE_FILES} ${ODLIB_FILES})
+add_executable(zookeeper ${ZK_SOURCE_FILES} ${ODLIB_FILES})
+add_executable(hermes ${HERMES_SOURCE_FILES} ${ODLIB_FILES})
 
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)

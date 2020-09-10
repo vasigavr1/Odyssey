@@ -36,4 +36,4 @@ cat /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 # Using "perf top" (no hyphen) gives real-time information on where time goes
 # To make it work we need: -g -fno-inline -fno-omit-frame-pointer
 # For zoom, we must execute "sudo zoom run --allow_power_management" and then start profiling while kite executes
-#
+#pidof hermes | xargs -I {} sudo perf top -p {}
