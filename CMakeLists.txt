@@ -22,7 +22,7 @@ include_directories(
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -D_GNU_SOURCE ")
+-Wno-format-truncation -D_GNU_SOURCE -g")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 # -g
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
