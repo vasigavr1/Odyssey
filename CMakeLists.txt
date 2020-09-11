@@ -4,12 +4,16 @@ project(odyssey)
 set(odyssey_VERSION_MAJOR 1)
 
 include_directories(
+        odlib/incldue
+        odlib/incldue/fifo
         odlib/include/libhrd
         kite/include/kite
         odlib/include/mica
         odlib/include/general_util
         odlib/include/multicast
         odlib/include/network_api
+        odlib/include/client_api
+        odlib/include/trace
         zookeeper/include/zookeeper
         derecho/include/derecho
         kite/include/kite_inline_util
@@ -18,7 +22,7 @@ include_directories(
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -D_GNU_SOURCE -g ")
+-Wno-format-truncation -D_GNU_SOURCE ")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 # -g
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
@@ -43,8 +47,8 @@ set(ODLIB_FILES
         /usr/include/infiniband/verbs.h
         odlib/src/client/client.c
         odlib/include/general_util/generic_macros.h
-        odlib/include/general_util/client_if_util.h
-        odlib/include/general_util/interface.h
+        odlib/include/client_api/wrkr_side_calls.h
+        odlib/include/client_api/interface.h
         odlib/include/general_util/latency_util.h
         odlib/include/general_util/stats.h
         odlib/include/general_util/top.h
@@ -52,7 +56,7 @@ set(ODLIB_FILES
         odlib/include/general_util/generic_inline_util.h
         odlib/include/general_util/init_connect.h
         odlib/include/general_util/generic_opcodes.h
-        odlib/include/general_util/trace_util.h
+        odlib/include/trace/trace_util.h
         odlib/include/general_util/rdma_gen_util.h
         odlib/include/general_util/debug_util.h
         odlib/include/general_util/inline_util.h
@@ -61,12 +65,12 @@ set(ODLIB_FILES
         odlib/include/multicast/multicast.h
         odlib/src/multicast/multicast.c
         odlib/include/network_api/network_context.h
-        odlib/include/general_util/fifo.h
+        odlib/include/fifo/fifo.h
         odlib/include/network_api/netw_func.h
         odlib/include/network_api/ctx_templates.h
         odlib/src/network_api/init_qp_meta.c
         odlib/src/network_api/init_ctx.c
-        odlib/src/network_api/main_loop_api.c)
+        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
