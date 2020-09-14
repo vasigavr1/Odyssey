@@ -16,3 +16,6 @@
 [submodule "Hermes"]
 	path = hermes
 	url = git@github.com:vasigavr1/Od-Hermes.git
+[submodule "cht"]
+	path = cht
+	url = git@github.com:vasigavr1/CHT.git

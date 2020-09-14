@@ -5,7 +5,7 @@ set(odyssey_VERSION_MAJOR 1)
 
 include_directories(
         odlib/incldue
-        odlib/incldue/fifo
+        odlib/include/fifo
         odlib/include/libhrd
         kite/include/kite
         odlib/include/mica
@@ -19,6 +19,8 @@ include_directories(
         kite/include/kite_inline_util
         /usr/include/
         hermes/include/hermes
+        cht/include/cht
+        odlib/include/protocols
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
@@ -70,7 +72,7 @@ set(ODLIB_FILES
         odlib/include/network_api/ctx_templates.h
         odlib/src/network_api/init_qp_meta.c
         odlib/src/network_api/init_ctx.c
-        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c)
+        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c odlib/include/protocols/top_prot_sel.h odlib/include/protocols/main_prot_sel.h odlib/include/protocols/wrkr_prot_sel.h odlib/include/protocols/kvs_prot_sel.h odlib/include/protocols/stats_prot_sel.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
@@ -125,23 +127,29 @@ set(HERMES_SOURCE_FILES
         hermes/include/hermes/hr_kvs_util.h
         hermes/include/hermes/hr_debug_util.h hermes/src/hermes/hr_main_loop.c hermes/src/hermes/hr_kvs.c hermes/src/hermes/hr_util.c)
 
+
+set(CHT_SOURCE_FILES
+        cht/include/cht/cht_util.h cht/include/cht/cht_config.h cht/include/cht/cht_kvs_util.h cht/include/cht/cht_inline_util.h cht/include/cht/cht_debug_util.h cht/include/cht/cht_messages.h cht/src/cht/cht_stats.c)
 #set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(kite ${KITE_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(zookeeper ${ZK_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(hermes ${HERMES_SOURCE_FILES} ${ODLIB_FILES})
+add_executable(cht ${CHT_SOURCE_FILES} ${ODLIB_FILES})
 
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
 set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
 set_target_properties(hermes PROPERTIES COMPILE_FLAGS -DHERMES)
+set_target_properties(cht PROPERTIES COMPILE_FLAGS -DCHT)
 
 
 target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
 target_link_libraries(kite pthread ibverbs rt numa rdmacm)
 target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
 target_link_libraries(hermes pthread ibverbs rt numa rdmacm)
+target_link_libraries(cht pthread ibverbs rt numa rdmacm)
 
 
