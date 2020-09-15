@@ -1,5 +1,8 @@
 * req_cqe_error: (from /sys/class/infiniband/mlx5_0/ports/1/hw_counters)
-On the send side, it can mean that the send buffer is not registered (and the work request is not "inlined")
+On the send side, it can mean that the send buffer is not registered (and the work request is not "inlined").
+Usually, the message appears to be sent with no blocking or error on the send side. 
+But because the buffer is not registered it is silently never sent.
+Tip: Decrease coalescing to fall below the inline limit, to confirm the issue.
 
 
 * Ibv post send error 12
