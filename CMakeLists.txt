@@ -129,7 +129,7 @@ set(HERMES_SOURCE_FILES
 
 
 set(CHT_SOURCE_FILES
-        cht/include/cht/cht_util.h cht/include/cht/cht_config.h cht/include/cht/cht_kvs_util.h cht/include/cht/cht_inline_util.h cht/include/cht/cht_debug_util.h cht/include/cht/cht_messages.h cht/src/cht/cht_stats.c)
+        cht/include/cht/cht_util.h cht/include/cht/cht_config.h cht/include/cht/cht_kvs_util.h cht/include/cht/cht_inline_util.h cht/include/cht/cht_debug_util.h cht/include/cht/cht_messages.h cht/src/cht/cht_stats.c cht/include/cht/cht_reserve_stations.h)
 #set(CMAKE_BUILD_TYPE Release)
 
 add_executable(derecho ${DR_SOURCE_FILES} ${ODLIB_FILES})
