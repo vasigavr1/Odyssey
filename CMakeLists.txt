@@ -73,7 +73,7 @@ set(ODLIB_FILES
         odlib/include/network_api/ctx_templates.h
         odlib/src/network_api/init_qp_meta.c
         odlib/src/network_api/init_ctx.c
-        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c odlib/include/protocols/top_prot_sel.h odlib/include/protocols/main_prot_sel.h odlib/include/protocols/wrkr_prot_sel.h odlib/include/protocols/kvs_prot_sel.h odlib/include/protocols/stats_prot_sel.h)
+        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c odlib/include/protocols/top_prot_sel.h odlib/include/protocols/main_prot_sel.h odlib/include/protocols/wrkr_prot_sel.h odlib/include/protocols/kvs_prot_sel.h odlib/include/protocols/stats_prot_sel.h craq/include/craq/cr_kvs_util.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/util.c
@@ -144,7 +144,7 @@ set(CRAQ_SOURCE_FILES
         craq/include/craq/cr_util.h
         craq/include/craq/cr_inline_util.h
         craq/include/craq/cr_debug_util.h
-        craq/src/craq/cr_stats.c)
+        craq/src/craq/cr_stats.c craq/include/craq/cr_messages.h)
 
 
 #set(CMAKE_BUILD_TYPE Release)
