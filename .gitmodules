@@ -19,3 +19,6 @@
 [submodule "cht"]
 	path = cht
 	url = git@github.com:vasigavr1/CHT.git
+[submodule "craq"]
+	path = craq
+	url = git@github.com:vasigavr1/CRAQ

@@ -21,6 +21,10 @@ echo "----------Pushing to CHT-------------------------"
 /home/s1687259/odyssey/bin/git-scripts/git-push.sh "cht" "$1"
 echo "------------------------------------------------------"
 
+echo "----------Pushing to CRAQ-------------------------"
+/home/s1687259/odyssey/bin/git-scripts/git-push.sh "craq" "$1"
+echo "------------------------------------------------------"
+
 echo "----------Pushing to Od-lib-------------------------"
 /home/s1687259/odyssey/bin/git-scripts/git-push.sh "odlib" "$1"
 echo "------------------------------------------------------"
