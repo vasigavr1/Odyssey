@@ -144,7 +144,7 @@ set(CRAQ_SOURCE_FILES
         craq/include/craq/cr_util.h
         craq/include/craq/cr_inline_util.h
         craq/include/craq/cr_debug_util.h
-        craq/src/craq/cr_stats.c craq/include/craq/cr_messages.h)
+        craq/src/craq/cr_stats.c craq/include/craq/cr_messages.h craq/include/craq/cr_generic_util.h)
 
 
 #set(CMAKE_BUILD_TYPE Release)
