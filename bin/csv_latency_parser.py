@@ -117,7 +117,7 @@ class LatencyParser:
             else:
                 lat_bucket = int(words[0].strip())
                 if lat_bucket == 0:
-                    print(self.requests)
+                    #print(self.requests)
                     lr_lines = 0
                 if lr_lines >= len(self.latency_values):
                     self.latency_values.append(lat_bucket)
@@ -125,7 +125,7 @@ class LatencyParser:
                     self.all_reqs.append(lat_occurances)
                 else:
                     self.all_reqs[lr_lines] = self.all_reqs[lr_lines] + lat_occurances
-                print(type_i)
+                #print(type_i)
                 if lr_lines >= len(self.requests[type_i]):
                     self.requests[type_i].append(lat_occurances)
                 else:
@@ -135,7 +135,7 @@ class LatencyParser:
         # print(self.latency_values)
         # print(self.max_req_latency)
         # print(self.per_req_count)
-        print(self.requests)
+        #print(self.requests)
         # print(max(self.max_req_latency))
 
 
