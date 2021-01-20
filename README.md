@@ -17,7 +17,7 @@ The repo contains the implementation of 10 protocols using odlib:
 9. ABD (inside kite)
 10. Hermes (inside hermes) 
 
-#Example
+## Example
 
 To run Hermes while in the Odyssey directory:
 
@@ -36,10 +36,10 @@ The script ./bin/copy-run.sh will
 ```
 * This same command must be executed in the rest of the machines of the deployment
 
-
+### Using git
 To push changes to github use the script
 ```sh
-./bin/git-scripts/git-push-all-odyssey "meaningfull message"
+./bin/git-scripts/git-all-push.sh "meaningfull message"
 ```
 
 --------------------------------------------------------------
