@@ -4,7 +4,7 @@
 #HOSTS=( "houston" "sanantonio" "philly")
 #HOSTS=( "houston" "sanantonio" "austin")
 #HOSTS=( "houston" "austin")
-HOSTS=( "philly" "sanantonio" "austin" "indianapolis")
+HOSTS=( "sanantonio" "austin" "indianapolis")
 #HOSTS=( "sanantonio" "austin" "indianapolis")
 #HOSTS=( "philly" "sanantonio" "indianapolis")
 #HOSTS=( "austin" "houston" "sanantonio")
