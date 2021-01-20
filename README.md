@@ -17,7 +17,38 @@ The repo contains the implementation of 10 protocols using odlib:
 9. ABD (inside kite)
 10. Hermes (inside hermes) 
 
-## Example
+
+### Dependencies
+1. numactl
+2. libgsl0-dev
+3. libnuma-dev
+4. MLNX_OFED_LINUX-4.1-1.0.2.0
+
+### Settings
+1. Run subnet-manager in one of the nodes: '/etc/init.d/opensmd start'
+2. On every node apply the following:
+3. echo 8192 | tee /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages /sys/devices/system/node/node1/hugepages/hugepages-2048kB/nr_hugepages > /dev/null
+4. echo 10000000001 | tee /proc/sys/kernel/shmmax /proc/sys/kernel/shmall > /dev/null
+ * Make sure that the changes have been applied using cat on the above files
+ * The above changes are temporary (i.e. need to be performed after a reboot)
+
+
+### How to run Odyssey
+To run Odyssey:
+1. Modify the script ./bin/copy-run.sh to contain the ip-addresses of the machines that will run Odyssey
+2. Run the script in all machines passing as a parameter the name of the executable.
+
+The script bin/copy-executables.sh  can be used to compile in one 
+machine and then copy the executable in the rest of the machines. 
+(The machines must be specified within the script).
+
+
+## Tested on
+* Infiniband cluster of 5 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
+* OS: Ubuntu 18.04.1 LTS (Kernel: 4.15.0-55-generic)
+
+
+### Example
 
 To run Hermes while in the Odyssey directory:
 
@@ -30,7 +61,7 @@ The script ./bin/copy-run.sh will
 * make hermes in build
 * copy the hermes executable to all nodes specified in bin/copy_executables.sh
 * copy bin/run-exe.sh to the same set of machines. This is the script used to run a protocol.
-* Then it will execute  the following
+* Then it will execute the following
 ```sh
 ./bin/run-exe.sh hermes
 ```
