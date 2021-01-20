@@ -17,6 +17,25 @@ The repo contains the implementation of 10 protocols using odlib:
 9. ABD (inside kite)
 10. Hermes (inside hermes) 
 
+## Odyssey API
+Odyssey API contains two flavours (a blocking and a nonblocking) of the following commands
+1. read()
+2. write()
+3. release()
+4. acquire()
+5. CAS_strong()
+6. CAS_weak()
+7. FAA()
+
+The Odyssey API can be used by the client threads.
+./odlib/src/client.c already contains implementations of
+* The Treiber Stack
+* Michael & Scott Queues
+* Harris and Michael Lists
+* A circular producer consumer pattern
+
+Also a User Interface to issue requests from the Command Line is available.
+
 
 ### Dependencies
 1. numactl
