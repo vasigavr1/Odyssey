@@ -93,5 +93,5 @@ To push changes to github use the script
 ```
 
 --------------------------------------------------------------
-The title of the project is inspired by this
-https://www.youtube.com/watch?v=NQBFCaQPtEs
+The title of the project is inspired by [this](
+https://www.youtube.com/watch?v=NQBFCaQPtEs)
