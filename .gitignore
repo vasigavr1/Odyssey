@@ -11,7 +11,6 @@ kite/src/PaxosVerifier/pv
 kite/src/PaxosVerifier/copy_from_remote_machines
 kite/src/kite/profile_info
 cmake-build-debug
-*ignore
 bin/clean-pages.sh
 bin/install-dependencies.sh
 
