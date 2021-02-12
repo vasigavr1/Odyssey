@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.16)
 project(odyssey)
 
 set(odyssey_VERSION_MAJOR 1)
@@ -18,6 +18,8 @@ include_directories(
         derecho/include/derecho
         kite/include/kite_inline_util
         /usr/include/
+        /usr/include/rdma
+        /usr/include/infiniband
         hermes/include/hermes
         cht/include/cht
         odlib/include/protocols

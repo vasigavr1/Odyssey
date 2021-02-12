@@ -14,6 +14,13 @@ cat /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 # This starts the subnet manager, run it in one machine only!
 #/etc/init.d/opensmd start
 
+#Debugging
+# ibstat will show the state of ports
+#ssh admin@mellanox.inf.ed.ac.uk  to ssh into the switch
+# ofed_info -s tells you the installed driver
+# service opensmd status
+# /etc/init.d/openibd restart  # restarts the driver
+
 #PCIe counter settings
 #echo 0 > /proc/sys/kernel/nmi_watchdog
 #modprobe msr
