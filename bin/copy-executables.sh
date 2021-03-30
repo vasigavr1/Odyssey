@@ -28,5 +28,6 @@ for SCRIPT in "${SCRIPTS[@]}"
 do
 	#echo "${EXEC} copied to {${HOSTS[@]/$LOCAL_HOST}}"
 	parallel --will-cite scp $SCRIPT_FOLDER/${SCRIPT} {}:${DEST_FOLDER}/${SCRIPT} ::: $(echo ${HOSTS[@]/$LOCAL_HOST})
+	parallel --will-cite scp $SCRIPT_FOLDER/cluster.sh {}:${DEST_FOLDER}/cluster.sh ::: $(echo ${HOSTS[@]/$LOCAL_HOST})
 	echo "${SCRIPT} copied to {${HOSTS[@]/$LOCAL_HOST}}"
 done
