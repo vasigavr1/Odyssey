@@ -33,14 +33,28 @@
 #echo RemoteIPs: "${remoteIPs[@]}"
 
 
-allIPs=(192.168.8.4 #houston
-        192.168.8.6 #austin
-        192.168.8.5 #sanantonio
-        192.168.8.3 #indianapolis
-        192.168.8.2 #philly
-        192.168.5.11
-        192.168.5.13 )
-localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+# Informatics cluster
+#allIPs=(192.168.8.4 #houston
+#        192.168.8.6 #austin
+#        192.168.8.5 #sanantonio
+#        192.168.8.3 #indianapolis
+#        192.168.8.2 #philly
+#        192.168.5.11
+#        192.168.5.13 )
+#localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+
+# Cloudlab
+allIPs=(
+	10.0.3.1
+	10.0.3.2
+	10.0.3.3
+	10.0.3.4
+	10.0.3.5
+	10.0.3.6
+	10.0.3.7
+	)
+localIP=$(ip addr | grep 'state UP' -A2 | grep 'inet 10.0.3'| awk '{print $2}' | cut -f1  -d'/')
+
 
 tmp=$((${#localIP}-1))
 machine_id=-1
@@ -66,7 +80,7 @@ export MLX5_SINGLE_THREADED=1
 export MLX5_SCATTER_TO_CQE=1
 
 
-#sudo killall kite
+sudo killall $1
 
 # A function to echo in blue color
 function blue() {
@@ -111,5 +125,5 @@ sleep 1
 	./$1 \
 	--all-ips ${remoteIPs[@]} \
 	--machine-id $machine_id \
-  --device_name "mlx5_0" \
+        --device_name "mlx4_0" \
 	2>&1

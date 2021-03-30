@@ -1,18 +1,7 @@
 #!/usr/bin/env bash
 
-#HOSTS=( "houston" "sanantonio")
-#HOSTS=( "houston" "sanantonio" "philly")
-#HOSTS=( "houston" "sanantonio" "austin")
-#HOSTS=( "houston" "austin")
-HOSTS=( "sanantonio" "austin" "indianapolis")
-#HOSTS=( "sanantonio" "austin" "indianapolis")
-#HOSTS=( "philly" "sanantonio" "indianapolis")
-#HOSTS=( "austin" "houston" "sanantonio")
-#HOSTS=( "austin" "sanantonio") # "houston" "sanantonio" "atlanta" "philly" )
-#HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "philly" "baltimore" "chicago" "atlanta" "detroit")
-#HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "chicago" "atlanta" "detroit")
-#HOSTS=( "austin" "houston" "sanantonio" "indianapolis" "atlanta")
-#HOSTS=( "austin" "houston" "sanantonio" "indianapolis")
+source ./cluster.sh
+
 LOCAL_HOST=`hostname`
 EXECUTABLES=($1)
 SCRIPTS=($2)
