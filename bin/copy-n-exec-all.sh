@@ -3,7 +3,8 @@
 
 
 #declare -a write_ratios=(10 20 50 100 200 500 1000)
-declare -a write_ratios=(100 200 500 1000)
+#declare -a write_ratios=(100 200 500 1000)
+declare -a write_ratios=(0)
 EXECUTABLE="zookeeper"
 
 EXEC_FOLDER="${HOME}/odyssey/build"
