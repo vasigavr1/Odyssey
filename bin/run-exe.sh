@@ -4,19 +4,27 @@ source ./cluster.sh
 
 #### Get CLI arguments
 # Use -1 for the default (#define in config.h) values if not argument is passed
+IS_REMOTE_BQR="1"
+BQR_READ_BUF_LEN="0"
 WRITE_RATIO="-1"
 EXEC="zookeeper"
 
 # Each letter is an option argument, if it's followed by a collum
 # it requires an argument. The first colum indicates the '\?'
 # help/error command when no arguments are given
-while getopts ":w:x:h" opt; do
+while getopts ":B:R:w:x:h" opt; do
   case $opt in
      x)
        EXEC=$OPTARG # given number is divided by 10 to give write rate % (i.e., 55 means 5.5 % writes)
        ;;
      w)
        WRITE_RATIO=$OPTARG # given number is divided by 10 to give write rate % (i.e., 55 means 5.5 % writes)
+       ;;
+     B)
+       BQR_READ_BUF_LEN=$OPTARG # given number is divided by 10 to give write rate % (i.e., 55 means 5.5 % writes)
+       ;;
+     R)
+       IS_REMOTE_BQR=$OPTARG # given number is divided by 10 to give write rate % (i.e., 55 means 5.5 % writes)
        ;;
      h)
       echo "Usage: -w <write ratio>  (x1000 --> 10 for 1%)"
@@ -104,4 +112,6 @@ sleep 1
 	--machine-id $machine_id \
   --device_name ${NET_DEVICE_NAME} \
   --write-ratio ${WRITE_RATIO} \
+  --bqr-is-remote ${IS_REMOTE_BQR} \
+  --bqr-buffer-size ${BQR_READ_BUF_LEN} \
 	2>&1
