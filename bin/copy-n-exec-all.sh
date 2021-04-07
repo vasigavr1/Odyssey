@@ -3,7 +3,7 @@
 
 
 #declare -a write_ratios=(10 20 50 100 200 500 1000)
-#declare -a write_ratios=(0)
+declare -a write_ratios=(0)
 #declare -a bqr_read_buf_size=(0)
 declare -a bqr_read_buf_size=(512)
 declare -a remote_bqr=(0)
