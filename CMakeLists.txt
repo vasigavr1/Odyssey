@@ -22,8 +22,10 @@ include_directories(
         /usr/include/infiniband
         hermes/include/hermes
         cht/include/cht
-        odlib/include/protocols
         craq/include/craq
+        paxos/include/paxos/
+        paxos/include/paxos_inline_util/
+        odlib/include/protocols
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
@@ -37,64 +39,83 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of
 
 
 set(ODLIB_FILES
-        odlib/src/main/main.c
-        odlib/src/main/worker.c
-        odlib/src/mica/kvs.c
-        odlib/src/main/stats.c
+        odlib/src/main/od_main.c
+        odlib/src/main/od_worker.c
+        odlib/src/mica/od_kvs.c
+        odlib/src/main/od_stats.c
         #libhrd
-        odlib/include/libhrd/hrd.h
-        odlib/src/libhrd/hrd_util.c
-        odlib/src/libhrd/hrd_conn.c
+        odlib/include/libhrd/od_hrd.h
+        odlib/src/libhrd/od_hrd_util.c
+        odlib/src/libhrd/od_hrd_conn.c
         #mica
-        odlib/src/mica/city.c
-        odlib/include/mica/kvs.h
-        odlib/include/mica/city.h
+        odlib/src/mica/od_city.c
+        odlib/include/mica/od_kvs.h
+        odlib/include/mica/od_city.h
         /usr/include/infiniband/verbs.h
-        odlib/src/client/client.c
-        odlib/include/general_util/generic_macros.h
-        odlib/include/client_api/wrkr_side_calls.h
-        odlib/include/client_api/interface.h
-        odlib/include/general_util/latency_util.h
-        odlib/include/general_util/stats.h
-        odlib/include/general_util/top.h
-        odlib/include/general_util/init_func.h
-        odlib/include/general_util/generic_inline_util.h
-        odlib/include/general_util/init_connect.h
-        odlib/include/general_util/generic_opcodes.h
-        odlib/include/trace/trace_util.h
-        odlib/include/general_util/rdma_gen_util.h
-        odlib/include/general_util/debug_util.h
-        odlib/include/general_util/inline_util.h
-        odlib/include/general_util/sizes.h
-        odlib/include/general_util/config_util.h
-        odlib/include/multicast/multicast.h
-        odlib/src/multicast/multicast.c
-        odlib/include/network_api/network_context.h
-        odlib/include/fifo/fifo.h
-        odlib/include/network_api/netw_func.h
-        odlib/include/network_api/ctx_templates.h
-        odlib/src/network_api/init_qp_meta.c
-        odlib/src/network_api/init_ctx.c
-        odlib/src/network_api/main_loop_api.c odlib/src/trace/trace.c odlib/src/client_api/interface.c odlib/src/client/wrkr_side_calls.c odlib/include/protocols/top_prot_sel.h odlib/include/protocols/main_prot_sel.h odlib/include/protocols/wrkr_prot_sel.h odlib/include/protocols/kvs_prot_sel.h odlib/include/protocols/stats_prot_sel.h craq/include/craq/cr_kvs_util.h)
+        odlib/src/client/od_client.c
+        odlib/include/general_util/od_generic_macros.h
+        odlib/include/client_api/od_wrkr_side_calls.h
+        odlib/include/client_api/od_interface.h
+        odlib/include/general_util/od_latency_util.h
+        odlib/include/general_util/od_stats.h
+        odlib/include/general_util/od_top.h
+        odlib/include/general_util/od_init_func.h
+        odlib/include/general_util/od_generic_inline_util.h
+        odlib/include/general_util/od_init_connect.h
+        odlib/include/general_util/od_generic_opcodes.h
+        odlib/include/trace/od_trace_util.h
+        odlib/include/general_util/od_rdma_gen_util.h
+        odlib/include/general_util/od_debug_util.h
+        odlib/include/general_util/od_inline_util.h
+        odlib/include/general_util/od_sizes.h
+        odlib/include/general_util/od_config_util.h
+        odlib/include/multicast/od_multicast.h
+        odlib/src/multicast/od_multicast.c
+        odlib/include/network_api/od_network_context.h
+        odlib/include/fifo/od_fifo.h
+        odlib/include/network_api/od_netw_func.h
+        odlib/include/network_api/od_templates.h
+        odlib/src/network_api/od_init_qp_meta.c
+        odlib/src/network_api/od_init_ctx.c
+        odlib/src/network_api/od_main_loop_api.c odlib/src/trace/od_trace.c odlib/src/client_api/od_interface.c odlib/src/client/od_wrkr_side_calls.c odlib/include/protocols/od_top_prot_sel.h odlib/include/protocols/od_main_prot_sel.h odlib/include/protocols/od_wrkr_prot_sel.h odlib/include/protocols/od_kvs_prot_sel.h odlib/include/protocols/od_stats_prot_sel.h craq/include/craq/cr_kvs_util.h)
 
 set(KITE_SOURCE_FILES
-        kite/src/kite/util.c
-        kite/src/kite/stats.c
-        kite/include/kite_inline_util/kite_inline_util.h
-        kite/include/kite/main.h
-        kite/include/kite/util.h
-        kite/include/kite/config.h
-        kite/include/kite/opcodes.h
-        kite/include/kite_inline_util/generic_util.h
-        kite/include/kite_inline_util/kvs_util.h
-        kite/include/kite_inline_util/kite_debug_util.h
-        kite/include/kite_inline_util/kite_config_util.h
-        kite/include/kite_inline_util/paxos_util.h
-        kite/include/kite_inline_util/reserve_stations_util.h
-        kite/include/kite_inline_util/communication_utility.h
-        kite/include/kite_inline_util/paxos_generic_util.h
-        kite/include/kite/messages.h
-        kite/include/kite/buffer_sizes.h
+        kite/src/kite/kt_util.c
+        kite/src/kite/kt_stats.c
+        kite/include/kite_inline_util/kt_inline_util.h
+        kite/include/kite/kt_util.h
+        kite/include/kite/kt_config.h
+        kite/include/kite/kt_opcodes.h
+        kite/include/kite_inline_util/kt_generic_util.h
+        kite/include/kite_inline_util/kt_kvs_util.h
+        kite/include/kite_inline_util/kt_debug_util.h
+        kite/include/kite_inline_util/kt_config_util.h
+        kite/include/kite_inline_util/kt_paxos_util.h
+        kite/include/kite_inline_util/kt_reserve_stations_util.h
+        kite/include/kite_inline_util/kt_communication_utility.h
+        kite/include/kite_inline_util/kt_paxos_generic_util.h
+        kite/include/kite/kt_messages.h
+        kite/include/kite/kt_buffer_sizes.h
+        kite/include/kite/kt_main.h)
+
+set(PAXOS_SOURCE_FILES
+        paxos/src/paxos/cp_util.c
+        paxos/src/paxos/cp_stats.c
+        paxos/include/paxos_inline_util/cp_inline_util.h
+        paxos/include/paxos/cp_main.h
+        paxos/include/paxos/cp_util.h
+        paxos/include/paxos/cp_config.h
+        paxos/include/paxos/cp_opcodes.h
+        paxos/include/paxos_inline_util/cp_generic_util.h
+        paxos/include/paxos_inline_util/cp_kvs_util.h
+        paxos/include/paxos_inline_util/cp_debug_util.h
+        paxos/include/paxos_inline_util/cp_config_util.h
+        paxos/include/paxos_inline_util/cp_paxos_util.h
+        paxos/include/paxos_inline_util/cp_reserve_stations_util.h
+        paxos/include/paxos_inline_util/cp_communication_utility.h
+        paxos/include/paxos_inline_util/cp_paxos_generic_util.h
+        paxos/include/paxos/cp_messages.h
+        paxos/include/paxos/cp_buffer_sizes.h
         )
 
 set(ZK_SOURCE_FILES
@@ -157,7 +178,7 @@ add_executable(zookeeper ${ZK_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(hermes ${HERMES_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(cht ${CHT_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(craq ${CRAQ_SOURCE_FILES} ${ODLIB_FILES})
-
+add_executable(paxos ${PAXOS_SOURCE_FILES} ${ODLIB_FILES})
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
@@ -165,6 +186,7 @@ set_target_properties(zookeeper PROPERTIES COMPILE_FLAGS -DZOOKEEPER)
 set_target_properties(hermes PROPERTIES COMPILE_FLAGS -DHERMES)
 set_target_properties(cht PROPERTIES COMPILE_FLAGS -DCHT)
 set_target_properties(craq PROPERTIES COMPILE_FLAGS -DCRAQ)
+set_target_properties(paxos PROPERTIES COMPILE_FLAGS -DPAXOS)
 
 
 target_link_libraries(derecho pthread ibverbs rt numa rdmacm)
@@ -173,5 +195,6 @@ target_link_libraries(zookeeper pthread ibverbs rt numa rdmacm)
 target_link_libraries(hermes pthread ibverbs rt numa rdmacm)
 target_link_libraries(cht pthread ibverbs rt numa rdmacm)
 target_link_libraries(craq pthread ibverbs rt numa rdmacm)
+target_link_libraries(paxos pthread ibverbs rt numa rdmacm)
 
 

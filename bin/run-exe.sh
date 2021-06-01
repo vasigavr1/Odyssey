@@ -33,14 +33,15 @@
 #echo RemoteIPs: "${remoteIPs[@]}"
 
 
-allIPs=(192.168.8.4 #houston
+allIPs=(129.215.165.8 #houston
+        129.215.165.7 #sanantonio
         192.168.8.6 #austin
-        192.168.8.5 #sanantonio
         192.168.8.3 #indianapolis
         192.168.8.2 #philly
         192.168.5.11
         192.168.5.13 )
-localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+#localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+localIP=$(ip addr | grep 'ether' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
 
 tmp=$((${#localIP}-1))
 machine_id=-1
@@ -111,5 +112,6 @@ sleep 1
 	./$1 \
 	--all-ips ${remoteIPs[@]} \
 	--machine-id $machine_id \
-  --device_name "mlx5_0" \
+  --device_name "mlx5_1" \
+  --is-roce "1"
 	2>&1

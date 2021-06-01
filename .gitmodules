@@ -1,9 +1,6 @@
 [submodule "shared"]
 	path = odlib
 	url = https://github.com/vasigavr1/Odyssey-lib.git
-[submodule "kite"]
-	path = kite
-	url = https://github.com/vasigavr1/Kite.git
 [submodule "zookeeper"]
 	path = zookeeper
 	url = https://github.com/vasigavr1/Zookeeper.git
@@ -22,3 +19,9 @@
 [submodule "craq"]
 	path = craq
 	url = git@github.com:vasigavr1/CRAQ
+[submodule "kite"]
+	path = kite
+	url = git@github.com:vasigavr1/Kite.git
+[submodule "paxos"]
+	path = paxos
+	url = git@github.com:vasigavr1/Paxos.git
