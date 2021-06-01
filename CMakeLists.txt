@@ -122,6 +122,8 @@ set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
         zookeeper/src/zookeeper/zk_util.c
         zookeeper/include/zookeeper/zk_inline_util.h
+        zookeeper/include/zookeeper/zk_bqr.h
+        zookeeper/include/zookeeper/zk_latency.h
         zookeeper/include/zookeeper/zk_main.h
         zookeeper/include/zookeeper/zk_util.h
         zookeeper/include/zookeeper/zk_config.h
