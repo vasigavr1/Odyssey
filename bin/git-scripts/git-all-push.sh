@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 
-
+GIT_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 echo "----------Pushing to Kite-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "kite" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "kite" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Derecho-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "derecho" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "derecho" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Hermes-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "hermes" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "hermes" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Zookeeper-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "zookeeper" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "zookeeper" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to CHT-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "cht" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "cht" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to CRAQ-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "craq" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "craq" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to PAXOS-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "paxos" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "paxos" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Od-lib-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "odlib" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "odlib" "$1"
 echo "------------------------------------------------------"
 
 echo "----------Pushing to Odyssey-------------------------"
-/home/s1687259/odyssey/bin/git-scripts/git-push.sh "" "$1"
+$GIT_SCRIPT_DIR/git-push.sh "" "$1"
 echo "------------------------------------------------------"
