@@ -7,16 +7,16 @@ include_directories(
         odlib/incldue
         odlib/include/fifo
         odlib/include/libhrd
-        kite/include/kite
         odlib/include/mica
         odlib/include/general_util
         odlib/include/multicast
         odlib/include/network_api
         odlib/include/client_api
         odlib/include/trace
+        kite/include/kite
+        kite/include/kite_inline_util
         zookeeper/include/zookeeper
         derecho/include/derecho
-        kite/include/kite_inline_util
         /usr/include/
         /usr/include/rdma
         /usr/include/infiniband
@@ -109,10 +109,8 @@ set(PAXOS_SOURCE_FILES
         paxos/include/paxos_inline_util/cp_generic_util.h
         paxos/include/paxos_inline_util/cp_kvs_util.h
         paxos/include/paxos_inline_util/cp_debug_util.h
-        paxos/include/paxos_inline_util/cp_config_util.h
         paxos/include/paxos_inline_util/cp_paxos_util.h
         paxos/include/paxos_inline_util/cp_reserve_stations_util.h
-        paxos/include/paxos_inline_util/cp_communication_utility.h
         paxos/include/paxos_inline_util/cp_paxos_generic_util.h
         paxos/include/paxos/cp_messages.h
         paxos/include/paxos/cp_buffer_sizes.h
