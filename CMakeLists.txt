@@ -29,7 +29,7 @@ include_directories(
   )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
--Wno-format-truncation -D_GNU_SOURCE -g ")
+-Wno-format-truncation -D_GNU_SOURCE -fno-inline -g ")
 #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -O3 -std=gnu2x -flto ")
 # -g
 # -fno-omit-frame-pointer  enable the frame pointer to trace stack
@@ -112,6 +112,7 @@ set(PAXOS_SOURCE_FILES
         paxos/include/paxos_inline_util/cp_paxos_util.h
         paxos/include/paxos_inline_util/cp_reserve_stations_util.h
         paxos/include/paxos_inline_util/cp_paxos_generic_util.h
+        paxos/include/paxos_inline_util/cp_paxos_debug.h
         paxos/include/paxos/cp_messages.h
         paxos/include/paxos/cp_buffer_sizes.h
         )
