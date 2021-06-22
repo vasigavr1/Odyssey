@@ -15,3 +15,11 @@ Check the address of the sgl_list. Perhaps you forgot to have it point in the ri
 
 * Core files
 They will not be generated when sanitizers are on
+
+* No ib devices found
+If ibstat and ibstatus show that the state is ACTIVE but ibv_devinfo returns that 
+it found no ib devices, then you need to execute ibdev2netdev
+
+* MLNX bugs
+Take a look at the ofed cheat sheet:
+https://gist.github.com/githubfoam/da75951b97e9aec21dcebadf68a6a360
