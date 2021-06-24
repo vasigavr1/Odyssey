@@ -25,6 +25,21 @@ cat /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
 #echo 0 > /proc/sys/kernel/nmi_watchdog
 #modprobe msr
 
+#Cloud lab steps
+Create experiment in in cloudlab with the profile rdma-hermes
+(Cloudlab and github must have the same public key for you)
+Clone Antonis scripts from https://github.com/akatsarakis/cloudlab
+Change directories and username init_cloudlab.sh and init-preimaged.sh
+execute init_cloudlab.sh
+In node-1 execute the script install-latest-cmake.sh
+cmake -B build
+In bin/cluster.sh change :
+hosts, all-ips, mellanox device name, command to get local ip
+In run-exe.sh set is_roce to 0
+In od_top.h use the system aprameters of cloudlab
+
+
+
 
 # If a machine is using huge pages of 1GB instead of 2MB
 # open /etc/default/grub and write this: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash hugepagesz=2M default_hugepagesz=2M"

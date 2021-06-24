@@ -119,7 +119,7 @@ sleep 1
 	--machine-id $machine_id \
 	--write-ratio ${WRITE_RATIO} \
   --device_name ${NET_DEVICE_NAME} \
-  --is-roce "1" \
+  --is-roce "0" \
   2>&1
 
 #  --device_name ${NET_DEVICE_NAME} \
