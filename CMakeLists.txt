@@ -3,30 +3,6 @@ project(odyssey)
 
 set(odyssey_VERSION_MAJOR 1)
 
-include_directories(
-        odlib/incldue
-        odlib/include/fifo
-        odlib/include/libhrd
-        odlib/include/mica
-        odlib/include/general_util
-        odlib/include/multicast
-        odlib/include/network_api
-        odlib/include/client_api
-        odlib/include/trace
-        kite/include/kite
-        kite/include/kite_inline_util
-        zookeeper/include/zookeeper
-        derecho/include/derecho
-        /usr/include/
-        /usr/include/rdma
-        /usr/include/infiniband
-        hermes/include/hermes
-        cht/include/cht
-        craq/include/craq
-        paxos/include/paxos/
-        paxos/include/paxos_inline_util/
-        odlib/include/protocols
-  )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of-packed-member \
 -Wno-format-truncation -D_GNU_SOURCE  -g ")
@@ -36,6 +12,30 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -std=gnu1x -march=native -Wno-address-of
 #-fno-inline
 #-fsanitize=address -fsanitize=thread
 # -fsanitize=address -fno-inline -fno-omit-frame-pointer
+
+set(COMMON_INCLUDE_DIRS
+        /usr/include/
+        /usr/include/rdma
+        /usr/include/infiniband
+        odlib/incldue
+        odlib/include/fifo
+        odlib/include/libhrd
+        odlib/include/mica
+        odlib/include/general_util
+        odlib/include/multicast
+        odlib/include/network_api
+        odlib/include/client_api
+        odlib/include/trace
+        odlib/include/protocols)
+
+set (PAXOS_INCLUDE_DIRS
+        paxos/include/paxos/
+        paxos/include/paxos_inline_util/
+        paxos/include/cp_core)
+
+set (KITE_INCLUDE_DIRS
+        kite/include/kite
+        kite/include/kite_inline_util)
 
 
 set(ODLIB_FILES
@@ -77,7 +77,15 @@ set(ODLIB_FILES
         odlib/include/network_api/od_templates.h
         odlib/src/network_api/od_init_qp_meta.c
         odlib/src/network_api/od_init_ctx.c
-        odlib/src/network_api/od_main_loop_api.c odlib/src/trace/od_trace.c odlib/src/client_api/od_interface.c odlib/src/client/od_wrkr_side_calls.c odlib/include/protocols/od_top_prot_sel.h odlib/include/protocols/od_main_prot_sel.h odlib/include/protocols/od_wrkr_prot_sel.h odlib/include/protocols/od_kvs_prot_sel.h odlib/include/protocols/od_stats_prot_sel.h craq/include/craq/cr_kvs_util.h)
+        odlib/src/network_api/od_main_loop_api.c
+        odlib/src/trace/od_trace.c
+        odlib/src/client_api/od_interface.c
+        odlib/src/client/od_wrkr_side_calls.c
+        odlib/include/protocols/od_top_prot_sel.h
+        odlib/include/protocols/od_main_prot_sel.h
+        odlib/include/protocols/od_wrkr_prot_sel.h
+        odlib/include/protocols/od_kvs_prot_sel.h
+        odlib/include/protocols/od_stats_prot_sel.h)
 
 set(KITE_SOURCE_FILES
         kite/src/kite/kt_util.c
@@ -99,8 +107,6 @@ set(KITE_SOURCE_FILES
         kite/include/kite/kt_main.h)
 
 set(PAXOS_SOURCE_FILES
-        paxos/src/paxos/cp_util.c
-        paxos/src/paxos/cp_stats.c
         paxos/include/paxos_inline_util/cp_inline_util.h
         paxos/include/paxos/cp_main.h
         paxos/include/paxos/cp_util.h
@@ -109,13 +115,13 @@ set(PAXOS_SOURCE_FILES
         paxos/include/paxos_inline_util/cp_generic_util.h
         paxos/include/paxos_inline_util/cp_kvs_util.h
         paxos/include/paxos_inline_util/cp_debug_util.h
-        paxos/include/paxos_inline_util/cp_paxos_util.h
         paxos/include/paxos_inline_util/cp_reserve_stations_util.h
-        paxos/include/paxos_inline_util/cp_paxos_generic_util.h
-        paxos/include/paxos_inline_util/cp_paxos_debug.h
+        paxos/include/cp_core/cp_core_debug.h
         paxos/include/paxos/cp_messages.h
         paxos/include/paxos/cp_buffer_sizes.h
-        )
+        paxos/src/paxos/cp_util.c
+        paxos/src/paxos/cp_stats.c
+        paxos/include/cp_core/cp_core_util.h paxos/include/cp_core/cp_core_generic_util.h)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
@@ -150,7 +156,10 @@ set(HERMES_SOURCE_FILES
         hermes/include/hermes/hr_messages.h
         hermes/src/hermes/hr_stats.c
         hermes/include/hermes/hr_kvs_util.h
-        hermes/include/hermes/hr_debug_util.h hermes/src/hermes/hr_main_loop.c hermes/src/hermes/hr_kvs.c hermes/src/hermes/hr_util.c)
+        hermes/include/hermes/hr_debug_util.h
+        hermes/src/hermes/hr_main_loop.c
+        hermes/src/hermes/hr_kvs.c
+        hermes/src/hermes/hr_util.c)
 
 
 set(CHT_SOURCE_FILES
@@ -168,7 +177,10 @@ set(CRAQ_SOURCE_FILES
         craq/include/craq/cr_util.h
         craq/include/craq/cr_inline_util.h
         craq/include/craq/cr_debug_util.h
-        craq/src/craq/cr_stats.c craq/include/craq/cr_messages.h craq/include/craq/cr_generic_util.h)
+        craq/src/craq/cr_stats.c
+        craq/include/craq/cr_messages.h
+        craq/include/craq/cr_generic_util.h
+        craq/include/craq/cr_kvs_util.h)
 
 
 #set(CMAKE_BUILD_TYPE Release)
@@ -180,6 +192,21 @@ add_executable(hermes ${HERMES_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(cht ${CHT_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(craq ${CRAQ_SOURCE_FILES} ${ODLIB_FILES})
 add_executable(paxos ${PAXOS_SOURCE_FILES} ${ODLIB_FILES})
+
+target_include_directories(derecho PUBLIC
+        ${COMMON_INCLUDE_DIRS} derecho/include/derecho/)
+target_include_directories(kite PUBLIC
+        ${COMMON_INCLUDE_DIRS} ${KITE_INCLUDE_DIRS})
+target_include_directories(zookeeper PUBLIC
+        ${COMMON_INCLUDE_DIRS} zookeeper/include/zookeeper)
+target_include_directories(hermes PUBLIC
+        ${COMMON_INCLUDE_DIRS} hermes/include/hermes)
+target_include_directories(cht PUBLIC
+        ${COMMON_INCLUDE_DIRS} cht/include/cht)
+target_include_directories(craq PUBLIC
+        ${COMMON_INCLUDE_DIRS} craq/include/craq)
+target_include_directories(paxos PUBLIC
+        ${COMMON_INCLUDE_DIRS} ${PAXOS_INCLUDE_DIRS})
 
 set_target_properties(derecho PROPERTIES COMPILE_FLAGS -DDERECHO)
 set_target_properties(kite PROPERTIES COMPILE_FLAGS -DKITE )
@@ -197,5 +224,7 @@ target_link_libraries(hermes pthread ibverbs rt numa rdmacm)
 target_link_libraries(cht pthread ibverbs rt numa rdmacm)
 target_link_libraries(craq pthread ibverbs rt numa rdmacm)
 target_link_libraries(paxos pthread ibverbs rt numa rdmacm)
+
+
 
 
