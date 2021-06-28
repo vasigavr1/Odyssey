@@ -6,7 +6,8 @@
 	url = https://github.com/vasigavr1/Zookeeper.git
 [submodule "odlib"]
 	path = odlib
-	url = https://github.com/vasigavr1/Odyssey-lib
+	url = git@github.com:vasigavr1/Odyssey-lib.git
+	branch = Development
 [submodule "Derecho"]
 	path = derecho
 	url = git@github.com:vasigavr1/Derecho.git
