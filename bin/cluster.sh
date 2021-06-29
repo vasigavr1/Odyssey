@@ -1,6 +1,6 @@
 INFORMATICS="informatics"
 CLOUDLAB="cloudlab"
-SETUP=$INFORMATICS
+SETUP=$CLOUDLAB
 
 
 if [ $SETUP == $INFORMATICS ]; then
