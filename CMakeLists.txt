@@ -121,7 +121,9 @@ set(PAXOS_SOURCE_FILES
         paxos/include/paxos/cp_buffer_sizes.h
         paxos/src/paxos/cp_util.c
         paxos/src/paxos/cp_stats.c
-        paxos/include/cp_core/cp_core_util.h paxos/include/cp_core/cp_core_generic_util.h)
+        paxos/include/cp_core/cp_core_util.h
+        paxos/include/cp_core/cp_core_generic_util.h
+        paxos/src/cp_core/cp_handle_rmw_rep.c paxos/src/cp_core/cp_commit_alg.c paxos/src/cp_core/cp_handle_remote_rmw.c)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
