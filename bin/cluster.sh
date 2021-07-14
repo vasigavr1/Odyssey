@@ -26,11 +26,11 @@ else
   OD_HOME="/users/vasigavr/odyssey"
 
   HOSTS=(
-   n1
-   n2
-   n3
-   n4
-   n5
+    10.0.3.1
+    10.0.3.2
+    10.0.3.3
+    10.0.3.4
+    10.0.3.5
   )
 
   allIPs=(
