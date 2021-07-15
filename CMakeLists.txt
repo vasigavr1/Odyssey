@@ -123,7 +123,7 @@ set(PAXOS_SOURCE_FILES
         paxos/src/paxos/cp_stats.c
         paxos/include/cp_core/cp_core_util.h
         paxos/include/cp_core/cp_core_generic_util.h
-        paxos/src/cp_core/cp_handle_rmw_rep.c paxos/src/cp_core/cp_commit_alg.c paxos/src/cp_core/cp_handle_remote_rmw.c paxos/src/cp_core/cp_rmw_fsm.c paxos/src/cp_core/inspect_props_accs.c paxos/src/cp_core/cp_back_off.c)
+        paxos/src/cp_core/cp_handle_rmw_rep.c paxos/src/cp_core/cp_commit_alg.c paxos/src/cp_core/cp_handle_remote_rmw.c paxos/src/cp_core/cp_rmw_fsm.c paxos/src/cp_core/cp_inspect_props_accs.c paxos/src/cp_core/cp_back_off.c paxos/src/cp_core/cp_retrying.c)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
