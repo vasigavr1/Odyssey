@@ -107,14 +107,14 @@ set(KITE_SOURCE_FILES
         kite/include/kite/kt_main.h)
 
 set(PAXOS_SOURCE_FILES
-        paxos/include/cp_netw/cp_inline_util.h
+        paxos/include/cp_netw/cp_main_loop.h
         paxos/include/paxos/cp_main.h
         paxos/include/paxos/cp_util.h
         paxos/include/paxos/cp_config.h
         paxos/include/paxos/cp_opcodes.h
         paxos/include/cp_netw/cp_netw_generic_util.h
-        paxos/include/cp_netw/cp_kvs_util.h
-        paxos/include/cp_netw/cp_debug_util.h
+        paxos/include/cp_netw/cp_kvs.h
+        paxos/include/cp_netw/cp_netw_debug.h
         paxos/include/cp_netw/cp_reserve_stations_util.h
         paxos/include/cp_core/cp_core_debug.h
         paxos/include/paxos/cp_messages.h
@@ -140,7 +140,7 @@ set(PAXOS_SOURCE_FILES
         paxos/include/cp_netw/cp_netw_structs.h
         paxos/src/cp_core/cp_core_fill_netw_messages.c
         paxos/src/cp_netw/cp_main_loop.c
-        paxos/src/cp_netw/cp_netw_insert.c)
+        paxos/src/cp_netw/cp_netw_insert.c paxos/src/cp_netw/cp_kvs.c paxos/include/cp_netw/cp_netw_insert.h)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
