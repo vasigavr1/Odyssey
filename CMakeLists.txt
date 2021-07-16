@@ -140,7 +140,7 @@ set(PAXOS_SOURCE_FILES
         paxos/include/cp_netw/cp_netw_structs.h
         paxos/src/cp_core/cp_core_fill_netw_messages.c
         paxos/src/cp_netw/cp_main_loop.c
-        paxos/src/cp_netw/cp_netw_insert.c paxos/src/cp_netw/cp_kvs.c paxos/include/cp_netw/cp_netw_insert.h)
+        paxos/src/cp_netw/cp_netw_insert.c paxos/src/cp_netw/cp_kvs.c paxos/include/cp_netw/cp_netw_insert.h paxos/include/paxos/cp_stats.h)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
