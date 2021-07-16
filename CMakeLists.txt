@@ -119,11 +119,28 @@ set(PAXOS_SOURCE_FILES
         paxos/include/cp_core/cp_core_debug.h
         paxos/include/paxos/cp_messages.h
         paxos/include/paxos/cp_buffer_sizes.h
-        paxos/src/paxos/cp_util.c
-        paxos/src/paxos/cp_stats.c
+        paxos/src/cp_netw/cp_util.c
+        paxos/src/cp_netw/cp_stats.c
         paxos/include/cp_core/cp_core_interface.h
         paxos/include/cp_core/cp_core_generic_util.h
-        paxos/src/cp_core/cp_handle_rmw_rep.c paxos/src/cp_core/cp_commit_alg.c paxos/src/cp_core/cp_handle_remote_rmw.c paxos/src/cp_core/cp_rmw_fsm.c paxos/src/cp_core/cp_inspect_props_accs.c paxos/src/cp_core/cp_back_off.c paxos/src/cp_core/cp_retrying.c paxos/src/cp_core/cp_local_prop_acc.c paxos/src/cp_core/cp_rmw_first_try.c paxos/include/cp_netw/cp_netw_interface.h paxos/src/paxos/cp_netw_interface.c paxos/include/cp_core/cp_core_common_util.h paxos/include/cp_core/cp_core_structs.h paxos/src/cp_core/cp_init_util.c paxos/include/cp_netw/cp_netw_structs.h paxos/src/cp_core/cp_core_fill_netw_messages.c)
+        paxos/src/cp_core/cp_handle_rmw_rep.c
+        paxos/src/cp_core/cp_commit_alg.c
+        paxos/src/cp_core/cp_handle_remote_rmw.c
+        paxos/src/cp_core/cp_rmw_fsm.c
+        paxos/src/cp_core/cp_inspect_props_accs.c
+        paxos/src/cp_core/cp_back_off.c
+        paxos/src/cp_core/cp_retrying.c
+        paxos/src/cp_core/cp_local_prop_acc.c
+        paxos/src/cp_core/cp_rmw_first_try.c
+        paxos/include/cp_netw/cp_netw_interface.h
+        paxos/src/cp_netw/cp_netw_interface.c
+        paxos/include/cp_core/cp_core_common_util.h
+        paxos/include/cp_core/cp_core_structs.h
+        paxos/src/cp_core/cp_init_util.c
+        paxos/include/cp_netw/cp_netw_structs.h
+        paxos/src/cp_core/cp_core_fill_netw_messages.c
+        paxos/src/cp_netw/cp_main_loop.c
+        paxos/src/cp_netw/cp_netw_insert.c)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
