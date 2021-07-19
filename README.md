@@ -12,10 +12,12 @@ The repo contains the implementation of 10 protocols using odlib:
 4. CHT multi-leader (inside cht)
 5. CRAQ (inside craq)
 6. Derecho (inside derecho)
-7. Classic Paxos (inside kite)
-8. All-aboard Paxos (inside kite)
+7. Classic Paxos (inside paxos (and kite))
+8. All-aboard Paxos (inside paxos (and kite))
 9. ABD (inside kite)
 10. Hermes (inside hermes) 
+
+The script /bin/git_scripts/init_submodules.sh will download all protocols.
 
 ## Odyssey API
 Odyssey API contains two flavours (a blocking and a nonblocking) of the following commands
@@ -54,8 +56,9 @@ Also a User Interface to issue requests from the Command Line is available.
 
 ### How to run Odyssey
 To run Odyssey:
-1. Modify the script ./bin/copy-run.sh to contain the ip-addresses of the machines that will run Odyssey
-2. Run the script in all machines passing as a parameter the name of the executable.
+1. Modify the script ./bin/cluster.sh to contain the ip-addresses of the machines that will run Odyssey
+    * this step will not be needed for cloudlab
+2. Run the script run-exe.sh in all machines passing as a parameter the name of the executable.
 
 The script bin/copy-executables.sh  can be used to compile in one 
 machine and then copy the executable in the rest of the machines. 
@@ -63,8 +66,9 @@ machine and then copy the executable in the rest of the machines.
 
 
 ## Tested on
-* Infiniband cluster of 5 inter-connected nodes, via a Mellanox MSX6012F-BS switch, each one equiped with a single-port 56Gb Infiniband NIC (Mellanox MCX455A-FCAT PCIe-gen3 x16).
-* OS: Ubuntu 18.04.1 LTS (Kernel: 4.15.0-55-generic)
+* Cloudlab r320 machines
+* in-house RoCe cluster
+* in-house Infiniband cluster 
 
 
 ### Example
@@ -73,24 +77,21 @@ To run Hermes while in the Odyssey directory:
 
 ```sh
 cmake -B build
-./bin/copy-run.sh hermes
+./bin/copy-run.sh -x hermes
 ```
 
 The script ./bin/copy-run.sh will
-* make hermes in build
-* copy the hermes executable to all nodes specified in bin/copy_executables.sh
-* copy bin/run-exe.sh to the same set of machines. This is the script used to run a protocol.
+* make hermes in /build
+* copy the hermes executable to all nodes specified in bin/cluster.sh
+* copy bin/run-exe.sh to the same set of machines. (This is the script used to run a protocol.)
 * Then it will execute the following
 ```sh
-./bin/run-exe.sh hermes
+./bin/run-exe.sh -x hermes
 ```
 * This same command must be executed in the rest of the machines of the deployment
 
 ### Using git
-To push changes to github use the script
-```sh
-./bin/git-scripts/git-all-push.sh "meaningfull message"
-```
+The directory /bin/git-scripts includes a number of scripts to aid in using git with the odyssey submodules
 
 --------------------------------------------------------------
 The title of the project is inspired by [this](

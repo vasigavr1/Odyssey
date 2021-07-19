@@ -29,7 +29,7 @@ set(COMMON_INCLUDE_DIRS
         odlib/include/protocols)
 
 set (PAXOS_INCLUDE_DIRS
-        paxos/include/paxos/
+        paxos/include/cp_top/
         paxos/include/cp_netw/
         paxos/include/cp_core)
 
@@ -108,19 +108,17 @@ set(KITE_SOURCE_FILES
 
 set(PAXOS_SOURCE_FILES
         paxos/include/cp_netw/cp_main_loop.h
-        paxos/include/paxos/cp_main.h
-        paxos/include/paxos/cp_util.h
-        paxos/include/paxos/cp_config.h
-        paxos/include/paxos/cp_opcodes.h
+        paxos/include/cp_top/cp_init.h
+        paxos/include/cp_top/cp_config.h
+        paxos/include/cp_top/cp_opcodes.h
         paxos/include/cp_netw/cp_netw_generic_util.h
         paxos/include/cp_netw/cp_kvs.h
         paxos/include/cp_netw/cp_netw_debug.h
-        paxos/include/cp_netw/cp_reserve_stations_util.h
         paxos/include/cp_core/cp_core_debug.h
-        paxos/include/paxos/cp_messages.h
-        paxos/include/paxos/cp_buffer_sizes.h
-        paxos/src/cp_netw/cp_util.c
-        paxos/src/cp_netw/cp_stats.c
+        paxos/include/cp_top/cp_messages.h
+        paxos/include/cp_top/cp_buffer_sizes.h
+        paxos/src/cp_top/cp_init.c
+        paxos/src/cp_top/cp_stats.c
         paxos/include/cp_core/cp_core_interface.h
         paxos/include/cp_core/cp_core_generic_util.h
         paxos/src/cp_core/cp_handle_rmw_rep.c
@@ -140,7 +138,7 @@ set(PAXOS_SOURCE_FILES
         paxos/include/cp_netw/cp_netw_structs.h
         paxos/src/cp_core/cp_core_fill_netw_messages.c
         paxos/src/cp_netw/cp_main_loop.c
-        paxos/src/cp_netw/cp_netw_insert.c paxos/src/cp_netw/cp_kvs.c paxos/include/cp_netw/cp_netw_insert.h paxos/include/paxos/cp_stats.h)
+        paxos/src/cp_netw/cp_netw_insert.c paxos/src/cp_netw/cp_kvs.c paxos/include/cp_netw/cp_netw_insert.h paxos/include/cp_top/cp_stats.h)
 
 set(ZK_SOURCE_FILES
         zookeeper/src/zookeeper/zk_stats.c
