@@ -68,8 +68,9 @@ machine and then copy the executable in the rest of the machines.
 ## Tested on
 * Cloudlab r320 machines
 * in-house RoCe cluster
-* in-house Infiniband cluster 
-
+* in-house Infiniband cluster
+   * The performance numbers of the [paper](https://vasigavr1.github.io/files/Odyssey_Eurosys_2021.pdf) are taken with
+    56bit NICs and 40-core dual socket servers with 64GB memory each.
 
 ### Example
 
@@ -89,6 +90,13 @@ The script ./bin/copy-run.sh will
 ./bin/run-exe.sh -x hermes
 ```
 * This same command must be executed in the rest of the machines of the deployment
+
+### Code details
+CMakeLists.txt can build all executables.
+odlib/include/general_util/od_top.h contains a lot of configuration details.
+For example the ENABLE_ASSERTIONS macro will enable checks inside odlib and across all protocols. 
+Similarly, ENABLE_CLIENTS can be set to spawn client threads. 
+A few configuration parameters can be passed as input to bin/run-exe.sh, such as the write-ratio, the device name (set in cluster.sh) and whether the cluster is RoCE
 
 ### Using git
 The directory /bin/git-scripts includes a number of scripts to aid in using git with the odyssey submodules
