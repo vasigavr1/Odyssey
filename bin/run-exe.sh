@@ -53,8 +53,14 @@ machine_id=-1
 firstIP="${allIPs[0]}"
 remoteIPs="$firstIP"
 for i in "${!allIPs[@]}"; do
-	if [  "${allIPs[i]}" ==  "$localIP" ]; then
+	if [  "${allIPs[i]}" ==  "$localIPA" ]; then
 		machine_id=$i
+	fi
+	if [  "${allIPs[i]}" ==  "$localIPB" ]; then 
+                machine_id=$i 
+	fi
+	if [  "${allIPs[i]}" ==  "$localIPC" ]; then 
+		 machine_id=$i 
 	fi
 	if [ "${allIPs[i]}" !=  "$firstIP" ]; then
         remoteIPs="${remoteIPs},${allIPs[i]}"

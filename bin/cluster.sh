@@ -1,14 +1,15 @@
 INFORMATICS="informatics"
 CLOUDLAB="cloudlab"
-SETUP=$CLOUDLAB
+SETUP=$INFORMATICS
 
 
 if [ $SETUP == $INFORMATICS ]; then
   echo "informatics"
-  OD_HOME="/home/s1687259/odyssey"
-  HOSTS=(houston sanantonio )
-  allIPs=( 129.215.165.8 #houston
-        129.215.165.7 #sanantonio
+  OD_HOME="/home/vasilis/Odyssey"
+  HOSTS=(r1 r2 r3 )
+  allIPs=( 10.204.236.218 
+         10.204.236.219
+	  10.204.236.220
         192.168.8.4 #houston
         192.168.8.6 #austin
         192.168.8.5 #sanantonio
@@ -18,8 +19,10 @@ if [ $SETUP == $INFORMATICS ]; then
         192.168.5.13
         )
   #localIP=$(ip addr | grep 'infiniband' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
-  localIP=$(ip addr | grep 'ether' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
-  NET_DEVICE_NAME="mlx5_1"
+  localIPA=$(ip addr | grep 'ether' -A2 | sed -n 2p | awk '{print $2}' | cut -f1  -d'/')
+  localIPB=$(ip addr | grep 'ether' -A2 | sed -n 4p | awk '{print $2}' | cut -f1  -d'/')
+  localIPC=$(ip addr | grep 'ether' -A2 | sed -n 6p | awk '{print $2}' | cut -f1  -d'/') 
+  NET_DEVICE_NAME="mlx5_0"
   IS_ROCE=1
 else
   echo "cloudlab"
