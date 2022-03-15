@@ -55,6 +55,21 @@ Also a User Interface to issue requests from the Command Line is available.
 
 
 ### How to run Odyssey
+Install cmake if needed
+~~~
+ cd bin; ./install-latest-cmake.sh
+~~~
+Download all submodules
+~~~
+cd bin/git-scripts;   
+./init_submodules.sh
+~~~
+
+Cmake
+~~~
+cmake -B build
+~~~
+
 To run Odyssey:
 1. Modify the script ./bin/cluster.sh to contain the ip-addresses of the machines that will run Odyssey
     * this step will not be needed for cloudlab
