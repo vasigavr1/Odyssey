@@ -27,6 +27,7 @@ Odyssey API contains two flavours (a blocking and a nonblocking) of the followin
 6. CAS_weak()
 7. FAA()
 
+
 The Odyssey API can be used by the client threads.
 ./odlib/src/client.c already contains implementations of
 * The Treiber Stack
